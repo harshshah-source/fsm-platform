@@ -16,6 +16,7 @@ import { WarehouseRequestsController } from './component-request/warehouse.contr
 import { ComponentRequestController } from './component-request/component-request.controller';
 import { EngineersModule } from './engineers/engineers.module';
 import { EngineersController } from './engineers/engineers.controller';
+import { LeaveRequestController } from './engineers/leave-request.controller';
 import { MeController } from './me/me.controller';
 import { OrgModule } from './org/org.module';
 import { PlannerModule } from './planner/planner.module';
@@ -102,6 +103,7 @@ import { ZonesController } from './zones/zones.controller';
     WarehouseRequestsController,
     ComponentRequestController,
     EngineersController,
+    LeaveRequestController,
   ],
   providers: [AuthGuard, RoleGuard, ZoneScopeGuard],
 })

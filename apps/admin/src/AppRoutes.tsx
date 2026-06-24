@@ -11,6 +11,7 @@ import { DashboardHome } from './pages/dashboard/DashboardHome';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { SeManagementPage } from './pages/engineers/SeManagementPage';
+import { LeaveRequestsPage } from './pages/engineers/LeaveRequestsPage';
 import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
@@ -63,6 +64,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <SeManagementPage />
+              </RoleRoute>
+            }
+          />
+          {/* Leave Requests — ZM approvals, manager roles (Issue 26). */}
+          <Route
+            path="/leave-requests"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <LeaveRequestsPage />
               </RoleRoute>
             }
           />

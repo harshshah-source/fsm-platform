@@ -126,6 +126,7 @@ model EngineerMaster {
   componentRequests ComponentRequest[]
   inventoryTransactions InventoryTransaction[]
   availability    SeAvailability[]
+  leaveRequests   LeaveRequest[]
 
   @@index([zoneId])
   @@index([lastActivityAt])
@@ -755,6 +756,48 @@ model SeAvailability {
 
   @@index([seId, windowStart(sort: Desc)])
   @@map("se_availability")
+}
+
+/// SE-initiated Leave Request (Issue 26). The SE files ON_LEAVE / WEEKLY_OFF for a date range; the
+/// Zonal Manager approves (writes an `se_availability` window — `availability_id` links it) or rejects
+/// with a reason. A rejected request can be revised + resubmitted (a new row). Distinct from the direct
+/// `se_availability` write: a Leave Request carries an approval workflow + status.
+model LeaveRequest {
+  id             BigInt             @id @default(autoincrement())
+  seId           String             @map("se_id") @db.Uuid
+  type           LeaveRequestType
+  status         LeaveRequestStatus @default(PENDING)
+  windowStart    DateTime           @map("window_start") @db.Timestamptz(6)
+  windowEnd      DateTime           @map("window_end") @db.Timestamptz(6)
+  reason         String?
+  decisionReason String?            @map("decision_reason")
+  decidedBy      String?            @map("decided_by") @db.Uuid
+  decidedByRole  String?            @map("decided_by_role")
+  decidedAt      DateTime?          @map("decided_at") @db.Timestamptz(6)
+  availabilityId BigInt?            @map("availability_id")
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
+
+  @@index([seId, createdAt(sort: Desc)])
+  @@index([status])
+  @@map("leave_requests")
+}
+
+enum LeaveRequestType {
+  ON_LEAVE
+  WEEKLY_OFF
+
+  @@map("leave_request_type")
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@map("leave_request_status")
 }
 
 /// The system_settings registry — global, Operations-Head-owned configuration

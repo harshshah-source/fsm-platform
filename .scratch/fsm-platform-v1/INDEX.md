@@ -52,7 +52,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 
 ## P5 — Availability, readiness, intra-day
 - 25 — SE Management page + Activity Status + Set Availability → 15  *(accepted — backend AC#1–#5 + admin `/engineers` page; mobile SE self-availability → M-series)*
-- 26 — Leave request + SOFT_UNAVAILABLE → 25
+- 26 — Leave request + SOFT_UNAVAILABLE → 25  *(accepted — backend AC#1–#5 + admin `/leave-requests`; mobile SE submit → M-series)*
 - 27 — Role backup cascade + CSM acting scope → 02
 - 28 — Vehicle Unavailability Report + dual SLA clocks + readiness → 16
 - 29 — Intra-day CRITICAL insertion + SE Accept/Decline + WhatsApp → 25, 03
