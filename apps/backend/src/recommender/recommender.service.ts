@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { Prisma } from '../generated/prisma/client';
+import { type SeAvailabilityStatus } from '../generated/prisma/enums';
 import { type CommonKitStatus, InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CandidateSelectionService } from './candidate-selection.service';
@@ -41,8 +43,9 @@ export class RecommenderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly candidates: CandidateSelectionService,
-    // Defaulted so direct construction in tests need not pass it; Nest injects the provider.
+    // Defaulted so direct construction in tests need not pass them; Nest injects the providers.
     private readonly inventory: InventoryService = new InventoryService(prisma),
+    private readonly availability: SeAvailabilityService = new SeAvailabilityService(prisma),
   ) {}
 
   async runForZone(zoneId: bigint, opts: { now?: Date } = {}): Promise<RunSummary> {
@@ -83,6 +86,7 @@ export class RecommenderService {
     const seededPlants = new Set<string>(); // plant_id → already has a cluster seed this run
     const plannerByPlant = await this.plannerForDate(zoneId, now); // plant_id → planned se_ids (soft bias)
     const kitStatusBySe = new Map<string, CommonKitStatus>(); // memoised Common-Kit status per SE
+    const availabilityBySe = new Map<string, SeAvailabilityStatus>(); // memoised current availability per SE
 
     let recommended = 0;
     let unassignable = 0;
@@ -92,17 +96,20 @@ export class RecommenderService {
       const processingRank = i + 1;
       const ordered = await this.candidates.orderedCandidatesForPlant(t.plantId);
 
-      // Common-Kit completeness per candidate (Issue 21) — memoised across the run. Availability and
-      // vehicle readiness remain seams (issues 25/28); the expected-component leg is deferred until
-      // `expected_components` lands (Issue 22).
+      // Common-Kit completeness (Issue 21) + current SE availability (Issue 25) per candidate —
+      // memoised across the run. An SE with an active non-AVAILABLE availability window is dropped
+      // (SE_UNAVAILABLE). Vehicle readiness remains a seam (Issue 28); the expected-component leg is
+      // deferred until `expected_components` lands (Issue 22).
       await Promise.all(ordered.map((c) => this.ensureKitStatus(c.seId, kitStatusBySe)));
+      await this.ensureAvailability(ordered.map((c) => c.seId), availabilityBySe, now);
 
       const readiness: (SeCandidateReadiness & { seId: string })[] = ordered.map((c) => {
         const cap = capacity.get(c.seId);
+        const availStatus = availabilityBySe.get(c.seId) ?? 'AVAILABLE';
         return {
           seId: c.seId,
           vehicleReadiness: 'UNKNOWN',
-          available: cap?.isActive ?? true,
+          available: (cap?.isActive ?? true) && availStatus === 'AVAILABLE',
           overCapacity: cap !== undefined && (assigned.get(c.seId) ?? 0) >= cap.dailyCapacity,
           commonKitComplete: kitStatusBySe.get(c.seId)?.complete ?? true,
           expectedComponentsAvailable: true,
@@ -191,6 +198,14 @@ export class RecommenderService {
   private async ensureKitStatus(seId: string, cache: Map<string, CommonKitStatus>): Promise<void> {
     if (cache.has(seId)) return;
     cache.set(seId, await this.inventory.commonKitStatus(seId));
+  }
+
+  /** Memoise current SE availability across a run (Issue 25) — one batched query for the uncached. */
+  private async ensureAvailability(seIds: string[], cache: Map<string, SeAvailabilityStatus>, now: Date): Promise<void> {
+    const uncached = seIds.filter((id) => !cache.has(id));
+    if (uncached.length === 0) return;
+    const statuses = await this.availability.currentStatusMany(uncached, now);
+    for (const id of uncached) cache.set(id, statuses.get(id) ?? 'AVAILABLE');
   }
 
   /** SE Planner entries for the run date, as plant_id → planned se_ids (soft bias, ADR-0022). */

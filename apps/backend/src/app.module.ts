@@ -14,6 +14,8 @@ import { ShadowUseController } from './inventory/shadow-use.controller';
 import { ComponentRequestModule } from './component-request/component-request.module';
 import { WarehouseRequestsController } from './component-request/warehouse.controller';
 import { ComponentRequestController } from './component-request/component-request.controller';
+import { EngineersModule } from './engineers/engineers.module';
+import { EngineersController } from './engineers/engineers.controller';
 import { MeController } from './me/me.controller';
 import { OrgModule } from './org/org.module';
 import { PlannerModule } from './planner/planner.module';
@@ -67,6 +69,7 @@ import { ZonesController } from './zones/zones.controller';
     VerificationModule,
     InventoryModule,
     ComponentRequestModule,
+    EngineersModule,
   ],
   controllers: [
     MeController,
@@ -98,6 +101,7 @@ import { ZonesController } from './zones/zones.controller';
     ShadowUseController,
     WarehouseRequestsController,
     ComponentRequestController,
+    EngineersController,
   ],
   providers: [AuthGuard, RoleGuard, ZoneScopeGuard],
 })

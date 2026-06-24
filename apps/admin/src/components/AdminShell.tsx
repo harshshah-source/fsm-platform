@@ -7,7 +7,7 @@ const NAV_ITEMS: { label: string; to?: string }[] = [
   { label: 'Schedules', to: '/schedules' },
   { label: 'Intra-day' },
   { label: 'Tickets', to: '/tickets' },
-  { label: 'Engineers' },
+  { label: 'Engineers', to: '/engineers' },
   { label: 'Verification', to: '/verification' },
   { label: 'Component-Blocked', to: '/component-blocked' },
   { label: 'Reports' },

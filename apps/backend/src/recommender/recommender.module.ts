@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CandidateSelectionService } from './candidate-selection.service';
@@ -13,7 +14,7 @@ import { RecommenderService } from './recommender.service';
  */
 @Module({
   imports: [PrismaModule],
-  providers: [CandidateSelectionService, RecommenderService, InventoryService],
+  providers: [CandidateSelectionService, RecommenderService, InventoryService, SeAvailabilityService],
   exports: [CandidateSelectionService, RecommenderService],
 })
 export class RecommenderModule {}

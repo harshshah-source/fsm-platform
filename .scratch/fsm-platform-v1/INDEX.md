@@ -51,7 +51,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 24 — 409 Conflict + Shadow Use + reconciliation + inventory rollback → 21, 18  *(accepted — inventory ledger + business 409 + Shadow Use Queue + verification rollback; mobile 409 screen → 63)*
 
 ## P5 — Availability, readiness, intra-day
-- 25 — SE Management page + Activity Status + Set Availability → 15
+- 25 — SE Management page + Activity Status + Set Availability → 15  *(accepted — backend AC#1–#5 + admin `/engineers` page; mobile SE self-availability → M-series)*
 - 26 — Leave request + SOFT_UNAVAILABLE → 25
 - 27 — Role backup cascade + CSM acting scope → 02
 - 28 — Vehicle Unavailability Report + dual SLA clocks + readiness → 16

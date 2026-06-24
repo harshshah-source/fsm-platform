@@ -10,6 +10,7 @@ import { ShadowUseQueuePage } from './pages/inventory/ShadowUseQueuePage';
 import { DashboardHome } from './pages/dashboard/DashboardHome';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
+import { SeManagementPage } from './pages/engineers/SeManagementPage';
 import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
@@ -53,6 +54,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <ScheduleDetailPage />
+              </RoleRoute>
+            }
+          />
+          {/* SE Management — derived Activity Status + Set Availability, manager roles (Issue 25). */}
+          <Route
+            path="/engineers"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <SeManagementPage />
               </RoleRoute>
             }
           />
