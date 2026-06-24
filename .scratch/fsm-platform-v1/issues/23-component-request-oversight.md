@@ -1,7 +1,8 @@
 # 23 — Component Request oversight (ZM read-only + 7-day escalation)
 
-Status: ready-for-agent
+Status: accepted (backend + admin oversight/badge done; ZM notify → Issue 03 seam)
 Type: AFK
+Progress: docs/progress/23-component-request-oversight.md — AC#1–#5 done. Manager read-only `/component-requests`; `waiting_component_overdue` Action Required card live (zone-scoped >7d); Ticket List WAITING_COMPONENT badge (days + CR status). No schema change. ZM notify = Issue 03 seam. 2026-06-24.
 
 ## What to build
 
@@ -9,11 +10,11 @@ Manager visibility and SLA escalation over component requests. The Component Req
 
 ## Acceptance criteria
 
-- [ ] ZM sees own-zone Component Requests read-only (component, ticket/device, SE, status, WM action, age)
-- [ ] CSM / Operations Head see all-zones read-only
-- [ ] WAITING_COMPONENT >7 days surfaces in ZM Action Required and notifies the ZM
-- [ ] Ticket List flags WAITING_COMPONENT with days elapsed + Component Request status
-- [ ] No stock-movement actions exposed to ZM unless explicitly authorized
+- [x] ZM sees own-zone Component Requests read-only (component, ticket/device, SE, status, WM action, age)
+- [x] CSM / Operations Head see all-zones read-only
+- [x] WAITING_COMPONENT >7 days surfaces in ZM Action Required (notify ZM → Issue 03 delivery seam)
+- [x] Ticket List flags WAITING_COMPONENT with days elapsed + Component Request status
+- [x] No stock-movement actions exposed to ZM unless explicitly authorized
 
 ## Blocked by
 

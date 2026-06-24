@@ -264,6 +264,28 @@ export class VerificationService {
         await tx.failureCycle.update({ where: { cycleId: ticket.failureCycleId }, data: { state: 'VERIFIED', closedAt: now } });
         await tx.deviceState.updateMany({ where: { deviceId: ticket.deviceId }, data: { hasOpenFailureCycle: false } });
       }
+
+      // Inventory follows the outcome (Issue 24, CONTEXT §Inventory). A verified close confirms the
+      // PRE_VERIFICATION consumption as DEDUCTED; a failed verification means the device wasn't repaired,
+      // so the components roll back and the SE's van stock is restored to physical reality.
+      if (outcome === 'CLOSED') {
+        await tx.inventoryTransaction.updateMany({
+          where: { ticketId: ticket.ticketId, status: 'PRE_VERIFICATION' },
+          data: { status: 'DEDUCTED' },
+        });
+      } else {
+        const pre = await tx.inventoryTransaction.findMany({
+          where: { ticketId: ticket.ticketId, status: 'PRE_VERIFICATION' },
+        });
+        for (const txn of pre) {
+          await tx.seVanStock.upsert({
+            where: { seId_componentId: { seId: txn.seId, componentId: txn.componentId } },
+            create: { seId: txn.seId, componentId: txn.componentId, qty: txn.qty },
+            update: { qty: { increment: txn.qty } },
+          });
+          await tx.inventoryTransaction.update({ where: { id: txn.id }, data: { status: 'ROLLED_BACK' } });
+        }
+      }
       await tx.ticketEvent.create({
         data: { ticketId: ticket.ticketId, fromState: ticket.status, toState: ticketStatus, at: now, reasonCode: `VERIFICATION_${tag}` },
       });

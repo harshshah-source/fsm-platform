@@ -5,6 +5,8 @@ import { AdminShell } from './components/AdminShell';
 import { SnapshotBanner } from './components/SnapshotBanner';
 import { TerritoryPage } from './pages/coverage/TerritoryPage';
 import { ComponentBlockedPage } from './pages/inventory/ComponentBlockedPage';
+import { ComponentRequestsPage } from './pages/inventory/ComponentRequestsPage';
+import { ShadowUseQueuePage } from './pages/inventory/ShadowUseQueuePage';
 import { DashboardHome } from './pages/dashboard/DashboardHome';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
@@ -69,6 +71,33 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <ComponentBlockedPage />
+              </RoleRoute>
+            }
+          />
+          {/* Component Requests queue — Warehouse Manager owns approval/shipping (Issue 22). */}
+          <Route
+            path="/warehouse/requests"
+            element={
+              <RoleRoute roles={['WAREHOUSE_MANAGER']}>
+                <ComponentRequestsPage />
+              </RoleRoute>
+            }
+          />
+          {/* Component Requests oversight — manager read-only (own-zone ZM / all-zones CSM, OH) (Issue 23). */}
+          <Route
+            path="/component-requests"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <ComponentRequestsPage readOnly />
+              </RoleRoute>
+            }
+          />
+          {/* Shadow Use Queue — Warehouse Manager reconciliation of 409-loser consumption (Issue 24). */}
+          <Route
+            path="/warehouse/shadow-use"
+            element={
+              <RoleRoute roles={['WAREHOUSE_MANAGER']}>
+                <ShadowUseQueuePage />
               </RoleRoute>
             }
           />

@@ -33,12 +33,25 @@ export function InlineBadges({ ticket }: { ticket: TicketRow }) {
         ESCALATED
       </span>,
     );
-  if (ticket.failureCycleState === 'WAITING_COMPONENT')
+  if (ticket.failureCycleState === 'WAITING_COMPONENT') {
+    const days = ticket.waitingComponentSince
+      ? Math.floor((Date.now() - new Date(ticket.waitingComponentSince).getTime()) / 86_400_000)
+      : null;
+    // Past the 7-day auto-escalation threshold the badge darkens (CONTEXT §8 / Issue 23).
+    const overdue = days !== null && days > 7;
+    const parts = ['WAITING COMPONENT'];
+    if (days !== null) parts.push(`${days}d`);
+    if (ticket.componentRequestStatus) parts.push(ticket.componentRequestStatus);
     badges.push(
-      <span key="wait" data-testid="badge-WAITING_COMPONENT" className="rounded bg-amber-100 px-1 text-xs text-amber-800">
-        WAITING COMPONENT
+      <span
+        key="wait"
+        data-testid="badge-WAITING_COMPONENT"
+        className={`rounded px-1 text-xs ${overdue ? 'bg-amber-200 text-amber-900' : 'bg-amber-100 text-amber-800'}`}
+      >
+        {parts.join(' · ')}
       </span>,
     );
+  }
   if (ticket.status === 'CLOSED_AUTO_RECOVERY')
     badges.push(
       <span key="auto" data-testid="badge-AUTO_RECOVERY" className="rounded bg-slate-200 px-1 text-xs text-slate-600">

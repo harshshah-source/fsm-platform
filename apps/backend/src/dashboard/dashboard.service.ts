@@ -254,10 +254,37 @@ export class DashboardService {
   }
 
   /**
-   * The Action Required panel cards. Returns the urgency-ordered contract; counts are 0 and cards
-   * are unavailable until their owning issues land (the panel degrades gracefully — AC#1).
+   * The Action Required panel cards in urgency order. Most sources are later issues and stay graceful
+   * stubs (`available:false`, `count:0`); the `waiting_component_overdue` card is wired here (Issue 23)
+   * with a real, zone-scoped count of WAITING_COMPONENT cycles paused over 7 days.
    */
-  actionRequired(): ActionRequiredCard[] {
-    return ACTION_REQUIRED_CARDS.map((c) => ({ ...c, count: 0, available: false }));
+  async actionRequired(scope: ZoneScope, now: Date = new Date()): Promise<ActionRequiredCard[]> {
+    const waitingComponentOverdue = await this.waitingComponentOverdueCount(scope, now);
+    return ACTION_REQUIRED_CARDS.map((c) =>
+      c.key === 'waiting_component_overdue'
+        ? { ...c, count: waitingComponentOverdue, available: true }
+        : { ...c, count: 0, available: false },
+    );
+  }
+
+  /**
+   * Count WAITING_COMPONENT Failure Cycles whose primary SLA has been paused longer than 7 days
+   * (CONTEXT §8 auto-escalation). Zone-scoped for a ZM (via the ticket's plant→zone); CSM / Operations
+   * Head see all zones.
+   */
+  private async waitingComponentOverdueCount(scope: ZoneScope, now: Date): Promise<number> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+    const zoneFilter =
+      restrictZone !== null ? Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+    const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const rows = await this.prisma.$queryRaw<{ n: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS n
+      FROM failure_cycles fc
+      JOIN tickets t ON t.failure_cycle_id = fc.cycle_id
+      JOIN plants p ON p.plant_id = t.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      WHERE fc.state = 'WAITING_COMPONENT' AND fc.sla_paused = true
+        AND fc.sla_paused_at < ${cutoff} ${zoneFilter}`);
+    return rows[0]?.n ?? 0;
   }
 }

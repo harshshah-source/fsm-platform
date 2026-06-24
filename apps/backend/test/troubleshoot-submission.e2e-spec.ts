@@ -150,11 +150,12 @@ describe('Issue 16 slices 2–3 — troubleshoot submission', () => {
     expect(rows.length).toBe(1);
   });
 
-  it('returns NOT_OPEN when the ticket is no longer OPEN (another submission already won)', async () => {
+  it('returns a business CONFLICT when the ticket is no longer OPEN (another submission already won)', async () => {
     const { ticketId } = await makeTicket();
     await svc.submit({ ticketId, seId: se, clientSubmissionId: randomUUID(), rootCauseCategory: 'UNKNOWN', actor: actor(), now: NOW });
-    // A different SE draft on a now-VERIFICATION_PENDING ticket.
+    // A second draft on a now-VERIFICATION_PENDING ticket (no consumed components → no Shadow Use).
     const outcome = await svc.submit({ ticketId, seId: se, clientSubmissionId: randomUUID(), rootCauseCategory: 'UNKNOWN', actor: actor(), now: NOW });
-    expect(outcome.result).toBe('NOT_OPEN');
+    expect(outcome.result).toBe('CONFLICT');
+    expect(outcome.result === 'CONFLICT' && outcome.shadowUseRecorded).toBe(false);
   });
 });

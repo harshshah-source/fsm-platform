@@ -16,6 +16,7 @@ datasource db {
 /// RBAC roles — tops out at OPERATIONS_HEAD; intentionally no ADMIN (schema D1). Mirrors
 /// the canonical `@fsm/shared` ROLES.
 enum Role {
+  
   SERVICE_ENGINEER
   ZONAL_MANAGER
   CENTRAL_SERVICE_MANAGER
@@ -122,6 +123,9 @@ model EngineerMaster {
   submissions     TroubleshootingSubmission[]
   vanStock        SeVanStock[]
   componentBlocks ComponentBlockedQueue[]
+  componentRequests ComponentRequest[]
+  inventoryTransactions InventoryTransaction[]
+  availability    SeAvailability[]
 
   @@index([zoneId])
   @@index([lastActivityAt])
@@ -541,6 +545,8 @@ model TroubleshootingSubmission {
   failureCycle FailureCycle   @relation(fields: [failureCycleId], references: [cycleId])
   engineer     EngineerMaster @relation(fields: [seId], references: [engineerId])
   verificationRuns VerificationRun[]
+  componentRequest ComponentRequest?
+  inventoryTransactions InventoryTransaction[]
 
   @@unique([seId, clientSubmissionId])
   @@index([ticketId, submittedAt(sort: Desc)])
@@ -610,6 +616,8 @@ model ComponentMaster {
 
   vanStock  SeVanStock[]
   commonKit CommonKitDefinition[]
+  componentRequests ComponentRequest[]
+  inventoryTransactions InventoryTransaction[]
 
   @@map("component_master")
 }
@@ -661,6 +669,92 @@ model ComponentBlockedQueue {
   engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
 
   @@map("component_blocked_queue")
+}
+
+/// Component Request (ADR-0008, CONTEXT §8, Issue 22). Raised automatically when an SE submits a
+/// Troubleshoot form with `component_unavailable=true`: the Failure Cycle enters WAITING_COMPONENT,
+/// the primary SLA pauses, and this row routes to the Warehouse Manager. v1 lifecycle
+/// REQUESTED → APPROVED | REJECTED → SHIPPED → RECEIVED. One request per raising submission
+/// (idempotent raise). `delivery_destination` drives Floating-SE resubmit ownership.
+model ComponentRequest {
+  requestId           String                  @id @default(uuid()) @map("request_id") @db.Uuid
+  ticketId            String                  @map("ticket_id") @db.Uuid
+  failureCycleId      String                  @map("failure_cycle_id") @db.Uuid
+  submissionId        String                  @unique @map("submission_id") @db.Uuid
+  seId                String                  @map("se_id") @db.Uuid
+  componentId         BigInt?                 @map("component_id")
+  status              ComponentRequestStatus  @default(REQUESTED)
+  deliveryDestination DeliveryDestination?    @map("delivery_destination")
+  trackingRef         String?                 @map("tracking_ref")
+  rejectionReason     String?                 @map("rejection_reason")
+  wmActorId           String?                 @map("wm_actor_id") @db.Uuid
+  approvedAt          DateTime?               @map("approved_at") @db.Timestamptz(6)
+  shippedAt           DateTime?               @map("shipped_at") @db.Timestamptz(6)
+  rejectedAt          DateTime?               @map("rejected_at") @db.Timestamptz(6)
+  receivedAt          DateTime?               @map("received_at") @db.Timestamptz(6)
+  version             Int                     @default(0)
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ticket       Ticket                    @relation(fields: [ticketId], references: [ticketId])
+  failureCycle FailureCycle              @relation(fields: [failureCycleId], references: [cycleId])
+  submission   TroubleshootingSubmission @relation(fields: [submissionId], references: [submissionId])
+  engineer     EngineerMaster            @relation(fields: [seId], references: [engineerId])
+  component    ComponentMaster?          @relation(fields: [componentId], references: [componentId])
+
+  @@index([status, createdAt])
+  @@index([ticketId, createdAt(sort: Desc)])
+  @@map("component_request")
+}
+
+/// Inventory ledger (CONTEXT §Inventory, Issue 24). One row per component movement on a Ticket:
+/// `type` = accounting category, `status` = lifecycle. Normal consumption is written PRE_VERIFICATION
+/// at submit and resolves to DEDUCTED / ROLLED_BACK on the verification outcome; a 409-loser's
+/// consumption is written SHADOW_USE and reconciled by the Warehouse Manager (RECONCILED | DISPUTED).
+model InventoryTransaction {
+  id           BigInt             @id @default(autoincrement())
+  seId         String             @map("se_id") @db.Uuid
+  componentId  BigInt             @map("component_id")
+  qty          Int
+  ticketId     String?            @map("ticket_id") @db.Uuid
+  submissionId String?            @map("submission_id") @db.Uuid
+  type         InventoryTxnType
+  status       InventoryTxnStatus
+  reason       String?
+  reconciledBy String?            @map("reconciled_by") @db.Uuid
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  engineer   EngineerMaster             @relation(fields: [seId], references: [engineerId])
+  component  ComponentMaster            @relation(fields: [componentId], references: [componentId])
+  ticket     Ticket?                    @relation(fields: [ticketId], references: [ticketId])
+  submission TroubleshootingSubmission? @relation(fields: [submissionId], references: [submissionId])
+
+  @@index([status])
+  @@index([ticketId])
+  @@index([seId])
+  @@map("inventory_transactions")
+}
+
+/// Time-windowed SE planning availability (ADR-0010, CONTEXT §SE Availability, Issue 25). One row per
+/// availability window; `window_end` null = open-ended. The current status is the active window's
+/// status (else AVAILABLE). Written by the Zonal Manager (own zone) or the SE themselves — never
+/// Operations Head. Only AVAILABLE lets the Recommender include the SE.
+model SeAvailability {
+  id          BigInt               @id @default(autoincrement())
+  seId        String               @map("se_id") @db.Uuid
+  status      SeAvailabilityStatus
+  windowStart DateTime             @map("window_start") @db.Timestamptz(6)
+  windowEnd   DateTime?            @map("window_end") @db.Timestamptz(6)
+  reason      String?
+  setBy       String?              @map("set_by") @db.Uuid
+  setByRole   String?              @map("set_by_role")
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
+
+  @@index([seId, windowStart(sort: Desc)])
+  @@map("se_availability")
 }
 
 /// The system_settings registry — global, Operations-Head-owned configuration
@@ -833,6 +927,62 @@ enum SlaPauseReason {
   @@map("sla_pause_reason")
 }
 
+/// Component Request v1 lifecycle (ADR-0008, CONTEXT §8, Issue 22). Phase 2 expands to a 6-state
+/// courier-tracked model — schema designed for that expansion.
+enum ComponentRequestStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  SHIPPED
+  RECEIVED
+
+  @@map("component_request_status")
+}
+
+/// Where the spare is delivered — drives Floating-SE resubmit ownership (ADR-0008, CONTEXT §8).
+enum DeliveryDestination {
+  SE_LOCATION
+  PLANT_WAREHOUSE
+
+  @@map("delivery_destination")
+}
+
+/// Stored SE planning-availability status (ADR-0010, CONTEXT §SE Availability). Only AVAILABLE lets
+/// the Recommender include the SE in candidate scoring; the rest exclude them for the window.
+enum SeAvailabilityStatus {
+  AVAILABLE
+  ON_LEAVE
+  OFF_SHIFT
+  WEEKLY_OFF
+  SOFT_UNAVAILABLE
+  OFFLINE
+
+  @@map("se_availability_status")
+}
+
+/// Inventory-transaction accounting category (CONTEXT §Inventory, Issue 24). The physical-place
+/// distinction (Ticket Consumption vs Faulty Return) — not the lifecycle (that is the status).
+enum InventoryTxnType {
+  TICKET_CONSUMPTION
+  FAULTY_COMPONENT_RETURNED
+
+  @@map("inventory_txn_type")
+}
+
+/// Inventory-transaction lifecycle (CONTEXT §Inventory / §Shadow Use, Issue 24). A normal consumption
+/// runs PRE_VERIFICATION → DEDUCTED (verified close) | ROLLED_BACK (failed verification); a 409-loser's
+/// consumption is SHADOW_USE → RECONCILED | DISPUTED (Warehouse Manager reconciliation).
+enum InventoryTxnStatus {
+  PRE_VERIFICATION
+  DEDUCTED
+  ROLLED_BACK
+  SHADOW_USE
+  RECONCILED
+  DISPUTED
+
+  @@map("inventory_txn_status")
+}
+
 /// Ticket work_type discriminator (schema D6 / ADR-0004); immutable. Issue 05 creates TROUBLESHOOT.
 enum WorkType {
   TROUBLESHOOT
@@ -988,6 +1138,7 @@ model FailureCycle {
   repeats              FailureCycle[] @relation("RepeatChain")
   ticket               Ticket?
   submissions          TroubleshootingSubmission[]
+  componentRequests    ComponentRequest[]
 
   @@index([state])
   @@index([deviceId, openedAt(sort: Desc)])
@@ -1029,6 +1180,8 @@ model Ticket {
   troubleshootingSubmissions TroubleshootingSubmission[]
   verificationRuns VerificationRun[]
   componentBlocks ComponentBlockedQueue[]
+  componentRequests ComponentRequest[]
+  inventoryTransactions InventoryTransaction[]
 
   @@index([status, plantId])
   @@index([workType, status])

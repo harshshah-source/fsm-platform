@@ -41,6 +41,31 @@ export function AdminShell() {
               )}
             </li>
           ))}
+          {/* Component Requests is the Warehouse Manager queue (Issue 22); WM only — the
+              /warehouse/requests route is RoleRoute-gated as the matching second line of defence. */}
+          {session.role === 'WAREHOUSE_MANAGER' && (
+            <>
+              <li className="rounded px-2 py-1">
+                <Link to="/warehouse/requests" className="text-slate-700 hover:underline">
+                  Component Requests
+                </Link>
+              </li>
+              <li className="rounded px-2 py-1">
+                <Link to="/warehouse/shadow-use" className="text-slate-700 hover:underline">
+                  Shadow Use Queue
+                </Link>
+              </li>
+            </>
+          )}
+          {/* Component Requests oversight — manager read-only visibility (Issue 23); the
+              /component-requests route is RoleRoute-gated as the matching second line of defence. */}
+          {isManager && (
+            <li className="rounded px-2 py-1">
+              <Link to="/component-requests" className="text-slate-700 hover:underline">
+                Component Requests
+              </Link>
+            </li>
+          )}
           {/* SE Planner is a ZM plant-visit scheduling tool (Issue 14b); manager roles only — the
               /engineers/planner route is RoleRoute-gated as the matching second line of defence. */}
           {isManager && (

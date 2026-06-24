@@ -96,8 +96,16 @@ export class TroubleshootController {
     });
 
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
-    if (outcome.result === 'NOT_OPEN') {
-      throw new ConflictException({ code: 'TICKET_NOT_OPEN', status: outcome.status });
+    if (outcome.result === 'CONFLICT') {
+      // Business 409 (CONTEXT §Business 409 Conflict) — distinct from an idempotency duplicate. Carries
+      // the winning SE/time for the SE-facing copy and whether consumed components were logged as Shadow Use.
+      throw new ConflictException({
+        code: 'TICKET_ALREADY_CLOSED',
+        status: outcome.status,
+        winnerSeId: outcome.conflict.winnerSeId,
+        winnerAt: outcome.conflict.winnerAt,
+        shadowUseRecorded: outcome.shadowUseRecorded,
+      });
     }
     return { result: outcome.result, duplicate: outcome.duplicate, submission: serialize(outcome.submission) };
   }

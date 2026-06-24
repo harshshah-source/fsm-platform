@@ -6,6 +6,7 @@ import {
   HttpCode,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -82,7 +83,7 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async detail(
     @CurrentUser() user: AccessTokenClaims,
-    @Param('engineerId') engineerId: string,
+    @Param('engineerId', new ParseUUIDPipe()) engineerId: string,
   ): Promise<ZmScheduleDetail> {
     const detail = await this.zm.getScheduleDetail(engineerId, { role: user.role, zoneId: user.zone_id });
     if (!detail) throw new NotFoundException({ code: 'SCHEDULE_NOT_FOUND' });

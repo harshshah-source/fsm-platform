@@ -16,6 +16,9 @@ export interface TicketRow {
   slaBucket: string | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
+  /** Issue 23 — latest Component Request status + the SLA-pause timestamp for the WAITING_COMPONENT flag. */
+  componentRequestStatus?: string | null;
+  waitingComponentSince?: string | null;
   createdAt: string;
 }
 

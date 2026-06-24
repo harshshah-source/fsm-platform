@@ -46,9 +46,9 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 
 ## P4 — Inventory & components
 - 21 — Van Stock + Common Kit Hard Filter + Component-Blocked Queue → 10, 16  *(partial — backend core done; mobile #5 / push #6 / expected-component leg #2b deferred)*
-- 22 — Component Request flow + WAITING_COMPONENT pause + resubmit → 21
-- 23 — Component Request oversight (ZM read-only + 7-day escalation) → 22
-- 24 — 409 Conflict + Shadow Use + reconciliation + inventory rollback → 21, 18
+- 22 — Component Request flow + WAITING_COMPONENT pause + resubmit → 21  *(accepted — backend + WM admin queue done; mobile → 58/60, Components tab → 62)*
+- 23 — Component Request oversight (ZM read-only + 7-day escalation) → 22  *(accepted — manager read-only view + Action Required card + ticket badge; ZM notify → 03)*
+- 24 — 409 Conflict + Shadow Use + reconciliation + inventory rollback → 21, 18  *(accepted — inventory ledger + business 409 + Shadow Use Queue + verification rollback; mobile 409 screen → 63)*
 
 ## P5 — Availability, readiness, intra-day
 - 25 — SE Management page + Activity Status + Set Availability → 15
@@ -77,6 +77,8 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 51 — Expected-component Hard-Filter leg + `expected_components` → 21, 22  *(closes Issue 21 AC#2b)*
 - 52 — SE mobile Home: Van Stock + Common-Kit badge → 21  *(closes Issue 21 AC#5 UI; needs mobile ticket screens)*
 - 53 — Push on Common-Kit-zero + Component-Blocked → Action Required cross-link → 21, 03  *(closes Issue 21 AC#6 + AC#4 cross-link; needs notification spine)*
+- 62 — Ticket Detail Components tab: request status + WAITING_COMPONENT pause → 22  *(drawer-retrofit A1; closes Issue 22 Components-tab UI)*
+- 63 — SE mobile full-screen 409 (Ticket already closed) screen → 54, 24  *(closes Issue 24 AC#3 mobile)*
 
 ## Mobile (foundation + M-series UI)
 

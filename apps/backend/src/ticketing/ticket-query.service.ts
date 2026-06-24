@@ -28,6 +28,10 @@ export interface TicketView {
   slaBucket: SlaBucket | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
+  /** Latest Component Request status for the ticket (Issue 23) — null when none was raised. */
+  componentRequestStatus: string | null;
+  /** SLA-pause timestamp while WAITING_COMPONENT (Issue 23); the UI derives "days elapsed". Null otherwise. */
+  waitingComponentSince: string | null;
   createdAt: string;
   lastStateChangedAt: string;
 }
@@ -87,7 +91,11 @@ const SELECT_COLUMNS = Prisma.sql`
   t.vehicle_id::text AS "vehicleId", t.plant_id::text AS "plantId", t.company_id::text AS "companyId",
   t.company_tier::text AS "companyTier", t.assignment_state::text AS "assignmentState",
   ds.sla_bucket::text AS "slaBucket", t.repeat_failure AS "repeatFailure",
-  fc.state::text AS "failureCycleState", t.created_at AS "createdAt",
+  fc.state::text AS "failureCycleState",
+  CASE WHEN fc.state = 'WAITING_COMPONENT' THEN fc.sla_paused_at ELSE NULL END AS "waitingComponentSince",
+  (SELECT cr.status::text FROM component_request cr WHERE cr.ticket_id = t.ticket_id
+     ORDER BY cr.created_at DESC LIMIT 1) AS "componentRequestStatus",
+  t.created_at AS "createdAt",
   t.last_state_changed_at AS "lastStateChangedAt"`;
 
 const FROM_JOINS = Prisma.sql`
@@ -110,6 +118,8 @@ type RawRow = {
   slaBucket: SlaBucket | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
+  componentRequestStatus: string | null;
+  waitingComponentSince: Date | null;
   createdAt: Date;
   lastStateChangedAt: Date;
 };
@@ -128,6 +138,8 @@ const toView = (r: RawRow): TicketView => ({
   slaBucket: r.slaBucket,
   repeatFailure: r.repeatFailure,
   failureCycleState: r.failureCycleState,
+  componentRequestStatus: r.componentRequestStatus,
+  waitingComponentSince: r.waitingComponentSince ? r.waitingComponentSince.toISOString() : null,
   createdAt: r.createdAt.toISOString(),
   lastStateChangedAt: r.lastStateChangedAt.toISOString(),
 });

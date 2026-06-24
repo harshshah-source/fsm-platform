@@ -1,7 +1,8 @@
 # 22 — Component Request flow + WAITING_COMPONENT pause + resubmit
 
-Status: ready-for-agent
+Status: accepted (backend + admin queue done; mobile screens → 58/60, Components tab → 62)
 Type: AFK
+Progress: docs/progress/22-component-request-flow-waiting-component.md — AC#1–#6 backend + WM admin queue done; SLA-resume switch `sla_resume_on_receipt`; resubmit ownership computed. Mobile confirm-receipt/resubmit → 58/60 (blocked-by #54); Ticket Detail Components tab → 62. Migration 25. 2026-06-24.
 
 ## What to build
 
@@ -9,12 +10,12 @@ The end-to-end component-unavailable loop. When an SE submits the form with `com
 
 ## Acceptance criteria
 
-- [ ] `component_unavailable = true` raises a Component Request and moves cycle to WAITING_COMPONENT
-- [ ] Primary SLA pauses with `pause_reason = WAITING_COMPONENT`
-- [ ] WM can Approve → Mark Shipped (with tracking) or Reject (mandatory reason, ZM notified)
-- [ ] SE Confirm Receipt sets RECEIVED and resumes SLA per the configured resume trigger
-- [ ] Resubmit reopens the form with a new `client_submission_id` on the same Ticket
-- [ ] Resubmit ownership rules applied for Dedicated/Multi-Plant vs Floating SE
+- [x] `component_unavailable = true` raises a Component Request and moves cycle to WAITING_COMPONENT
+- [x] Primary SLA pauses with `pause_reason = WAITING_COMPONENT`
+- [x] WM can Approve → Mark Shipped (with tracking) or Reject (mandatory reason, ZM notified — Issue 03 delivery seam)
+- [x] SE Confirm Receipt sets RECEIVED and resumes SLA per the configured resume trigger (`sla_resume_on_receipt`)
+- [x] Resubmit reopens the form with a new `client_submission_id` on the same Ticket (mobile screen → 58)
+- [x] Resubmit ownership rules applied for Dedicated/Multi-Plant vs Floating SE
 
 ## UI surfaces
 

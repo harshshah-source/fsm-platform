@@ -40,6 +40,11 @@ export class InMemoryUserStore {
       role: 'CENTRAL_SERVICE_MANAGER',
       zoneId: null,
     }),
+    seedUser('wm@fsm.test', 'correct-password', {
+      userId: '55555555-5555-5555-5555-555555555555',
+      role: 'WAREHOUSE_MANAGER',
+      zoneId: null,
+    }),
   ];
 
   findById(userId: string): AuthenticatedUser | null {

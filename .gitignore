@@ -20,6 +20,7 @@ docs/*
 !.scratch/fsm-platform-v1/
 .claude/
 data/
+backups/
 
 .vscode/
 .idea/

@@ -52,8 +52,17 @@ describe('Issue 06 slice 4 — /api/dashboard/action-required', () => {
     for (let i = 1; i < cards.length; i++) {
       expect(cards[i].urgency).toBeGreaterThan(cards[i - 1].urgency);
     }
-    // Every source is unbuilt at Issue 06 → graceful stub.
-    expect(cards.every((c) => c.available === false && c.count === 0)).toBe(true);
+    // Sources whose owning issue hasn't landed are still graceful stubs. `waiting_component_overdue`
+    // is wired (Issue 23): it is available, with a count ≥ 0.
+    for (const c of cards) {
+      if (c.key === 'waiting_component_overdue') {
+        expect(c.available).toBe(true);
+        expect(c.count).toBeGreaterThanOrEqual(0);
+      } else {
+        expect(c.available).toBe(false);
+        expect(c.count).toBe(0);
+      }
+    }
     expect(cards.map((c) => c.key)).toContain('vehicle_unavailability');
     expect(cards.map((c) => c.key)).toContain('non_op_awaiting_manager');
   });

@@ -10,6 +10,10 @@ import { IngestionModule } from './ingestion/ingestion.module';
 import { SnapshotsController } from './ingestion/snapshots.controller';
 import { InventoryModule } from './inventory/inventory.module';
 import { ComponentBlockedController, MeInventoryController } from './inventory/inventory.controller';
+import { ShadowUseController } from './inventory/shadow-use.controller';
+import { ComponentRequestModule } from './component-request/component-request.module';
+import { WarehouseRequestsController } from './component-request/warehouse.controller';
+import { ComponentRequestController } from './component-request/component-request.controller';
 import { MeController } from './me/me.controller';
 import { OrgModule } from './org/org.module';
 import { PlannerModule } from './planner/planner.module';
@@ -62,6 +66,7 @@ import { ZonesController } from './zones/zones.controller';
     SoftStateModule,
     VerificationModule,
     InventoryModule,
+    ComponentRequestModule,
   ],
   controllers: [
     MeController,
@@ -90,6 +95,9 @@ import { ZonesController } from './zones/zones.controller';
     VerificationController,
     ComponentBlockedController,
     MeInventoryController,
+    ShadowUseController,
+    WarehouseRequestsController,
+    ComponentRequestController,
   ],
   providers: [AuthGuard, RoleGuard, ZoneScopeGuard],
 })

@@ -48,7 +48,7 @@ export class DashboardController {
 
   @Get('action-required')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
-  actionRequired(): ActionRequiredCard[] {
-    return this.dashboard.actionRequired();
+  actionRequired(@CurrentUser() user: AccessTokenClaims): Promise<ActionRequiredCard[]> {
+    return this.dashboard.actionRequired({ role: user.role, zoneId: user.zone_id });
   }
 }

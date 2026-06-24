@@ -1,7 +1,8 @@
 # 24 — 409 Conflict + Shadow Use + reconciliation + inventory rollback
 
-Status: ready-for-agent
+Status: accepted (backend + admin Shadow Use Queue done; mobile 409 screen → 63)
 Type: AFK
+Progress: docs/progress/24-409-conflict-shadow-use.md — AC#1,#2,#4,#5,#6 done. Inventory ledger (migration 26); business 409 (TICKET_ALREADY_CLOSED) + Shadow Use; PRE_VERIFICATION→DEDUCTED/ROLLED_BACK on verification; Shadow Use Queue (reconcile/dispute→ZM). Mobile 409 screen → Issue 63 (blocked-by #54). 2026-06-24.
 
 ## What to build
 
@@ -9,12 +10,12 @@ The dual-SE conflict and inventory-reconciliation path. When an SE submits on a 
 
 ## Acceptance criteria
 
-- [ ] Second submit on a closed Ticket returns a business 409 (distinct from idempotency duplicate)
-- [ ] Consumed components decremented from Van Stock and logged as a SHADOW_USE inventory transaction
-- [ ] Mobile shows the full-screen 409 screen with correct copy and actions
-- [ ] Shadow Use Queue supports Mark Reconciled / Mark Disputed (dispute escalates to ZM, flags Ticket)
-- [ ] Failed-verification inventory rollback corrects Van Stock (PRE_VERIFICATION → DEDUCTED handled)
-- [ ] Two-SEs-same-Ticket reconciliation keeps both engineers' Van Stock accurate
+- [x] Second submit on a closed Ticket returns a business 409 (distinct from idempotency duplicate)
+- [x] Consumed components decremented from Van Stock and logged as a SHADOW_USE inventory transaction
+- [~] Mobile shows the full-screen 409 screen with correct copy and actions (backend payload ready; mobile UI → Issue 63)
+- [x] Shadow Use Queue supports Mark Reconciled / Mark Disputed (dispute escalates to ZM, flags Ticket)
+- [x] Failed-verification inventory rollback corrects Van Stock (PRE_VERIFICATION → DEDUCTED handled)
+- [x] Two-SEs-same-Ticket reconciliation keeps both engineers' Van Stock accurate
 
 ## Blocked by
 
