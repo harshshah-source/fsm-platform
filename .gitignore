@@ -13,9 +13,11 @@ package-lock.json
 
 *.log
 
-# keep out business docs and internal planning
-docs/
-.scratch/
+# keep out business docs and internal planning, except versioned governance + active backlog
+docs/*
+!docs/agents/
+.scratch/*
+!.scratch/fsm-platform-v1/
 .claude/
 data/
 

@@ -1,0 +1,22 @@
+# 24 — 409 Conflict + Shadow Use + reconciliation + inventory rollback
+
+Status: ready-for-agent
+Type: AFK
+
+## What to build
+
+The dual-SE conflict and inventory-reconciliation path. When an SE submits on a Ticket already closed by another SE, the server returns a business **409 Conflict** (distinct from an idempotency duplicate): components the rejected SE physically consumed are decremented from their Van Stock and recorded as a `SHADOW_USE` `inventory_transactions` row for Warehouse reconciliation. Mobile shows a full-screen 409 screen ("This Ticket was already closed by [SE] at [time]. Your consumed components have been logged as Shadow Use…") with View Van Stock / Go Back actions. **Shadow Use Queue** (`/warehouse/shadow-use`, Warehouse Manager): unreconciled SHADOW_USE rows; per-row **Mark Reconciled** or **Mark Disputed** (escalates to ZM with reason; Ticket gains an "Inventory Dispute" flag). Also handle inventory rollback when a Ticket fails GPS verification (device not actually installed/repaired) so Van Stock reflects physical reality (PRE_VERIFICATION → DEDUCTED lifecycle).
+
+## Acceptance criteria
+
+- [ ] Second submit on a closed Ticket returns a business 409 (distinct from idempotency duplicate)
+- [ ] Consumed components decremented from Van Stock and logged as a SHADOW_USE inventory transaction
+- [ ] Mobile shows the full-screen 409 screen with correct copy and actions
+- [ ] Shadow Use Queue supports Mark Reconciled / Mark Disputed (dispute escalates to ZM, flags Ticket)
+- [ ] Failed-verification inventory rollback corrects Van Stock (PRE_VERIFICATION → DEDUCTED handled)
+- [ ] Two-SEs-same-Ticket reconciliation keeps both engineers' Van Stock accurate
+
+## Blocked by
+
+- #21
+- #18
