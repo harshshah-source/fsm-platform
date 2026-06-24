@@ -1,0 +1,23 @@
+{
+  "name": "@fsm/shared",
+  "version": "0.0.1",
+  "private": true,
+  "type": "commonjs",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"(no lint configured)\"",
+    "test": "echo \"(shared DTOs are covered by consumer tests)\""
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

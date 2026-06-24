@@ -1,0 +1,26 @@
+node_modules/
+dist/
+coverage/
+.turbo/
+apps/backend/dist/
+packages/shared/dist/
+apps/mobile/.expo/
+package-lock.json
+
+.env
+.env.*
+!.env.example
+
+*.log
+
+# keep out business docs and internal planning
+docs/
+.scratch/
+.claude/
+data/
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+apps/backend/src/generated/

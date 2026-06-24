@@ -1,0 +1,96 @@
+import { Module } from '@nestjs/common';
+import { AuditModule } from './audit/audit.module';
+import { AuthModule } from './auth/auth.module';
+import { AuthGuard } from './common/guards/auth.guard';
+import { RoleGuard } from './common/guards/role.guard';
+import { ZoneScopeGuard } from './common/guards/zone-scope.guard';
+import { DashboardModule } from './dashboard/dashboard.module';
+import { DashboardController } from './dashboard/dashboard.controller';
+import { IngestionModule } from './ingestion/ingestion.module';
+import { SnapshotsController } from './ingestion/snapshots.controller';
+import { InventoryModule } from './inventory/inventory.module';
+import { ComponentBlockedController, MeInventoryController } from './inventory/inventory.controller';
+import { MeController } from './me/me.controller';
+import { OrgModule } from './org/org.module';
+import { PlannerModule } from './planner/planner.module';
+import { SePlannerController } from './planner/se-planner.controller';
+import { CommonKitAdminController } from './org/common-kit.controller';
+import { CompaniesAdminController } from './org/companies.controller';
+import { PlantsAdminController } from './org/plants.controller';
+import { ScoringWeightsAdminController } from './org/scoring-weights.controller';
+import {
+  EngineersAdminController,
+  SeCoverageAdminController,
+} from './org/se-coverage.controller';
+import { GeographyController } from './org/geography.controller';
+import { SeTerritoryAdminController } from './org/se-territory.controller';
+import { SlaRulesAdminController } from './org/sla-rules.controller';
+import { UsersAdminController } from './org/users.controller';
+import { ZonesAdminController } from './org/zones.controller';
+import { PrismaModule } from './prisma/prisma.module';
+import { SettingsController } from './settings/settings.controller';
+import { SettingsModule } from './settings/settings.module';
+import { RecommenderModule } from './recommender/recommender.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
+import { SchedulesController } from './scheduling/schedules.controller';
+import { BatchesController } from './scheduling/batches.controller';
+import { SharedPoolModule } from './shared-pool/shared-pool.module';
+import { SharedPoolController } from './shared-pool/shared-pool.controller';
+import { SoftStateModule } from './soft-state/soft-state.module';
+import { SoftStateController } from './soft-state/soft-state.controller';
+import { TicketingModule } from './ticketing/ticketing.module';
+import { TicketsController } from './ticketing/tickets.controller';
+import { TroubleshootController } from './ticketing/troubleshoot.controller';
+import { VerificationModule } from './verification/verification.module';
+import { VerificationController } from './verification/verification.controller';
+import { ZonesController } from './zones/zones.controller';
+
+@Module({
+  imports: [
+    PrismaModule,
+    AuthModule,
+    SettingsModule,
+    AuditModule,
+    OrgModule,
+    IngestionModule,
+    TicketingModule,
+    RecommenderModule,
+    SchedulingModule,
+    SharedPoolModule,
+    PlannerModule,
+    DashboardModule,
+    SoftStateModule,
+    VerificationModule,
+    InventoryModule,
+  ],
+  controllers: [
+    MeController,
+    SettingsController,
+    ZonesController,
+    ZonesAdminController,
+    PlantsAdminController,
+    UsersAdminController,
+    CompaniesAdminController,
+    EngineersAdminController,
+    SeCoverageAdminController,
+    SeTerritoryAdminController,
+    GeographyController,
+    SlaRulesAdminController,
+    ScoringWeightsAdminController,
+    CommonKitAdminController,
+    SnapshotsController,
+    TicketsController,
+    TroubleshootController,
+    SchedulesController,
+    BatchesController,
+    SharedPoolController,
+    SePlannerController,
+    DashboardController,
+    SoftStateController,
+    VerificationController,
+    ComponentBlockedController,
+    MeInventoryController,
+  ],
+  providers: [AuthGuard, RoleGuard, ZoneScopeGuard],
+})
+export class AppModule {}

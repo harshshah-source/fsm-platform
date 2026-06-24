@@ -1,0 +1,30 @@
+{
+  // Typecheck-only config. Expo (babel-preset-expo / Metro) reads ONLY tsconfig.json and applies
+  // its `paths` as runtime module aliases — so the react→@types/react redirect that dedupes the
+  // monorepo's two @types/react versions (admin's hoisted 18.3.31 vs mobile's 19.1.17) MUST live
+  // here, not in tsconfig.json, or it would break runtime module resolution (Metro + jest).
+  // Used by the `typecheck` script only. See docs/progress/01 — infra-debt note.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "react": [
+        "./node_modules/@types/react"
+      ],
+      "react/jsx-runtime": [
+        "./node_modules/@types/react/jsx-runtime"
+      ],
+      "react/jsx-dev-runtime": [
+        "./node_modules/@types/react/jsx-dev-runtime"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ]
+}

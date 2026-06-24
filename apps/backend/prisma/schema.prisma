@@ -1,0 +1,1097 @@
+// FSM backend — Prisma schema. ADR-0025: Postgres 16+ + PostGIS via Prisma,
+// snake_case via @map, timestamptz UTC. PostGIS geometry arrives with the
+// coverage/territory slice (Issue 09) as Unsupported(...) + raw SQL.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "nodejs"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// RBAC roles — tops out at OPERATIONS_HEAD; intentionally no ADMIN (schema D1). Mirrors
+/// the canonical `@fsm/shared` ROLES.
+enum Role {
+  SERVICE_ENGINEER
+  ZONAL_MANAGER
+  CENTRAL_SERVICE_MANAGER
+  OPERATIONS_HEAD
+  WAREHOUSE_MANAGER
+
+  @@map("role")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+
+  @@map("user_status")
+}
+
+enum CompanyTier {
+  PLATINUM
+  GOLD
+  SILVER
+
+  @@map("company_tier")
+}
+
+/// SE coverage model — DEDICATED (one plant), MULTI_PLANT (several), FLOATING (territory polygon,
+/// modelled in `se_territory` from Issue 09, never in `se_coverage`). Schema D3.
+enum CoverageType {
+  DEDICATED
+  MULTI_PLANT
+  FLOATING
+
+  @@map("coverage_type")
+}
+
+/// Company master — reference of all companies; the recommender's top-level scoring gate
+/// (`companyTier`) plus tie-break (`companyPriorityRank`, a single uppercase letter). Tier and
+/// rank are columns, not separate tables (schema D1). Consumed by Issues 06/10.
+model Company {
+  companyId           BigInt      @id @default(autoincrement()) @map("company_id")
+  name                String
+  companyTier         CompanyTier @map("company_tier")
+  companyPriorityRank String      @map("company_priority_rank")
+  contractRef         String?     @map("contract_ref")
+  source              String?
+  opsOverride         Boolean     @default(false) @map("ops_override")
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicles Vehicle[]
+  tickets  Ticket[]
+
+  @@index([companyTier, companyPriorityRank])
+  @@map("company_master")
+}
+
+/// Users — every system account; the RBAC actor and audit subject (schema D1). Credentials
+/// are intentionally NOT stored here (the login path keeps its own store for now); this is the
+/// account registry Operations Head manages. `zone_id` is NULL for fleet-wide roles.
+model User {
+  userId    String     @id @default(uuid()) @map("user_id") @db.Uuid
+  name      String
+  role      Role
+  zoneId    BigInt?    @map("zone_id")
+  phone     String     @unique
+  email     String     @unique
+  status    UserStatus @default(ACTIVE)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  zone     Zone?           @relation(fields: [zoneId], references: [zoneId])
+  engineer EngineerMaster?
+
+  @@index([role])
+  @@index([zoneId])
+  @@map("users")
+}
+
+/// SE-only profile + Activity-Ping timestamp, kept off `users` to avoid wide nullable manager rows
+/// (schema D3). `engineerId` == the SE's `user_id` (1:1 FK→users). `preferredNotificationChannel`
+/// is text for now — the `notify_channel` enum lands with the notification spine (Issue 03).
+/// `lastActivityAt` is visibility/telemetry only and never gates scoring (ADR-0023/0024).
+model EngineerMaster {
+  engineerId                  String       @id @map("engineer_id") @db.Uuid
+  coverageType                CoverageType @map("coverage_type")
+  zoneId                      BigInt       @map("zone_id")
+  dailyCapacity               Int          @map("daily_capacity")
+  shiftStart                  DateTime?    @map("shift_start") @db.Time(6)
+  shiftEnd                    DateTime?    @map("shift_end") @db.Time(6)
+  preferredNotificationChannel String?     @map("preferred_notification_channel")
+  lastActivityAt              DateTime?    @map("last_activity_at") @db.Timestamptz(6)
+  isActive                    Boolean      @default(true) @map("is_active")
+  createdAt                   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user      User                        @relation(fields: [engineerId], references: [userId])
+  zone      Zone                        @relation(fields: [zoneId], references: [zoneId])
+  coverage        SeCoverage[]
+  territory       EngineerTerritoryCoverage[]
+  recommendations Recommendation[]
+  workSchedules   WorkSchedule[]
+  batches         PlantBatchAssignment[]
+  plannerEntries  SePlanner[]
+  softStates      SoftState[]
+  submissions     TroubleshootingSubmission[]
+  vanStock        SeVanStock[]
+  componentBlocks ComponentBlockedQueue[]
+
+  @@index([zoneId])
+  @@index([lastActivityAt])
+  @@map("engineer_master")
+}
+
+/// Plant coverage for DEDICATED / MULTI_PLANT SEs — the responsibility assignment, not the
+/// geography (schema D3). FLOATING never appears here (territory polygon table instead); enforced
+/// by a CHECK added in the migration. Partial-unique on a DEDICATED SE = one row.
+model SeCoverage {
+  id           BigInt       @id @default(autoincrement())
+  seId         String       @map("se_id") @db.Uuid
+  plantId      BigInt       @map("plant_id")
+  coverageType CoverageType @map("coverage_type")
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
+  plant    Plant          @relation(fields: [plantId], references: [plantId])
+
+  @@unique([seId, plantId])
+  @@index([plantId])
+  @@map("se_coverage")
+}
+
+/// Zones — coarse rollup of plants; the unit of Zonal Manager authority and row-level
+/// scoping (schema D1). `zonalManagerUserId` is a role-polymorphic actor referencing the
+/// future `users` table; modelled as a nullable uuid now, FK added when `users` lands (Issue 02
+/// users slice). Operations-Head-owned reference data.
+model Zone {
+  zoneId             BigInt   @id @default(autoincrement()) @map("zone_id")
+  name               String   @unique
+  zonalManagerUserId String?  @map("zonal_manager_user_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plants        Plant[]
+  users         User[]
+  engineers     EngineerMaster[]
+  workSchedules WorkSchedule[]
+
+  @@index([zonalManagerUserId])
+  @@map("zones")
+}
+
+/// Plants — physical sites rolling up to a zone (schema D1); the primary clustering unit and
+/// the zone→plant drill-down for dashboards (Issues 06/07). `location` is a PostGIS point used by
+/// the `plant_eligible_floating_se` MV for Floating-SE territory membership (Issue 09); it is an
+/// `Unsupported` type (geometry is raw-SQL-only in Prisma). `districtId` FK→`districts`.
+model Plant {
+  plantId    BigInt   @id @default(autoincrement()) @map("plant_id")
+  name       String
+  zoneId     BigInt   @map("zone_id")
+  districtId BigInt?  @map("district_id")
+  location   Unsupported("geometry(Point, 4326)")?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  zone     Zone         @relation(fields: [zoneId], references: [zoneId])
+  district District?    @relation(fields: [districtId], references: [districtId])
+  coverage SeCoverage[]
+  vehicles Vehicle[]
+  tickets  Ticket[]
+  batches  PlantBatchAssignment[]
+  plannerEntries SePlanner[]
+
+  @@index([zoneId])
+  @@map("plants")
+}
+
+/// Indian administrative geography — region level (schema D1, Issue 09). Operations-Head/seed
+/// reference data for Floating-SE hierarchical territory; read by territory lookup and the
+/// `plant_eligible_floating_se` MV refresh.
+model Region {
+  regionId  BigInt                      @id @default(autoincrement()) @map("region_id")
+  name      String                      @unique
+  state     String
+  districts District[]
+  territory EngineerTerritoryCoverage[]
+
+  @@map("regions")
+}
+
+/// Indian administrative geography — district level (~700; schema D1, Issue 09). Parent region is
+/// optional; unique per `(name, state)`. Floating-SE hierarchical coverage and plants roll up here.
+model District {
+  districtId BigInt  @id @default(autoincrement()) @map("district_id")
+  name       String
+  state      String
+  regionId   BigInt? @map("region_id")
+
+  region    Region?                     @relation(fields: [regionId], references: [regionId])
+  plants    Plant[]
+  territory EngineerTerritoryCoverage[]
+
+  @@unique([name, state])
+  @@index([regionId])
+  @@map("districts")
+}
+
+/// Floating-SE Territory (ADR-0006, schema D3, Issue 09). Hierarchical (state/region/district)
+/// AND/OR polygon; membership is the union of all set dimensions. A raw-SQL CHECK requires at least
+/// one dimension (a row covering nothing is meaningless). `polygon` is reserved — geometry is
+/// `Unsupported` (raw-SQL only) and the map-drawing editor is deferred; v1 configures territory via
+/// the State/Region/District hierarchical selectors.
+model EngineerTerritoryCoverage {
+  id         BigInt  @id @default(autoincrement())
+  seId       String  @map("se_id") @db.Uuid
+  districtId BigInt? @map("district_id")
+  regionId   BigInt? @map("region_id")
+  state      String?
+  polygon    Unsupported("geometry(MultiPolygon, 4326)")?
+
+  engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
+  district District?      @relation(fields: [districtId], references: [districtId])
+  region   Region?        @relation(fields: [regionId], references: [regionId])
+
+  @@index([seId])
+  @@map("engineer_territory_coverage")
+}
+
+/// Tunable SLA windows, keyed by scope (`bucket` | `company_tier`) and scope key (schema D17).
+/// Read by the SLA engine (Issue 05+); Operations-Head-owned, audited config.
+model SlaRuleConfig {
+  id                   BigInt   @id @default(autoincrement())
+  scope                String
+  key                  String
+  submitWithinMinutes  Int?     @map("submit_within_minutes")
+  verifyWithinMinutes  Int?     @map("verify_within_minutes")
+  escalateAfterMinutes Int?     @map("escalate_after_minutes")
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([scope, key])
+  @@map("sla_rule_config")
+}
+
+/// Versioned, tunable Recommender scoring weights (schema D17). The active set
+/// (`weight_set_ref` + `active`) is what BatchAssignment stamps into `recommendations`
+/// (Issue 10). Operations-Head-owned, audited config.
+model PriorityRuleConfig {
+  id            BigInt    @id @default(autoincrement())
+  weightSetRef  String    @map("weight_set_ref")
+  component     String
+  weight        Decimal   @db.Decimal(10, 4)
+  active        Boolean   @default(true)
+  effectiveFrom DateTime? @map("effective_from") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([weightSetRef, component])
+  @@index([weightSetRef, active])
+  @@map("priority_rule_config")
+}
+
+/// Recommender path discriminator (schema D-sched). Morning batch vs intra-day insertion.
+enum RecPath {
+  MORNING_BATCH
+  INTRADAY
+
+  @@map("rec_path")
+}
+
+/// The Recommender's append-only "why suggested?" explainability record (LLD §3.6, ADR-0003/0017,
+/// Issue 10). One row per (ticket, recommendation): the precedence-selected SE, the Company Tier /
+/// Device Bucket gate context, a `scoreBreakdown` jsonb (weighted components + Plant Cluster
+/// Multiplier + active `weight_set_ref`), the canonical `processingRank`, and the `path`. Corrections
+/// append new rows — never updated. Dispatch/day-plan grouping is Issue 11.
+model Recommendation {
+  recommendationId BigInt       @id @default(autoincrement()) @map("recommendation_id")
+  ticketId         String       @map("ticket_id") @db.Uuid
+  seId             String?      @map("se_id") @db.Uuid
+  companyTier      CompanyTier? @map("company_tier")
+  deviceBucket     SlaBucket?   @map("device_bucket")
+  scoreBreakdown   Json         @map("score_breakdown")
+  processingRank   Int?         @map("processing_rank")
+  status           String
+  path             RecPath
+  retryChain       Json?        @map("retry_chain")
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  ticket   Ticket          @relation(fields: [ticketId], references: [ticketId])
+  engineer EngineerMaster? @relation(fields: [seId], references: [engineerId])
+
+  @@index([ticketId])
+  @@index([seId])
+  @@map("recommendations")
+}
+
+/// Day-Plan dispatch (LLD §3.6, schema D-sched, Issue 11). Lifecycle states only — the approval
+/// gate is removed (ADR-0007/0019 superseded): no DRAFT/PENDING_REVIEW/APPROVED.
+enum WorkScheduleStatus {
+  ACTIVE
+  OVERRIDDEN
+  COMPLETED
+  PARTIAL
+
+  @@map("work_schedule_status")
+}
+
+enum ScheduleSource {
+  SYSTEM_GENERATED
+  ZM_MANUAL
+
+  @@map("schedule_source")
+}
+
+enum BatchStatus {
+  AUTO_ASSIGNED
+  OVERRIDDEN
+  COMPLETED
+  PARTIAL
+
+  @@map("batch_status")
+}
+
+/// A dispatched SE Work Schedule (LLD §3.6) — the per-SE day/date-range container the Day Plan
+/// reads. Built ACTIVE and dispatched directly by the BatchAssignmentWorker (no approval gate,
+/// Decision §7); the ZM overrides post-hoc (OVERRIDDEN). `lastOverriddenBy` is a role-polymorphic
+/// actor uuid; its FK is deferred like `Zone.zonalManagerUserId`.
+model WorkSchedule {
+  scheduleId       BigInt             @id @default(autoincrement()) @map("schedule_id")
+  seId             String             @map("se_id") @db.Uuid
+  zoneId           BigInt             @map("zone_id")
+  dateFrom         DateTime           @map("date_from") @db.Date
+  dateTo           DateTime           @map("date_to") @db.Date
+  status           WorkScheduleStatus @default(ACTIVE)
+  source           ScheduleSource     @default(SYSTEM_GENERATED)
+  dispatchedAt     DateTime?          @map("dispatched_at") @db.Timestamptz(6)
+  lastOverriddenBy String?            @map("last_overridden_by") @db.Uuid
+  lastOverriddenAt DateTime?          @map("last_overridden_at") @db.Timestamptz(6)
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  engineer EngineerMaster         @relation(fields: [seId], references: [engineerId])
+  zone     Zone                   @relation(fields: [zoneId], references: [zoneId])
+  batches  PlantBatchAssignment[]
+
+  @@index([seId, dateFrom])
+  @@index([zoneId, status])
+  @@map("work_schedules")
+}
+
+/// A Plant-wise Batch Assignment (LLD §3.6) — one Plant's tickets assigned as a unit to one SE
+/// within a Work Schedule. `stopSequence` orders the plant stops in the Day Plan. Dispatched
+/// AUTO_ASSIGNED; OVERRIDDEN carries an `overrideReason` when the ZM reassigns/splits.
+model PlantBatchAssignment {
+  batchId        BigInt      @id @default(autoincrement()) @map("batch_id")
+  scheduleId     BigInt      @map("schedule_id")
+  plantId        BigInt      @map("plant_id")
+  seId           String      @map("se_id") @db.Uuid
+  status         BatchStatus @default(AUTO_ASSIGNED)
+  stopSequence   Int         @map("stop_sequence")
+  overrideReason String?     @map("override_reason")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  schedule WorkSchedule            @relation(fields: [scheduleId], references: [scheduleId])
+  plant    Plant                   @relation(fields: [plantId], references: [plantId])
+  engineer EngineerMaster          @relation(fields: [seId], references: [engineerId])
+  tickets  BatchAssignmentTicket[]
+
+  @@index([scheduleId])
+  @@index([plantId])
+  @@index([seId])
+  @@map("plant_batch_assignments")
+}
+
+/// Tickets inside a Plant-wise Batch Assignment (LLD §3.6). `sortOrder` is the within-stop order;
+/// `removedAt`/`deferredToDate` capture ZM override removals/defers without deleting history. The
+/// partial-unique `(ticket_id) WHERE removed_at IS NULL` ("one active batch per ticket") is added
+/// in raw SQL — not expressible in Prisma (same posture as the se_coverage CHECK).
+model BatchAssignmentTicket {
+  id             BigInt    @id @default(autoincrement())
+  batchId        BigInt    @map("batch_id")
+  ticketId       String    @map("ticket_id") @db.Uuid
+  sortOrder      Int       @map("sort_order")
+  deferredToDate DateTime? @map("deferred_to_date") @db.Date
+  removedAt      DateTime? @map("removed_at") @db.Timestamptz(6)
+  removedBy      String?   @map("removed_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  batch  PlantBatchAssignment @relation(fields: [batchId], references: [batchId])
+  ticket Ticket               @relation(fields: [ticketId], references: [ticketId])
+
+  @@index([batchId])
+  @@map("batch_assignment_tickets")
+}
+
+/// SE Planner (LLD §3.6, ADR-0022, Issue 14a) — ZM-authored plant-visit intent (which SE visits which
+/// plant on which date). Plant-level, distinct from the ticket-level Day Plan. The Morning Batch reads
+/// it as a **soft bias** (prefer the planned SE among eligible candidates), never a hard constraint.
+model SePlanner {
+  id          BigInt   @id @default(autoincrement())
+  seId        String   @map("se_id") @db.Uuid
+  plantId     BigInt   @map("plant_id")
+  plannedDate DateTime @map("planned_date") @db.Date
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
+  plant    Plant          @relation(fields: [plantId], references: [plantId])
+
+  @@unique([seId, plantId, plannedDate])
+  @@index([plannedDate])
+  @@map("se_planner")
+}
+
+/// SE soft-state type (schema D7) — temporary field-progress signal, never a ticket lifecycle state.
+enum SoftStateType {
+  VIEWED
+  ON_SITE
+  TROUBLESHOOT_STARTED
+
+  @@map("soft_state_type")
+}
+
+/// How an ON_SITE soft state was captured (CONTEXT §Soft State): auto from a geofenced app action,
+/// or a manual SE tap fallback (audited). Only set for ON_SITE.
+enum OnsiteSource {
+  AUTO_GEOFENCE
+  MANUAL
+
+  @@map("onsite_source")
+}
+
+/// SE field-progress soft states (schema D7). VIEWED / ON_SITE / TROUBLESHOOT_STARTED on a ticket —
+/// not a lifecycle state, not a lock; multiple *different* SEs may hold them concurrently. Primary
+/// input to the derived SE Activity Status (ADR-0023). VIEWED carries a `timeoutAt` and clears on a
+/// configurable timeout; ON_SITE / TROUBLESHOOT_STARTED never time-expire and resolve only on explicit
+/// events. The active-state partial unique (`ux_ss_active`) and the three CHECKs are not expressible in
+/// Prisma and are appended as raw SQL in the migration (same pattern as se_coverage / shared-pool).
+model SoftState {
+  softStateId      BigInt        @id @default(autoincrement()) @map("soft_state_id")
+  ticketId         String        @map("ticket_id") @db.Uuid
+  seId             String        @map("se_id") @db.Uuid
+  type             SoftStateType
+  onsiteSource     OnsiteSource? @map("onsite_source")
+  setAt            DateTime      @default(now()) @map("set_at") @db.Timestamptz(6)
+  timeoutAt        DateTime?     @map("timeout_at") @db.Timestamptz(6)
+  resolvedAt       DateTime?     @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy       String?       @map("resolved_by")
+  resolutionReason String?       @map("resolution_reason")
+
+  ticket   Ticket         @relation(fields: [ticketId], references: [ticketId])
+  engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
+
+  @@index([seId, resolvedAt])
+  @@map("soft_states")
+}
+
+/// Mobile submission type — the `client_submission_id` uniqueness scope (CONTEXT §client_submission_id).
+/// Shared across surfaces; `troubleshooting_submissions` is CHECK-restricted to the two form types.
+enum SubmissionType {
+  TROUBLESHOOTING_FORM
+  EXPENSE_VOUCHER
+  COMPONENT_REQUEST
+  COMPONENT_RESUBMIT
+
+  @@map("submission_type")
+}
+
+/// How the SE's on-site presence was established at submission (multi-signal, schema D11).
+enum PresenceSource {
+  GEOFENCE_AUTO
+  MANUAL_ONSITE
+  FORM_GPS
+  NONE
+
+  @@map("presence_source")
+}
+
+/// Structured root-cause taxonomy — **the** source for Root Cause Analytics (free-text is supplementary).
+enum RootCauseCategory {
+  POWER_ISSUE
+  SIM_NETWORK_ISSUE
+  GPS_ANTENNA_ISSUE
+  DEVICE_HARDWARE_FAULT
+  WIRING_ISSUE
+  CONFIGURATION_ISSUE
+  VEHICLE_ACCESS_ISSUE
+  INSTALLATION_ISSUE
+  CUSTOMER_SIDE_ISSUE
+  UNKNOWN
+
+  @@map("root_cause_category")
+}
+
+/// SE troubleshooting-form submission (schema D11). A 1-to-many child of a Ticket (one cycle → one
+/// ticket → 1+ submissions). Carries the structured root cause (the analytics source), the silently
+/// captured SE GPS verification anchor, and storage-level idempotency via `(se_id, client_submission_id)`.
+/// `componentUnavailableItem` references `component_master` (Issue 21) — kept a plain bigint until then.
+/// The multi `submission_components` join + expected-component auto-populate land with the inventory
+/// slice (Issue 21); this table holds the scalar component-unavailable signal only.
+model TroubleshootingSubmission {
+  submissionId             String            @id @default(uuid()) @map("submission_id") @db.Uuid
+  ticketId                 String            @map("ticket_id") @db.Uuid
+  failureCycleId           String            @map("failure_cycle_id") @db.Uuid
+  submissionType           SubmissionType    @map("submission_type")
+  clientSubmissionId       String            @map("client_submission_id") @db.Uuid
+  seId                     String            @map("se_id") @db.Uuid
+  seGpsLat                 Float?            @map("se_gps_lat")
+  seGpsLon                 Float?            @map("se_gps_lon")
+  presenceSource           PresenceSource    @map("presence_source")
+  onsiteCaptureGps         Unsupported("geometry(Point, 4326)")? @map("onsite_capture_gps")
+  componentUnavailable     Boolean           @default(false) @map("component_unavailable")
+  componentUnavailableItem BigInt?           @map("component_unavailable_item")
+  rootCauseCategory        RootCauseCategory @map("root_cause_category")
+  rootCauseSubcategory     String?           @map("root_cause_subcategory")
+  rootCauseNotes           String?           @map("root_cause_notes")
+  actionTakenCategory      String?           @map("action_taken_category")
+  actionTakenNotes         String?           @map("action_taken_notes")
+  diagnosisNotes           String?           @map("diagnosis_notes")
+  submittedAt              DateTime          @map("submitted_at") @db.Timestamptz(6)
+  photoRefs                String[]          @map("photo_refs")
+  createdAt                DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ticket       Ticket         @relation(fields: [ticketId], references: [ticketId])
+  failureCycle FailureCycle   @relation(fields: [failureCycleId], references: [cycleId])
+  engineer     EngineerMaster @relation(fields: [seId], references: [engineerId])
+  verificationRuns VerificationRun[]
+
+  @@unique([seId, clientSubmissionId])
+  @@index([ticketId, submittedAt(sort: Desc)])
+  @@index([failureCycleId])
+  @@index([rootCauseCategory, submittedAt])
+  @@map("troubleshooting_submissions")
+}
+
+/// Three-phase GPS verification phase (schema D14). PENDING → PHASE_1_PASS → PHASE_2_PASS.
+enum VerifyPhase {
+  PENDING
+  PHASE_1_PASS
+  PHASE_2_PASS
+
+  @@map("verify_phase")
+}
+
+/// Verification outcome (schema D14). NULL while a run is in flight.
+enum VerifyOutcome {
+  CLOSED
+  FAILED_VERIFICATION
+  PARTIAL_RECOVERY
+  CLOSED_AUTO_RECOVERY
+  FAILED_ACTIVATION
+
+  @@map("verify_outcome")
+}
+
+/// Three-phase auto-GPS verification of recovery pings (schema D14, Issue 18). Watches the named
+/// `device_id`'s pings after a troubleshoot submission: Phase 1 anchors the first ping ±500 m of the
+/// SE's form-submission GPS (skipped, no fraud, when `presence_source=NONE`); Phase 2 wants continued
+/// pinging (movement welcome). Drives ticket close / fail / the PARTIAL_RECOVERY badge. The one-in-flight
+/// partial unique (`ux_vr_active`) is raw SQL.
+model VerificationRun {
+  runId                   String         @id @default(uuid()) @map("run_id") @db.Uuid
+  ticketId                String         @map("ticket_id") @db.Uuid
+  submissionId            String?        @map("submission_id") @db.Uuid
+  deviceId                BigInt         @map("device_id")
+  startedAt               DateTime       @map("started_at") @db.Timestamptz(6)
+  seGpsLat                Float?         @map("se_gps_lat")
+  seGpsLon                Float?         @map("se_gps_lon")
+  phase                   VerifyPhase    @default(PENDING)
+  phase1PassedAt          DateTime?      @map("phase1_passed_at") @db.Timestamptz(6)
+  phase2PassedAt          DateTime?      @map("phase2_passed_at") @db.Timestamptz(6)
+  firstPingDistanceMeters Decimal?       @map("first_ping_distance_meters") @db.Decimal(12, 2)
+  fraudFlag               Boolean        @default(false) @map("fraud_flag")
+  pingsReceivedCount      Int            @default(0) @map("pings_received_count")
+  outcome                 VerifyOutcome?
+  outcomeAt               DateTime?      @map("outcome_at") @db.Timestamptz(6)
+  createdAt               DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ticket     Ticket                     @relation(fields: [ticketId], references: [ticketId])
+  submission TroubleshootingSubmission? @relation(fields: [submissionId], references: [submissionId])
+
+  @@index([deviceId])
+  @@map("verification_runs")
+}
+
+/// Master list of all components referenced anywhere in the system (schema D12, Issue 21).
+/// Operations-Head-owned reference data; `serialTracked` marks GPS/SIM units.
+model ComponentMaster {
+  componentId   BigInt  @id @default(autoincrement()) @map("component_id")
+  name          String  @unique
+  category      String?
+  serialTracked Boolean @default(false) @map("serial_tracked")
+
+  vanStock  SeVanStock[]
+  commonKit CommonKitDefinition[]
+
+  @@map("component_master")
+}
+
+/// Components physically carried per SE — the Common-Kit source for the Recommender Hard Filter
+/// (schema D12). Read-only to the SE; written only via inventory transactions (Issue 22/24).
+model SeVanStock {
+  id          BigInt @id @default(autoincrement())
+  seId        String @map("se_id") @db.Uuid
+  componentId BigInt @map("component_id")
+  qty         Int    @default(0)
+
+  engineer  EngineerMaster  @relation(fields: [seId], references: [engineerId])
+  component ComponentMaster @relation(fields: [componentId], references: [componentId])
+
+  @@unique([seId, componentId])
+  @@map("se_van_stock")
+}
+
+/// Common Kit definition — components every SE carries; input to the Recommender Common-Kit
+/// Hard Filter (schema D12). The `component_master` FK lands here (Issue 21).
+model CommonKitDefinition {
+  id          BigInt   @id @default(autoincrement())
+  componentId BigInt   @unique @map("component_id")
+  minQty      Int      @map("min_qty")
+  active      Boolean  @default(true)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  component ComponentMaster @relation(fields: [componentId], references: [componentId])
+
+  @@map("common_kit_definition")
+}
+
+/// Component-Blocked Queue (schema D12, Issue 21). Tickets dropped from a Day Plan because the eligible
+/// SE's Common Kit is incomplete (or an expected component is OOS). One active row per ticket; carries
+/// the missing parts + the Warehouse-Manager action status. Rows older than 7 days with no WM action
+/// surface a "Warehouse Overdue" badge. Resolved when the ticket is later assignable.
+model ComponentBlockedQueue {
+  id                BigInt    @id @default(autoincrement())
+  ticketId          String    @map("ticket_id") @db.Uuid
+  seId              String    @map("se_id") @db.Uuid
+  reason            String
+  missingComponents Json      @map("missing_components") @db.JsonB
+  wmActionStatus    String    @default("PENDING") @map("wm_action_status")
+  blockedAt         DateTime  @default(now()) @map("blocked_at") @db.Timestamptz(6)
+  resolvedAt        DateTime? @map("resolved_at") @db.Timestamptz(6)
+
+  ticket   Ticket         @relation(fields: [ticketId], references: [ticketId])
+  engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
+
+  @@map("component_blocked_queue")
+}
+
+/// The system_settings registry — global, Operations-Head-owned configuration
+/// (inactivity threshold, soft-state warning windows, etc.). Keyed by string.
+model SystemSetting {
+  key         String   @id
+  value       Json     @db.JsonB
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("system_settings")
+}
+
+/// Snapshot run lifecycle (schema D4). One row per SnapshotIngestionWorker run; drives the
+/// data-as-of banner and the single-in-flight guard. The `(status) WHERE status='RUNNING'`
+/// partial-unique index that enforces one in-flight run is not expressible in Prisma and is
+/// added by raw SQL in the migration (same pattern as the se_coverage CHECK).
+enum SnapshotStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  PARTIAL
+
+  @@map("snapshot_status")
+}
+
+/// Per-chunk ingestion status (schema D4) — enables chunk-independent retry.
+enum ChunkStatus {
+  PENDING
+  SUCCESS
+  FAILED
+
+  @@map("chunk_status")
+}
+
+model SnapshotRun {
+  runId      BigInt         @id @default(autoincrement()) @map("run_id")
+  startedAt  DateTime       @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime?      @map("finished_at") @db.Timestamptz(6)
+  status     SnapshotStatus @default(RUNNING)
+  cursor     String?
+  dataAsOf   DateTime?      @map("data_as_of") @db.Timestamptz(6)
+  chunkStats Json?          @map("chunk_stats") @db.JsonB
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  chunks       SnapshotRunChunk[]
+  rawSnapshots RawDeviceSnapshot[]
+
+  @@map("snapshot_runs")
+}
+
+/// Per-chunk retry bookkeeping (schema D4). A failed chunk retries without restarting the run;
+/// `(run_id, chunk_no)` is unique. Engineering telemetry — not audited, purged with the parent run.
+model SnapshotRunChunk {
+  id         BigInt      @id @default(autoincrement())
+  runId      BigInt      @map("run_id")
+  chunkNo    Int         @map("chunk_no")
+  status     ChunkStatus @default(PENDING)
+  retryCount Int         @default(0) @map("retry_count")
+  error      String?
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  run SnapshotRun @relation(fields: [runId], references: [runId])
+
+  @@unique([runId, chunkNo])
+  @@index([runId, status])
+  @@map("snapshot_run_chunks")
+}
+
+/// Raw GPS telemetry, one row per device-ping (schema D4) — the highest-volume table, RANGE
+/// range-partitioned monthly by `gps_datetime` (the `PARTITION BY` and default partition are raw
+/// SQL in the migration; Prisma cannot express partitioning, the same way PostGIS is deferred).
+/// Source timestamps normalized to UTC at ingestion; telemetry preserved verbatim. UNIQUE
+/// `(device_id, gps_datetime)` + `INSERT … ON CONFLICT DO NOTHING` makes chunk re-runs idempotent.
+model RawDeviceSnapshot {
+  id                BigInt   @default(autoincrement())
+  runId             BigInt   @map("run_id")
+  deviceId          BigInt   @map("device_id")
+  gpsDatetime       DateTime @map("gps_datetime") @db.Timestamptz(6)
+  lat               Float?
+  lon               Float?
+  mainsStatus       Int?     @map("mains_status") @db.SmallInt
+  mainsVoltage      Decimal? @map("mains_voltage") @db.Decimal(12, 2)
+  gpsValidity       String?  @map("gps_validity")
+  gpsMode           String?  @map("gps_mode")
+  ignitionStatus    String?  @map("ignition_status")
+  speed             Decimal? @db.Decimal(12, 2)
+  creg              String?
+  cgreg             String?
+  csq               Int?     @db.SmallInt
+  ipAddress         String?  @map("ip_address") @db.Inet
+  portNo            Int?     @map("port_no")
+  simSubscriberName String?  @map("sim_subscriber_name")
+  unitNo            String?  @map("unit_no")
+  deviceType        String?  @map("device_type")
+
+  run SnapshotRun @relation(fields: [runId], references: [runId])
+
+  @@id([id, gpsDatetime])
+  @@unique([deviceId, gpsDatetime])
+  @@index([deviceId, gpsDatetime(sort: Desc)])
+  @@map("raw_device_snapshots")
+}
+
+/// Immutable in-transaction audit record. ADR-0025: one row is written in the SAME DB
+/// transaction as every mutation; `acted_as_role` records the backup-cascade proxy.
+/// Kept strictly separate from operational (Pino) logs.
+model AuditLog {
+  id          BigInt   @id @default(autoincrement())
+  actorId     String   @map("actor_id")
+  actorRole   String   @map("actor_role")
+  actedAsRole String?  @map("acted_as_role")
+  action      String
+  entityType  String   @map("entity_type")
+  entityId    String   @map("entity_id")
+  metadata    Json?    @db.JsonB
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// ─── Issue 05: device-state → ticket spine (schema D2/D5/D6) + minimal eligibility inputs ───
+
+/// Deal type — commercial arrangement; drives Recovery Ticket creation on Non-Op (Issues 35/36).
+/// NULL → Ops-Head manual tag fallback (ownership tracked in follow-up #48).
+enum DealType {
+  RECURRING
+  ONE_TIME
+
+  @@map("deal_type")
+}
+
+/// Stored SLA Bucket (schema D5) — the device inactivity-age band, a pure function of
+/// `inactivity_hours` (classifier: `src/device-state/sla-bucket.ts`). NULL = the 0–4h ACTIVE band,
+/// which never enters a queue. Omits `ACTIVE` deliberately; uses `LONG_PENDING` for the 7d+ top band.
+enum SlaBucket {
+  WARNING
+  EARLY_RISK
+  RISK
+  CRITICAL
+  HIGH_CRITICAL
+  SEVERE
+  VERY_SEVERE
+  LONG_PENDING
+
+  @@map("sla_bucket")
+}
+
+/// Failure Cycle state machine (schema D6). Issue 05 opens `OPEN`; later issues drive the rest.
+enum FailureCycleState {
+  OPEN
+  WAITING_COMPONENT
+  SUBMITTED
+  VERIFIED
+  FAILED
+  REPEAT
+  ESCALATED
+
+  @@map("failure_cycle_state")
+}
+
+/// SLA primary-clock pause reason (schema D6 / ADR-0020). Component-only or vehicle-unavailable.
+enum SlaPauseReason {
+  WAITING_COMPONENT
+  VEHICLE_UNAVAILABLE
+
+  @@map("sla_pause_reason")
+}
+
+/// Ticket work_type discriminator (schema D6 / ADR-0004); immutable. Issue 05 creates TROUBLESHOOT.
+enum WorkType {
+  TROUBLESHOOT
+  INSTALL
+  RECOVERY
+
+  @@map("work_type")
+}
+
+/// Full `ticket_status` union (schema D6). Coupled to `work_type` by a CHECK + service guard. Issue
+/// 05 uses only the TROUBLESHOOT subset (`OPEN`); defined complete so later work-type issues never
+/// `ALTER TYPE`.
+enum TicketStatus {
+  OPEN
+  SUBMITTED
+  VERIFICATION_PENDING
+  CLOSED
+  CLOSED_AUTO_RECOVERY
+  FAILED_VERIFICATION
+  ESCALATED
+  CLOSED_NON_OPERATIONAL
+  REQUESTED
+  SCHEDULED
+  ON_SITE
+  FITTED
+  ACTIVATED
+  FAILED_ACTIVATION
+  COLLECTED
+  RECEIVED_AT_WAREHOUSE
+  FAILED_RECOVERY
+
+  @@map("ticket_status")
+}
+
+/// Assignment state (schema D6). System batch dispatch flips it to FORMALLY_ASSIGNED (Issue 11).
+enum AssignmentState {
+  UNASSIGNED
+  FORMALLY_ASSIGNED
+
+  @@map("assignment_state")
+}
+
+/// Non-Operational marking lifecycle (schema D16). Issue 05 reads only CONFIRMED/ACTIVE for the
+/// eligibility gate; the full dual-confirmation lifecycle lands with Issue 35 (additive).
+enum NonOpState {
+  REQUESTED
+  AWAITING_CUSTOMER_CONFIRMATION
+  AWAITING_ZM_CONFIRMATION
+  CONFIRMED
+  ACTIVE
+  EXPIRED
+  UNMARKED
+
+  @@map("nonop_state")
+}
+
+/// A single GPS unit — the per-device-id verification anchor (schema D2). `deviceId` is the business
+/// bigint from the AutoPlant source (not a surrogate). `currentVehicleId` denormalises the active
+/// fitment; the time-windowed `vehicle_device_mappings` history table lands with verification (Issue 18).
+model Device {
+  deviceId         BigInt    @id @map("device_id")
+  currentVehicleId BigInt?   @map("current_vehicle_id")
+  dealType         DealType? @map("deal_type")
+  deviceType       String?   @map("device_type")
+  simId            String?   @map("sim_id")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  currentVehicle Vehicle?                @relation(fields: [currentVehicleId], references: [vehicleId])
+  state          DeviceState?
+  failureCycles  FailureCycle[]
+  tickets        Ticket[]
+  pgiHistory     PgiHistory[]
+  nonOpMarkings  NonOperationalMarking[]
+
+  @@index([currentVehicleId])
+  @@index([dealType])
+  @@map("devices")
+}
+
+/// A vehicle carrying one or more devices (schema D2); the coordination anchor for plant, company,
+/// and transporter. `transporterId` is a bare bigint — the `transporters` table is deferred (not in
+/// v1 scope yet), mirroring how `plants.districtId` defers its FK.
+model Vehicle {
+  vehicleId     BigInt   @id @default(autoincrement()) @map("vehicle_id")
+  vehicleNo     String   @unique @map("vehicle_no")
+  plantId       BigInt   @map("plant_id")
+  transporterId BigInt?  @map("transporter_id")
+  companyId     BigInt   @map("company_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plant   Plant    @relation(fields: [plantId], references: [plantId])
+  company Company  @relation(fields: [companyId], references: [companyId])
+  devices Device[]
+  tickets Ticket[]
+
+  @@index([plantId])
+  @@index([companyId])
+  @@index([transporterId])
+  @@map("vehicles")
+}
+
+/// Derived current device state, one row per device (upsert) — the queue/dashboard hot table
+/// (schema D5). `slaBucket` is a STORED derived field for fast queue filtering, recomputed by
+/// DeviceStateService; denormalised vehicle/plant/company/transporter avoid joins on the hot path.
+/// The `inactivity_hours >= 0` CHECK is appended as raw SQL in the migration.
+model DeviceState {
+  deviceId            BigInt     @id @map("device_id")
+  latestGpsDatetime   DateTime?  @map("latest_gps_datetime") @db.Timestamptz(6)
+  isInactive          Boolean    @default(false) @map("is_inactive")
+  inactivityHours     Decimal?   @map("inactivity_hours") @db.Decimal(12, 4)
+  slaBucket           SlaBucket? @map("sla_bucket")
+  eligibleForUptime   Boolean    @default(false) @map("eligible_for_uptime")
+  hasOpenFailureCycle Boolean    @default(false) @map("has_open_failure_cycle")
+  vehicleId           BigInt?    @map("vehicle_id")
+  plantId             BigInt?    @map("plant_id")
+  companyId           BigInt?    @map("company_id")
+  transporterId       BigInt?    @map("transporter_id")
+  computedAt          DateTime   @map("computed_at") @db.Timestamptz(6)
+
+  device Device @relation(fields: [deviceId], references: [deviceId])
+
+  @@index([isInactive, slaBucket])
+  @@index([plantId])
+  @@index([companyId])
+  @@index([eligibleForUptime])
+  @@map("device_states")
+}
+
+/// Immutable inactivity-episode record; parent of exactly one Troubleshoot Ticket; the SLA
+/// primary-clock anchor (schema D6). One active episode per device (invariant I1) is a partial-unique
+/// on the active states, added as raw SQL in the migration. Issue 05 opens OPEN cycles only.
+model FailureCycle {
+  cycleId                    String            @id @default(uuid()) @map("cycle_id") @db.Uuid
+  deviceId                   BigInt            @map("device_id")
+  state                      FailureCycleState @default(OPEN)
+  openedAt                   DateTime          @map("opened_at") @db.Timestamptz(6)
+  closedAt                   DateTime?         @map("closed_at") @db.Timestamptz(6)
+  previousFailureCycleId     String?           @map("previous_failure_cycle_id") @db.Uuid
+  repeatFailure              Boolean           @default(false) @map("repeat_failure")
+  slaPaused                  Boolean           @default(false) @map("sla_paused")
+  slaPauseReason             SlaPauseReason?   @map("sla_pause_reason")
+  slaPausedAt                DateTime?         @map("sla_paused_at") @db.Timestamptz(6)
+  slaPauseSource             String?           @map("sla_pause_source")
+  slaAccumulatedPauseSeconds BigInt            @default(0) @map("sla_accumulated_pause_seconds")
+  version                    Int               @default(0)
+  createdAt                  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  device               Device         @relation(fields: [deviceId], references: [deviceId])
+  previousFailureCycle FailureCycle?  @relation("RepeatChain", fields: [previousFailureCycleId], references: [cycleId], onDelete: NoAction, onUpdate: NoAction)
+  repeats              FailureCycle[] @relation("RepeatChain")
+  ticket               Ticket?
+  submissions          TroubleshootingSubmission[]
+
+  @@index([state])
+  @@index([deviceId, openedAt(sort: Desc)])
+  @@index([previousFailureCycleId])
+  @@map("failure_cycles")
+}
+
+/// The unified actionable work item with a `work_type` discriminator (schema D6). Issue 05 creates
+/// only TROUBLESHOOT tickets (status OPEN, parented by a Failure Cycle — invariant I2 = UNIQUE on
+/// `failureCycleId`). INSTALL/RECOVERY-only columns (se_id assignee, created_by, closure_type, import
+/// batch …) are added by their owning issues (11/33/34/36/37). `companyTier` is denormalised at
+/// creation. The `work_type='TROUBLESHOOT' ⇒ failure_cycle_id IS NOT NULL` CHECK is raw SQL.
+model Ticket {
+  ticketId           String          @id @default(uuid()) @map("ticket_id") @db.Uuid
+  workType           WorkType        @map("work_type")
+  status             TicketStatus
+  failureCycleId     String?         @unique @map("failure_cycle_id") @db.Uuid
+  deviceId           BigInt          @map("device_id")
+  vehicleId          BigInt?         @map("vehicle_id")
+  plantId            BigInt          @map("plant_id")
+  companyId          BigInt          @map("company_id")
+  companyTier        CompanyTier     @map("company_tier")
+  assignmentState    AssignmentState @default(UNASSIGNED) @map("assignment_state")
+  repeatFailure      Boolean         @default(false) @map("repeat_failure")
+  lastStateChangedAt DateTime        @map("last_state_changed_at") @db.Timestamptz(6)
+  version            Int             @default(0)
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  failureCycle FailureCycle? @relation(fields: [failureCycleId], references: [cycleId])
+  device       Device        @relation(fields: [deviceId], references: [deviceId])
+  vehicle      Vehicle?      @relation(fields: [vehicleId], references: [vehicleId])
+  plant           Plant            @relation(fields: [plantId], references: [plantId])
+  company         Company          @relation(fields: [companyId], references: [companyId])
+  events          TicketEvent[]
+  recommendations Recommendation[]
+  batchTickets    BatchAssignmentTicket[]
+  softStates      SoftState[]
+  troubleshootingSubmissions TroubleshootingSubmission[]
+  verificationRuns VerificationRun[]
+  componentBlocks ComponentBlockedQueue[]
+
+  @@index([status, plantId])
+  @@index([workType, status])
+  @@index([companyId])
+  // Shared Pool query: partial `(plant_id) WHERE status='OPEN' AND assignment_state='UNASSIGNED'`
+  // (Issue 12) — not expressible in Prisma; added by raw SQL in 20260621190000_add_shared_pool_index.
+  @@map("tickets")
+}
+
+/// Ticket lifecycle history (schema D6) — an append-only timeline complementing `audit_logs`,
+/// narrower and faster for the history UI. One row per transition, written by every ticket-mutating
+/// service. Issue 07 lands the table + the OPEN creation event; later issues append their transitions.
+/// `actorId` is a bare uuid for now (FK→users deferred, same pattern as other cross-table refs);
+/// append-only is enforced by construction (services only INSERT) until the DB trigger is added.
+model TicketEvent {
+  eventId     BigInt   @id @default(autoincrement()) @map("event_id")
+  ticketId    String   @map("ticket_id") @db.Uuid
+  fromState   String?  @map("from_state")
+  toState     String   @map("to_state")
+  actorId     String?  @map("actor_id") @db.Uuid
+  actorRole   Role?    @map("actor_role")
+  actedAsRole Role?    @map("acted_as_role")
+  reasonCode  String?  @map("reason_code")
+  at          DateTime @default(now()) @db.Timestamptz(6)
+
+  ticket Ticket @relation(fields: [ticketId], references: [ticketId])
+
+  @@index([ticketId, at])
+  @@map("ticket_events")
+}
+
+/// SAP Post-Goods-Issue events — proof of active commercial use feeding the eligibility gate
+/// (schema D4). Active PGI ≤15d is the gate Issue 05's TicketCreation applies. Append-only feed;
+/// the SAP integration that populates it is external (deferred), rows seeded directly for now.
+model PgiHistory {
+  id       BigInt   @id @default(autoincrement())
+  deviceId BigInt   @map("device_id")
+  pgiDate  DateTime @map("pgi_date") @db.Date
+  orderRef String?  @map("order_ref")
+
+  device Device @relation(fields: [deviceId], references: [deviceId])
+
+  @@index([deviceId, pgiDate(sort: Desc)])
+  @@map("pgi_history")
+}
+
+/// Non-Operational marking (schema D16) — MINIMAL for Issue 05's eligibility read. Issue 05 reads
+/// only `state ∈ (CONFIRMED, ACTIVE)` to exclude a device from the eligible set; one active marking
+/// per device (invariant I13) is a raw-SQL partial-unique. The full dual-confirmation lifecycle
+/// (tokens, roles, reason_code, effective-window editing) lands with Issue 35 as an additive migration.
+model NonOperationalMarking {
+  markingId     String     @id @default(uuid()) @map("marking_id") @db.Uuid
+  deviceId      BigInt     @map("device_id")
+  state         NonOpState @default(REQUESTED)
+  effectiveFrom DateTime?  @map("effective_from") @db.Timestamptz(6)
+  effectiveTo   DateTime?  @map("effective_to") @db.Timestamptz(6)
+  version       Int        @default(0)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  device Device @relation(fields: [deviceId], references: [deviceId])
+
+  @@index([deviceId, state])
+  @@index([state, effectiveTo])
+  @@map("non_operational_markings")
+}
