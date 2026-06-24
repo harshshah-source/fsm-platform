@@ -1,13 +1,9 @@
 // Typed client for the SE Management surface (Issue 25, `/api/engineers`). Zone-scoped SE list +
 // detail (manager roles) and the Set-Availability write (ZM / CSM / SE — never Operations Head).
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
+import { authHeaders } from './authHeaders';
 
-function authHeaders(): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
 
 export type ActivityStatus =
   | 'AVAILABLE'

@@ -7,6 +7,8 @@ export interface AuditEntry {
   actorId: string;
   actorRole: string;
   actedAsRole?: string | null;
+  /** Zone being acted in on a backup-cascade (acted-as) action; drives the CSM-backup report (Issue 27). */
+  actingZone?: number | null;
   action: string;
   entityType: string;
   entityId: string;
@@ -33,6 +35,7 @@ export class AuditService {
           actorId: entry.actorId,
           actorRole: entry.actorRole,
           actedAsRole: entry.actedAsRole ?? null,
+          actingZone: entry.actingZone != null ? BigInt(entry.actingZone) : null,
           action: entry.action,
           entityType: entry.entityType,
           entityId: entry.entityId,

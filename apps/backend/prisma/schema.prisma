@@ -785,6 +785,26 @@ model LeaveRequest {
   @@map("leave_requests")
 }
 
+/// Role backup cascade (Issue 27). Records that a role (a specific ZM's zone, or a cross-zone role)
+/// is unavailable for a window, so the strict upward cascade (ZM → CSM → Operations Head) can resolve
+/// who currently holds the duty. Distinct from `se_availability` (SE planning) — this is the
+/// manager-tier backup model.
+model RoleUnavailability {
+  id            BigInt    @id @default(autoincrement())
+  role          Role
+  zoneId        BigInt?   @map("zone_id")
+  userId        String?   @map("user_id") @db.Uuid
+  windowStart   DateTime  @map("window_start") @db.Timestamptz(6)
+  windowEnd     DateTime? @map("window_end") @db.Timestamptz(6)
+  reason        String?
+  createdBy     String?   @map("created_by") @db.Uuid
+  createdByRole String?   @map("created_by_role")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([role, zoneId, windowStart(sort: Desc)])
+  @@map("role_unavailability")
+}
+
 enum LeaveRequestType {
   ON_LEAVE
   WEEKLY_OFF
@@ -912,6 +932,7 @@ model AuditLog {
   actorId     String   @map("actor_id")
   actorRole   String   @map("actor_role")
   actedAsRole String?  @map("acted_as_role")
+  actingZone  BigInt?  @map("acting_zone")
   action      String
   entityType  String   @map("entity_type")
   entityId    String   @map("entity_id")
@@ -919,6 +940,7 @@ model AuditLog {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@index([entityType, entityId])
+  @@index([actedAsRole, actingZone, createdAt])
   @@map("audit_logs")
 }
 

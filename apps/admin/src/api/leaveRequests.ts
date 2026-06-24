@@ -1,13 +1,9 @@
 // Typed client for ZM Leave Request approvals (Issue 26, `/api/leave-requests`). Zone-scoped list +
 // Approve / Reject. Manager roles read; ZM / CSM decide (server-enforced).
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
+import { authHeaders } from './authHeaders';
 
-function authHeaders(): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
 
 export interface LeaveRequestRow {
   id: string;

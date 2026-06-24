@@ -15,6 +15,7 @@ import { LeaveRequestsPage } from './pages/engineers/LeaveRequestsPage';
 import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
+import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { TicketDetailDrawer } from './pages/tickets/TicketDetailDrawer';
 import { TicketsPage } from './pages/tickets/TicketsPage';
 import { VerificationReviewPage } from './pages/verification/VerificationReviewPage';
@@ -64,6 +65,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <SeManagementPage />
+              </RoleRoute>
+            }
+          />
+          {/* CSM Backup Share report — Operations Head only (Issue 27 AC#5). */}
+          <Route
+            path="/reports/csm-approval-share"
+            element={
+              <RoleRoute roles={['OPERATIONS_HEAD']}>
+                <CsmApprovalSharePage />
               </RoleRoute>
             }
           />

@@ -17,6 +17,8 @@ import { ComponentRequestController } from './component-request/component-reques
 import { EngineersModule } from './engineers/engineers.module';
 import { EngineersController } from './engineers/engineers.controller';
 import { LeaveRequestController } from './engineers/leave-request.controller';
+import { RoleBackupModule } from './roles/role-backup.module';
+import { RoleBackupController } from './roles/role-backup.controller';
 import { MeController } from './me/me.controller';
 import { OrgModule } from './org/org.module';
 import { PlannerModule } from './planner/planner.module';
@@ -71,6 +73,7 @@ import { ZonesController } from './zones/zones.controller';
     InventoryModule,
     ComponentRequestModule,
     EngineersModule,
+    RoleBackupModule,
   ],
   controllers: [
     MeController,
@@ -104,6 +107,7 @@ import { ZonesController } from './zones/zones.controller';
     ComponentRequestController,
     EngineersController,
     LeaveRequestController,
+    RoleBackupController,
   ],
   providers: [AuthGuard, RoleGuard, ZoneScopeGuard],
 })

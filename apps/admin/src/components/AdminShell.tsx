@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 
@@ -15,7 +16,8 @@ const NAV_ITEMS: { label: string; to?: string }[] = [
 ];
 
 export function AdminShell() {
-  const { session, logout } = useAuth();
+  const { session, logout, actingZone, setActingZone } = useAuth();
+  const [zoneInput, setZoneInput] = useState('');
   if (!session) {
     return null;
   }
@@ -25,6 +27,16 @@ export function AdminShell() {
     session.role === 'ZONAL_MANAGER' ||
     session.role === 'CENTRAL_SERVICE_MANAGER' ||
     session.role === 'OPERATIONS_HEAD';
+  // Backup cascade (Issue 27): a CSM / Operations Head may act in a ZM's scope for a chosen zone.
+  const canAct = session.role === 'CENTRAL_SERVICE_MANAGER' || session.role === 'OPERATIONS_HEAD';
+
+  const enterActing = () => {
+    const z = Number(zoneInput);
+    if (!Number.isNaN(z) && zoneInput.trim()) {
+      setActingZone(z);
+      setZoneInput('');
+    }
+  };
 
   return (
     <div className="flex min-h-screen">
@@ -86,6 +98,11 @@ export function AdminShell() {
                 </Link>
               </li>
               <li className="rounded px-2 py-1">
+                <Link to="/reports/csm-approval-share" className="text-slate-700 hover:underline">
+                  CSM Backup Share
+                </Link>
+              </li>
+              <li className="rounded px-2 py-1">
                 <Link to="/settings" className="text-slate-700 hover:underline">
                   Settings
                 </Link>
@@ -96,9 +113,22 @@ export function AdminShell() {
       </nav>
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-end gap-4 border-b px-6 py-3 text-sm">
-          {session.acted_as_role && (
-            <span role="status" className="rounded bg-amber-100 px-2 py-1 text-amber-800">
-              Acting as {session.acted_as_role}
+          {canAct && actingZone == null && (
+            <span className="flex items-center gap-1">
+              <label htmlFor="acting-zone" className="text-slate-500">
+                Act as ZM
+              </label>
+              <input
+                id="acting-zone"
+                aria-label="Act as ZM for zone"
+                value={zoneInput}
+                onChange={(e) => setZoneInput(e.target.value)}
+                placeholder="zone"
+                className="w-16 rounded border px-1 py-0.5"
+              />
+              <button type="button" onClick={enterActing} className="rounded border px-2 py-0.5">
+                Go
+              </button>
             </span>
           )}
           <span className="font-medium">{session.role}</span>
@@ -107,6 +137,16 @@ export function AdminShell() {
             Log out
           </button>
         </header>
+        {actingZone != null && (
+          <div role="status" className="flex items-center justify-between bg-amber-100 px-6 py-2 text-sm text-amber-900">
+            <span>
+              Acting as Zonal Manager for Zone {actingZone} (audited as {session.role})
+            </span>
+            <button type="button" onClick={() => setActingZone(null)} className="rounded border border-amber-300 px-2 py-0.5">
+              Exit acting mode
+            </button>
+          </div>
+        )}
         <main className="flex-1 p-6">
           <Outlet />
         </main>
