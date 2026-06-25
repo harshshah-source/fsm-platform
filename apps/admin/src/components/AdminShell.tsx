@@ -111,6 +111,15 @@ export function AdminShell() {
               </Link>
             </li>
           )}
+          {/* Recovery ZM decision queue (Issue 37); manager roles only — the
+              /readiness/recovery-decisions route is RoleRoute-gated as the matching second line. */}
+          {isManager && (
+            <li className="rounded px-2 py-1">
+              <Link to="/readiness/recovery-decisions" className="text-slate-700 hover:underline">
+                Recovery Decisions
+              </Link>
+            </li>
+          )}
           {/* Settings is Operations-Head-only (Issue 02 AC#1); other roles never see the link
               and the /settings route is RoleRoute-gated as the second line of defence. */}
           {session.role === 'OPERATIONS_HEAD' && (

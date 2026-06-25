@@ -13,6 +13,7 @@ import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
 import { NonOperationalQueuePage } from './pages/readiness/NonOperationalQueuePage';
+import { RecoveryDecisionQueuePage } from './pages/readiness/RecoveryDecisionQueuePage';
 import { SeManagementPage } from './pages/engineers/SeManagementPage';
 import { LeaveRequestsPage } from './pages/engineers/LeaveRequestsPage';
 import { IntradayQueuePage } from './pages/schedules/IntradayQueuePage';
@@ -126,6 +127,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <NonOperationalQueuePage />
+              </RoleRoute>
+            }
+          />
+          {/* Recovery ZM Decision Queue — unable-to-collect triage (Issue 37); manager roles only. */}
+          <Route
+            path="/readiness/recovery-decisions"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <RecoveryDecisionQueuePage />
               </RoleRoute>
             }
           />

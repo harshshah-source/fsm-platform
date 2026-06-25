@@ -25,9 +25,36 @@ export async function apiRecoveryAwaitingReceipt(): Promise<RecoveryRow[]> {
 }
 
 export async function apiConfirmRecoveryReceipt(ticketId: string): Promise<RecoveryRow> {
-  const res = await fetch(`${BASE_URL}/recovery/${ticketId}/receipt`, {
+  return post(`/recovery/${ticketId}/receipt`);
+}
+
+export async function apiRecoveryZmQueue(): Promise<RecoveryRow[]> {
+  const res = await fetch(`${BASE_URL}/recovery/zm-queue`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as RecoveryRow[];
+}
+
+export async function apiRescheduleRecovery(ticketId: string, seId: string): Promise<RecoveryRow> {
+  return post(`/recovery/${ticketId}/reschedule`, { seId });
+}
+
+export async function apiCloseFailedRecovery(ticketId: string, reason: string): Promise<RecoveryRow> {
+  return post(`/recovery/${ticketId}/close-failed`, { reason });
+}
+
+export async function apiEscalateRecovery(ticketId: string): Promise<RecoveryRow> {
+  return post(`/recovery/${ticketId}/escalate`);
+}
+
+export async function apiManualCloseRecovery(ticketId: string, reason: string): Promise<RecoveryRow> {
+  return post(`/recovery/${ticketId}/manual-close`, { reason });
+}
+
+async function post(path: string, body?: unknown): Promise<RecoveryRow> {
+  const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as RecoveryRow;

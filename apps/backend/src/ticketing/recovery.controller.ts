@@ -96,6 +96,49 @@ export class RecoveryController {
     return rows.map(toDto);
   }
 
+  @Get('stalled')
+  @Roles(...MANAGER_ROLES)
+  async stalled(): Promise<RecoveryDto[]> {
+    const rows = await this.recovery.stalledRecoveries();
+    return rows.map(toDto);
+  }
+
+  @Get('non-standard-closures')
+  @Roles(...MANAGER_ROLES)
+  async nonStandard(): Promise<RecoveryDto[]> {
+    const rows = await this.recovery.nonStandardClosures();
+    return rows.map(toDto);
+  }
+
+  @Post(':id/reschedule')
+  @HttpCode(200)
+  @Roles(...MANAGER_ROLES)
+  async reschedule(@CurrentActor() actor: RequestActor, @Param('id') id: string, @Body() body: { seId?: string }): Promise<RecoveryDto> {
+    if (!body.seId) throw new BadRequestException({ code: 'SE_ID_REQUIRED' });
+    return this.map(await this.recovery.rescheduleRecovery(id, body.seId, actor));
+  }
+
+  @Post(':id/close-failed')
+  @HttpCode(200)
+  @Roles(...MANAGER_ROLES)
+  async closeFailed(@CurrentActor() actor: RequestActor, @Param('id') id: string, @Body() body: { reason?: string }): Promise<RecoveryDto> {
+    return this.map(await this.recovery.closeFailedRecovery(id, body.reason ?? '', actor));
+  }
+
+  @Post(':id/escalate')
+  @HttpCode(200)
+  @Roles(...MANAGER_ROLES)
+  async escalate(@CurrentActor() actor: RequestActor, @Param('id') id: string): Promise<RecoveryDto> {
+    return this.map(await this.recovery.escalateToOh(id, actor));
+  }
+
+  @Post(':id/manual-close')
+  @HttpCode(200)
+  @Roles(...MANAGER_ROLES)
+  async manualClose(@CurrentActor() actor: RequestActor, @Param('id') id: string, @Body() body: { reason?: string }): Promise<RecoveryDto> {
+    return this.map(await this.recovery.manualClose(id, body.reason ?? '', actor));
+  }
+
   private map(out: RecoveryOutcome): RecoveryDto {
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'RECOVERY_NOT_FOUND' });
     if (out.result === 'FORBIDDEN') throw new ForbiddenException({ code: 'RECOVERY_FORBIDDEN' });
@@ -103,6 +146,7 @@ export class RecoveryController {
     if (out.result === 'INVALID_SERIAL') throw new BadRequestException({ code: 'INVALID_DEVICE_SERIAL' });
     if (out.result === 'NOTES_REQUIRED') throw new BadRequestException({ code: 'CONDITION_NOTES_REQUIRED' });
     if (out.result === 'INVALID_REASON') throw new BadRequestException({ code: 'INVALID_REASON' });
+    if (out.result === 'REASON_REQUIRED') throw new BadRequestException({ code: 'REASON_REQUIRED' });
     return toDto(out.ticket);
   }
 }

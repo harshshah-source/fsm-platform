@@ -42,7 +42,8 @@ export type RecoveryOutcome =
   | { result: 'FORBIDDEN' }
   | { result: 'INVALID_SERIAL' }
   | { result: 'NOTES_REQUIRED' }
-  | { result: 'INVALID_REASON' };
+  | { result: 'INVALID_REASON' }
+  | { result: 'REASON_REQUIRED' };
 
 /** The minimal ticket shape the service reads for a recovery transition. */
 type TicketRow = {
@@ -51,7 +52,24 @@ type TicketRow = {
   status: TicketStatus;
   deviceId: bigint;
   assignedSeId: string | null;
+  unableToCollectReason: $Enums.UnableToCollectReason | null;
+  collectedDeviceSerial: string | null;
 };
+
+/** Recovery statuses past which no decision-queue action or manual close applies. */
+const TERMINAL_STATES = new Set<TicketStatus>(['CLOSED', 'FAILED_RECOVERY']);
+
+/** Days without state progression after which a Recovery Ticket is "stalled" (CONTEXT §14). */
+const STALL_DAYS = 14;
+const DAY_MS = 86_400_000;
+
+/** Manual closure types (every closure that is NOT the automatic warehouse-receipt close). */
+const MANUAL_CLOSURE_TYPES: $Enums.ClosureType[] = [
+  'FAILED_RECOVERY_CLOSE',
+  'ZM_MANUAL_CLOSE',
+  'OPERATIONS_HEAD_OVERRIDE_CLOSE',
+  'CSM_ACTING_CLOSE',
+];
 
 /**
  * Recovery Ticket field workflow (Issue 36, CONTEXT.md §14). Lifecycle
@@ -183,11 +201,84 @@ export class RecoveryService {
     return { result: 'OK', ticket: toView(updated) };
   }
 
+  /**
+   * ZM decision-queue action — Reschedule: re-assign an unable-to-collect ticket for another attempt
+   * (back to SCHEDULED), clearing the unable flag (AC#1). Manager roles.
+   */
+  async rescheduleRecovery(ticketId: string, seId: string, actor: RequestActor): Promise<RecoveryOutcome> {
+    if (!MANAGER_ROLES.has(actor.role)) return { result: 'FORBIDDEN' };
+    const ticket = await this.load(ticketId);
+    if (!ticket) return { result: 'NOT_FOUND' };
+    if (!this.inDecisionQueue(ticket)) return { result: 'WRONG_STATE' };
+    return this.transition(ticket, 'SCHEDULED', actor, 'RECOVERY_RESCHEDULED', {
+      assignedSeId: seId,
+      unableToCollectReason: null,
+      unableToCollectAt: null,
+    });
+  }
+
+  /**
+   * ZM decision-queue action — Close as FAILED_RECOVERY with a mandatory reason
+   * (`closure_type = FAILED_RECOVERY_CLOSE`) (AC#1). Manager roles.
+   */
+  async closeFailedRecovery(ticketId: string, reason: string, actor: RequestActor): Promise<RecoveryOutcome> {
+    if (!MANAGER_ROLES.has(actor.role)) return { result: 'FORBIDDEN' };
+    const ticket = await this.load(ticketId);
+    if (!ticket) return { result: 'NOT_FOUND' };
+    if (!this.inDecisionQueue(ticket)) return { result: 'WRONG_STATE' };
+    if (!reason?.trim()) return { result: 'REASON_REQUIRED' };
+    return this.closeWith(ticket, 'FAILED_RECOVERY', 'FAILED_RECOVERY_CLOSE', reason.trim(), actor, 'RECOVERY_FAILED_CLOSE');
+  }
+
+  /** ZM decision-queue action — Escalate an unable-to-collect ticket to Operations Head (AC#1). */
+  async escalateToOh(ticketId: string, actor: RequestActor): Promise<RecoveryOutcome> {
+    if (!MANAGER_ROLES.has(actor.role)) return { result: 'FORBIDDEN' };
+    const ticket = await this.load(ticketId);
+    if (!ticket) return { result: 'NOT_FOUND' };
+    if (!this.inDecisionQueue(ticket)) return { result: 'WRONG_STATE' };
+    const out = await this.transition(ticket, ticket.status, actor, 'RECOVERY_ESCALATED_TO_OH', {});
+    await this.notifier.escalatedToOh?.({ ticketId, deviceId: ticket.deviceId, escalatedByRole: actor.role });
+    return out;
+  }
+
+  /**
+   * Manual closure (web only, exception path) by ZM / Operations Head / CSM-acting with a mandatory
+   * reason; the `closure_type` is set by the acting role and full audit fields are recorded
+   * (previous_state + device_serial). Operations Head may close any zone (AC#2/#3).
+   */
+  async manualClose(ticketId: string, reason: string, actor: RequestActor): Promise<RecoveryOutcome> {
+    if (!MANAGER_ROLES.has(actor.role)) return { result: 'FORBIDDEN' };
+    const ticket = await this.load(ticketId);
+    if (!ticket) return { result: 'NOT_FOUND' };
+    if (TERMINAL_STATES.has(ticket.status)) return { result: 'WRONG_STATE' };
+    if (!reason?.trim()) return { result: 'REASON_REQUIRED' };
+    return this.closeWith(ticket, 'CLOSED', manualClosureType(actor.role), reason.trim(), actor, 'RECOVERY_MANUAL_CLOSE');
+  }
+
   /** COLLECTED Recovery Tickets awaiting the Warehouse Manager's receipt confirmation (oldest first). */
   async awaitingReceipt(): Promise<RecoveryView[]> {
     const rows = await this.prisma.ticket.findMany({
       where: { workType: 'RECOVERY', status: 'COLLECTED' },
       orderBy: { lastStateChangedAt: 'asc' },
+    });
+    return rows.map(toView);
+  }
+
+  /** Recovery Tickets with no state progression for 14+ days — surface in ZM Action Required (AC#5). */
+  async stalledRecoveries(now: Date = new Date()): Promise<RecoveryView[]> {
+    const cutoff = new Date(now.getTime() - STALL_DAYS * DAY_MS);
+    const rows = await this.prisma.ticket.findMany({
+      where: { workType: 'RECOVERY', status: { notIn: ['CLOSED', 'FAILED_RECOVERY'] }, lastStateChangedAt: { lt: cutoff } },
+      orderBy: { lastStateChangedAt: 'asc' },
+    });
+    return rows.map(toView);
+  }
+
+  /** Manual (non-auto-receipt) closures — the compliance report of non-standard closes (AC#4). */
+  async nonStandardClosures(): Promise<RecoveryView[]> {
+    const rows = await this.prisma.ticket.findMany({
+      where: { workType: 'RECOVERY', closureType: { in: MANUAL_CLOSURE_TYPES } },
+      orderBy: { closedAt: 'desc' },
     });
     return rows.map(toView);
   }
@@ -208,11 +299,59 @@ export class RecoveryService {
   private async load(ticketId: string): Promise<TicketRow | null> {
     const t = await this.prisma.ticket.findUnique({ where: { ticketId } });
     if (!t || t.workType !== 'RECOVERY') return null;
-    return { ticketId: t.ticketId, workType: t.workType, status: t.status, deviceId: t.deviceId, assignedSeId: t.assignedSeId };
+    return {
+      ticketId: t.ticketId,
+      workType: t.workType,
+      status: t.status,
+      deviceId: t.deviceId,
+      assignedSeId: t.assignedSeId,
+      unableToCollectReason: t.unableToCollectReason,
+      collectedDeviceSerial: t.collectedDeviceSerial,
+    };
   }
 
   private isAssignedSe(ticket: TicketRow, actor: RequestActor): boolean {
     return actor.role === 'SERVICE_ENGINEER' && ticket.assignedSeId === actor.userId;
+  }
+
+  /** A ticket sitting in the ZM decision queue: flagged unable-to-collect and not yet terminal. */
+  private inDecisionQueue(ticket: TicketRow): boolean {
+    return ticket.unableToCollectReason != null && !TERMINAL_STATES.has(ticket.status);
+  }
+
+  /** Closes the ticket to a terminal status with a classified `closure_type` + full audit fields. */
+  private async closeWith(
+    ticket: TicketRow,
+    toState: TicketStatus,
+    closureType: $Enums.ClosureType,
+    reason: string,
+    actor: RequestActor,
+    action: string,
+    now: Date = new Date(),
+  ): Promise<RecoveryOutcome> {
+    const updated = await this.audit.withAudit(
+      {
+        ...auditActor(actor),
+        action,
+        entityType: 'tickets',
+        entityId: ticket.ticketId,
+        metadata: {
+          closureType,
+          reason,
+          previousState: ticket.status,
+          deviceSerial: ticket.collectedDeviceSerial ?? String(ticket.deviceId),
+        },
+      },
+      async (tx) => {
+        const row = await tx.ticket.update({
+          where: { ticketId: ticket.ticketId },
+          data: { status: toState, closureType, closureReason: reason, closedAt: now, lastStateChangedAt: now },
+        });
+        await tx.ticketEvent.create({ data: { ticketId: ticket.ticketId, fromState: ticket.status, toState, reasonCode: closureType, ...eventActor(actor), at: now } });
+        return row;
+      },
+    );
+    return { result: 'OK', ticket: toView(updated) };
   }
 
   /** Applies one status transition inside an audited transaction + appends a ticket_events row. */
@@ -248,6 +387,13 @@ export class RecoveryService {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** Maps the acting role to its manual-closure classification (CONTEXT §14 closure authority). */
+function manualClosureType(role: string): $Enums.ClosureType {
+  if (role === 'OPERATIONS_HEAD') return 'OPERATIONS_HEAD_OVERRIDE_CLOSE';
+  if (role === 'CENTRAL_SERVICE_MANAGER') return 'CSM_ACTING_CLOSE';
+  return 'ZM_MANUAL_CLOSE';
 }
 
 /** The actor columns for a `ticket_events` row (bare-uuid actor, role + acted-as proxy). */

@@ -20,9 +20,18 @@ export interface RecoveryUnableToCollectEvent {
  * built yet, so RecoveryService fires closure + unable-to-collect events through this port. Issue 03
  * swaps the default for the real multi-channel notifier; the contract stays unchanged.
  */
+/** Emitted when a ZM escalates an unable-to-collect Recovery Ticket to Operations Head (Issue 37). */
+export interface RecoveryEscalatedEvent {
+  ticketId: string;
+  deviceId: bigint;
+  escalatedByRole: string;
+}
+
 export interface RecoveryNotifier {
   recoveryClosed(event: RecoveryClosedEvent): Promise<void> | void;
   unableToCollect(event: RecoveryUnableToCollectEvent): Promise<void> | void;
+  /** Optional — escalation to Operations Head (Issue 37); older stubs may omit it. */
+  escalatedToOh?(event: RecoveryEscalatedEvent): Promise<void> | void;
 }
 
 export const RECOVERY_NOTIFIER = Symbol('RECOVERY_NOTIFIER');
@@ -35,5 +44,8 @@ export class LoggingRecoveryNotifier implements RecoveryNotifier {
   }
   unableToCollect(event: RecoveryUnableToCollectEvent): void {
     this.logger.log(`Recovery unable-to-collect (${event.reasonCode}) → ZM decision queue — ticket=${event.ticketId} device=${event.deviceId}`);
+  }
+  escalatedToOh(event: RecoveryEscalatedEvent): void {
+    this.logger.log(`Recovery escalated to Operations Head by ${event.escalatedByRole} — ticket=${event.ticketId} device=${event.deviceId}`);
   }
 }

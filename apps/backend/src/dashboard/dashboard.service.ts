@@ -69,7 +69,11 @@ const ACTION_REQUIRED_CARDS: ReadonlyArray<Omit<ActionRequiredCard, 'count' | 'a
   { key: 'waiting_component_overdue', label: 'WAITING_COMPONENT over 7 days', urgency: 6, source: 'Issue 22/23' },
   { key: 'non_op_awaiting_manager', label: 'Non-Op requests awaiting manager confirmation', urgency: 7, source: 'Issue 35' },
   { key: 'manual_assignment_required', label: 'Manual assignment required (retry exhausted)', urgency: 8, source: 'Issue 30' },
+  { key: 'recovery_stalled', label: 'Recovery Tickets stalled 14+ days', urgency: 9, source: 'Issue 37' },
 ];
+
+/** Days without state progression after which a Recovery Ticket is "stalled" (Issue 37). */
+const RECOVERY_STALL_DAYS = 14;
 
 /** CRITICAL and above, in the SLA severity order (CONTEXT "SLA Bucket"). */
 const CRITICAL_PLUS_BUCKETS = [
@@ -260,11 +264,31 @@ export class DashboardService {
    */
   async actionRequired(scope: ZoneScope, now: Date = new Date()): Promise<ActionRequiredCard[]> {
     const waitingComponentOverdue = await this.waitingComponentOverdueCount(scope, now);
-    return ACTION_REQUIRED_CARDS.map((c) =>
-      c.key === 'waiting_component_overdue'
-        ? { ...c, count: waitingComponentOverdue, available: true }
-        : { ...c, count: 0, available: false },
-    );
+    const recoveryStalled = await this.recoveryStalledCount(scope, now);
+    return ACTION_REQUIRED_CARDS.map((c) => {
+      if (c.key === 'waiting_component_overdue') return { ...c, count: waitingComponentOverdue, available: true };
+      if (c.key === 'recovery_stalled') return { ...c, count: recoveryStalled, available: true };
+      return { ...c, count: 0, available: false };
+    });
+  }
+
+  /**
+   * Count RECOVERY Tickets with no state progression for 14+ days (Issue 37 AC#5). Zone-scoped for a
+   * ZM (via the ticket's plant→zone); CSM / Operations Head see all zones.
+   */
+  private async recoveryStalledCount(scope: ZoneScope, now: Date): Promise<number> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+    const zoneFilter =
+      restrictZone !== null ? Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+    const cutoff = new Date(now.getTime() - RECOVERY_STALL_DAYS * 24 * 60 * 60 * 1000);
+    const rows = await this.prisma.$queryRaw<{ n: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS n
+      FROM tickets t
+      JOIN plants p ON p.plant_id = t.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      WHERE t.work_type = 'RECOVERY' AND t.status NOT IN ('CLOSED', 'FAILED_RECOVERY')
+        AND t.last_state_changed_at < ${cutoff} ${zoneFilter}`);
+    return rows[0]?.n ?? 0;
   }
 
   /**

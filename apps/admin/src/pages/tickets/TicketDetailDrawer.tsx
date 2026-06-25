@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthProvider';
 import { apiComponentRequestsByTicket, type ComponentRequestRow } from '../../api/componentRequests';
+import { apiManualCloseRecovery } from '../../api/recovery';
 import { apiTicketDetail, type TicketDetail } from '../../api/tickets';
 import { BucketBadge, InlineBadges } from './ticketBadges';
+
+const RECOVERY_TERMINAL = new Set(['CLOSED', 'FAILED_RECOVERY']);
 
 type TabId = 'Overview' | 'Lifecycle' | 'Forms' | 'Verification' | 'Components' | 'Assignment History';
 const TABS: TabId[] = ['Overview', 'Lifecycle', 'Forms', 'Verification', 'Components', 'Assignment History'];
@@ -30,6 +34,11 @@ const CR_STATUS_CLASS: Record<string, string> = {
 export function TicketDetailDrawer() {
   const { ticketId } = useParams();
   const navigate = useNavigate();
+  const { session } = useAuth();
+  const isManager =
+    session?.role === 'ZONAL_MANAGER' ||
+    session?.role === 'CENTRAL_SERVICE_MANAGER' ||
+    session?.role === 'OPERATIONS_HEAD';
   const [searchParams] = useSearchParams();
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +136,31 @@ export function TicketDetailDrawer() {
               </dd>
             </dl>
           )}
+
+          {/* Manual close (web-only exception path) for an open Recovery Ticket — ZM / OH / CSM-acting.
+              The backend stamps the closure_type by acting role + full audit (Issue 37 AC#2/#3). */}
+          {tab === 'Overview' &&
+            isManager &&
+            ticket.workType === 'RECOVERY' &&
+            !RECOVERY_TERMINAL.has(ticket.status) && (
+              <button
+                type="button"
+                data-testid="recovery-manual-close"
+                onClick={async () => {
+                  const reason = window.prompt('Manually close this Recovery Ticket — reason (mandatory):');
+                  if (!reason?.trim() || !ticketId) return;
+                  try {
+                    await apiManualCloseRecovery(ticketId, reason.trim());
+                    navigate('/tickets');
+                  } catch {
+                    setError('Manual close failed');
+                  }
+                }}
+                className="mt-4 rounded border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50"
+              >
+                Manually close Recovery Ticket
+              </button>
+            )}
 
           {tab === 'Lifecycle' && (
             <ol className="flex flex-col gap-2 text-sm">

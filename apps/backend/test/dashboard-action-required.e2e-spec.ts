@@ -53,9 +53,10 @@ describe('Issue 06 slice 4 — /api/dashboard/action-required', () => {
       expect(cards[i].urgency).toBeGreaterThan(cards[i - 1].urgency);
     }
     // Sources whose owning issue hasn't landed are still graceful stubs. `waiting_component_overdue`
-    // is wired (Issue 23): it is available, with a count ≥ 0.
+    // (Issue 23) and `recovery_stalled` (Issue 37) are wired: available, with a count ≥ 0.
+    const wired = new Set(['waiting_component_overdue', 'recovery_stalled']);
     for (const c of cards) {
-      if (c.key === 'waiting_component_overdue') {
+      if (wired.has(c.key)) {
         expect(c.available).toBe(true);
         expect(c.count).toBeGreaterThanOrEqual(0);
       } else {

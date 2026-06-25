@@ -65,7 +65,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 34 — Install lifecycle + verification + serial visibility → 33, 18
 - 35 — Non-Operational dual-confirmation marking → 07  *(done — dual-confirmation lifecycle + OH 7-day override + CONFIRMED side-effects (auto-close tickets, Recovery-Ticket auto-create, eligibility exclusion) + customer tokenised-email seam (backend) + admin dual-confirmation queue & Mark modal; UI refinements → #67)*
 - 36 — Recovery Ticket lifecycle + warehouse receipt auto-close + unable-to-collect → 35  *(done — full field lifecycle + Collection-Form validation + WM receipt auto-close + unable-to-collect routing + notifier seam (backend) + WM "Awaiting Receipt" admin queue; SE mobile screens → #68; ZM decision-queue actions → #37)*
-- 37 — Recovery closure authority + ZM decision queue + stalled flags → 36
+- 37 — Recovery closure authority + ZM decision queue + stalled flags → 36  *(done — ZM decision-queue actions + manual closure authority (closure_type by acting role) + OH override-any-zone + non-standard-closure compliance read + stalled-14d Action Required card (backend + admin); web-only, no migration)*
 
 ## Follow-ups (deep review)
 - 45 — Plants Admin UI → 02  *(done — Plants tab (zone-picker create + list) + SE-Coverage plant picker; closes Issue 02 AC#2)*
