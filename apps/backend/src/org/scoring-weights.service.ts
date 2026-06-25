@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface ScoringWeightView {
@@ -34,7 +34,7 @@ export class ScoringWeightsService {
   }
 
   /** Upserts one weight by (weightSetRef, component), audited (AC#6). Bad inputs → 400. */
-  async upsert(input: UpsertScoringWeightInput, actor: ConfigActor): Promise<ScoringWeightView> {
+  async upsert(input: UpsertScoringWeightInput, actor: RequestActor): Promise<ScoringWeightView> {
     if (typeof input.weightSetRef !== 'string' || input.weightSetRef.trim() === '') {
       throw new BadRequestException('weightSetRef is required');
     }
@@ -47,9 +47,7 @@ export class ScoringWeightsService {
     const active = input.active ?? true;
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: 'SCORING_WEIGHT_UPDATED',
         entityType: 'priority_rule_config',
         entityId: `${input.weightSetRef}:${input.component}`,

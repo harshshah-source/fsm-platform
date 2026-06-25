@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { isRole } from '@fsm/shared';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { $Enums, Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -36,16 +36,14 @@ export class UsersService {
   }
 
   /** Creates an account, audited (AC#6). Invalid role → 400; duplicate email/phone → 409. */
-  async create(input: CreateUserInput, actor: ConfigActor): Promise<UserView> {
+  async create(input: CreateUserInput, actor: RequestActor): Promise<UserView> {
     if (!isRole(input.role)) {
       throw new BadRequestException(`Invalid role: ${input.role}`);
     }
     try {
       return await this.audit.withAudit(
         {
-          actorId: actor.user_id,
-          actorRole: actor.role,
-          actedAsRole: actor.acted_as_role ?? null,
+          ...auditActor(actor),
           action: 'USER_CREATED',
           entityType: 'users',
           entityId: input.email,
@@ -72,7 +70,7 @@ export class UsersService {
   }
 
   /** Activates or disables an account, audited. Unknown user → 404. */
-  async setStatus(userId: string, status: string, actor: ConfigActor): Promise<UserView> {
+  async setStatus(userId: string, status: string, actor: RequestActor): Promise<UserView> {
     if (status !== 'ACTIVE' && status !== 'DISABLED') {
       throw new BadRequestException(`Invalid status: ${status}`);
     }
@@ -82,9 +80,7 @@ export class UsersService {
     }
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: status === 'DISABLED' ? 'USER_DISABLED' : 'USER_ACTIVATED',
         entityType: 'users',
         entityId: userId,

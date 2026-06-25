@@ -1,9 +1,8 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type { ConfigActor };
 
 /**
  * Canonical system_settings defaults (Operations-Head-owned, CONTEXT.md "Soft State"
@@ -75,13 +74,11 @@ export class SettingsService implements OnModuleInit {
   async set(
     key: string,
     value: unknown,
-    actor: ConfigActor,
+    actor: RequestActor,
   ): Promise<{ key: string; value: unknown }> {
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: 'SETTING_UPDATED',
         entityType: 'system_settings',
         entityId: key,

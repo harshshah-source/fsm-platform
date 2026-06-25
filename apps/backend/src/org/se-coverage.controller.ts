@@ -8,8 +8,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -36,9 +36,9 @@ export class EngineersAdminController {
   @Post()
   create(
     @Body() body: CreateEngineerInput,
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<EngineerView> {
-    return this.seCoverage.createEngineer(body, user);
+    return this.seCoverage.createEngineer(body, actor);
   }
 }
 
@@ -57,16 +57,16 @@ export class SeCoverageAdminController {
   @Post()
   add(
     @Body() body: CreateSeCoverageInput,
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<SeCoverageView> {
-    return this.seCoverage.addCoverage(body, user);
+    return this.seCoverage.addCoverage(body, actor);
   }
 
   @Delete(':id')
   remove(
     @Param('id') id: string,
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<{ id: number }> {
-    return this.seCoverage.removeCoverage(Number(id), user);
+    return this.seCoverage.removeCoverage(Number(id), actor);
   }
 }

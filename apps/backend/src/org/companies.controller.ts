@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import {
@@ -29,17 +29,17 @@ export class CompaniesAdminController {
   @Post()
   create(
     @Body() body: CreateCompanyInput,
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<CompanyView> {
-    return this.companies.create(body, user);
+    return this.companies.create(body, actor);
   }
 
   @Patch(':id')
   update(
     @Param('id') id: string,
     @Body() body: UpdateCompanyInput,
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<CompanyView> {
-    return this.companies.update(Number(id), body, user);
+    return this.companies.update(Number(id), body, actor);
   }
 }

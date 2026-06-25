@@ -1,6 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -24,13 +24,11 @@ export class ZonesService {
   }
 
   /** Creates a zone inside an audited transaction (Issue 02 AC#6). Duplicate name → 409. */
-  async create(name: string, actor: ConfigActor): Promise<ZoneView> {
+  async create(name: string, actor: RequestActor): Promise<ZoneView> {
     try {
       return await this.audit.withAudit(
         {
-          actorId: actor.user_id,
-          actorRole: actor.role,
-          actedAsRole: actor.acted_as_role ?? null,
+          ...auditActor(actor),
           action: 'ZONE_CREATED',
           entityType: 'zones',
           entityId: name,

@@ -70,7 +70,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 ## Follow-ups (deep review)
 - 45 — Plants Admin UI → 02  *(done — Plants tab (zone-picker create + list) + SE-Coverage plant picker; closes Issue 02 AC#2)*
 - 46 — Company Update API + UI → 02  *(done — PATCH /org/companies/:id (Ops-Head, audited) + editable admin Companies rows; closes Issue 02 AC#3)*
-- 47 — RequestActor acting-attribution seam → 02  *(land before 27/33/35)*
+- 47 — RequestActor acting-attribution seam → 02  *(done — `RequestActor` + `@CurrentActor()` seam carries `acted_as_role` + `acting_zone` to every audited config mutation; `ConfigActor` removed; unblocks 27/33/35)*
 - 48 — `deal_type` ownership clarification → 02  *(done — resolved to #49 via triage)*
 - 49 — Device `deal_type` column + Operations-Head manual tagging → 05, 02  *(done — Ops-Head audited tag endpoint + device read path; column pre-existed; admin tag control → #44)*
 - 50 — Fix test isolation in dashboard-company-plant e2e → —  *(bug; test-only)*

@@ -4,8 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { $Enums, Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -58,7 +58,7 @@ export class SeCoverageService {
 
   /** Registers an SE profile, audited (AC#6). Bad coverage type / capacity → 400; the user must
    * exist and be a SERVICE_ENGINEER → 400; duplicate profile → 409. */
-  async createEngineer(input: CreateEngineerInput, actor: ConfigActor): Promise<EngineerView> {
+  async createEngineer(input: CreateEngineerInput, actor: RequestActor): Promise<EngineerView> {
     if (!COVERAGE_TYPES.has(input.coverageType)) {
       throw new BadRequestException(`Invalid coverage type: ${input.coverageType}`);
     }
@@ -72,9 +72,7 @@ export class SeCoverageService {
     try {
       return await this.audit.withAudit(
         {
-          actorId: actor.user_id,
-          actorRole: actor.role,
-          actedAsRole: actor.acted_as_role ?? null,
+          ...auditActor(actor),
           action: 'ENGINEER_REGISTERED',
           entityType: 'engineer_master',
           entityId: input.userId,
@@ -109,7 +107,7 @@ export class SeCoverageService {
 
   /** Maps a Dedicated/Multi-Plant SE to a plant, audited. FLOATING → 400; duplicate (se,plant) or
    * a second DEDICATED row → 409; unknown SE/plant → 404. */
-  async addCoverage(input: CreateSeCoverageInput, actor: ConfigActor): Promise<SeCoverageView> {
+  async addCoverage(input: CreateSeCoverageInput, actor: RequestActor): Promise<SeCoverageView> {
     if (!COVERAGE_TYPES.has(input.coverageType)) {
       throw new BadRequestException(`Invalid coverage type: ${input.coverageType}`);
     }
@@ -129,9 +127,7 @@ export class SeCoverageService {
     try {
       return await this.audit.withAudit(
         {
-          actorId: actor.user_id,
-          actorRole: actor.role,
-          actedAsRole: actor.acted_as_role ?? null,
+          ...auditActor(actor),
           action: 'SE_COVERAGE_ADDED',
           entityType: 'se_coverage',
           entityId: `${input.seId}:${input.plantId}`,
@@ -156,16 +152,14 @@ export class SeCoverageService {
   }
 
   /** Removes a coverage mapping, audited. Unknown id → 404. */
-  async removeCoverage(id: number, actor: ConfigActor): Promise<{ id: number }> {
+  async removeCoverage(id: number, actor: RequestActor): Promise<{ id: number }> {
     const existing = await this.prisma.seCoverage.findUnique({ where: { id: BigInt(id) } });
     if (!existing) {
       throw new NotFoundException(`Coverage not found: ${id}`);
     }
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: 'SE_COVERAGE_REMOVED',
         entityType: 'se_coverage',
         entityId: String(id),

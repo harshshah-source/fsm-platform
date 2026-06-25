@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -25,16 +25,16 @@ export class SeTerritoryAdminController {
   @Post()
   add(
     @Body() body: CreateTerritoryInput,
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<TerritoryView> {
-    return this.territory.addTerritory(body, user);
+    return this.territory.addTerritory(body, actor);
   }
 
   @Delete(':id')
   remove(
     @Param('id') id: string,
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<{ id: number }> {
-    return this.territory.removeTerritory(Number(id), user);
+    return this.territory.removeTerritory(Number(id), actor);
   }
 }

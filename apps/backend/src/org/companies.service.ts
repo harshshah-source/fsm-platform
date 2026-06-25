@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -43,7 +43,7 @@ export class CompaniesService {
   }
 
   /** Creates a company (tier + priority rank), audited (AC#6). Bad tier/rank → 400. */
-  async create(input: CreateCompanyInput, actor: ConfigActor): Promise<CompanyView> {
+  async create(input: CreateCompanyInput, actor: RequestActor): Promise<CompanyView> {
     if (!TIERS.has(input.companyTier)) {
       throw new BadRequestException(`Invalid company tier: ${input.companyTier}`);
     }
@@ -54,9 +54,7 @@ export class CompaniesService {
     }
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: 'COMPANY_CREATED',
         entityType: 'company_master',
         entityId: input.name,
@@ -79,7 +77,7 @@ export class CompaniesService {
    * (`COMPANY_UPDATED`). Setting `opsOverride = true` is the manual override of CRM/SAP-sourced tier
    * (CONTEXT "Operations Head can override per-company"). Unknown id → 404; bad tier/rank → 400.
    */
-  async update(companyId: number, input: UpdateCompanyInput, actor: ConfigActor): Promise<CompanyView> {
+  async update(companyId: number, input: UpdateCompanyInput, actor: RequestActor): Promise<CompanyView> {
     if (input.companyTier !== undefined && !TIERS.has(input.companyTier)) {
       throw new BadRequestException(`Invalid company tier: ${input.companyTier}`);
     }
@@ -91,9 +89,7 @@ export class CompaniesService {
 
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: 'COMPANY_UPDATED',
         entityType: 'company_master',
         entityId: existing.name,

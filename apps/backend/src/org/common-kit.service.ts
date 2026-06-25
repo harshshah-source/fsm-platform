@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface CommonKitView {
@@ -34,7 +34,7 @@ export class CommonKitService {
   }
 
   /** Upserts one kit component by componentId, audited (AC#6). Bad componentId / minQty → 400. */
-  async upsert(input: UpsertCommonKitInput, actor: ConfigActor): Promise<CommonKitView> {
+  async upsert(input: UpsertCommonKitInput, actor: RequestActor): Promise<CommonKitView> {
     if (!Number.isInteger(input.componentId) || input.componentId <= 0) {
       throw new BadRequestException('componentId must be a positive integer');
     }
@@ -44,9 +44,7 @@ export class CommonKitService {
     const active = input.active ?? true;
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: 'COMMON_KIT_UPDATED',
         entityType: 'common_kit_definition',
         entityId: String(input.componentId),

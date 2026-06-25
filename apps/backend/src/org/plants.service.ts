@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** API shape of a plant. BigInt ids surfaced as JSON-safe numbers. */
@@ -26,16 +26,14 @@ export class PlantsService {
   }
 
   /** Creates a plant under an existing zone, audited (AC#6). Unknown zone → 404. */
-  async create(name: string, zoneId: number, actor: ConfigActor): Promise<PlantView> {
+  async create(name: string, zoneId: number, actor: RequestActor): Promise<PlantView> {
     const zone = await this.prisma.zone.findUnique({ where: { zoneId: BigInt(zoneId) } });
     if (!zone) {
       throw new NotFoundException(`Zone not found: ${zoneId}`);
     }
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: 'PLANT_CREATED',
         entityType: 'plants',
         entityId: name,

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -21,8 +21,8 @@ export class PlantsAdminController {
   @Post()
   create(
     @Body() body: { name: string; zoneId: number },
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<PlantView> {
-    return this.plants.create(body.name, body.zoneId, user);
+    return this.plants.create(body.name, body.zoneId, actor);
   }
 }

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
+import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** One audit row's worth of who/what/where. `actedAsRole` carries the backup-cascade proxy. */
@@ -13,6 +14,26 @@ export interface AuditEntry {
   entityType: string;
   entityId: string;
   metadata?: Prisma.InputJsonValue;
+}
+
+/** The who/where slice of an {@link AuditEntry} (actor + acting attribution). */
+export type AuditActorFields = Pick<
+  AuditEntry,
+  'actorId' | 'actorRole' | 'actedAsRole' | 'actingZone'
+>;
+
+/**
+ * Flattens a {@link RequestActor} into the actor fields of an audit row — the single place the
+ * `actor → {actorId, actorRole, actedAsRole, actingZone}` mapping lives, so acting attribution
+ * is stamped uniformly instead of via per-service `actor.acted_as_role ?? null` (Issue 47).
+ */
+export function auditActor(actor: RequestActor): AuditActorFields {
+  return {
+    actorId: actor.userId,
+    actorRole: actor.role,
+    actedAsRole: actor.actedAsRole,
+    actingZone: actor.actingZone,
+  };
 }
 
 /**

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service';
-import type { ConfigActor } from '../common/config-actor';
+import { auditActor, AuditService } from '../audit/audit.service';
+import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface SlaRuleView {
@@ -35,7 +35,7 @@ export class SlaRulesService {
   }
 
   /** Upserts one rule by (scope, key), audited (AC#6). Bad scope / negative window → 400. */
-  async upsert(input: UpsertSlaRuleInput, actor: ConfigActor): Promise<SlaRuleView> {
+  async upsert(input: UpsertSlaRuleInput, actor: RequestActor): Promise<SlaRuleView> {
     if (!SCOPES.has(input.scope)) {
       throw new BadRequestException(`Invalid SLA scope: ${input.scope}`);
     }
@@ -46,9 +46,7 @@ export class SlaRulesService {
     };
     return this.audit.withAudit(
       {
-        actorId: actor.user_id,
-        actorRole: actor.role,
-        actedAsRole: actor.acted_as_role ?? null,
+        ...auditActor(actor),
         action: 'SLA_RULE_UPDATED',
         entityType: 'sla_rule_config',
         entityId: `${input.scope}:${input.key}`,

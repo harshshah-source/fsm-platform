@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -21,8 +21,8 @@ export class SettingsController {
   update(
     @Param('key') key: string,
     @Body() body: { value: unknown },
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
   ): Promise<{ key: string; value: unknown }> {
-    return this.settings.set(key, body.value, user);
+    return this.settings.set(key, body.value, actor);
   }
 }

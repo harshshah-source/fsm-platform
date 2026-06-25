@@ -1,8 +1,11 @@
 # 47 — RequestActor acting-attribution seam
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 Origin: Issue 02 deep review + architecture review (2026-06-18).
+Done: 2026-06-25 — `RequestActor` + `@CurrentActor()` seam + `auditActor()` flattening; `ConfigActor`
+removed; e2e drives non-null `acted_as_role` + `acting_zone` onto a real audited mutation. See
+`docs/progress/47-request-actor-acting-attribution-seam.md`.
 
 ## Problem
 
@@ -32,11 +35,11 @@ the backup cascade must record `acted_as_role = CENTRAL_SERVICE_MANAGER` (etc.) 
 
 ## Acceptance criteria
 
-- [ ] A request acting in a ZM's zone (CSM/Operations Head via `X-Acting-As-Zone`) carries
+- [x] A request acting in a ZM's zone (CSM/Operations Head via `X-Acting-As-Zone`) carries
       `acted_as_role` through to any audited mutation it performs, not just `/me`
-- [ ] At least one e2e drives a non-null `acted_as_role` onto an `audit_logs` row via a real mutation
-- [ ] Existing audited mutations (OpsHead config) still record `acted_as_role = null`
-- [ ] `AccessTokenClaims` is no longer the type passed where acting attribution is expected
+- [x] At least one e2e drives a non-null `acted_as_role` onto an `audit_logs` row via a real mutation
+- [x] Existing audited mutations (OpsHead config) still record `acted_as_role = null`
+- [x] `AccessTokenClaims` is no longer the type passed where acting attribution is expected
 
 ## Notes
 
