@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import type { ConfigActor } from '../common/config-actor';
 import { $Enums } from '../generated/prisma/client';
@@ -17,6 +17,13 @@ export interface CreateCompanyInput {
   name: string;
   companyTier: string;
   companyPriorityRank: string;
+}
+
+/** Partial update of a company's commercial classification (Issue 46). */
+export interface UpdateCompanyInput {
+  companyTier?: string;
+  companyPriorityRank?: string;
+  opsOverride?: boolean;
 }
 
 const TIERS = new Set<string>(Object.values($Enums.CompanyTier));
@@ -61,6 +68,54 @@ export class CompaniesService {
               name: input.name,
               companyTier: input.companyTier as $Enums.CompanyTier,
               companyPriorityRank: input.companyPriorityRank,
+            },
+          }),
+        ),
+    );
+  }
+
+  /**
+   * Updates a company's commercial classification (tier / priority rank / ops-override), audited
+   * (`COMPANY_UPDATED`). Setting `opsOverride = true` is the manual override of CRM/SAP-sourced tier
+   * (CONTEXT "Operations Head can override per-company"). Unknown id → 404; bad tier/rank → 400.
+   */
+  async update(companyId: number, input: UpdateCompanyInput, actor: ConfigActor): Promise<CompanyView> {
+    if (input.companyTier !== undefined && !TIERS.has(input.companyTier)) {
+      throw new BadRequestException(`Invalid company tier: ${input.companyTier}`);
+    }
+    if (input.companyPriorityRank !== undefined && !RANK.test(input.companyPriorityRank)) {
+      throw new BadRequestException(`Invalid company priority rank: ${input.companyPriorityRank}`);
+    }
+    const existing = await this.prisma.company.findUnique({ where: { companyId: BigInt(companyId) } });
+    if (!existing) throw new NotFoundException(`Company not found: ${companyId}`);
+
+    return this.audit.withAudit(
+      {
+        actorId: actor.user_id,
+        actorRole: actor.role,
+        actedAsRole: actor.acted_as_role ?? null,
+        action: 'COMPANY_UPDATED',
+        entityType: 'company_master',
+        entityId: existing.name,
+        metadata: {
+          companyTier: input.companyTier ?? null,
+          companyPriorityRank: input.companyPriorityRank ?? null,
+          opsOverride: input.opsOverride ?? null,
+          previous: {
+            companyTier: existing.companyTier,
+            companyPriorityRank: existing.companyPriorityRank,
+            opsOverride: existing.opsOverride,
+          },
+        },
+      },
+      async (tx) =>
+        toCompanyView(
+          await tx.company.update({
+            where: { companyId: BigInt(companyId) },
+            data: {
+              ...(input.companyTier !== undefined ? { companyTier: input.companyTier as $Enums.CompanyTier } : {}),
+              ...(input.companyPriorityRank !== undefined ? { companyPriorityRank: input.companyPriorityRank } : {}),
+              ...(input.opsOverride !== undefined ? { opsOverride: input.opsOverride } : {}),
             },
           }),
         ),

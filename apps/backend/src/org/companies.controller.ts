@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -8,6 +8,7 @@ import {
   CompaniesService,
   type CompanyView,
   type CreateCompanyInput,
+  type UpdateCompanyInput,
 } from './companies.service';
 
 /**
@@ -31,5 +32,14 @@ export class CompaniesAdminController {
     @CurrentUser() user: AccessTokenClaims,
   ): Promise<CompanyView> {
     return this.companies.create(body, user);
+  }
+
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Body() body: UpdateCompanyInput,
+    @CurrentUser() user: AccessTokenClaims,
+  ): Promise<CompanyView> {
+    return this.companies.update(Number(id), body, user);
   }
 }
