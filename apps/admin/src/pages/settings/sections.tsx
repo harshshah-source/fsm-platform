@@ -66,6 +66,65 @@ export function ZonesSection() {
   );
 }
 
+export function PlantsSection() {
+  const { items, setItems } = useList(org.listPlants);
+  const { items: zones } = useList(org.listZones);
+  const [name, setName] = useState('');
+  const [zoneId, setZoneId] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <section>
+      <form
+        className="mb-4 flex items-end gap-2"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setError(null);
+          try {
+            const created = await org.createPlant({ name, zoneId: Number(zoneId) });
+            setItems((xs) => [...xs, created]);
+            setName('');
+          } catch {
+            setError('Failed to create plant — check the zone exists.');
+          }
+        }}
+      >
+        <Field label="Plant name">
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label="Zone">
+          <select className={inputClass} value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
+            <option value="">Select zone…</option>
+            {zones.map((z) => (
+              <option key={z.zoneId} value={z.zoneId}>
+                {z.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <button className={btnClass} type="submit">
+          Add plant
+        </button>
+      </form>
+      {error && (
+        <p role="alert" className="mb-2 text-sm text-red-700">
+          {error}
+        </p>
+      )}
+      <table className="text-sm">
+        <tbody>
+          {items.map((p) => (
+            <tr key={p.plantId}>
+              <td className="pr-4">{p.name}</td>
+              <td className="text-slate-500">zone {p.zoneId}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 export function CompaniesSection() {
   const { items, setItems } = useList(org.listCompanies);
   const [name, setName] = useState('');
@@ -102,15 +161,91 @@ export function CompaniesSection() {
       <table className="text-sm">
         <tbody>
           {items.map((c) => (
-            <tr key={c.companyId}>
-              <td className="pr-4">{c.name}</td>
-              <td className="pr-4">{c.companyTier}</td>
-              <td>{c.companyPriorityRank}</td>
-            </tr>
+            <CompanyRow
+              key={c.companyId}
+              company={c}
+              onSaved={(updated) => setItems((xs) => xs.map((x) => (x.companyId === updated.companyId ? updated : x)))}
+            />
           ))}
         </tbody>
       </table>
     </section>
+  );
+}
+
+/** A Companies table row with inline Operations-Head edit of tier / rank / ops-override (Issue 46). */
+function CompanyRow({ company, onSaved }: { company: org.CompanyView; onSaved: (c: org.CompanyView) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [tier, setTier] = useState(company.companyTier);
+  const [rank, setRank] = useState(company.companyPriorityRank);
+  const [override, setOverride] = useState(company.opsOverride);
+
+  if (!editing) {
+    return (
+      <tr>
+        <td className="pr-4">{company.name}</td>
+        <td className="pr-4">{company.companyTier}</td>
+        <td className="pr-4">{company.companyPriorityRank}</td>
+        <td className="pr-4 text-slate-500">{company.opsOverride ? 'override' : ''}</td>
+        <td>
+          <button type="button" className="rounded border px-2 py-0.5 text-xs" onClick={() => setEditing(true)}>
+            Edit
+          </button>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr>
+      <td className="pr-4">{company.name}</td>
+      <td className="pr-4">
+        <select
+          aria-label={`Tier for ${company.name}`}
+          className={inputClass}
+          value={tier}
+          onChange={(e) => setTier(e.target.value)}
+        >
+          <option value="PLATINUM">PLATINUM</option>
+          <option value="GOLD">GOLD</option>
+          <option value="SILVER">SILVER</option>
+        </select>
+      </td>
+      <td className="pr-4">
+        <input aria-label={`Rank for ${company.name}`} className={inputClass} value={rank} onChange={(e) => setRank(e.target.value)} />
+      </td>
+      <td className="pr-4">
+        <label className="flex items-center gap-1 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            aria-label={`Ops override for ${company.name}`}
+            checked={override}
+            onChange={(e) => setOverride(e.target.checked)}
+          />
+          override
+        </label>
+      </td>
+      <td className="flex gap-1">
+        <button
+          type="button"
+          className="rounded bg-slate-800 px-2 py-0.5 text-xs text-white"
+          onClick={async () => {
+            const updated = await org.updateCompany(company.companyId, {
+              companyTier: tier,
+              companyPriorityRank: rank,
+              opsOverride: override,
+            });
+            onSaved(updated);
+            setEditing(false);
+          }}
+        >
+          Save
+        </button>
+        <button type="button" className="rounded border px-2 py-0.5 text-xs" onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+      </td>
+    </tr>
   );
 }
 
@@ -277,6 +412,7 @@ export function ScoringWeightsSection() {
 export function SeCoverageSection() {
   const engineers = useList(org.listEngineers);
   const coverage = useList(org.listSeCoverage);
+  const plants = useList(org.listPlants);
   const [userId, setUserId] = useState('');
   const [coverageType, setCoverageType] = useState('DEDICATED');
   const [zoneId, setZoneId] = useState('');
@@ -357,12 +493,15 @@ export function SeCoverageSection() {
           <Field label="SE ID">
             <input className={inputClass} value={covSeId} onChange={(e) => setCovSeId(e.target.value)} />
           </Field>
-          <Field label="Plant ID">
-            <input
-              className={inputClass}
-              value={covPlantId}
-              onChange={(e) => setCovPlantId(e.target.value)}
-            />
+          <Field label="Plant">
+            <select className={inputClass} value={covPlantId} onChange={(e) => setCovPlantId(e.target.value)}>
+              <option value="">Select plant…</option>
+              {plants.items.map((p) => (
+                <option key={p.plantId} value={p.plantId}>
+                  {p.name} (zone {p.zoneId})
+                </option>
+              ))}
+            </select>
           </Field>
           <button className={btnClass} type="submit">
             Add coverage

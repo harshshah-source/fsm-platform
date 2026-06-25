@@ -62,7 +62,18 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface PlantView {
+  plantId: number;
+  name: string;
+  zoneId: number;
+}
+
 export const listZones = () => api<ZoneView[]>('/org/zones');
+
+export const listPlants = (zoneId?: number) =>
+  api<PlantView[]>(`/org/plants${zoneId !== undefined ? `?zoneId=${zoneId}` : ''}`);
+export const createPlant = (body: { name: string; zoneId: number }) =>
+  api<PlantView>('/org/plants', { method: 'POST', body: JSON.stringify(body) });
 export const createZone = (name: string) =>
   api<ZoneView>('/org/zones', { method: 'POST', body: JSON.stringify({ name }) });
 
@@ -72,6 +83,11 @@ export const createCompany = (body: {
   companyTier: string;
   companyPriorityRank: string;
 }) => api<CompanyView>('/org/companies', { method: 'POST', body: JSON.stringify(body) });
+// Issue 46 — Operations-Head edit of an existing company's commercial classification.
+export const updateCompany = (
+  companyId: number,
+  body: { companyTier?: string; companyPriorityRank?: string; opsOverride?: boolean },
+) => api<CompanyView>(`/org/companies/${companyId}`, { method: 'PATCH', body: JSON.stringify(body) });
 
 export const listUsers = () => api<UserView[]>('/org/users');
 export const createUser = (body: {

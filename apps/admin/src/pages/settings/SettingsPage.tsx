@@ -3,6 +3,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import {
   CommonKitSection,
   CompaniesSection,
+  PlantsSection,
   ScoringWeightsSection,
   SeCoverageSection,
   SlaRulesSection,
@@ -19,6 +20,7 @@ interface Tab {
 // Operations-Head-owned configuration surfaces (Issue 02). Order mirrors the reference→rules flow.
 const TABS: Tab[] = [
   { id: 'zones', label: 'Zones', render: () => <ZonesSection /> },
+  { id: 'plants', label: 'Plants', render: () => <PlantsSection /> },
   { id: 'users', label: 'Users', render: () => <UsersSection /> },
   { id: 'companies', label: 'Companies', render: () => <CompaniesSection /> },
   { id: 'se-coverage', label: 'SE Coverage', render: () => <SeCoverageSection /> },

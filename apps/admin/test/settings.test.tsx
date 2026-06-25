@@ -1,5 +1,5 @@
 import type { SessionView } from '@fsm/shared';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -93,6 +93,89 @@ describe('Settings — Operations Head only (AC#1)', () => {
       ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
     );
     expect(postCall).toBeTruthy();
+  });
+
+  it('edits an existing company tier + override via PATCH (Issue 46)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/org/companies/') && init?.method === 'PATCH') {
+        return new Response(
+          JSON.stringify({ companyId: 1, name: 'Acme Logistics', companyTier: 'GOLD', companyPriorityRank: 'A', opsOverride: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.endsWith('/org/companies')) {
+        return new Response(
+          JSON.stringify([{ companyId: 1, name: 'Acme Logistics', companyTier: 'PLATINUM', companyPriorityRank: 'A', opsOverride: false }]),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response('[]', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderAt('/settings', opsHead);
+    await userEvent.click(await screen.findByRole('tab', { name: /companies/i }));
+
+    const row = (await screen.findByText('Acme Logistics')).closest('tr') as HTMLElement;
+    await userEvent.click(within(row).getByRole('button', { name: /edit/i }));
+    await userEvent.selectOptions(within(row).getByLabelText(/tier for/i), 'GOLD');
+    await userEvent.click(within(row).getByLabelText(/override for/i));
+    await userEvent.click(within(row).getByRole('button', { name: /save/i }));
+
+    const patchCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH');
+    expect(patchCall).toBeTruthy();
+    expect(String(patchCall![0])).toContain('/org/companies/1');
+    // Row reflects the updated tier from the PATCH response.
+    expect(await within(row).findByText('GOLD')).toBeInTheDocument();
+  });
+
+  it('creates a plant under a chosen zone and lists it (Issue 45)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/org/plants') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ plantId: 10, name: 'Pune Yard', zoneId: 1 }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/org/plants')) return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.endsWith('/org/zones')) {
+        return new Response(JSON.stringify([{ zoneId: 1, name: 'NORTH', zonalManagerUserId: null }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('[]', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderAt('/settings', opsHead);
+    await userEvent.click(await screen.findByRole('tab', { name: /plants/i }));
+    await userEvent.type(screen.getByLabelText(/plant name/i), 'Pune Yard');
+    await userEvent.selectOptions(screen.getByLabelText(/^zone$/i), '1');
+    await userEvent.click(screen.getByRole('button', { name: /add plant/i }));
+
+    expect(await screen.findByText('Pune Yard')).toBeInTheDocument();
+    const postCall = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
+    expect(postCall).toBeTruthy();
+  });
+
+  it('surfaces a plant-create error in the UI instead of an unhandled rejection (Issue 45)', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/org/plants') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ message: 'Zone not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.endsWith('/org/plants')) return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.endsWith('/org/zones')) {
+        return new Response(JSON.stringify([{ zoneId: 1, name: 'NORTH', zonalManagerUserId: null }]), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('[]', { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderAt('/settings', opsHead);
+    await userEvent.click(await screen.findByRole('tab', { name: /plants/i }));
+    await userEvent.type(screen.getByLabelText(/plant name/i), 'Orphan');
+    await userEvent.selectOptions(screen.getByLabelText(/^zone$/i), '1');
+    await userEvent.click(screen.getByRole('button', { name: /add plant/i }));
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
   });
 
   it('blocks a non-Operations-Head role from the Settings route', () => {
