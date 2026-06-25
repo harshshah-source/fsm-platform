@@ -5,6 +5,7 @@ import { RepeatEscalationService } from './repeat-escalation.service';
 import { TicketCreationService } from './ticket-creation.service';
 import { TicketQueryService } from './ticket-query.service';
 import { TroubleshootSubmissionService } from './troubleshoot-submission.service';
+import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
 
 /**
  * Ticketing (Issue 05). The TROUBLESHOOT spine: `TicketCreationService` turns newly-inactive
@@ -21,6 +22,7 @@ import { TroubleshootSubmissionService } from './troubleshoot-submission.service
     AutoRecoveryService,
     RepeatEscalationService,
     TroubleshootSubmissionService,
+    VehicleUnavailabilityService,
   ],
   exports: [
     TicketCreationService,
@@ -28,6 +30,7 @@ import { TroubleshootSubmissionService } from './troubleshoot-submission.service
     AutoRecoveryService,
     RepeatEscalationService,
     TroubleshootSubmissionService,
+    VehicleUnavailabilityService,
   ],
 })
 export class TicketingModule {}

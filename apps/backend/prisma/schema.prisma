@@ -1211,6 +1211,53 @@ model FailureCycle {
   @@map("failure_cycles")
 }
 
+/// Vehicle Unavailability Report (Issue 28). The SE files this when a vehicle can't be worked; on
+/// submit the primary SLA pauses (`pause_reason = VEHICLE_UNAVAILABLE`) and the Ticket resurfaces at
+/// the expected-availability date. The Secondary SLA Clock (true elapsed, never pauses) is derived
+/// from the Failure Cycle's `opened_at` and shown only to ZM/CSM/Operations Head.
+model VehicleUnavailabilityReport {
+  id                   BigInt                @id @default(autoincrement())
+  ticketId             String                @map("ticket_id") @db.Uuid
+  failureCycleId       String?               @map("failure_cycle_id") @db.Uuid
+  seId                 String                @map("se_id") @db.Uuid
+  reasonCode           VehicleUnavailReason  @map("reason_code")
+  transporterContacted Boolean               @default(false) @map("transporter_contacted")
+  expectedFrom         DateTime              @map("expected_from") @db.Timestamptz(6)
+  expectedTo           DateTime?             @map("expected_to") @db.Timestamptz(6)
+  notes                String?
+  gpsLat               Float?                @map("gps_lat")
+  gpsLng               Float?                @map("gps_lng")
+  status               VehicleUnavailStatus  @default(OPEN)
+  resolvedBy           String?               @map("resolved_by") @db.Uuid
+  resolvedByRole       String?               @map("resolved_by_role")
+  resolvedAt           DateTime?             @map("resolved_at") @db.Timestamptz(6)
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ticket Ticket @relation(fields: [ticketId], references: [ticketId])
+
+  @@index([ticketId])
+  @@index([status, expectedFrom])
+  @@map("vehicle_unavailability_reports")
+}
+
+enum VehicleUnavailReason {
+  VEHICLE_ON_TRIP
+  VEHICLE_NOT_AT_PLANT
+  DRIVER_NOT_AVAILABLE
+  CUSTOMER_REFUSED
+  OTHER
+
+  @@map("vehicle_unavail_reason")
+}
+
+enum VehicleUnavailStatus {
+  OPEN
+  RESOLVED
+
+  @@map("vehicle_unavail_status")
+}
+
 /// The unified actionable work item with a `work_type` discriminator (schema D6). Issue 05 creates
 /// only TROUBLESHOOT tickets (status OPEN, parented by a Failure Cycle — invariant I2 = UNIQUE on
 /// `failureCycleId`). INSTALL/RECOVERY-only columns (se_id assignee, created_by, closure_type, import
@@ -1247,6 +1294,7 @@ model Ticket {
   componentBlocks ComponentBlockedQueue[]
   componentRequests ComponentRequest[]
   inventoryTransactions InventoryTransaction[]
+  vehicleUnavailabilityReports VehicleUnavailabilityReport[]
 
   @@index([status, plantId])
   @@index([workType, status])

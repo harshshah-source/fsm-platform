@@ -14,7 +14,18 @@ Vehicle-access pauses and the dual SLA clock model. On mobile, when the vehicle 
 - [ ] Secondary SLA Clock (never pauses) visible only to ZM/CSM/OH, never the SE
 - [ ] ZM can edit/confirm expected-availability date or manually resume SLA
 - [ ] Readiness hints render as warnings; only ON_TRIP blocks assignment; raw readiness never pauses SLA
-- [ ] Readiness conflicts (UNKNOWN / STALE / WAITING_CONFIRMATION) resolvable by ZM
+- [ ] Readiness conflicts (UNKNOWN / STALE) resolvable by ZM via the field path (ON_SITE capture or a filed VU report) — **→ Issue 65**. (`WAITING_CONFIRMATION` / per-ticket gate dropped per the 2026-06-25 HITL decision; CONTEXT-aligned, no new state.)
+
+## UI surfaces
+
+- **Admin:** ZM Vehicle Unavailability Review page (`/readiness/vehicle-unavailability`) — built in this issue (slice 4). ZM Readiness Conflicts page (`10-readiness.png`) → **Issue 65**.
+- **Mobile:** SE Vehicle Unavailability file screen + Transporter tap-to-call + readiness hint chip → **Issue 64** (blocked-by Mobile Foundation #54).
+
+## Reference
+
+- `docs/ui/desktop/v2-reference/11-vehicle-unavailability.png` (ZM Vehicle Unavailability Review — this issue)
+- `docs/ui/desktop/v2-reference/10-readiness.png` (ZM Readiness conflicts → Issue 65)
+- Mobile: `docs/ui/mobile/troubleshooting.png.png` (SE file screen → Issue 64)
 
 ## Blocked by
 
