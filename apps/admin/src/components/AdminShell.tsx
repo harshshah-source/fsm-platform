@@ -68,6 +68,11 @@ export function AdminShell() {
                   Shadow Use Queue
                 </Link>
               </li>
+              <li className="rounded px-2 py-1">
+                <Link to="/warehouse/recovery-receipt" className="text-slate-700 hover:underline">
+                  Recovery Receipt
+                </Link>
+              </li>
             </>
           )}
           {/* Component Requests oversight — manager read-only visibility (Issue 23); the

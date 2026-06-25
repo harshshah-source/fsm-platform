@@ -1,7 +1,12 @@
 # 36 — Recovery Ticket lifecycle + warehouse receipt auto-close + unable-to-collect
 
-Status: ready-for-agent
+Status: done
 Type: AFK
+Done: 2026-06-25 — full Recovery field lifecycle (schedule → on-site → collected → warehouse receipt
+auto-close) + Collection-Form validation + unable-to-collect routing + closure/unable notifier seam
+(backend) + Warehouse-Manager "Awaiting Receipt" admin queue. SE mobile field screens → #68 (blocked
+by #54). ZM decision-queue actions + manual-close authority = #37. See
+`docs/progress/36-recovery-ticket-lifecycle.md`.
 
 ## What to build
 
@@ -9,11 +14,11 @@ The Recovery Ticket field workflow. Lifecycle SCHEDULED → ON_SITE → COLLECTE
 
 ## Acceptance criteria
 
-- [ ] Recovery lifecycle SCHEDULED → ON_SITE → COLLECTED → RECEIVED_AT_WAREHOUSE → CLOSED enforced
-- [ ] COLLECTED captures mandatory device-serial confirmation (validated) + condition notes
-- [ ] Warehouse Manager receipt auto-closes the Ticket (`AUTO_CLOSED_ON_WAREHOUSE_RECEIPT`), no ZM approval
-- [ ] SE + ZM receive closure notification
-- [ ] Unable to Collect requires a reason code and routes the Ticket to the ZM decision queue
+- [x] Recovery lifecycle SCHEDULED → ON_SITE → COLLECTED → RECEIVED_AT_WAREHOUSE → CLOSED enforced
+- [x] COLLECTED captures mandatory device-serial confirmation (validated) + condition notes
+- [x] Warehouse Manager receipt auto-closes the Ticket (`AUTO_CLOSED_ON_WAREHOUSE_RECEIPT`), no ZM approval
+- [x] SE + ZM receive closure notification (notifier seam; Issue 03 delivery)
+- [x] Unable to Collect requires a reason code and routes the Ticket to the ZM decision queue
 
 ## Blocked by
 

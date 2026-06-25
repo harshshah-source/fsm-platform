@@ -1090,6 +1090,30 @@ enum AssignmentState {
   @@map("assignment_state")
 }
 
+/// Recovery Ticket closure classification (CONTEXT.md §14 "Closure authority"). Issue 36 sets only
+/// AUTO_CLOSED_ON_WAREHOUSE_RECEIPT; the manual/failed closure types land with Issue 37 (defined
+/// complete so #37 never `ALTER TYPE`s).
+enum ClosureType {
+  AUTO_CLOSED_ON_WAREHOUSE_RECEIPT
+  FAILED_RECOVERY_CLOSE
+  ZM_MANUAL_CLOSE
+  OPERATIONS_HEAD_OVERRIDE_CLOSE
+  CSM_ACTING_CLOSE
+
+  @@map("closure_type")
+}
+
+/// SE "Unable to Collect" reason on a Recovery Ticket (Issue 36); routes the ticket to the ZM
+/// decision queue (Issue 37).
+enum UnableToCollectReason {
+  COMPANY_REFUSED
+  VEHICLE_UNREACHABLE
+  DEVICE_MISSING
+  OTHER
+
+  @@map("unable_to_collect_reason")
+}
+
 /// Non-Operational marking lifecycle (schema D16). Issue 05 reads only CONFIRMED/ACTIVE for the
 /// eligibility gate; the full dual-confirmation lifecycle lands with Issue 35 (additive).
 enum NonOpState {
@@ -1295,6 +1319,16 @@ model Ticket {
   // Back-reference to the Non-Op marking that closed this ticket (CLOSED_NON_OPERATIONAL) or
   // auto-created it (the RECOVERY ticket) — Issue 35 / CONTEXT.md §14.
   nonOpMarkingId     String?         @map("nonop_marking_id") @db.Uuid
+  // RECOVERY field-workflow columns (Issue 36). The assignee collects; the Collection Form captures
+  // the confirmed device serial + condition; closure is classified by `closureType` (CONTEXT §14).
+  assignedSeId       String?         @map("assigned_se_id") @db.Uuid
+  collectedDeviceSerial    String?   @map("collected_device_serial")
+  collectionConditionNotes String?   @map("collection_condition_notes")
+  unableToCollectReason    UnableToCollectReason? @map("unable_to_collect_reason")
+  unableToCollectAt        DateTime? @map("unable_to_collect_at") @db.Timestamptz(6)
+  closureType        ClosureType?    @map("closure_type")
+  closureReason      String?         @map("closure_reason")
+  closedAt           DateTime?       @map("closed_at") @db.Timestamptz(6)
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1319,6 +1353,7 @@ model Ticket {
   @@index([workType, status])
   @@index([companyId])
   @@index([nonOpMarkingId])
+  @@index([assignedSeId])
   // Shared Pool query: partial `(plant_id) WHERE status='OPEN' AND assignment_state='UNASSIGNED'`
   // (Issue 12) — not expressible in Prisma; added by raw SQL in 20260621190000_add_shared_pool_index.
   @@map("tickets")

@@ -64,7 +64,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 33 — Install Ticket create (single + CSV, scoped) → 07
 - 34 — Install lifecycle + verification + serial visibility → 33, 18
 - 35 — Non-Operational dual-confirmation marking → 07  *(done — dual-confirmation lifecycle + OH 7-day override + CONFIRMED side-effects (auto-close tickets, Recovery-Ticket auto-create, eligibility exclusion) + customer tokenised-email seam (backend) + admin dual-confirmation queue & Mark modal; UI refinements → #67)*
-- 36 — Recovery Ticket lifecycle + warehouse receipt auto-close + unable-to-collect → 35
+- 36 — Recovery Ticket lifecycle + warehouse receipt auto-close + unable-to-collect → 35  *(done — full field lifecycle + Collection-Form validation + WM receipt auto-close + unable-to-collect routing + notifier seam (backend) + WM "Awaiting Receipt" admin queue; SE mobile screens → #68; ZM decision-queue actions → #37)*
 - 37 — Recovery closure authority + ZM decision queue + stalled flags → 36
 
 ## Follow-ups (deep review)
@@ -83,6 +83,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 65 — Vehicle readiness source (AutoPlant LR-Date/Next-Trip) + ZM Readiness Conflicts page + AC#6 resolution → 28, 04  *(AC#6 authority conflict RESOLVED 2026-06-25 → field path, CONTEXT-aligned, no new state; AutoPlant = external seam)*
 - 66 — SE mobile Day Plan: highlight ZM-added Tickets + one-session "removed" label → 31, 54  *(closes Issue 31 AC#5 mobile)*
 - 67 — Non-Op Mark modal ticket enumeration + queue zone-scope + Recovery toast → 35  *(Issue 35 UI refinements)*
+- 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect) → 54, 36  *(Issue 36 mobile)*
 
 ## Mobile (foundation + M-series UI)
 

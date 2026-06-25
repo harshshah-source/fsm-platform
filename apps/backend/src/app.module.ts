@@ -58,6 +58,7 @@ import {
   NonOperationalController,
   NonOperationalPublicController,
 } from './ticketing/non-operational.controller';
+import { RecoveryController } from './ticketing/recovery.controller';
 import { VerificationModule } from './verification/verification.module';
 import { VerificationController } from './verification/verification.controller';
 import { ZonesController } from './zones/zones.controller';
@@ -106,6 +107,7 @@ import { ZonesController } from './zones/zones.controller';
     VehicleUnavailabilityController,
     NonOperationalController,
     NonOperationalPublicController,
+    RecoveryController,
     SchedulesController,
     BatchesController,
     IntradayUpdatesController,

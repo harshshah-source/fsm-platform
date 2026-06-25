@@ -7,6 +7,7 @@ import { TerritoryPage } from './pages/coverage/TerritoryPage';
 import { ComponentBlockedPage } from './pages/inventory/ComponentBlockedPage';
 import { ComponentRequestsPage } from './pages/inventory/ComponentRequestsPage';
 import { ShadowUseQueuePage } from './pages/inventory/ShadowUseQueuePage';
+import { RecoveryReceiptQueuePage } from './pages/warehouse/RecoveryReceiptQueuePage';
 import { DashboardHome } from './pages/dashboard/DashboardHome';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
@@ -152,6 +153,16 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <ComponentRequestsPage readOnly />
+              </RoleRoute>
+            }
+          />
+          {/* Recovery — Awaiting Warehouse Receipt — Warehouse Manager confirms physical receipt,
+              auto-closing the Recovery Ticket (Issue 36). WM-only; RoleRoute is the second line. */}
+          <Route
+            path="/warehouse/recovery-receipt"
+            element={
+              <RoleRoute roles={['WAREHOUSE_MANAGER']}>
+                <RecoveryReceiptQueuePage />
               </RoleRoute>
             }
           />
