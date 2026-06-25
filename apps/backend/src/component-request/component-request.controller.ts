@@ -29,6 +29,16 @@ export class ComponentRequestController {
     return this.requests.oversightQueue({ role: user.role, zoneId: user.zone_id });
   }
 
+  /**
+   * Per-ticket Component Requests for the Ticket Detail Components tab (Issue 62). Zone-scoped read;
+   * static `by-ticket` prefix keeps it clear of the `:id` POST action routes.
+   */
+  @Get('by-ticket/:ticketId')
+  @Roles(...MANAGER_ROLES)
+  byTicket(@CurrentUser() user: AccessTokenClaims, @Param('ticketId') ticketId: string) {
+    return this.requests.byTicket(ticketId, { role: user.role, zoneId: user.zone_id });
+  }
+
   @Post(':id/confirm-receipt')
   @Roles('SERVICE_ENGINEER')
   async confirmReceipt(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string) {

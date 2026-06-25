@@ -99,6 +99,24 @@ export class ComponentRequestService {
     return this.buildRows(where, now);
   }
 
+  /**
+   * Per-ticket read for the Ticket Detail Components tab (Issue 62). ALL of a ticket's Component
+   * Requests, any status, newest-first. Zone-scoped like the oversight list: a ZONAL_MANAGER sees only
+   * own-zone tickets (via the ticket's plant→zone); CSM / Operations Head see all zones.
+   */
+  async byTicket(
+    ticketId: string,
+    scope: { role: string; zoneId: number | null },
+    now: Date = new Date(),
+  ): Promise<ComponentRequestRow[]> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+    const where: Prisma.ComponentRequestWhereInput =
+      restrictZone != null
+        ? { ticketId, ticket: { plant: { zoneId: BigInt(restrictZone) } } }
+        : { ticketId };
+    return this.buildRows(where, now);
+  }
+
   private async buildRows(where: Prisma.ComponentRequestWhereInput, now: Date): Promise<ComponentRequestRow[]> {
     const rows = await this.prisma.componentRequest.findMany({
       where,

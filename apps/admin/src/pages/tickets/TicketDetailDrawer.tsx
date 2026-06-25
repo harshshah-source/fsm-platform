@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { apiComponentRequestsByTicket, type ComponentRequestRow } from '../../api/componentRequests';
 import { apiTicketDetail, type TicketDetail } from '../../api/tickets';
 import { BucketBadge, InlineBadges } from './ticketBadges';
 
@@ -10,8 +11,15 @@ const TABS: TabId[] = ['Overview', 'Lifecycle', 'Forms', 'Verification', 'Compon
 const STUB_TABS: Record<string, string> = {
   Forms: 'Troubleshooting / Install forms appear here once submitted (Issue 16).',
   Verification: 'GPS verification runs and outcome appear here (Issue 18/19).',
-  Components: 'Component requests and consumption appear here (Issue 21/22).',
   'Assignment History': 'Assignment and override history appears here (Issue 11/13).',
+};
+
+const CR_STATUS_CLASS: Record<string, string> = {
+  REQUESTED: 'bg-amber-100 text-amber-800',
+  APPROVED: 'bg-blue-100 text-blue-800',
+  SHIPPED: 'bg-violet-100 text-violet-800',
+  RECEIVED: 'bg-green-100 text-green-800',
+  REJECTED: 'bg-rose-100 text-rose-800',
 };
 
 /**
@@ -25,6 +33,7 @@ export function TicketDetailDrawer() {
   const [searchParams] = useSearchParams();
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [components, setComponents] = useState<ComponentRequestRow[] | null>(null);
   // The Verification Review page (Issue 19) deep-links to a specific tab via `?tab=Verification`.
   const initialTab = searchParams.get('tab');
   const [tab, setTab] = useState<TabId>(
@@ -41,6 +50,18 @@ export function TicketDetailDrawer() {
       alive = false;
     };
   }, [ticketId]);
+
+  // Lazy-load the ticket's Component Requests when the Components tab is opened (Issue 62).
+  useEffect(() => {
+    if (!ticketId || tab !== 'Components' || components !== null) return;
+    let alive = true;
+    apiComponentRequestsByTicket(ticketId)
+      .then((rows) => alive && setComponents(rows))
+      .catch(() => alive && setComponents([]));
+    return () => {
+      alive = false;
+    };
+  }, [ticketId, tab, components]);
 
   return (
     <aside
@@ -120,6 +141,47 @@ export function TicketDetailDrawer() {
                 </li>
               ))}
             </ol>
+          )}
+
+          {tab === 'Components' && (
+            <div className="flex flex-col gap-3 text-sm">
+              {ticket.failureCycleState === 'WAITING_COMPONENT' && (
+                <div
+                  data-testid="waiting-component-badge"
+                  className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                >
+                  WAITING_COMPONENT — primary SLA paused
+                  {ticket.waitingComponentSince
+                    ? ` since ${new Date(ticket.waitingComponentSince).toLocaleString()}`
+                    : ''}
+                </div>
+              )}
+
+              {components === null && <p className="text-slate-500">Loading…</p>}
+              {components !== null && components.length === 0 && (
+                <p className="text-slate-400">No component requests on this ticket.</p>
+              )}
+              {components?.map((c) => (
+                <div key={c.requestId} data-testid={`cr-${c.requestId}`} className="rounded border p-2">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="font-medium">{c.componentName ?? 'Component'}</span>
+                    <span className={`rounded px-2 py-0.5 text-xs ${CR_STATUS_CLASS[c.status] ?? 'bg-slate-100 text-slate-700'}`}>
+                      {c.status}
+                    </span>
+                  </div>
+                  {c.status === 'SHIPPED' && (
+                    <div className="text-xs text-slate-600">
+                      Shipped to {c.deliveryDestination ?? '—'}
+                      {c.trackingRef ? ` · tracking ${c.trackingRef}` : ''}
+                    </div>
+                  )}
+                  {c.status === 'REJECTED' && c.rejectionReason && (
+                    <div className="text-xs text-rose-700">Rejected: {c.rejectionReason}</div>
+                  )}
+                  <div className="mt-1 text-xs text-slate-400">{c.ageDays}d old</div>
+                </div>
+              ))}
+            </div>
           )}
 
           {tab in STUB_TABS && (

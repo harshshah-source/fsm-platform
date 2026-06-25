@@ -42,6 +42,15 @@ export async function apiComponentRequestsOversight(): Promise<ComponentRequestR
   return (await res.json()) as ComponentRequestRow[];
 }
 
+// Per-ticket Component Requests for the Ticket Detail Components tab (Issue 62); zone-scoped, read-only.
+export async function apiComponentRequestsByTicket(ticketId: string): Promise<ComponentRequestRow[]> {
+  const res = await fetch(`${BASE_URL}/component-requests/by-ticket/${encodeURIComponent(ticketId)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as ComponentRequestRow[];
+}
+
 async function post(path: string, body?: unknown): Promise<void> {
   const res = await fetch(`${BASE_URL}/warehouse/requests/${path}`, {
     method: 'POST',
