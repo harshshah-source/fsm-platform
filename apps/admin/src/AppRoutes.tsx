@@ -10,8 +10,10 @@ import { ShadowUseQueuePage } from './pages/inventory/ShadowUseQueuePage';
 import { DashboardHome } from './pages/dashboard/DashboardHome';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
+import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
 import { SeManagementPage } from './pages/engineers/SeManagementPage';
 import { LeaveRequestsPage } from './pages/engineers/LeaveRequestsPage';
+import { IntradayQueuePage } from './pages/schedules/IntradayQueuePage';
 import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
@@ -92,6 +94,26 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <PlannerPage />
+              </RoleRoute>
+            }
+          />
+          {/* Intra-day Queue — ZM manual same-day updates (Issue 31); manager roles only. System
+              CRITICAL insertions (Issue 29) land in the same view later. */}
+          <Route
+            path="/intraday"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <IntradayQueuePage />
+              </RoleRoute>
+            }
+          />
+          {/* Vehicle Unavailability Review — ZM dual-SLA-clock review, manager roles only (Issue 28).
+              The secondary (never-pausing) clock is manager-only by living behind this gate. */}
+          <Route
+            path="/readiness/vehicle-unavailability"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <VehicleUnavailabilityPage />
               </RoleRoute>
             }
           />

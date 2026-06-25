@@ -54,10 +54,10 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 25 — SE Management page + Activity Status + Set Availability → 15  *(accepted — backend AC#1–#5 + admin `/engineers` page; mobile SE self-availability → M-series)*
 - 26 — Leave request + SOFT_UNAVAILABLE → 25  *(accepted — backend AC#1–#5 + admin `/leave-requests`; mobile SE submit → M-series)*
 - 27 — Role backup cascade + CSM acting scope → 02  *(accepted — cascade + acting banner + CSM authority + %-report; per-endpoint audit-threading incremental)*
-- 28 — Vehicle Unavailability Report + dual SLA clocks + readiness → 16
+- 28 — Vehicle Unavailability Report + dual SLA clocks + readiness → 16  *(accepted core — VU report + dual SLA clocks + ZM review page (backend + admin); mobile → 64, readiness source/AC#6 → 65 (authority conflict flagged))*
 - 29 — Intra-day CRITICAL insertion + SE Accept/Decline + WhatsApp → 25, 03
 - 30 — Intra-day timeout retry chain + 3-retry escalation → 29
-- 31 — ZM manual same-day update + ON_SITE conflict warning → 11
+- 31 — ZM manual same-day update + ON_SITE conflict warning → 11  *(accepted core — same-day add/remove/reorder + Intra-day Queue (backend + admin); MANUAL_ZM_UPDATE = AuditLog view; mobile cues → 66)*
 - 32 — Cross-zone Platinum auto-escalation + manual flag → 29
 
 ## P6 — Install / Recovery / Non-Op
@@ -68,17 +68,20 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 37 — Recovery closure authority + ZM decision queue + stalled flags → 36
 
 ## Follow-ups (deep review)
-- 45 — Plants Admin UI → 02  *(closes AC#2 partial)*
-- 46 — Company Update API + UI → 02  *(closes AC#3 company gap)*
+- 45 — Plants Admin UI → 02  *(done — Plants tab (zone-picker create + list) + SE-Coverage plant picker; closes Issue 02 AC#2)*
+- 46 — Company Update API + UI → 02  *(done — PATCH /org/companies/:id (Ops-Head, audited) + editable admin Companies rows; closes Issue 02 AC#3)*
 - 47 — RequestActor acting-attribution seam → 02  *(land before 27/33/35)*
 - 48 — `deal_type` ownership clarification → 02  *(done — resolved to #49 via triage)*
-- 49 — Device `deal_type` column + Operations-Head manual tagging → 05, 02  *(land before 35)*
+- 49 — Device `deal_type` column + Operations-Head manual tagging → 05, 02  *(done — Ops-Head audited tag endpoint + device read path; column pre-existed; admin tag control → #44)*
 - 50 — Fix test isolation in dashboard-company-plant e2e → —  *(bug; test-only)*
 - 51 — Expected-component Hard-Filter leg + `expected_components` → 21, 22  *(closes Issue 21 AC#2b)*
 - 52 — SE mobile Home: Van Stock + Common-Kit badge → 21  *(closes Issue 21 AC#5 UI; needs mobile ticket screens)*
 - 53 — Push on Common-Kit-zero + Component-Blocked → Action Required cross-link → 21, 03  *(closes Issue 21 AC#6 + AC#4 cross-link; needs notification spine)*
-- 62 — Ticket Detail Components tab: request status + WAITING_COMPONENT pause → 22  *(drawer-retrofit A1; closes Issue 22 Components-tab UI)*
+- 62 — Ticket Detail Components tab: request status + WAITING_COMPONENT pause → 22  *(done — drawer Components tab + `/component-requests/by-ticket/:id`; closes Issue 22 Components-tab UI)*
 - 63 — SE mobile full-screen 409 (Ticket already closed) screen → 54, 24  *(closes Issue 24 AC#3 mobile)*
+- 64 — SE mobile Vehicle Unavailability file screen + Transporter tap-to-call + readiness hints → 28, 54  *(closes Issue 28 mobile AC#1 + AC#5 render)*
+- 65 — Vehicle readiness source (AutoPlant LR-Date/Next-Trip) + ZM Readiness Conflicts page + AC#6 resolution → 28, 04  *(AC#6 authority conflict RESOLVED 2026-06-25 → field path, CONTEXT-aligned, no new state; AutoPlant = external seam)*
+- 66 — SE mobile Day Plan: highlight ZM-added Tickets + one-session "removed" label → 31, 54  *(closes Issue 31 AC#5 mobile)*
 
 ## Mobile (foundation + M-series UI)
 

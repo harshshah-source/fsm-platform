@@ -6,6 +6,8 @@ import { RoleGuard } from './common/guards/role.guard';
 import { ZoneScopeGuard } from './common/guards/zone-scope.guard';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DashboardController } from './dashboard/dashboard.controller';
+import { DevicesModule } from './devices/devices.module';
+import { DevicesController } from './devices/devices.controller';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { SnapshotsController } from './ingestion/snapshots.controller';
 import { InventoryModule } from './inventory/inventory.module';
@@ -43,6 +45,7 @@ import { RecommenderModule } from './recommender/recommender.module';
 import { SchedulingModule } from './scheduling/scheduling.module';
 import { SchedulesController } from './scheduling/schedules.controller';
 import { BatchesController } from './scheduling/batches.controller';
+import { IntradayUpdatesController } from './scheduling/intraday-updates.controller';
 import { SharedPoolModule } from './shared-pool/shared-pool.module';
 import { SharedPoolController } from './shared-pool/shared-pool.controller';
 import { SoftStateModule } from './soft-state/soft-state.module';
@@ -50,6 +53,7 @@ import { SoftStateController } from './soft-state/soft-state.controller';
 import { TicketingModule } from './ticketing/ticketing.module';
 import { TicketsController } from './ticketing/tickets.controller';
 import { TroubleshootController } from './ticketing/troubleshoot.controller';
+import { VehicleUnavailabilityController } from './ticketing/vehicle-unavailability.controller';
 import { VerificationModule } from './verification/verification.module';
 import { VerificationController } from './verification/verification.controller';
 import { ZonesController } from './zones/zones.controller';
@@ -63,6 +67,7 @@ import { ZonesController } from './zones/zones.controller';
     OrgModule,
     IngestionModule,
     TicketingModule,
+    DevicesModule,
     RecommenderModule,
     SchedulingModule,
     SharedPoolModule,
@@ -92,9 +97,12 @@ import { ZonesController } from './zones/zones.controller';
     CommonKitAdminController,
     SnapshotsController,
     TicketsController,
+    DevicesController,
     TroubleshootController,
+    VehicleUnavailabilityController,
     SchedulesController,
     BatchesController,
+    IntradayUpdatesController,
     SharedPoolController,
     SePlannerController,
     DashboardController,

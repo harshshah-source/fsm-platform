@@ -5,6 +5,7 @@ import { BatchAssignmentService } from './batch-assignment.service';
 import { DAY_PLAN_NOTIFIER, LoggingDayPlanNotifier } from './day-plan-notifier';
 import { DayPlanQueryService } from './day-plan-query.service';
 import { OverrideService } from './override.service';
+import { SameDayUpdateService } from './same-day-update.service';
 import { SOFT_STATE_CONFLICT } from './soft-state-conflict';
 import { PrismaSoftStateConflictPort } from '../soft-state/soft-state-conflict.adapter';
 import { ZmScheduleQueryService } from './zm-schedule-query.service';
@@ -21,10 +22,11 @@ import { ZmScheduleQueryService } from './zm-schedule-query.service';
     DayPlanQueryService,
     ZmScheduleQueryService,
     OverrideService,
+    SameDayUpdateService,
     { provide: DAY_PLAN_NOTIFIER, useClass: LoggingDayPlanNotifier },
     // Issue 15 AC#7 — the real soft_states-backed conflict source replaces the 13a no-conflict seam.
     { provide: SOFT_STATE_CONFLICT, useClass: PrismaSoftStateConflictPort },
   ],
-  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, OverrideService],
+  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, OverrideService, SameDayUpdateService],
 })
 export class SchedulingModule {}

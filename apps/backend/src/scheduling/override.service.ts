@@ -61,6 +61,10 @@ export class OverrideService {
     scope: ZmScope,
     actor: ActorContext,
     now: Date = new Date(),
+    /** When set (Issue 31 same-day update), the change audits under this action (e.g. `MANUAL_ZM_UPDATE`)
+     *  with an `updateType` in metadata, so it surfaces in the Intra-day Queue instead of as a plain
+     *  `BATCH_OVERRIDE_*` morning-batch override. Only REMOVE_TICKET / REORDER honour it. */
+    auditAction?: string,
   ): Promise<OverrideOutcome> {
     const batch = await this.prisma.plantBatchAssignment.findUnique({
       where: { batchId },
@@ -91,11 +95,11 @@ export class OverrideService {
 
     switch (cmd.action) {
       case 'REMOVE_TICKET':
-        return this.removeTicket(batch.batchId, batch.scheduleId, batch.seId, cmd, actor, now);
+        return this.removeTicket(batch.batchId, batch.scheduleId, batch.seId, cmd, actor, now, auditAction);
       case 'DEFER_TICKET':
         return this.deferTicket(batch.batchId, batch.scheduleId, batch.seId, cmd, actor, now);
       case 'REORDER':
-        return this.reorder(batch.batchId, batch.scheduleId, batch.seId, cmd, actor, now);
+        return this.reorder(batch.batchId, batch.scheduleId, batch.seId, cmd, actor, now, auditAction);
       case 'SWAP_SE':
         return this.swapSe(batch, cmd, actor, now);
       case 'REASSIGN':
@@ -114,6 +118,7 @@ export class OverrideService {
     cmd: Extract<OverrideCommand, { action: 'REMOVE_TICKET' }>,
     actor: ActorContext,
     now: Date,
+    auditAction?: string,
   ): Promise<OverrideOutcome> {
     const bat = await this.prisma.batchAssignmentTicket.findFirst({
       where: { batchId, ticketId: cmd.ticketId, removedAt: null },
@@ -126,7 +131,7 @@ export class OverrideService {
         ticketId: cmd.ticketId,
         reasonCode: cmd.reasonCode,
         seId,
-      }),
+      }, auditAction),
       async (tx) => {
         await tx.batchAssignmentTicket.update({
           where: { id: bat.id },
@@ -183,6 +188,7 @@ export class OverrideService {
     cmd: Extract<OverrideCommand, { action: 'REORDER' }>,
     actor: ActorContext,
     now: Date,
+    auditAction?: string,
   ): Promise<OverrideOutcome> {
     const batches = await this.prisma.plantBatchAssignment.findMany({
       where: { scheduleId },
@@ -198,7 +204,7 @@ export class OverrideService {
     ordered.splice(pos - 1, 0, target);
 
     await this.audit.withAudit(
-      this.auditEntry(actor, batchId, { action: cmd.action, stopSequence: pos, reasonCode: cmd.reasonCode, seId }),
+      this.auditEntry(actor, batchId, { action: cmd.action, stopSequence: pos, reasonCode: cmd.reasonCode, seId }, auditAction),
       async (tx) => {
         for (let i = 0; i < ordered.length; i++) {
           await tx.plantBatchAssignment.update({
@@ -226,6 +232,12 @@ export class OverrideService {
     scope: ZmScope,
     actor: ActorContext,
     now: Date = new Date(),
+    /**
+     * Audit action stamped on the assignment row. Defaults to `CRITICAL_ASSIGN` (the Grouped Critical
+     * Work Queue one-click). The ZM manual same-day ADD path (Issue 31) passes `MANUAL_ZM_UPDATE` so
+     * the change surfaces in the Intra-day Queue view instead of as a system CRITICAL insertion.
+     */
+    auditAction = 'CRITICAL_ASSIGN',
   ): Promise<AssignOutcome> {
     const ticket = await this.prisma.ticket.findUnique({ where: { ticketId }, include: { plant: true } });
     if (!ticket || !this.inScope(ticket.plant.zoneId, scope)) return { result: 'NOT_FOUND' };
@@ -239,10 +251,12 @@ export class OverrideService {
         actorId: actor.userId,
         actorRole: actor.role,
         actedAsRole: actor.actedAsRole ?? null,
-        action: 'CRITICAL_ASSIGN',
+        action: auditAction,
         entityType: 'ticket',
         entityId: ticketId,
-        metadata: { seId } as Prisma.InputJsonValue,
+        metadata: (auditAction === 'MANUAL_ZM_UPDATE'
+          ? { seId, updateType: 'ADD' }
+          : { seId }) as Prisma.InputJsonValue,
       },
       async (tx) => {
         const sched = await this.ensureSchedule(tx, seId, { zoneId: ticket.plant.zoneId, dateFrom: day, dateTo: day }, now);
@@ -268,7 +282,7 @@ export class OverrideService {
       },
     );
 
-    await this.notifier.dayPlanOverridden({ seId, scheduleId: ids.scheduleId, batchId: ids.batchId, action: 'CRITICAL_ASSIGN' });
+    await this.notifier.dayPlanOverridden({ seId, scheduleId: ids.scheduleId, batchId: ids.batchId, action: auditAction });
     return { result: 'OK', scheduleId: String(ids.scheduleId), batchId: String(ids.batchId), ticketId, seId };
   }
 
@@ -412,15 +426,25 @@ export class OverrideService {
     });
   }
 
-  private auditEntry(actor: ActorContext, batchId: bigint, metadata: Record<string, unknown>) {
+  private auditEntry(
+    actor: ActorContext,
+    batchId: bigint,
+    metadata: Record<string, unknown>,
+    actionOverride?: string,
+  ) {
+    // Issue 31: a same-day update re-tags the action (e.g. MANUAL_ZM_UPDATE) and normalises the
+    // command into an Intra-day Queue `updateType` (REMOVE_TICKET → REMOVE, REORDER → REORDER).
+    const meta = actionOverride
+      ? { ...metadata, updateType: String(metadata.action).replace(/_TICKET$/, '') }
+      : metadata;
     return {
       actorId: actor.userId,
       actorRole: actor.role,
       actedAsRole: actor.actedAsRole ?? null,
-      action: `BATCH_OVERRIDE_${String(metadata.action)}`,
+      action: actionOverride ?? `BATCH_OVERRIDE_${String(metadata.action)}`,
       entityType: 'plant_batch_assignment',
       entityId: String(batchId),
-      metadata: metadata as Prisma.InputJsonValue,
+      metadata: meta as Prisma.InputJsonValue,
     };
   }
 

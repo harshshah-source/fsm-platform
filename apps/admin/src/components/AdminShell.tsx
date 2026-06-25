@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthProvider';
 const NAV_ITEMS: { label: string; to?: string }[] = [
   { label: 'Zone Dashboard', to: '/' },
   { label: 'Schedules', to: '/schedules' },
-  { label: 'Intra-day' },
+  { label: 'Intra-day', to: '/intraday' },
   { label: 'Tickets', to: '/tickets' },
   { label: 'Engineers', to: '/engineers' },
   { label: 'Leave Requests', to: '/leave-requests' },
@@ -76,6 +76,15 @@ export function AdminShell() {
             <li className="rounded px-2 py-1">
               <Link to="/component-requests" className="text-slate-700 hover:underline">
                 Component Requests
+              </Link>
+            </li>
+          )}
+          {/* Vehicle Unavailability Review — ZM dual-SLA-clock review (Issue 28); manager roles only,
+              the /readiness/vehicle-unavailability route is RoleRoute-gated as the second line. */}
+          {isManager && (
+            <li className="rounded px-2 py-1">
+              <Link to="/readiness/vehicle-unavailability" className="text-slate-700 hover:underline">
+                Vehicle Unavailability
               </Link>
             </li>
           )}
