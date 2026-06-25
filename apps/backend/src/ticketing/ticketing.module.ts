@@ -1,6 +1,12 @@
 import { Module } from '@nestjs/common';
+import { AuditModule } from '../audit/audit.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AutoRecoveryService } from './auto-recovery.service';
+import {
+  CUSTOMER_CONFIRMATION_NOTIFIER,
+  LoggingCustomerConfirmationNotifier,
+} from './customer-confirmation-notifier';
+import { NonOperationalService } from './non-operational.service';
 import { RepeatEscalationService } from './repeat-escalation.service';
 import { TicketCreationService } from './ticket-creation.service';
 import { TicketQueryService } from './ticket-query.service';
@@ -15,7 +21,7 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
  * Shared Pool surfaces are layered on by later issues.
  */
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, AuditModule],
   providers: [
     TicketCreationService,
     TicketQueryService,
@@ -23,6 +29,8 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
     RepeatEscalationService,
     TroubleshootSubmissionService,
     VehicleUnavailabilityService,
+    NonOperationalService,
+    { provide: CUSTOMER_CONFIRMATION_NOTIFIER, useClass: LoggingCustomerConfirmationNotifier },
   ],
   exports: [
     TicketCreationService,
@@ -31,6 +39,7 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
     RepeatEscalationService,
     TroubleshootSubmissionService,
     VehicleUnavailabilityService,
+    NonOperationalService,
   ],
 })
 export class TicketingModule {}

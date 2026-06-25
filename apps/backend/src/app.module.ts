@@ -54,6 +54,10 @@ import { TicketingModule } from './ticketing/ticketing.module';
 import { TicketsController } from './ticketing/tickets.controller';
 import { TroubleshootController } from './ticketing/troubleshoot.controller';
 import { VehicleUnavailabilityController } from './ticketing/vehicle-unavailability.controller';
+import {
+  NonOperationalController,
+  NonOperationalPublicController,
+} from './ticketing/non-operational.controller';
 import { VerificationModule } from './verification/verification.module';
 import { VerificationController } from './verification/verification.controller';
 import { ZonesController } from './zones/zones.controller';
@@ -100,6 +104,8 @@ import { ZonesController } from './zones/zones.controller';
     DevicesController,
     TroubleshootController,
     VehicleUnavailabilityController,
+    NonOperationalController,
+    NonOperationalPublicController,
     SchedulesController,
     BatchesController,
     IntradayUpdatesController,

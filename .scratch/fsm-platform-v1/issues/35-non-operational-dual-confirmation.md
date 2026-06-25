@@ -1,7 +1,12 @@
 # 35 — Non-Operational dual-confirmation marking
 
-Status: ready-for-agent
+Status: done
 Type: AFK
+Done: 2026-06-25 — full dual-confirmation lifecycle (request → manager + customer legs → CONFIRMED),
+CONFIRMED side-effects (auto-close tickets + Recovery-Ticket auto-create + eligibility exclusion),
+customer one-time tokenised-email seam, and admin dual-confirmation queue + Mark modal. UI refinements
+(modal ticket enumeration + queue zone-scope + Recovery toast) → #67. See
+`docs/progress/35-non-operational-dual-confirmation.md`.
 
 ## What to build
 
@@ -9,12 +14,12 @@ The Non-Operational marking lifecycle (`/non-op`). Dual-confirmation queue sorte
 
 ## Acceptance criteria
 
-- [ ] Dual-confirmation queue with correct row states and days-elapsed badges
-- [ ] CONFIRMED reachable only after both parties confirm (or OH 7-day override-confirm with reason)
-- [ ] CONFIRMED blocks new Failure Cycles and auto-closes in-flight Tickets
-- [ ] RECURRING device on CONFIRMED auto-creates a Recovery Ticket and queues it (toast with number)
-- [ ] Confirmed device excluded from Fleet Uptime eligible set
-- [ ] Customer confirmation via one-time tokenised email link
+- [x] Dual-confirmation queue with correct row states and days-elapsed badges
+- [x] CONFIRMED reachable only after both parties confirm (or OH 7-day override-confirm with reason)
+- [x] CONFIRMED blocks new Failure Cycles and auto-closes in-flight Tickets
+- [x] RECURRING device on CONFIRMED auto-creates a Recovery Ticket and queues it (toast → #67; number on row)
+- [x] Confirmed device excluded from Fleet Uptime eligible set
+- [x] Customer confirmation via one-time tokenised email link
 
 ## Blocked by
 

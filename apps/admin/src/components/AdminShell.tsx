@@ -97,6 +97,15 @@ export function AdminShell() {
               </Link>
             </li>
           )}
+          {/* Non-Operational dual-confirmation queue (Issue 35); manager roles only — the
+              /readiness/non-operational route is RoleRoute-gated as the matching second line. */}
+          {isManager && (
+            <li className="rounded px-2 py-1">
+              <Link to="/readiness/non-operational" className="text-slate-700 hover:underline">
+                Non-Operational
+              </Link>
+            </li>
+          )}
           {/* Settings is Operations-Head-only (Issue 02 AC#1); other roles never see the link
               and the /settings route is RoleRoute-gated as the second line of defence. */}
           {session.role === 'OPERATIONS_HEAD' && (

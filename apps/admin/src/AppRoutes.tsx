@@ -11,6 +11,7 @@ import { DashboardHome } from './pages/dashboard/DashboardHome';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
+import { NonOperationalQueuePage } from './pages/readiness/NonOperationalQueuePage';
 import { SeManagementPage } from './pages/engineers/SeManagementPage';
 import { LeaveRequestsPage } from './pages/engineers/LeaveRequestsPage';
 import { IntradayQueuePage } from './pages/schedules/IntradayQueuePage';
@@ -114,6 +115,16 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <VehicleUnavailabilityPage />
+              </RoleRoute>
+            }
+          />
+          {/* Non-Operational dual-confirmation queue — manager roles (Issue 35). Override-confirm is
+              Operations-Head-only, gated in-page; the route is RoleRoute-gated as the second line. */}
+          <Route
+            path="/readiness/non-operational"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <NonOperationalQueuePage />
               </RoleRoute>
             }
           />

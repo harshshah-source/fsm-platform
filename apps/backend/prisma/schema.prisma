@@ -1104,6 +1104,21 @@ enum NonOpState {
   @@map("nonop_state")
 }
 
+/// Non-Operational reason codes (CONTEXT.md §14). `OTHER` requires free-text (`reason_text`).
+/// The RECURRING-deal Recovery-Ticket auto-create fires only for the physical-retrieval subset
+/// {VEHICLE_SCRAPPED, VEHICLE_SOLD, COMPANY_PAUSED, DEVICE_REPLACEMENT_PENDING}.
+enum NonOpReason {
+  VEHICLE_SCRAPPED
+  VEHICLE_SOLD
+  VEHICLE_ACCIDENT
+  COMPANY_PAUSED
+  DEVICE_REPLACEMENT_PENDING
+  COMPLIANCE_HOLD
+  OTHER
+
+  @@map("nonop_reason")
+}
+
 /// A single GPS unit — the per-device-id verification anchor (schema D2). `deviceId` is the business
 /// bigint from the AutoPlant source (not a surrogate). `currentVehicleId` denormalises the active
 /// fitment; the time-windowed `vehicle_device_mappings` history table lands with verification (Issue 18).
@@ -1277,12 +1292,16 @@ model Ticket {
   repeatFailure      Boolean         @default(false) @map("repeat_failure")
   lastStateChangedAt DateTime        @map("last_state_changed_at") @db.Timestamptz(6)
   version            Int             @default(0)
+  // Back-reference to the Non-Op marking that closed this ticket (CLOSED_NON_OPERATIONAL) or
+  // auto-created it (the RECOVERY ticket) — Issue 35 / CONTEXT.md §14.
+  nonOpMarkingId     String?         @map("nonop_marking_id") @db.Uuid
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   failureCycle FailureCycle? @relation(fields: [failureCycleId], references: [cycleId])
   device       Device        @relation(fields: [deviceId], references: [deviceId])
   vehicle      Vehicle?      @relation(fields: [vehicleId], references: [vehicleId])
+  nonOpMarking NonOperationalMarking? @relation(fields: [nonOpMarkingId], references: [markingId])
   plant           Plant            @relation(fields: [plantId], references: [plantId])
   company         Company          @relation(fields: [companyId], references: [companyId])
   events          TicketEvent[]
@@ -1299,6 +1318,7 @@ model Ticket {
   @@index([status, plantId])
   @@index([workType, status])
   @@index([companyId])
+  @@index([nonOpMarkingId])
   // Shared Pool query: partial `(plant_id) WHERE status='OPEN' AND assignment_state='UNASSIGNED'`
   // (Issue 12) — not expressible in Prisma; added by raw SQL in 20260621190000_add_shared_pool_index.
   @@map("tickets")
@@ -1355,9 +1375,33 @@ model NonOperationalMarking {
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  device Device @relation(fields: [deviceId], references: [deviceId])
+  // Issue 35 dual-confirmation lifecycle (additive). Reason + window captured at request; deal type
+  // snapshotted so the Recovery-Ticket rule is decided against the value at marking time.
+  reasonCode             NonOpReason? @map("reason_code")
+  reasonText             String?      @map("reason_text")
+  dealTypeAtMarking      DealType?    @map("deal_type_at_marking")
+  requestedBy            String?      @map("requested_by") @db.Uuid
+  requestedByRole        Role?        @map("requested_by_role")
+  // Sort key for the dual-confirmation queue + days-elapsed badge; reset on each state advance.
+  awaitingSince          DateTime?    @map("awaiting_since") @db.Timestamptz(6)
+  managerConfirmedAt     DateTime?    @map("manager_confirmed_at") @db.Timestamptz(6)
+  managerConfirmedBy     String?      @map("manager_confirmed_by") @db.Uuid
+  customerConfirmedAt    DateTime?    @map("customer_confirmed_at") @db.Timestamptz(6)
+  // One-time tokenised email link for customer confirmation (v1, no portal).
+  customerToken          String?      @unique @map("customer_token")
+  customerTokenExpiresAt DateTime?    @map("customer_token_expires_at") @db.Timestamptz(6)
+  confirmedAt            DateTime?    @map("confirmed_at") @db.Timestamptz(6)
+  // Operations-Head 7-day no-response override-confirm; reason mandatory.
+  overrideConfirmedBy    String?      @map("override_confirmed_by") @db.Uuid
+  overrideReason         String?      @map("override_reason")
+  // The RECOVERY ticket auto-created on CONFIRMED for a qualifying RECURRING device (toast number).
+  recoveryTicketId       String?      @map("recovery_ticket_id") @db.Uuid
+
+  device  Device   @relation(fields: [deviceId], references: [deviceId])
+  tickets Ticket[]
 
   @@index([deviceId, state])
   @@index([state, effectiveTo])
+  @@index([state, awaitingSince])
   @@map("non_operational_markings")
 }
