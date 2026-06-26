@@ -137,7 +137,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 - FE-11 — SE Planner grid parity → FE-03/04  *(ref 16)*  **(done — PageHeader + MetricStrip + Coverage column + token grid; cell-*/intent-*/batch-*/plant-drag-source ids, drag dataTransfer, POST/DELETE CRUD preserved)**
 - FE-12 — Schedules + Schedule Detail parity (no Approve gate) → FE-03/04  *(ref 12)*  **(done — SchedulesPage on DataTable+MetricStrip (no Approve gate); ScheduleDetailPage reskinned (AUTO framing, token stop cards + Button override controls); all override/conflict selectors preserved; reasoning stays gated; per-ticket PARTIAL/CRITICAL/tier badges → #71)**
 - FE-13 — Intra-day Queue parity → FE-03/04  *(ref 13)*  **(done — PageHeader + MetricCard row + DataTable severity accents; iq-metric-*/iq-row-* ids preserved; SE-Acceptance column forward-compatible placeholder for 29/30)**
-- FE-14 — Readiness / Vehicle Unavailability parity (no EXPECTED_BACK) → FE-03/04  *(ref 10/11)*
+- FE-14 — Readiness / Vehicle Unavailability parity (no EXPECTED_BACK) → FE-03/04  *(ref 10/11)*  **(done — PageHeader + MetricCard strip + DataTable dual-clock cells + StatusPill; vu-metric-*/vu-row-*/vu-primary-*/vu-secondary-* ids + Confirm-date/Resume-SLA actions preserved; EXPECTED_BACK omitted)**
 
 **Phase F4 — Warehouse & components:**
 - FE-15 — Component queues (one recipe) → FE-03/04  *(ref 18/19)*

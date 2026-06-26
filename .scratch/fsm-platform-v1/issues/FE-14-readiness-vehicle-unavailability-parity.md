@@ -1,6 +1,6 @@
 # FE-14 — Readiness / Vehicle Unavailability parity
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Frontend · Phase F3
 Effort: M
 
@@ -18,9 +18,21 @@ WAITING_CONFIRMATION). **Omit `EXPECTED_BACK`** (removed — documented deviatio
 
 ## Acceptance criteria
 
-- [ ] Readiness/VU table matches `10`/`11` with colour-coded status + dual-clock cells
-- [ ] Status vocabulary matches current enum (no `EXPECTED_BACK`)
-- [ ] ZM review actions preserved (API + selectors)
+- [x] Readiness/VU table matches `10`/`11` with colour-coded status + dual-clock cells
+- [x] Status vocabulary matches current enum (no `EXPECTED_BACK`)
+- [x] ZM review actions preserved (API + selectors)
+
+## Outcome (done — presentation-only, FE-14)
+
+`VehicleUnavailabilityPage` re-skinned onto `PageHeader` (+ `DateRangeChips`) + a tone-coded `MetricCard`
+strip + the canonical `DataTable` with dual-clock cells (primary = warning + "(paused)", secondary =
+critical/true-elapsed) and a `StatusPill`. The paused rows carry a warning left-accent.
+
+`EXPECTED_BACK` is omitted (removed — documented deviation §9.2). The `vu-metric-strip` / `vu-metric-*` /
+`vu-row-*` / `vu-primary-*` / `vu-secondary-*` test ids, the `Vehicle Unavailability Reports`
+aria-label, the Confirm-date (edit `Field`/`Input` + Save/Cancel) and Resume-SLA manager actions, and the
+ticket→drawer navigation are all preserved. `apiVehicleUnavailability` / `apiConfirmVuDate` /
+`apiResumeVuSla` unchanged. Verified: admin `tsc --noEmit` clean · vitest **98/98** · `vite build` OK.
 
 ## Reusable components introduced
 
