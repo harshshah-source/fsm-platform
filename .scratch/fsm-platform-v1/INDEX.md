@@ -89,6 +89,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 70 — Per-ticket troubleshoot/install **form read** endpoint (`GET /tickets/:id/forms`) → 16  *(surfaced by FE-09 2026-06-26: the Ticket Detail Drawer Forms tab has no backend read; ticket detail payload carries no form data. Blocks FE-09 AC#2 Forms tab only — Verification/Assignment-History/Components are buildable. Needs SE troubleshoot-form persistence read + RBAC scope. (#69 is the Install-create admin UI per #33.))*
 - 71 — Schedule-stop ticket **state on the payload** (slaBucket / tier / PARTIAL_RECOVERY flag) → 13b, 18  *(surfaced by FE-12 2026-06-26: `ScheduleStopTicket` carries only `ticketId`/`sortOrder`/`reasoning`; the reasoning (tier/bucket) is gated behind "Why suggested?" and must stay hidden, so the reference 12 per-ticket PARTIAL/CRITICAL/tier card badges have no un-gated source. Add ungated ticket-state to the stop payload, then add the badges to the day-plan stop cards. FE-12 ships without these badges.)*
 - 72 — `Modal`-ize the remaining `window.prompt` reason legs → FE-16, 36, 37, 35  *(surfaced by FE-16 2026-06-26: recovery Reschedule / Close-FAILED_RECOVERY reason + non-op Override-confirm reason still use `window.prompt`; the queue tests assert a direct/prompt→POST on click, so converting to a confirm/reason `Modal` (DESIGN-SYSTEM §5.4) needs coordinated updates to `recovery-decision-queue.test` + `non-operational-queue.test`. Presentation-only, no API change. Receipt-confirm may also gain a confirm `Modal`.)*
+- 73 — Warehouse **stock read** endpoint + Low-Stock / Fulfillment-SLA KPIs → 21, 24  *(surfaced by FE-17 2026-06-26: the Warehouse-Manager dashboard (ref 05) Warehouse Stock table + Low-Stock/Fulfillment-SLA KPI cards have no backend source — `api/inventory` exposes only `apiComponentBlocked`. Add a zone-warehouse stock-level read (per-SKU on-hand/reserved/available + low-stock threshold), then fill `WarehouseDashboard`'s stock `SectionCard` + KPIs. FE-17 ships chrome + gated placeholders.)*
 
 ## Mobile (foundation + M-series UI)
 
@@ -143,7 +144,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 **Phase F4 — Warehouse & components:**
 - FE-15 — Component queues (one recipe) → FE-03/04  *(ref 18/19)*  **(done — queue recipe (MetricCard+DataTable+StatusPill+AgeChip) on ComponentRequestsPage (+readOnly) & ShadowUseQueuePage; cr-*/su-* ids + WM action legs preserved; mandatory-reason legs stay inline, not Modal/Toast — selector-contract priority)**
 - FE-16 — Recovery + Non-Op queues parity → FE-03/04  *(ref 20)*  **(done — recipe on RecoveryReceipt/RecoveryDecision/NonOperational queues; Non-Op Mark dual-confirm modal preserved+reskinned; rcv-*/rdq-*/nonop-* ids preserved; window.prompt→Modal upgrade → #72)**
-- FE-17 — Warehouse persona dashboard → FE-07, FE-15  *(ref 05)*
+- FE-17 — Warehouse persona dashboard → FE-07, FE-15  *(ref 05)*  **(done — DashboardHome thin role selector → WarehouseDashboard (WM) vs ManagerDashboard; Zone Warehouse Fulfillment KPI + Component-Request-Queue + Shadow-Use panels over existing WM data; Warehouse Stock table + Low-Stock/Fulfillment KPIs gated → #73)**
 
 **Phase F5 — Config & analytics:**
 - FE-18 — Settings parity → FE-03/04  *(ref 26)*
