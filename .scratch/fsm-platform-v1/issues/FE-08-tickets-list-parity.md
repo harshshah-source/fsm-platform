@@ -1,6 +1,6 @@
 # FE-08 — Tickets list parity
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Frontend · Phase F2
 Effort: S/M
 
@@ -18,9 +18,21 @@ params; server still returns rows pre-sorted + zone-scoped.
 
 ## Acceptance criteria
 
-- [ ] Filter row uses `FilterBar` (work type/status/SLA bucket/assignment/company/plant) with `aria-label`s preserved
-- [ ] Dense `DataTable` matches `07` (badge columns, ID formatting, hover, row click → drawer)
-- [ ] No change to fetch logic / query params
+- [x] Filter row uses `FilterBar` (work type/status/SLA bucket/assignment/company/plant) with `aria-label`s preserved
+- [x] Dense `DataTable` matches `07` (badge columns, ID formatting, hover, row click → drawer)
+- [x] No change to fetch logic / query params
+
+## Outcome (done — presentation-only, FE-08)
+
+`TicketsPage` re-skinned onto `PageHeader` ("Ticket Operations") + `FilterBar` (`FilterSelect` ×4 +
+`SearchInput` ×2) + the canonical `DataTable`. Columns: two-line Ticket (id8 mono + device), Work Type,
+two-line Plant/Company, `TierBadge`, `StatusPill`, `BucketBadge`, `AgeChip` (from `createdAt`), and the
+inline condition flags. Added a loading-skeleton state.
+
+`apiTicketsList` fetch + query params, server SLA-descending order, the `Tickets` table `aria-label`,
+all six filter `aria-label`s, the `bucket-*` / `badge-*` test ids, and row-click → `/tickets/:id` drawer
+navigation are all preserved (`BucketBadge` / `InlineBadges` reused unchanged). Verified: admin
+`tsc --noEmit` clean · vitest **98/98** · `vite build` OK.
 
 ## Reusable components introduced
 

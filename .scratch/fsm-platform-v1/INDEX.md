@@ -126,7 +126,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 - FE-07 — Role-variant dashboards (CSM-acting / Central / Ops-Head) → FE-06  *(ref 02/03/04)*  **(done — DashboardHome variant selector; OpsHead Pan-India + Central Tower + ZM/acting collapse; ScorecardTable + EscalationQueueList + BUCKET_HEX; Auto-Dispatch row = documented omission → BE-42/FE-24)**
 
 **Phase F2 — Tickets:**
-- FE-08 — Tickets list parity → FE-04  *(ref 07)*
+- FE-08 — Tickets list parity → FE-04  *(ref 07)*  **(done — PageHeader + FilterBar + DataTable badge columns; fetch/query-params + filter aria-labels + bucket-*/badge-* test ids + row-click drawer nav preserved)**
 - FE-09 — Ticket Detail Drawer parity + fill stub tabs → FE-04, FE-08  *(ref 08/09/28)*
 
 **Phase F3 — Daily ops:**
