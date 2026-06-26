@@ -123,7 +123,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 
 **Phase F1 — Dashboard:**
 - FE-06 — Zone Dashboard (ZM) parity → FE-02/03/04/05  *(ref 01)*  **(done — KPI MetricStrip + reference Action-Required grid + DataTable overviews + Critical-Queue cards; selector contract preserved; Fleet Uptime % = documented omission → BE-39/40/FE-21; Playwright baseline → FE-00)**
-- FE-07 — Role-variant dashboards (CSM-acting / Central / Ops-Head) → FE-06  *(ref 02/03/04)*
+- FE-07 — Role-variant dashboards (CSM-acting / Central / Ops-Head) → FE-06  *(ref 02/03/04)*  **(done — DashboardHome variant selector; OpsHead Pan-India + Central Tower + ZM/acting collapse; ScorecardTable + EscalationQueueList + BUCKET_HEX; Auto-Dispatch row = documented omission → BE-42/FE-24)**
 
 **Phase F2 — Tickets:**
 - FE-08 — Tickets list parity → FE-04  *(ref 07)*

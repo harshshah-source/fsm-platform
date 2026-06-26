@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   apiActionRequired,
   apiCompanyPlantOverview,
@@ -10,25 +10,24 @@ import {
   type ZoneOverviewRow,
 } from '../../api/dashboard';
 import { apiZoneEngineers, type ZoneEngineer } from '../../api/schedules';
-import { DateRangeChips, MetricStrip, PageHeader, type Metric } from '../../components/data';
-import { Badge } from '../../components/ui';
-import { ActionRequiredPanel } from './ActionRequiredPanel';
-import { CompanyPlantTable } from './CompanyPlantTable';
-import { CriticalQueue } from './CriticalQueue';
-import { ZoneOverviewTable } from './ZoneOverviewTable';
+import { useAuth } from '../../auth/AuthProvider';
+import { CentralDashboard } from './CentralDashboard';
+import { OpsHeadDashboard } from './OpsHeadDashboard';
+import { ZmDashboard, type DashboardData } from './ZmDashboard';
 
 /**
- * Zone Operations Dashboard landing (Issue 06 · FE-06 parity). Composes the KPI MetricStrip, the
- * Action Required panel, Zone Overview, Company/Plant Overview, and the Grouped Critical Work Queue.
- * Role/zone scoping is enforced server-side (a ZM only ever receives their own zone; CSM / Operations
- * Head see all zones).
+ * Dashboard landing — loads the role-scoped aggregations once and selects the variant body by role and
+ * acting context (Issue 06 / FE-06 / FE-07). The backend already scopes the data (a ZM sees their own
+ * zone; CSM / Operations Head see every zone), so the variants differ only in presentation — no new
+ * endpoints are introduced.
  *
- * FE-06 is a presentation-only refactor: the data loading, role scoping, assign wiring, and the test
- * selector contract are unchanged. The KPI strip derives its figures from the already-loaded dashboard
- * data — no new endpoint is introduced. Fleet Uptime % has no source until the Fleet Uptime report
- * (BE-39/40, surfaced by FE-21), so its card renders the reference chrome with a "—" placeholder.
+ * - Operations Head → Pan-India Fleet Command (reference 04)
+ * - Central Service Manager, not acting → Cross-Zone Central Tower (reference 03)
+ * - Zonal Manager, or any role acting as ZM in a zone → Zone Operations Dashboard (reference 01/02;
+ *   the amber Backup-Coverage banner is rendered by the shell, Issue 27)
  */
 export function DashboardHome() {
+  const { session, actingZone } = useAuth();
   const [zones, setZones] = useState<ZoneOverviewRow[]>([]);
   const [companyPlants, setCompanyPlants] = useState<CompanyPlantRow[]>([]);
   const [critical, setCritical] = useState<CriticalQueueGroup[]>([]);
@@ -67,59 +66,20 @@ export function DashboardHome() {
       .catch(() => undefined);
   }, []);
 
-  // KPI strip derived from already-loaded data (no new endpoint). Uptime is gated on BE-39/40.
-  const metrics: Metric[] = useMemo(() => {
-    const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
-    const criticalCount = critical.reduce((s, g) => s + g.tickets.length, 0);
-    const liveSources = actions.filter((a) => a.available && a.count > 0);
-    const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
-    return [
-      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
-      {
-        label: 'Inactive Devices',
-        value: inactive,
-        hint: `across ${zones.length} zone${zones.length === 1 ? '' : 's'}`,
-        tone: 'warning',
-      },
-      {
-        label: 'Critical+ Tickets',
-        value: criticalCount,
-        hint: `${critical.length} plant cluster${critical.length === 1 ? '' : 's'}`,
-        tone: 'critical',
-      },
-      {
-        label: 'Action Required',
-        value: actionTotal,
-        hint: `${liveSources.length} live source${liveSources.length === 1 ? '' : 's'}`,
-        tone: 'info',
-      },
-    ];
-  }, [zones, critical, actions]);
+  const data: DashboardData = {
+    zones,
+    companyPlants,
+    critical,
+    actions,
+    engineers,
+    error,
+    onAssigned: refreshCritical,
+  };
 
-  return (
-    <div>
-      <PageHeader
-        title="Zone Operations Dashboard"
-        subtitle="Live fleet readiness, action queue, and CRITICAL+ work for your zone."
-        actions={
-          <>
-            <Badge tone="success" dot>
-              Snapshot Healthy
-            </Badge>
-            <DateRangeChips />
-          </>
-        }
-      />
-      {error && (
-        <p role="alert" className="mb-4 text-sm text-critical">
-          {error}
-        </p>
-      )}
-      <MetricStrip metrics={metrics} />
-      <ActionRequiredPanel cards={actions} />
-      <ZoneOverviewTable rows={zones} />
-      <CompanyPlantTable rows={companyPlants} />
-      <CriticalQueue groups={critical} engineers={engineers} onAssigned={refreshCritical} />
-    </div>
-  );
+  // Acting as ZM in a zone collapses every role to the Zone Operations view (reference 02).
+  if (!actingZone) {
+    if (session?.role === 'OPERATIONS_HEAD') return <OpsHeadDashboard {...data} />;
+    if (session?.role === 'CENTRAL_SERVICE_MANAGER') return <CentralDashboard {...data} />;
+  }
+  return <ZmDashboard {...data} />;
 }
