@@ -41,6 +41,33 @@ type RawGroupRow = {
   seRepaired: number;
 };
 
+export interface SoftInactivePoint {
+  capturedAt: string;
+  period: string;
+  softInactiveCount: number;
+  eligibleDeviceCount: number;
+  deficitMode: boolean;
+}
+export interface SoftInactiveZoneSeries {
+  zoneId: string;
+  zoneName: string;
+  points: SoftInactivePoint[];
+}
+export interface SoftInactiveTrend {
+  sinceDays: number;
+  zones: SoftInactiveZoneSeries[];
+}
+
+type RawTrendRow = {
+  zoneId: string;
+  zoneName: string;
+  capturedAt: Date;
+  period: string;
+  softInactiveCount: number;
+  eligibleDeviceCount: number;
+  deficitMode: boolean;
+};
+
 /**
  * Reports read surface (Issue 39). `fleetUptime` serves the Fleet Uptime % report purely from
  * `device_downtime_summary_monthly` (the aggregation worker's output) — never raw telemetry or
@@ -86,6 +113,40 @@ export class ReportsService {
       fleet: { ...fleet, uptimePct: uptimePct(downtime, window) },
       rows: out,
     };
+  }
+
+  /**
+   * Soft Inactive Count trend (Issue 40 AC#3): the per-zone twice-daily series for the last `days`
+   * (default 7, max 90), read purely from `soft_inactive_count_history`. Operations-Head view.
+   */
+  async softInactiveTrend(opts: { days?: number } = {}, now: Date = new Date()): Promise<SoftInactiveTrend> {
+    const days = Math.min(Math.max(Math.trunc(opts.days ?? 7), 1), 90);
+    const cutoff = new Date(now.getTime() - days * 86_400_000);
+    const rows = await this.prisma.$queryRaw<RawTrendRow[]>(Prisma.sql`
+      SELECT z.zone_id::text AS "zoneId", z.name AS "zoneName", h.captured_at AS "capturedAt",
+             h.period AS "period", h.soft_inactive_count AS "softInactiveCount",
+             h.eligible_device_count AS "eligibleDeviceCount", h.deficit_mode AS "deficitMode"
+      FROM soft_inactive_count_history h
+      JOIN zones z ON z.zone_id = h.zone_id
+      WHERE h.captured_at >= ${cutoff}
+      ORDER BY z.name, h.captured_at ASC`);
+
+    const byZone = new Map<string, SoftInactiveZoneSeries>();
+    for (const r of rows) {
+      let series = byZone.get(r.zoneId);
+      if (!series) {
+        series = { zoneId: r.zoneId, zoneName: r.zoneName, points: [] };
+        byZone.set(r.zoneId, series);
+      }
+      series.points.push({
+        capturedAt: r.capturedAt.toISOString(),
+        period: r.period,
+        softInactiveCount: r.softInactiveCount,
+        eligibleDeviceCount: r.eligibleDeviceCount,
+        deficitMode: r.deficitMode,
+      });
+    }
+    return { sinceDays: days, zones: [...byZone.values()] };
   }
 
   private queryGroups(groupBy: FleetUptimeGroupBy, monthStart: Date, zoneFilter: Prisma.Sql): Promise<RawGroupRow[]> {

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaModule } from '../prisma/prisma.module';
+import { SoftInactiveCountService } from '../reports/soft-inactive-count.service';
 import { CandidateSelectionService } from './candidate-selection.service';
 import { RecommenderService } from './recommender.service';
 
@@ -14,7 +15,7 @@ import { RecommenderService } from './recommender.service';
  */
 @Module({
   imports: [PrismaModule],
-  providers: [CandidateSelectionService, RecommenderService, InventoryService, SeAvailabilityService],
+  providers: [CandidateSelectionService, RecommenderService, InventoryService, SeAvailabilityService, SoftInactiveCountService],
   exports: [CandidateSelectionService, RecommenderService],
 })
 export class RecommenderModule {}

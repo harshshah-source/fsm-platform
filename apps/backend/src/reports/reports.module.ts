@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { FleetUptimeAggregationService } from './fleet-uptime-aggregation.service';
 import { ReportsService } from './reports.service';
+import { SoftInactiveCountService } from './soft-inactive-count.service';
 
 /**
  * Reports (Issue 39). The Fleet Uptime % monthly report read (`ReportsService`) + its aggregation
@@ -10,7 +11,7 @@ import { ReportsService } from './reports.service';
  */
 @Module({
   imports: [PrismaModule],
-  providers: [ReportsService, FleetUptimeAggregationService],
-  exports: [ReportsService, FleetUptimeAggregationService],
+  providers: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService],
+  exports: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService],
 })
 export class ReportsModule {}

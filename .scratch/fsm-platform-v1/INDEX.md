@@ -86,6 +86,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect) → 54, 36  *(Issue 36 mobile)*
 - 69 — Admin Install-create UI (single form + CSV upload) → 33  *(Issue 33 admin surface; presentation-only over `/api/install` + `/upload`)*
 - 71 — SE mobile Install screens (on-site / Install Form / activation result) → 54, 34  *(Issue 34 mobile; blocked by #54)*
+- 72 — Recommender preventive-mode scoring re-prioritisation → 40, 10  *(Issue 40 follow-up; PREVENTIVE-mode ranking biases repeat-offenders/aged/Install backlog)*
 
 ## Mobile (foundation + M-series UI)
 
@@ -108,7 +109,7 @@ lands, all mobile ACs across the backlog are `blocked-by #54`, never silently de
 ## P7 — Vouchers & reporting
 - 38 — Expense Vouchers end-to-end → 07
 - 39 — Fleet Uptime % monthly report → 05, 08  *(done — backend slice: `device_downtime_summary_monthly` migration + `FleetUptimeAggregationService` (per-device failure-cycle-overlap downtime, eligible-gate snapshot, auto vs SE closure split) + `ReportsService.fleetUptime` (time-weighted, eligible-only denominator, per zone/company/plant, ZM-scoped) + `ReportsModule`/`ReportsController` (`GET /reports/fleet-uptime`, OH `recompute`); 15 e2e green; unblocks FE-21; month-end cron deferred)*
-- 40 — Soft Inactive Count trend → 05
+- 40 — Soft Inactive Count trend → 05  *(done — backend slice: `soft_inactive_count_history` migration + `SoftInactiveCountService` (per-zone twice-daily snapshot + `modeForZone` count-driven DEFICIT/PREVENTIVE switch, configurable 2% threshold) + Recommender consumes/records mode on `RunSummary` + `scoreBreakdown` + `ReportsService.softInactiveTrend` + OH endpoints; 8 e2e green; unblocks FE-21; preventive-mode scoring → #72; twice-daily cron deferred)*
 - 41 — Root Cause Analytics → 16
 - 42 — System Efficiency Report → 08, 18, 30
 - 43 — ZM Performance Scorecard → 13

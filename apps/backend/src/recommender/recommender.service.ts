@@ -4,6 +4,7 @@ import { Prisma } from '../generated/prisma/client';
 import { type SeAvailabilityStatus } from '../generated/prisma/enums';
 import { type CommonKitStatus, InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
 import { CandidateSelectionService } from './candidate-selection.service';
 import { type CandidateTicket, type DeviceBucket, canonicalSort } from './canonical-sort';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
@@ -28,6 +29,8 @@ const urgencyFromBucket = (b: DeviceBucket): number => BUCKET_SEVERITY.indexOf(b
 export interface RunSummary {
   recommended: number;
   unassignable: number;
+  /** The zone's active Recommender mode this run, switched off the Soft Inactive Count (Issue 40). */
+  mode: RecommenderMode;
 }
 
 /**
@@ -46,10 +49,14 @@ export class RecommenderService {
     // Defaulted so direct construction in tests need not pass them; Nest injects the providers.
     private readonly inventory: InventoryService = new InventoryService(prisma),
     private readonly availability: SeAvailabilityService = new SeAvailabilityService(prisma),
+    private readonly softInactive: SoftInactiveCountService = new SoftInactiveCountService(prisma),
   ) {}
 
   async runForZone(zoneId: bigint, opts: { now?: Date } = {}): Promise<RunSummary> {
     const now = opts.now ?? new Date();
+    // Soft Inactive Count drives the deficit/preventive switch (Issue 40, CONTEXT §5). Recorded on the
+    // run + each recommendation's breakdown; full preventive-mode scoring re-prioritisation → follow-up.
+    const mode = await this.softInactive.modeForZone(zoneId, now);
 
     const tickets = await this.prisma.ticket.findMany({
       where: {
@@ -134,7 +141,7 @@ export class RecommenderService {
             seId: null,
             companyTier: t.companyTier,
             deviceBucket: t.deviceBucket,
-            scoreBreakdown: { reason: 'NO_ELIGIBLE_SE', weightSetRef, companyTier: t.companyTier, deviceBucket: t.deviceBucket } as Prisma.InputJsonValue,
+            scoreBreakdown: { reason: 'NO_ELIGIBLE_SE', mode, weightSetRef, companyTier: t.companyTier, deviceBucket: t.deviceBucket } as Prisma.InputJsonValue,
             processingRank,
             status: 'UNASSIGNABLE',
             path: 'MORNING_BATCH',
@@ -176,6 +183,7 @@ export class RecommenderService {
           deviceBucket: t.deviceBucket,
           scoreBreakdown: {
             ...scored.breakdown,
+            mode,
             weightSetRef,
             coverageType,
             companyTier: t.companyTier,
@@ -191,7 +199,7 @@ export class RecommenderService {
       recommended++;
     }
 
-    return { recommended, unassignable };
+    return { recommended, unassignable, mode };
   }
 
   /** Memoise Common-Kit completeness for an SE within a run (Issue 21). */

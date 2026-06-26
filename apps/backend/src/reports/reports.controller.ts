@@ -5,7 +5,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { FleetUptimeAggregationService, type FleetUptimeAggregationResult } from './fleet-uptime-aggregation.service';
-import { type FleetUptimeGroupBy, type FleetUptimeReport, ReportsService } from './reports.service';
+import { type FleetUptimeGroupBy, type FleetUptimeReport, type SoftInactiveTrend, ReportsService } from './reports.service';
+import { type SoftInactiveRecomputeResult, SoftInactiveCountService } from './soft-inactive-count.service';
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 const GROUP_BYS: FleetUptimeGroupBy[] = ['zone', 'company', 'plant'];
@@ -21,6 +22,7 @@ export class ReportsController {
   constructor(
     private readonly reports: ReportsService,
     private readonly aggregation: FleetUptimeAggregationService,
+    private readonly softInactive: SoftInactiveCountService,
   ) {}
 
   @Get('fleet-uptime')
@@ -42,6 +44,22 @@ export class ReportsController {
   @Roles('OPERATIONS_HEAD')
   recompute(@Query('month') month?: string): Promise<FleetUptimeAggregationResult> {
     return this.aggregation.computeMonth(monthToDate(month ?? currentMonth()));
+  }
+
+  /** Soft Inactive Count trend — per-zone twice-daily series for the last `days` (Operations Head, AC#3). */
+  @Get('soft-inactive-trend')
+  @Roles('OPERATIONS_HEAD')
+  softInactiveTrend(@Query('days') days?: string): Promise<SoftInactiveTrend> {
+    const parsed = days !== undefined && /^\d+$/.test(days) ? Number(days) : undefined;
+    return this.reports.softInactiveTrend({ days: parsed });
+  }
+
+  /** Snapshot the Soft Inactive Count for every zone now (a twice-daily capture; Operations Head). */
+  @Post('soft-inactive/recompute')
+  @HttpCode(200)
+  @Roles('OPERATIONS_HEAD')
+  recomputeSoftInactive(): Promise<SoftInactiveRecomputeResult> {
+    return this.softInactive.recompute();
   }
 }
 

@@ -1427,6 +1427,25 @@ model PgiHistory {
   @@map("pgi_history")
 }
 
+/// Twice-daily per-zone Soft Inactive Count snapshot (Issue 40, CONTEXT §5). `softInactiveCount` =
+/// Eligible Devices in the zone currently silent >24h; `deficitMode` = the count exceeds
+/// `thresholdPct × eligibleDeviceCount` (the Recommender's deficit/preventive switch driver). The trend
+/// report reads this summary, never raw per-request scans.
+model SoftInactiveCountHistory {
+  id                  BigInt   @id @default(autoincrement())
+  zoneId              BigInt   @map("zone_id")
+  capturedAt          DateTime @map("captured_at") @db.Timestamptz(6)
+  period              String
+  softInactiveCount   Int      @map("soft_inactive_count")
+  eligibleDeviceCount Int      @map("eligible_device_count")
+  deficitMode         Boolean  @map("deficit_mode")
+  thresholdPct        Decimal  @map("threshold_pct") @db.Decimal(6, 4)
+
+  @@index([zoneId, capturedAt(sort: Desc)])
+  @@index([capturedAt(sort: Desc)])
+  @@map("soft_inactive_count_history")
+}
+
 /// Pre-computed per-(device, month) Fleet Uptime input (Issue 39). The aggregation worker writes one
 /// row per device per month so the report reads a small summary instead of raw telemetry / multi-year
 /// partition scans (CONTEXT §Fleet Uptime). `downtimeSeconds` = the device's failure-cycle overlap with
