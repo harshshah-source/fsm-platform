@@ -88,7 +88,9 @@ describe('Floating-SE Territory page (Issue 09 slice 6)', () => {
       expect(posted).toBe(true);
     });
 
-    const list = await screen.findByRole('list', { name: /current territory/i });
+    // FE-19 reskin: the membership list renders through the canonical DataTable (role="table"),
+    // keeping the "Current territory" accessible name.
+    const list = await screen.findByRole('table', { name: /current territory/i });
     expect(within(list).getByText(/Mumbai City/)).toBeInTheDocument();
   });
 });
