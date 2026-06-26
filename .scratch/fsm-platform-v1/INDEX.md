@@ -87,6 +87,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect) → 54, 36  *(Issue 36 mobile)*
 - 69 — Admin Install-create UI (single form + CSV upload) → 33  *(Issue 33 admin surface; presentation-only over `/api/install` + `/upload`)*
 - 70 — Per-ticket troubleshoot/install **form read** endpoint (`GET /tickets/:id/forms`) → 16  *(surfaced by FE-09 2026-06-26: the Ticket Detail Drawer Forms tab has no backend read; ticket detail payload carries no form data. Blocks FE-09 AC#2 Forms tab only — Verification/Assignment-History/Components are buildable. Needs SE troubleshoot-form persistence read + RBAC scope. (#69 is the Install-create admin UI per #33.))*
+- 71 — Schedule-stop ticket **state on the payload** (slaBucket / tier / PARTIAL_RECOVERY flag) → 13b, 18  *(surfaced by FE-12 2026-06-26: `ScheduleStopTicket` carries only `ticketId`/`sortOrder`/`reasoning`; the reasoning (tier/bucket) is gated behind "Why suggested?" and must stay hidden, so the reference 12 per-ticket PARTIAL/CRITICAL/tier card badges have no un-gated source. Add ungated ticket-state to the stop payload, then add the badges to the day-plan stop cards. FE-12 ships without these badges.)*
 
 ## Mobile (foundation + M-series UI)
 
@@ -134,7 +135,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 **Phase F3 — Daily ops:**
 - FE-10 — SE Activity parity → FE-03/04/05  *(ref 15)*  **(done — PageHeader + MetricCard row + DataTable; se-metric-*/se-row-* ids, SE Management/SE detail labels, literal status text, Set-Availability flow + Ops-Head read-only preserved)**
 - FE-11 — SE Planner grid parity → FE-03/04  *(ref 16)*  **(done — PageHeader + MetricStrip + Coverage column + token grid; cell-*/intent-*/batch-*/plant-drag-source ids, drag dataTransfer, POST/DELETE CRUD preserved)**
-- FE-12 — Schedules + Schedule Detail parity (no Approve gate) → FE-03/04  *(ref 12)*
+- FE-12 — Schedules + Schedule Detail parity (no Approve gate) → FE-03/04  *(ref 12)*  **(done — SchedulesPage on DataTable+MetricStrip (no Approve gate); ScheduleDetailPage reskinned (AUTO framing, token stop cards + Button override controls); all override/conflict selectors preserved; reasoning stays gated; per-ticket PARTIAL/CRITICAL/tier badges → #71)**
 - FE-13 — Intra-day Queue parity → FE-03/04  *(ref 13)*
 - FE-14 — Readiness / Vehicle Unavailability parity (no EXPECTED_BACK) → FE-03/04  *(ref 10/11)*
 
