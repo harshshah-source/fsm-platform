@@ -147,7 +147,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 - FE-17 — Warehouse persona dashboard → FE-07, FE-15  *(ref 05)*  **(done — DashboardHome thin role selector → WarehouseDashboard (WM) vs ManagerDashboard; Zone Warehouse Fulfillment KPI + Component-Request-Queue + Shadow-Use panels over existing WM data; Warehouse Stock table + Low-Stock/Fulfillment KPIs gated → #73)**
 
 **Phase F5 — Config & analytics:**
-- FE-18 — Settings parity → FE-03/04  *(ref 26)*
+- FE-18 — Settings parity → FE-03/04  *(ref 26)*  **(done — PageHeader + DateRangeChips + token tabs; SlaRulesTable (colour legend) + AccessMatrixGrid (feature×role) added; 8 CRUD sections restyled via shared Field/input/btn; all org.* CRUD + aria-labels + OH gating preserved; zone before/after deltas gated)**
 - FE-19 — Territory page reskin (polygon editor deferred) → FE-03
 - FE-20 — CSM Backup-Share report parity → FE-05
 - FE-21 — Reports landing + Fleet Uptime + Soft-Inactive → FE-05 + **BE 39/40**  *(ref 21)*

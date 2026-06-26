@@ -1,6 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import { useAuth } from '../../auth/AuthProvider';
+import { DateRangeChips, PageHeader } from '../../components/data';
+import { Badge, Button } from '../../components/ui';
+import { cn } from '../../lib/cn';
 import {
+  AccessMatrixGrid,
   CommonKitSection,
   CompaniesSection,
   PlantsSection,
@@ -17,7 +21,8 @@ interface Tab {
   render: () => ReactNode;
 }
 
-// Operations-Head-owned configuration surfaces (Issue 02). Order mirrors the reference→rules flow.
+// Operations-Head-owned configuration surfaces (Issue 02 · FE-18, reference 26). Order mirrors the
+// reference → rules flow; the Access matrix is the read-only role-visibility overview.
 const TABS: Tab[] = [
   { id: 'zones', label: 'Zones', render: () => <ZonesSection /> },
   { id: 'plants', label: 'Plants', render: () => <PlantsSection /> },
@@ -27,8 +32,16 @@ const TABS: Tab[] = [
   { id: 'sla', label: 'SLA Rules', render: () => <SlaRulesSection /> },
   { id: 'weights', label: 'Scoring Weights', render: () => <ScoringWeightsSection /> },
   { id: 'kit', label: 'Common Kit', render: () => <CommonKitSection /> },
+  { id: 'access', label: 'Access', render: () => <AccessMatrixGrid /> },
 ];
 
+/**
+ * Settings (Issue 02 · FE-18 parity, reference 26). Operations-Head-only configuration console — zone /
+ * plant / user / company / SE-coverage / SLA / scoring / kit CRUD plus a read-only role-access matrix.
+ * Presentation-only refactor onto `PageHeader` + `DateRangeChips` + a token tab bar; the `Settings`
+ * heading, the `role="tab"` set + labels, every form `aria-label`, and the `org.*` CRUD are preserved.
+ * Route-level Operations-Head gating is unchanged (`AppRoutes`).
+ */
 export function SettingsPage() {
   const { session, logout } = useAuth();
   const [active, setActive] = useState(TABS[0].id);
@@ -36,17 +49,21 @@ export function SettingsPage() {
 
   return (
     <div className="min-h-screen p-6">
-      <header className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Settings</h1>
-        <div className="flex items-center gap-3 text-sm">
-          <span className="font-medium">{session?.role}</span>
-          <button type="button" onClick={logout} className="rounded border px-2 py-1">
-            Log out
-          </button>
-        </div>
-      </header>
+      <PageHeader
+        title="Settings"
+        subtitle="Operations-Head configuration console — zones, plants, users, companies, coverage, SLA, and scoring."
+        actions={
+          <>
+            <DateRangeChips />
+            {session?.role && <Badge tone="neutral">{session.role}</Badge>}
+            <Button variant="secondary" size="sm" onClick={logout}>
+              Log out
+            </Button>
+          </>
+        }
+      />
 
-      <div role="tablist" aria-label="Settings sections" className="mb-4 flex gap-2 border-b">
+      <div role="tablist" aria-label="Settings sections" className="mb-5 flex flex-wrap gap-1 border-b border-line">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -54,9 +71,12 @@ export function SettingsPage() {
             type="button"
             aria-selected={tab.id === active}
             onClick={() => setActive(tab.id)}
-            className={`px-3 py-2 text-sm ${
-              tab.id === active ? 'border-b-2 border-slate-800 font-medium' : 'text-slate-500'
-            }`}
+            className={cn(
+              '-mb-px border-b-2 px-3 py-2 text-sm transition-colors',
+              tab.id === active
+                ? 'border-brand-600 font-semibold text-ink-strong'
+                : 'border-transparent text-ink-muted hover:text-ink-strong',
+            )}
           >
             {tab.label}
           </button>
