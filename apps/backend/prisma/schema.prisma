@@ -1427,6 +1427,30 @@ model PgiHistory {
   @@map("pgi_history")
 }
 
+/// Pre-computed per-(device, month) Fleet Uptime input (Issue 39). The aggregation worker writes one
+/// row per device per month so the report reads a small summary instead of raw telemetry / multi-year
+/// partition scans (CONTEXT §Fleet Uptime). `downtimeSeconds` = the device's failure-cycle overlap with
+/// the month window; `eligible` snapshots the uptime gate (active PGI ≤15d AND not Non-Op) so the
+/// denominator is Eligible Devices only; auto-recovery vs SE-repaired closures are counted separately.
+model DeviceDowntimeSummaryMonthly {
+  deviceId             BigInt   @map("device_id")
+  month                DateTime @db.Date
+  zoneId               BigInt?  @map("zone_id")
+  companyId            BigInt?  @map("company_id")
+  plantId              BigInt?  @map("plant_id")
+  eligible             Boolean  @default(false)
+  windowSeconds        BigInt   @map("window_seconds")
+  downtimeSeconds      BigInt   @default(0) @map("downtime_seconds")
+  autoRecoveryClosures Int      @default(0) @map("auto_recovery_closures")
+  seRepairedClosures   Int      @default(0) @map("se_repaired_closures")
+  computedAt           DateTime @map("computed_at") @db.Timestamptz(6)
+
+  @@id([deviceId, month])
+  @@index([month, zoneId])
+  @@index([month, eligible])
+  @@map("device_downtime_summary_monthly")
+}
+
 /// Non-Operational marking (schema D16) — MINIMAL for Issue 05's eligibility read. Issue 05 reads
 /// only `state ∈ (CONFIRMED, ACTIVE)` to exclude a device from the eligible set; one active marking
 /// per device (invariant I13) is a raw-SQL partial-unique. The full dual-confirmation lifecycle

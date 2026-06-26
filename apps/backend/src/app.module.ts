@@ -6,6 +6,8 @@ import { RoleGuard } from './common/guards/role.guard';
 import { ZoneScopeGuard } from './common/guards/zone-scope.guard';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DashboardController } from './dashboard/dashboard.controller';
+import { ReportsModule } from './reports/reports.module';
+import { ReportsController } from './reports/reports.controller';
 import { DevicesModule } from './devices/devices.module';
 import { DevicesController } from './devices/devices.controller';
 import { IngestionModule } from './ingestion/ingestion.module';
@@ -79,6 +81,7 @@ import { ZonesController } from './zones/zones.controller';
     SharedPoolModule,
     PlannerModule,
     DashboardModule,
+    ReportsModule,
     SoftStateModule,
     VerificationModule,
     InventoryModule,
@@ -116,6 +119,7 @@ import { ZonesController } from './zones/zones.controller';
     SharedPoolController,
     SePlannerController,
     DashboardController,
+    ReportsController,
     SoftStateController,
     VerificationController,
     ComponentBlockedController,

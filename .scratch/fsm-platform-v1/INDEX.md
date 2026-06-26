@@ -107,7 +107,7 @@ lands, all mobile ACs across the backlog are `blocked-by #54`, never silently de
 
 ## P7 — Vouchers & reporting
 - 38 — Expense Vouchers end-to-end → 07
-- 39 — Fleet Uptime % monthly report → 05, 08
+- 39 — Fleet Uptime % monthly report → 05, 08  *(done — backend slice: `device_downtime_summary_monthly` migration + `FleetUptimeAggregationService` (per-device failure-cycle-overlap downtime, eligible-gate snapshot, auto vs SE closure split) + `ReportsService.fleetUptime` (time-weighted, eligible-only denominator, per zone/company/plant, ZM-scoped) + `ReportsModule`/`ReportsController` (`GET /reports/fleet-uptime`, OH `recompute`); 15 e2e green; unblocks FE-21; month-end cron deferred)*
 - 40 — Soft Inactive Count trend → 05
 - 41 — Root Cause Analytics → 16
 - 42 — System Efficiency Report → 08, 18, 30
