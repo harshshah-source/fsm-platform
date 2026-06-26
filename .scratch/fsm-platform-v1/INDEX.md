@@ -62,7 +62,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 32 — Cross-zone Platinum auto-escalation + manual flag → 29
 
 ## P6 — Install / Recovery / Non-Op
-- 33 — Install Ticket create (single + CSV, scoped) → 07
+- 33 — Install Ticket create (single + CSV, scoped) → 07  *(done — backend slice: additive `tickets` migration (`created_by`/`created_by_role`/`install_trigger_source`/`install_batch_id`/CSV cols) + `InstallService` (single + all-or-nothing CSV with line-numbered errors) + `InstallController` (`/api/install` + `/upload`, ZM/CSM/OH scope, #47 audit attribution); 12 e2e green; admin Install-create UI → #69)*
 - 34 — Install lifecycle + verification + serial visibility → 33, 18
 - 35 — Non-Operational dual-confirmation marking → 07  *(done — dual-confirmation lifecycle + OH 7-day override + CONFIRMED side-effects (auto-close tickets, Recovery-Ticket auto-create, eligibility exclusion) + customer tokenised-email seam (backend) + admin dual-confirmation queue & Mark modal; UI refinements → #67)*
 - 36 — Recovery Ticket lifecycle + warehouse receipt auto-close + unable-to-collect → 35  *(done — full field lifecycle + Collection-Form validation + WM receipt auto-close + unable-to-collect routing + notifier seam (backend) + WM "Awaiting Receipt" admin queue; SE mobile screens → #68; ZM decision-queue actions → #37)*
@@ -85,7 +85,8 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 66 — SE mobile Day Plan: highlight ZM-added Tickets + one-session "removed" label → 31, 54  *(closes Issue 31 AC#5 mobile)*
 - 67 — Non-Op Mark modal ticket enumeration + queue zone-scope + Recovery toast → 35  *(Issue 35 UI refinements)*
 - 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect) → 54, 36  *(Issue 36 mobile)*
-- 69 — Per-ticket troubleshoot/install **form read** endpoint (`GET /tickets/:id/forms`) → 16  *(surfaced by FE-09 2026-06-26: the Ticket Detail Drawer Forms tab has no backend read; ticket detail payload carries no form data. Blocks FE-09 AC#2 Forms tab only — Verification/Assignment-History/Components are buildable. Needs SE troubleshoot-form persistence read + RBAC scope.)*
+- 69 — Admin Install-create UI (single form + CSV upload) → 33  *(Issue 33 admin surface; presentation-only over `/api/install` + `/upload`)*
+- 70 — Per-ticket troubleshoot/install **form read** endpoint (`GET /tickets/:id/forms`) → 16  *(surfaced by FE-09 2026-06-26: the Ticket Detail Drawer Forms tab has no backend read; ticket detail payload carries no form data. Blocks FE-09 AC#2 Forms tab only — Verification/Assignment-History/Components are buildable. Needs SE troubleshoot-form persistence read + RBAC scope. (#69 is the Install-create admin UI per #33.))*
 
 ## Mobile (foundation + M-series UI)
 
@@ -128,7 +129,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 
 **Phase F2 — Tickets:**
 - FE-08 — Tickets list parity → FE-04  *(ref 07)*  **(done — PageHeader + FilterBar + DataTable badge columns; fetch/query-params + filter aria-labels + bucket-*/badge-* test ids + row-click drawer nav preserved)**
-- FE-09 — Ticket Detail Drawer parity + fill stub tabs → FE-04, FE-08  *(ref 08/09/28)*  **(PAUSED 2026-06-26, Strategic-HITL backlog-ownership — Verification/Assignment-History/Components fillable, but Forms tab has no BE read endpoint → blocked by #69; user chose to pause & do other FE work)**
+- FE-09 — Ticket Detail Drawer parity + fill stub tabs → FE-04, FE-08  *(ref 08/09/28)*  **(PAUSED 2026-06-26, Strategic-HITL backlog-ownership — Verification/Assignment-History/Components fillable, but Forms tab has no BE read endpoint → blocked by #70; user chose to pause & do other FE work)**
 
 **Phase F3 — Daily ops:**
 - FE-10 — SE Activity parity → FE-03/04/05  *(ref 15)*
