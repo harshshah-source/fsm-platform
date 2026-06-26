@@ -122,7 +122,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 - FE-05 — Chart + metric primitives (recharts) → FE-01  *(ref 14/21/22/23/24/25)*  **(done)**
 
 **Phase F1 — Dashboard:**
-- FE-06 — Zone Dashboard (ZM) parity → FE-02/03/04/05  *(ref 01)*
+- FE-06 — Zone Dashboard (ZM) parity → FE-02/03/04/05  *(ref 01)*  **(done — KPI MetricStrip + reference Action-Required grid + DataTable overviews + Critical-Queue cards; selector contract preserved; Fleet Uptime % = documented omission → BE-39/40/FE-21; Playwright baseline → FE-00)**
 - FE-07 — Role-variant dashboards (CSM-acting / Central / Ops-Head) → FE-06  *(ref 02/03/04)*
 
 **Phase F2 — Tickets:**
