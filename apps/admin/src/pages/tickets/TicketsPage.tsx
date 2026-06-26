@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { apiTicketsList, type TicketFilters, type TicketRow } from '../../api/tickets';
 import { BUCKET_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { StatusPill, TierBadge } from '../../components/domain/badges';
 import { BucketBadge, InlineBadges } from './ticketBadges';
 
 const WORK_TYPES = ['TROUBLESHOOT', 'INSTALL', 'RECOVERY'];
@@ -109,8 +110,12 @@ export function TicketsPage() {
               >
                 <td className="py-1 pr-3 font-medium">{t.deviceId}</td>
                 <td className="py-1 pr-3">{t.plantId}</td>
-                <td className="py-1 pr-3">{t.companyTier}</td>
-                <td className="py-1 pr-3">{t.status}</td>
+                <td className="py-1 pr-3">
+                  <TierBadge tier={t.companyTier} />
+                </td>
+                <td className="py-1 pr-3">
+                  <StatusPill status={t.status} />
+                </td>
                 <td className="py-1 pr-3">
                   <BucketBadge bucket={t.slaBucket} />
                 </td>

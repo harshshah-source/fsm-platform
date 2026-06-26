@@ -9,6 +9,7 @@ import { ComponentRequestsPage } from './pages/inventory/ComponentRequestsPage';
 import { ShadowUseQueuePage } from './pages/inventory/ShadowUseQueuePage';
 import { RecoveryReceiptQueuePage } from './pages/warehouse/RecoveryReceiptQueuePage';
 import { DashboardHome } from './pages/dashboard/DashboardHome';
+import { KitchenSink } from './pages/KitchenSink';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
@@ -33,6 +34,9 @@ export function AppRoutes() {
       <SnapshotBanner />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+
+        {/* Dev-only design-system audit surface (FE-00/FE-01); excluded from production builds. */}
+        {import.meta.env.DEV && <Route path="/_kitchensink" element={<KitchenSink />} />}
 
         {/* Authenticated shell layout — nav + header + an Outlet for the active page. */}
         <Route

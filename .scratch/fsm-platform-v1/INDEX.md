@@ -13,6 +13,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - [`UI-OWNERSHIP-PLAN.md`](./UI-OWNERSHIP-PLAN.md) — backend capability → Admin/Mobile surface map (Issues 01–21).
 - [`UI-RECOVERY-PLAN.md`](./UI-RECOVERY-PLAN.md) — roadmap to ≥80% parity vs v2 mockups.
 - [`DOC-RECONCILIATION-GOVERNANCE-REVIEW.md`](./DOC-RECONCILIATION-GOVERNANCE-REVIEW.md) — documentation reconciliation review.
+- [`DESIGN-SYSTEM.md`](./DESIGN-SYSTEM.md) — **reference-derived design system** (the visual authority for all FE-series issues; governs tokens, components, page composition, fidelity rules).
 
 ## Foundation
 - 01 — Foundation skeleton & infrastructure (HITL)
@@ -102,6 +103,56 @@ lands, all mobile ACs across the backlog are `blocked-by #54`, never silently de
 - 61 — M7: Vouchers (capture) → 54, 38
 
 *(M8 daily-status/Profile and Issue 20 QR are the deferred 20% — to be filed/sequenced last.)*
+
+## FE — Enterprise UI parity (Admin, presentation-layer)
+
+Tracer-bullet **frontend** slices that bring the backend-verification admin UI to pixel-faithful parity
+with the v2 reference mockups. Each slice replaces presentation only — routing, API clients, RBAC,
+business logic, and the test selector-contract are preserved (see `DESIGN-SYSTEM.md` §9 + the Frontend
+Master Plan). Charts/reports (FE-21–25) are **backend-gated** on their reporting issues (39–44).
+
+**Phase F0 — foundation ✅ COMPLETE (2026-06-26).** Verified green at the milestone commit: admin
+`tsc --noEmit` clean · **vitest 94/94** · `vite build` OK. Design system + component library + hooks +
+chart kit are in place; every later FE issue composes these. FE-02 was the transition milestone.
+- FE-00 — Visual-regression + component-audit harness  *(partial — `/_kitchensink` done; Playwright baseline script still to file)*
+- FE-01 — Design tokens + base primitives + Login parity → FE-00  *(ref 00)*  **(done)**
+- FE-02 — AppShell (Sidebar + TopBar + Footer) → FE-01  *(all chrome)*  **(done)**
+- FE-03 — Data primitives (`DataTable`/`FilterBar`/states) + async hooks → FE-01  *(ref 17)*  **(done)**
+- FE-04 — Domain badges (`SLABadge`/`StatusPill`/…) + overlays (`Sheet`/`Modal`/`Tabs`) → FE-01, FE-03  **(done)**
+- FE-05 — Chart + metric primitives (recharts) → FE-01  *(ref 14/21/22/23/24/25)*  **(done)**
+
+**Phase F1 — Dashboard:**
+- FE-06 — Zone Dashboard (ZM) parity → FE-02/03/04/05  *(ref 01)*
+- FE-07 — Role-variant dashboards (CSM-acting / Central / Ops-Head) → FE-06  *(ref 02/03/04)*
+
+**Phase F2 — Tickets:**
+- FE-08 — Tickets list parity → FE-04  *(ref 07)*
+- FE-09 — Ticket Detail Drawer parity + fill stub tabs → FE-04, FE-08  *(ref 08/09/28)*
+
+**Phase F3 — Daily ops:**
+- FE-10 — SE Activity parity → FE-03/04/05  *(ref 15)*
+- FE-11 — SE Planner grid parity → FE-03/04  *(ref 16)*
+- FE-12 — Schedules + Schedule Detail parity (no Approve gate) → FE-03/04  *(ref 12)*
+- FE-13 — Intra-day Queue parity → FE-03/04  *(ref 13)*
+- FE-14 — Readiness / Vehicle Unavailability parity (no EXPECTED_BACK) → FE-03/04  *(ref 10/11)*
+
+**Phase F4 — Warehouse & components:**
+- FE-15 — Component queues (one recipe) → FE-03/04  *(ref 18/19)*
+- FE-16 — Recovery + Non-Op queues parity → FE-03/04  *(ref 20)*
+- FE-17 — Warehouse persona dashboard → FE-07, FE-15  *(ref 05)*
+
+**Phase F5 — Config & analytics:**
+- FE-18 — Settings parity → FE-03/04  *(ref 26)*
+- FE-19 — Territory page reskin (polygon editor deferred) → FE-03
+- FE-20 — CSM Backup-Share report parity → FE-05
+- FE-21 — Reports landing + Fleet Uptime + Soft-Inactive → FE-05 + **BE 39/40**  *(ref 21)*
+- FE-22 — Device Detail + downtime trend → FE-05 + **BE 44**  *(ref 22; closes 49 tag UI)*
+- FE-23 — Root-Cause Analytics → FE-05 + **BE 41**  *(ref 23)*
+- FE-24 — System Efficiency → FE-05 + **BE 42**  *(ref 24)*
+- FE-25 — ZM Performance Scorecard → FE-05 + **BE 43**  *(ref 25)*
+- FE-26 — Help Center → FE-02, FE-03  *(ref 27)*
+
+*(Mobile parity stays the separate Issue 54 + M-series backlog; it shares only the token language via NativeWind — see `DESIGN-SYSTEM.md` §6.)*
 
 ## P7 — Vouchers & reporting
 - 38 — Expense Vouchers end-to-end → 07

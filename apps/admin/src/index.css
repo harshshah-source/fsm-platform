@@ -1,1 +1,68 @@
 @import "tailwindcss";
+
+/*
+ * FSM Admin design tokens (reference-derived — see .scratch/fsm-platform-v1/DESIGN-SYSTEM.md).
+ * Tailwind v4 @theme: each --color-* / --radius-* becomes a utility (bg-*, text-*, border-*, rounded-*).
+ * No component may introduce a raw hex or off-scale value — everything routes through these tokens.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+
+  /* Brand — crimson [00-login, all topbars, mobile headers] */
+  --color-brand-300: #f6d7dc;
+  --color-brand-600: #c8102e;
+  --color-brand-700: #a60d26;
+
+  /* Chrome — dark navy [sidebar / topbar logo / footer / login bg] */
+  --color-chrome-900: #0e1422;
+  --color-chrome-800: #161d2e;
+  --color-chrome-700: #222c42;
+  --color-chrome-text: #c7cdda;
+  --color-chrome-muted: #7b8499;
+
+  /* Surfaces [content area — warm off-white, NOT pure white] */
+  --color-surface-app: #f6f5f3;
+  --color-surface-card: #ffffff;
+  --color-surface-sunken: #f1f0ee;
+
+  /* Lines */
+  --color-line: #e7e5e1;
+  --color-line-strong: #d6d3ce;
+
+  /* Ink */
+  --color-ink-strong: #161b26;
+  --color-ink: #374151;
+  --color-ink-muted: #6b7280;
+  --color-ink-caps: #8a93a3;
+
+  /* Semantic — foreground + tinted background (pills, badges, accents) */
+  --color-info: #1d4ed8;
+  --color-info-bg: #e5eeff;
+  --color-success: #197a3d;
+  --color-success-bg: #e3f5e9;
+  --color-verified: #6d28d9;
+  --color-verified-bg: #eee7fb;
+  --color-warning: #9a6700;
+  --color-warning-bg: #fdf2d9;
+  --color-critical: #b42318;
+  --color-critical-bg: #fbe3e3;
+  --color-neutral: #4b5563;
+  --color-neutral-bg: #eeeef0;
+
+  /* Radius */
+  --radius-card: 0.625rem;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background-color: var(--color-surface-app);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+}

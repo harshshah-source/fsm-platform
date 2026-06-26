@@ -1,18 +1,12 @@
 import type { TicketRow } from '../../api/tickets';
-import { BUCKET_CLASS, BUCKET_LABEL, type SlaBucket } from '../../lib/slaBucket';
+import { SLABadge } from '../../components/domain/badges';
 
-/** Colour-coded SLA bucket badge (AC#2/#5). Null bucket (ACTIVE) renders nothing. */
+/**
+ * Colour-coded SLA bucket badge (AC#2/#5). Now a thin wrapper over the shared `SLABadge` (FE-04),
+ * which keeps the `data-testid="bucket-<BUCKET>"` contract. Null bucket (ACTIVE) renders nothing.
+ */
 export function BucketBadge({ bucket }: { bucket: string | null }) {
-  if (!bucket) return null;
-  const b = bucket as SlaBucket;
-  return (
-    <span
-      data-testid={`bucket-${bucket}`}
-      className={`inline-block rounded px-1 text-xs ${BUCKET_CLASS[b] ?? 'bg-slate-200'}`}
-    >
-      {BUCKET_LABEL[b] ?? bucket}
-    </span>
-  );
+  return <SLABadge bucket={bucket} />;
 }
 
 /**

@@ -16,6 +16,6 @@ function renderAt(path: string) {
 describe('Admin shell — auth routing', () => {
   it('redirects an unauthenticated visit to "/" to the login page', () => {
     renderAt('/');
-    expect(screen.getByRole('heading', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /welcome back/i })).toBeInTheDocument();
   });
 });
