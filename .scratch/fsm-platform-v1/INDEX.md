@@ -132,7 +132,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 - FE-09 — Ticket Detail Drawer parity + fill stub tabs → FE-04, FE-08  *(ref 08/09/28)*  **(PAUSED 2026-06-26, Strategic-HITL backlog-ownership — Verification/Assignment-History/Components fillable, but Forms tab has no BE read endpoint → blocked by #70; user chose to pause & do other FE work)**
 
 **Phase F3 — Daily ops:**
-- FE-10 — SE Activity parity → FE-03/04/05  *(ref 15)*
+- FE-10 — SE Activity parity → FE-03/04/05  *(ref 15)*  **(done — PageHeader + MetricCard row + DataTable; se-metric-*/se-row-* ids, SE Management/SE detail labels, literal status text, Set-Availability flow + Ops-Head read-only preserved)**
 - FE-11 — SE Planner grid parity → FE-03/04  *(ref 16)*
 - FE-12 — Schedules + Schedule Detail parity (no Approve gate) → FE-03/04  *(ref 12)*
 - FE-13 — Intra-day Queue parity → FE-03/04  *(ref 13)*
