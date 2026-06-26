@@ -1082,6 +1082,16 @@ enum TicketStatus {
   @@map("ticket_status")
 }
 
+/// Install Ticket creation channel (ADR-0011 / CONTEXT.md §11). v1 is MANUAL_OPERATIONS (single-create
+/// or CSV bulk by ZM/CSM/OH, scoped); the v2 External Order Webhook will set EXTERNAL_API. Defined
+/// complete up-front (Issue 33) so the v2 webhook slice never needs to `ALTER TYPE`.
+enum InstallTriggerSource {
+  MANUAL_OPERATIONS
+  EXTERNAL_API
+
+  @@map("install_trigger_source")
+}
+
 /// Assignment state (schema D6). System batch dispatch flips it to FORMALLY_ASSIGNED (Issue 11).
 enum AssignmentState {
   UNASSIGNED
@@ -1329,6 +1339,17 @@ model Ticket {
   closureType        ClosureType?    @map("closure_type")
   closureReason      String?         @map("closure_reason")
   closedAt           DateTime?       @map("closed_at") @db.Timestamptz(6)
+  // INSTALL work-type columns (Issue 33, ADR-0011 / CONTEXT.md §11). Manual creation by ZM/CSM/OH
+  // records the actor (`createdBy` + `createdByRole`) and the channel (`installTriggerSource`); a CSV
+  // bulk upload stamps one shared `installBatchId` across its rows. `installSimId` / `installTargetDate`
+  // / `installNotes` are the optional CSV columns. TROUBLESHOOT/RECOVERY tickets leave these null.
+  createdBy            String?               @map("created_by") @db.Uuid
+  createdByRole        Role?                 @map("created_by_role")
+  installTriggerSource InstallTriggerSource? @map("install_trigger_source")
+  installSimId         String?               @map("install_sim_id")
+  installTargetDate    DateTime?             @map("install_target_date") @db.Date
+  installNotes         String?               @map("install_notes")
+  installBatchId       String?               @map("install_batch_id") @db.Uuid
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1354,6 +1375,7 @@ model Ticket {
   @@index([companyId])
   @@index([nonOpMarkingId])
   @@index([assignedSeId])
+  @@index([installBatchId])
   // Shared Pool query: partial `(plant_id) WHERE status='OPEN' AND assignment_state='UNASSIGNED'`
   // (Issue 12) — not expressible in Prisma; added by raw SQL in 20260621190000_add_shared_pool_index.
   @@map("tickets")
