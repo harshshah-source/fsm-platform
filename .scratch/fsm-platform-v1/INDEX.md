@@ -140,7 +140,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 - FE-14 — Readiness / Vehicle Unavailability parity (no EXPECTED_BACK) → FE-03/04  *(ref 10/11)*  **(done — PageHeader + MetricCard strip + DataTable dual-clock cells + StatusPill; vu-metric-*/vu-row-*/vu-primary-*/vu-secondary-* ids + Confirm-date/Resume-SLA actions preserved; EXPECTED_BACK omitted)**
 
 **Phase F4 — Warehouse & components:**
-- FE-15 — Component queues (one recipe) → FE-03/04  *(ref 18/19)*
+- FE-15 — Component queues (one recipe) → FE-03/04  *(ref 18/19)*  **(done — queue recipe (MetricCard+DataTable+StatusPill+AgeChip) on ComponentRequestsPage (+readOnly) & ShadowUseQueuePage; cr-*/su-* ids + WM action legs preserved; mandatory-reason legs stay inline, not Modal/Toast — selector-contract priority)**
 - FE-16 — Recovery + Non-Op queues parity → FE-03/04  *(ref 20)*
 - FE-17 — Warehouse persona dashboard → FE-07, FE-15  *(ref 05)*
 
