@@ -61,8 +61,8 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 32 — Cross-zone Platinum auto-escalation + manual flag → 29
 
 ## P6 — Install / Recovery / Non-Op
-- 33 — Install Ticket create (single + CSV, scoped) → 07
-- 34 — Install lifecycle + verification + serial visibility → 33, 18
+- 33 — Install Ticket create (single + CSV, scoped) → 07  *(done — backend slice: additive `tickets` migration + `InstallService` (single + all-or-nothing CSV with line-numbered errors) + `InstallController` (`/api/install` + `/upload`, ZM/CSM/OH scope, #47 audit attribution); 12 e2e green; admin Install-create UI → #69)*
+- 34 — Install lifecycle + verification + serial visibility → 33, 18  *(done — backend slice: additive lifecycle migration (`fitted_*`/`activated_at`) + `InstallLifecycleService` (schedule/on-site/FITTED→ACTIVATED + first-valid-ping verification sweep: CLOSED / FAILED_ACTIVATION, no geofence) + `install-notifier` seam + `InstallController` SE/manager endpoints + WM serial read (AC#5); 20 e2e green; SE mobile Install screens → #71)*
 - 35 — Non-Operational dual-confirmation marking → 07  *(done — dual-confirmation lifecycle + OH 7-day override + CONFIRMED side-effects (auto-close tickets, Recovery-Ticket auto-create, eligibility exclusion) + customer tokenised-email seam (backend) + admin dual-confirmation queue & Mark modal; UI refinements → #67)*
 - 36 — Recovery Ticket lifecycle + warehouse receipt auto-close + unable-to-collect → 35  *(done — full field lifecycle + Collection-Form validation + WM receipt auto-close + unable-to-collect routing + notifier seam (backend) + WM "Awaiting Receipt" admin queue; SE mobile screens → #68; ZM decision-queue actions → #37)*
 - 37 — Recovery closure authority + ZM decision queue + stalled flags → 36  *(done — ZM decision-queue actions + manual closure authority (closure_type by acting role) + OH override-any-zone + non-standard-closure compliance read + stalled-14d Action Required card (backend + admin); web-only, no migration)*
@@ -84,6 +84,8 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 66 — SE mobile Day Plan: highlight ZM-added Tickets + one-session "removed" label → 31, 54  *(closes Issue 31 AC#5 mobile)*
 - 67 — Non-Op Mark modal ticket enumeration + queue zone-scope + Recovery toast → 35  *(Issue 35 UI refinements)*
 - 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect) → 54, 36  *(Issue 36 mobile)*
+- 69 — Admin Install-create UI (single form + CSV upload) → 33  *(Issue 33 admin surface; presentation-only over `/api/install` + `/upload`)*
+- 71 — SE mobile Install screens (on-site / Install Form / activation result) → 54, 34  *(Issue 34 mobile; blocked by #54)*
 
 ## Mobile (foundation + M-series UI)
 

@@ -1350,6 +1350,14 @@ model Ticket {
   installTargetDate    DateTime?             @map("install_target_date") @db.Date
   installNotes         String?               @map("install_notes")
   installBatchId       String?               @map("install_batch_id") @db.Uuid
+  // INSTALL fitment capture + lifecycle anchors (Issue 34, CONTEXT.md §4). The SE records the GPS
+  // device serial + SIM serial (WM-verifiable) and an optional photo at FITTED; `activatedAt` is the
+  // warranty start and the anchor the install auto-verification watches for the first valid ping.
+  fittedGpsSerial      String?               @map("fitted_gps_serial")
+  fittedSimSerial      String?               @map("fitted_sim_serial")
+  fittedPhotoRef       String?               @map("fitted_photo_ref")
+  fittedAt             DateTime?             @map("fitted_at") @db.Timestamptz(6)
+  activatedAt          DateTime?             @map("activated_at") @db.Timestamptz(6)
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1376,6 +1384,7 @@ model Ticket {
   @@index([nonOpMarkingId])
   @@index([assignedSeId])
   @@index([installBatchId])
+  @@index([activatedAt])
   // Shared Pool query: partial `(plant_id) WHERE status='OPEN' AND assignment_state='UNASSIGNED'`
   // (Issue 12) — not expressible in Prisma; added by raw SQL in 20260621190000_add_shared_pool_index.
   @@map("tickets")
