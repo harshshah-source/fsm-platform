@@ -1,6 +1,6 @@
 # FE-13 — Intra-day Queue parity
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Frontend · Phase F3
 Effort: M
 
@@ -19,9 +19,22 @@ timeout columns that land when backend 29/30 ship.
 
 ## Acceptance criteria
 
-- [ ] MetricStrip + row-accent `DataTable` matches `13`
-- [ ] Status pills cover the acceptance vocabulary (Decision §16) with correct tones
-- [ ] Current same-day-update rows render unchanged; 29/30 columns are forward-compatible placeholders
+- [x] MetricStrip + row-accent `DataTable` matches `13`
+- [x] Status pills cover the acceptance vocabulary (Decision §16) with correct tones
+- [x] Current same-day-update rows render unchanged; 29/30 columns are forward-compatible placeholders
+
+## Outcome (done — presentation-only, FE-13)
+
+`IntradayQueuePage` re-skinned onto `PageHeader` + a tone-coded `MetricCard` row + the canonical
+`DataTable` with per-row severity accents (ADD=success / REMOVE=critical / REORDER=info). The
+`iq-metric-strip` / `iq-metric-*` / `iq-row-*` test ids, the `Intra-day Queue` aria-label, the event
+labels, the "No acceptance required" text, and the ticket→drawer navigation are preserved.
+
+The SE-Acceptance column is a forward-compatible placeholder: the acceptance vocabulary
+(PENDING_ACCEPTANCE / TIMED_OUT / DECLINED / ESCALATION_REQUIRED) already has correct `StatusPill` tones
+in FE-04, ready to bind when Issue 29/30 land system-triggered CRITICAL insertions into this same view.
+`apiIntradayUpdates` fetch + count derivation unchanged. Verified: admin `tsc --noEmit` clean · vitest
+**98/98** · `vite build` OK.
 
 ## Reusable components introduced
 
