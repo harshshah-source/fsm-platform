@@ -11,24 +11,32 @@ import {
   type NonOpReason,
   type NonOpState,
 } from '../../api/nonOp';
+import { DataTable, MetricCard, PageHeader, FilterSelect, type Column } from '../../components/data';
+import { Badge, Button, Field, Input } from '../../components/ui';
+import type { BadgeTone } from '../../components/ui/Badge';
 
 /**
- * Non-Operational dual-confirmation queue (Issue 35, `/readiness/non-operational`). Manager roles see
- * markings awaiting confirmation sorted by `awaiting_since` asc (server-ordered) with a state badge +
- * a days-elapsed badge, perform the manager confirmation leg, and (Operations Head) override-confirm
- * after 7 days. The Mark-Non-Operational modal warns — with an explicit acknowledgement — that a
- * RECURRING device with a physical-retrieval reason auto-creates a Recovery Ticket on confirmation.
- * No v2 reference image exists for this page; it follows the sibling queue pages' house style.
+ * Non-Operational dual-confirmation queue (Issue 35 · FE-16 recipe, `/readiness/non-operational`).
+ * Manager roles see markings awaiting confirmation sorted by `awaiting_since` asc (server-ordered) with a
+ * state badge + a days-elapsed badge, perform the manager confirmation leg, and (Operations Head)
+ * override-confirm after 7 days. The Mark-Non-Operational dual-confirmation modal warns — with an
+ * explicit acknowledgement — that a RECURRING device with a physical-retrieval reason auto-creates a
+ * Recovery Ticket on confirmation.
+ *
+ * FE-16 applies the canonical queue recipe + re-skins the Mark dual-confirmation modal onto the tokens.
+ * The `Non-Operational dual confirmation` aria-label, the `nonop-row-*` / `nonop-confirm-*` /
+ * `nonop-override-*` test ids, the Mark-modal labels (Device ID / Reason / acknowledge / submit), and the
+ * action behaviour are preserved. The override `window.prompt` leg is scheduled for a `Modal` (#72).
  */
 const STATE_LABEL: Record<NonOpState, string> = {
   AWAITING_ZM_CONFIRMATION: 'Awaiting Manager',
   AWAITING_CUSTOMER_CONFIRMATION: 'Awaiting Customer',
   CONFIRMED: 'Confirmed',
 };
-const STATE_CLASS: Record<NonOpState, string> = {
-  AWAITING_ZM_CONFIRMATION: 'bg-amber-100 text-amber-800',
-  AWAITING_CUSTOMER_CONFIRMATION: 'bg-blue-100 text-blue-800',
-  CONFIRMED: 'bg-emerald-100 text-emerald-800',
+const STATE_TONE: Record<NonOpState, BadgeTone> = {
+  AWAITING_ZM_CONFIRMATION: 'warning',
+  AWAITING_CUSTOMER_CONFIRMATION: 'info',
+  CONFIRMED: 'success',
 };
 
 const REASONS: NonOpReason[] = [
@@ -41,23 +49,26 @@ const REASONS: NonOpReason[] = [
   'OTHER',
 ];
 
-function daysClass(days: number): string {
-  if (days >= 7) return 'bg-rose-100 text-rose-800';
-  if (days >= 3) return 'bg-amber-100 text-amber-800';
-  return 'bg-slate-100 text-slate-600';
+function daysTone(days: number): BadgeTone {
+  if (days >= 7) return 'critical';
+  if (days >= 3) return 'warning';
+  return 'neutral';
 }
 
 export function NonOperationalQueuePage() {
   const { session } = useAuth();
   const isOpsHead = session?.role === 'OPERATIONS_HEAD';
   const [rows, setRows] = useState<NonOpQueueRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
 
   const load = () => {
+    setLoading(true);
     apiNonOpQueue()
       .then(setRows)
-      .catch(() => setError('Failed to load the Non-Operational queue'));
+      .catch(() => setError('Failed to load the Non-Operational queue'))
+      .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
@@ -81,91 +92,82 @@ export function NonOperationalQueuePage() {
     }
   };
 
+  const columns: Column<NonOpQueueRow>[] = [
+    { key: 'device', header: 'Device', render: (row) => <span className="font-mono text-xs text-ink-strong">{row.deviceId}</span> },
+    { key: 'reason', header: 'Reason', render: (row) => <span className="text-ink">{row.reasonCode ?? '—'}</span> },
+    { key: 'deal', header: 'Deal Type', render: (row) => <span className="text-xs text-ink-muted">{row.dealTypeAtMarking ?? '—'}</span> },
+    {
+      key: 'state',
+      header: 'State',
+      render: (row) => (
+        <span className="flex items-center gap-2">
+          <Badge tone={STATE_TONE[row.state]}>{STATE_LABEL[row.state]}</Badge>
+          {row.recoveryTicketId && (
+            <span className="font-mono text-[11px] text-success" title="Recovery Ticket">
+              ↻ {row.recoveryTicketId.slice(0, 8)}
+            </span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: 'awaiting',
+      header: 'Awaiting',
+      render: (row) => <Badge tone={daysTone(row.daysElapsed)}>{row.daysElapsed}d</Badge>,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      render: (row) => (
+        <div className="flex gap-2">
+          {row.state === 'AWAITING_ZM_CONFIRMATION' && (
+            <Button type="button" size="sm" variant="secondary" data-testid={`nonop-confirm-${row.markingId}`} onClick={() => confirm(row.markingId)}>
+              Confirm
+            </Button>
+          )}
+          {isOpsHead && row.state !== 'CONFIRMED' && (
+            <Button type="button" size="sm" variant="danger" data-testid={`nonop-override-${row.markingId}`} onClick={() => override(row.markingId)}>
+              Override-confirm
+            </Button>
+          )}
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between">
-        <h2 className="text-xl font-semibold">Non-Operational — Dual Confirmation</h2>
-        <button
-          type="button"
-          onClick={() => setShowModal(true)}
-          className="rounded bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
-        >
-          Mark Non-Operational
-        </button>
-      </div>
-      <p className="mb-4 text-sm text-slate-500">
-        Devices awaiting dual confirmation (manager + customer) before going Non-Operational. Oldest
-        wait first. On confirmation, in-flight tickets close and a RECURRING device with a
-        physical-retrieval reason gets a Recovery Ticket.
-      </p>
+      <PageHeader
+        title="Non-Operational — Dual Confirmation"
+        subtitle="Devices awaiting dual confirmation (manager + customer) before going Non-Operational. Oldest wait first. On confirmation, in-flight tickets close and a RECURRING device with a physical-retrieval reason gets a Recovery Ticket."
+        actions={
+          <Button type="button" onClick={() => setShowModal(true)}>
+            Mark Non-Operational
+          </Button>
+        }
+      />
 
       {error && (
-        <p role="alert" className="mb-4 text-sm text-red-700">
+        <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
 
-      <table aria-label="Non-Operational dual confirmation" className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b text-left text-slate-500">
-            <th className="py-2 pr-3">Device</th>
-            <th className="py-2 pr-3">Reason</th>
-            <th className="py-2 pr-3">Deal Type</th>
-            <th className="py-2 pr-3">State</th>
-            <th className="py-2 pr-3">Awaiting</th>
-            <th className="py-2 pr-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={6} className="py-4 text-slate-400">
-                Nothing awaiting confirmation.
-              </td>
-            </tr>
-          )}
-          {rows.map((row) => (
-            <tr key={row.markingId} data-testid={`nonop-row-${row.markingId}`} className="border-b align-top hover:bg-slate-50">
-              <td className="py-2 pr-3 font-mono text-xs">{row.deviceId}</td>
-              <td className="py-2 pr-3">{row.reasonCode ?? '—'}</td>
-              <td className="py-2 pr-3 text-xs">{row.dealTypeAtMarking ?? '—'}</td>
-              <td className="py-2 pr-3">
-                <span className={`rounded px-2 py-0.5 text-xs ${STATE_CLASS[row.state]}`}>{STATE_LABEL[row.state]}</span>
-                {row.recoveryTicketId && (
-                  <span className="ml-2 font-mono text-[11px] text-emerald-700" title="Recovery Ticket">
-                    ↻ {row.recoveryTicketId.slice(0, 8)}
-                  </span>
-                )}
-              </td>
-              <td className="py-2 pr-3">
-                <span className={`rounded px-2 py-0.5 text-xs ${daysClass(row.daysElapsed)}`}>{row.daysElapsed}d</span>
-              </td>
-              <td className="py-2 pr-3">
-                {row.state === 'AWAITING_ZM_CONFIRMATION' && (
-                  <button
-                    type="button"
-                    data-testid={`nonop-confirm-${row.markingId}`}
-                    onClick={() => confirm(row.markingId)}
-                    className="mr-2 rounded border px-2 py-0.5 text-xs hover:bg-slate-100"
-                  >
-                    Confirm
-                  </button>
-                )}
-                {isOpsHead && row.state !== 'CONFIRMED' && (
-                  <button
-                    type="button"
-                    data-testid={`nonop-override-${row.markingId}`}
-                    onClick={() => override(row.markingId)}
-                    className="rounded border px-2 py-0.5 text-xs text-rose-700 hover:bg-rose-50"
-                  >
-                    Override-confirm
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="mb-5 grid grid-cols-3 gap-3">
+        <div>
+          <MetricCard label="Awaiting Confirmation" value={rows.length} tone="warning" />
+        </div>
+      </div>
+
+      <DataTable
+        ariaLabel="Non-Operational dual confirmation"
+        rowKey={(r) => r.markingId}
+        rowTestId={(r) => `nonop-row-${r.markingId}`}
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        empty="Nothing awaiting confirmation."
+      />
 
       {showModal && (
         <MarkNonOperationalModal
@@ -210,7 +212,6 @@ function MarkNonOperationalModal({ onClose, onMarked }: { onClose: () => void; o
     (!showWarning || ack);
 
   const submit = async () => {
-    // `valid` implies reason !== '' — TS narrows reason to NonOpReason here (aliased-condition analysis).
     if (!valid) return;
     setSubmitting(true);
     try {
@@ -223,50 +224,55 @@ function MarkNonOperationalModal({ onClose, onMarked }: { onClose: () => void; o
   };
 
   return (
-    <div role="dialog" aria-label="Mark Non-Operational" className="fixed inset-0 flex items-center justify-center bg-black/30">
-      <div className="w-[28rem] rounded bg-white p-5 shadow-lg">
-        <h3 className="mb-3 text-lg font-semibold">Mark device Non-Operational</h3>
+    <div role="dialog" aria-label="Mark Non-Operational" className="fixed inset-0 z-50 flex items-center justify-center bg-chrome-900/40 p-4">
+      <div className="w-[28rem] rounded-card border border-line bg-surface-card p-5 shadow-lg">
+        <h3 className="mb-4 text-base font-semibold text-ink-strong">Mark device Non-Operational</h3>
 
-        <label className="mb-1 block text-sm" htmlFor="nonop-device">Device ID</label>
-        <input id="nonop-device" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} className="mb-3 w-full rounded border px-2 py-1 text-sm" />
+        <div className="flex flex-col gap-3">
+          <Field label="Device ID" htmlFor="nonop-device">
+            <Input id="nonop-device" value={deviceId} onChange={(e) => setDeviceId(e.target.value)} />
+          </Field>
 
-        <label className="mb-1 block text-sm" htmlFor="nonop-reason">Reason</label>
-        <select id="nonop-reason" value={reason} onChange={(e) => setReason(e.target.value as NonOpReason)} className="mb-3 w-full rounded border px-2 py-1 text-sm">
-          <option value="">Select a reason…</option>
-          {REASONS.map((r) => (
-            <option key={r} value={r}>{r}</option>
-          ))}
-        </select>
+          <Field label="Reason" htmlFor="nonop-reason">
+            <FilterSelect id="nonop-reason" value={reason} onChange={(e) => setReason(e.target.value as NonOpReason)} className="w-full">
+              <option value="">Select a reason…</option>
+              {REASONS.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </FilterSelect>
+          </Field>
 
-        {reason === 'OTHER' && (
-          <>
-            <label className="mb-1 block text-sm" htmlFor="nonop-details">Free-text details</label>
-            <textarea id="nonop-details" value={reasonText} onChange={(e) => setReasonText(e.target.value)} className="mb-3 w-full rounded border px-2 py-1 text-sm" />
-          </>
-        )}
+          {reason === 'OTHER' && (
+            <Field label="Free-text details" htmlFor="nonop-details">
+              <textarea
+                id="nonop-details"
+                value={reasonText}
+                onChange={(e) => setReasonText(e.target.value)}
+                className="w-full rounded-md border border-line bg-surface-card px-3 py-2 text-sm text-ink-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40"
+              />
+            </Field>
+          )}
 
-        {showWarning && (
-          <div role="alert" className="mb-3 rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
-            <p className="mb-2">A Recovery Ticket will be auto-created for this RECURRING device on confirmation.</p>
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} aria-label="Acknowledge Recovery Ticket creation" />
-              I acknowledge a Recovery Ticket will be created.
-            </label>
-          </div>
-        )}
+          {showWarning && (
+            <div role="alert" className="rounded-card border border-warning/40 bg-warning-bg p-3 text-sm text-warning">
+              <p className="mb-2">A Recovery Ticket will be auto-created for this RECURRING device on confirmation.</p>
+              <label className="flex items-center gap-2 text-xs">
+                <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} aria-label="Acknowledge Recovery Ticket creation" />
+                I acknowledge a Recovery Ticket will be created.
+              </label>
+            </div>
+          )}
 
-        {error && <p role="alert" className="mb-2 text-sm text-red-700">{error}</p>}
+          {error && <p role="alert" className="text-sm text-critical">{error}</p>}
+        </div>
 
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded border px-3 py-1 text-sm">Cancel</button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!valid || submitting}
-            className="rounded bg-slate-800 px-3 py-1 text-sm font-medium text-white disabled:opacity-40"
-          >
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" onClick={submit} disabled={!valid || submitting}>
             Mark device Non-Operational
-          </button>
+          </Button>
         </div>
       </div>
     </div>

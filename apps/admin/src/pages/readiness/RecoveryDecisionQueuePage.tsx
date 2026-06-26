@@ -6,21 +6,30 @@ import {
   apiRescheduleRecovery,
   type RecoveryRow,
 } from '../../api/recovery';
+import { DataTable, MetricCard, PageHeader, type Column } from '../../components/data';
+import { Badge, Button } from '../../components/ui';
 
 /**
- * ZM Recovery decision queue (Issue 37, `/readiness/recovery-decisions`). Manager roles triage
- * unable-to-collect Recovery Tickets: Reschedule (new SE attempt), Close as FAILED_RECOVERY (mandatory
- * reason), or Escalate to Operations Head. Manual closure from the Ticket Detail Drawer is the other
- * authority path (Issue 37). Follows the sibling queue pages' house style (no dedicated v2 image).
+ * ZM Recovery decision queue (Issue 37 · FE-16 recipe, `/readiness/recovery-decisions`, reference 20
+ * house style). Manager roles triage unable-to-collect Recovery Tickets: Reschedule (new SE attempt),
+ * Close as FAILED_RECOVERY (mandatory reason), or Escalate to Operations Head.
+ *
+ * FE-16 applies the canonical queue recipe (`PageHeader` + `MetricCard` + `DataTable`). The
+ * `Recovery decision queue` aria-label, the `rdq-row-*` / `rdq-reschedule-*` / `rdq-close-failed-*` /
+ * `rdq-escalate-*` test ids, and the action behaviour (asserted as direct/prompt→POST) are preserved;
+ * the `window.prompt` reason/SE legs are scheduled for a `Modal` upgrade in follow-up #72.
  */
 export function RecoveryDecisionQueuePage() {
   const [rows, setRows] = useState<RecoveryRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
+    setLoading(true);
     apiRecoveryZmQueue()
       .then(setRows)
-      .catch(() => setError('Failed to load the Recovery decision queue'));
+      .catch(() => setError('Failed to load the Recovery decision queue'))
+      .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
@@ -47,59 +56,61 @@ export function RecoveryDecisionQueuePage() {
 
   const escalate = (ticketId: string) => void run(() => apiEscalateRecovery(ticketId), 'Escalate failed');
 
+  const columns: Column<RecoveryRow>[] = [
+    { key: 'ticket', header: 'Ticket', render: (r) => <span className="font-mono text-xs text-ink-muted">{r.ticketId.slice(0, 8)}</span> },
+    { key: 'device', header: 'Device', render: (r) => <span className="font-mono text-xs text-ink-strong">{r.deviceId}</span> },
+    {
+      key: 'reason',
+      header: 'Unable reason',
+      render: (r) => <Badge tone="critical">{r.unableToCollectReason ?? '—'}</Badge>,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      render: (r) => (
+        <div className="flex gap-2">
+          <Button type="button" size="sm" variant="secondary" data-testid={`rdq-reschedule-${r.ticketId}`} onClick={() => reschedule(r.ticketId)}>
+            Reschedule
+          </Button>
+          <Button type="button" size="sm" variant="danger" data-testid={`rdq-close-failed-${r.ticketId}`} onClick={() => closeFailed(r.ticketId)}>
+            Close FAILED_RECOVERY
+          </Button>
+          <Button type="button" size="sm" variant="ghost" data-testid={`rdq-escalate-${r.ticketId}`} onClick={() => escalate(r.ticketId)}>
+            Escalate to OH
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div>
-      <h2 className="mb-1 text-xl font-semibold">Recovery — ZM Decision Queue</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Recovery Tickets the SE could not collect. Reschedule a new attempt, close as FAILED_RECOVERY
-        with a reason, or escalate to Operations Head.
-      </p>
+      <PageHeader
+        title="Recovery — ZM Decision Queue"
+        subtitle="Recovery Tickets the SE could not collect. Reschedule a new attempt, close as FAILED_RECOVERY with a reason, or escalate to Operations Head."
+      />
 
       {error && (
-        <p role="alert" className="mb-4 text-sm text-red-700">
+        <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
 
-      <table aria-label="Recovery decision queue" className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b text-left text-slate-500">
-            <th className="py-2 pr-3">Ticket</th>
-            <th className="py-2 pr-3">Device</th>
-            <th className="py-2 pr-3">Unable reason</th>
-            <th className="py-2 pr-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={4} className="py-4 text-slate-400">
-                Nothing awaiting a decision.
-              </td>
-            </tr>
-          )}
-          {rows.map((row) => (
-            <tr key={row.ticketId} data-testid={`rdq-row-${row.ticketId}`} className="border-b align-top hover:bg-slate-50">
-              <td className="py-2 pr-3 font-mono text-xs">{row.ticketId.slice(0, 8)}</td>
-              <td className="py-2 pr-3 font-mono text-xs">{row.deviceId}</td>
-              <td className="py-2 pr-3">
-                <span className="rounded bg-rose-100 px-2 py-0.5 text-xs text-rose-800">{row.unableToCollectReason ?? '—'}</span>
-              </td>
-              <td className="py-2 pr-3">
-                <button type="button" data-testid={`rdq-reschedule-${row.ticketId}`} onClick={() => reschedule(row.ticketId)} className="mr-2 rounded border px-2 py-0.5 text-xs hover:bg-slate-100">
-                  Reschedule
-                </button>
-                <button type="button" data-testid={`rdq-close-failed-${row.ticketId}`} onClick={() => closeFailed(row.ticketId)} className="mr-2 rounded border px-2 py-0.5 text-xs text-rose-700 hover:bg-rose-50">
-                  Close FAILED_RECOVERY
-                </button>
-                <button type="button" data-testid={`rdq-escalate-${row.ticketId}`} onClick={() => escalate(row.ticketId)} className="rounded border px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-50">
-                  Escalate to OH
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="mb-5 grid grid-cols-3 gap-3">
+        <div>
+          <MetricCard label="Awaiting Decision" value={rows.length} tone="critical" />
+        </div>
+      </div>
+
+      <DataTable
+        ariaLabel="Recovery decision queue"
+        rowKey={(r) => r.ticketId}
+        rowTestId={(r) => `rdq-row-${r.ticketId}`}
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        empty="Nothing awaiting a decision."
+      />
     </div>
   );
 }
