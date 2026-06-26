@@ -85,6 +85,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 66 — SE mobile Day Plan: highlight ZM-added Tickets + one-session "removed" label → 31, 54  *(closes Issue 31 AC#5 mobile)*
 - 67 — Non-Op Mark modal ticket enumeration + queue zone-scope + Recovery toast → 35  *(Issue 35 UI refinements)*
 - 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect) → 54, 36  *(Issue 36 mobile)*
+- 69 — Per-ticket troubleshoot/install **form read** endpoint (`GET /tickets/:id/forms`) → 16  *(surfaced by FE-09 2026-06-26: the Ticket Detail Drawer Forms tab has no backend read; ticket detail payload carries no form data. Blocks FE-09 AC#2 Forms tab only — Verification/Assignment-History/Components are buildable. Needs SE troubleshoot-form persistence read + RBAC scope.)*
 
 ## Mobile (foundation + M-series UI)
 
@@ -127,7 +128,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 
 **Phase F2 — Tickets:**
 - FE-08 — Tickets list parity → FE-04  *(ref 07)*  **(done — PageHeader + FilterBar + DataTable badge columns; fetch/query-params + filter aria-labels + bucket-*/badge-* test ids + row-click drawer nav preserved)**
-- FE-09 — Ticket Detail Drawer parity + fill stub tabs → FE-04, FE-08  *(ref 08/09/28)*
+- FE-09 — Ticket Detail Drawer parity + fill stub tabs → FE-04, FE-08  *(ref 08/09/28)*  **(PAUSED 2026-06-26, Strategic-HITL backlog-ownership — Verification/Assignment-History/Components fillable, but Forms tab has no BE read endpoint → blocked by #69; user chose to pause & do other FE work)**
 
 **Phase F3 — Daily ops:**
 - FE-10 — SE Activity parity → FE-03/04/05  *(ref 15)*
