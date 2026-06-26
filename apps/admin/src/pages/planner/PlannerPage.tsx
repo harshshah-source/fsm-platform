@@ -8,17 +8,24 @@ import {
   type PlannerPlant,
 } from '../../api/planner';
 import { apiListSchedules, apiZoneEngineers, type ScheduleRow, type ZoneEngineer } from '../../api/schedules';
+import { DateRangeChips, FilterSelect, MetricStrip, PageHeader, type Metric } from '../../components/data';
+import { Badge } from '../../components/ui';
+import { cn } from '../../lib/cn';
 
 /**
- * SE Planner grid (Issue 14b, ADR-0022). The Zonal-Manager plant-visit scheduling tool — separate from
- * the Day Plan (CONTEXT §SE Planner): rows are the zone's SEs, columns are days across a flexible
- * multi-day window (Schedule Cadence), and each cell holds the plant-visit intents the ZM wants that SE
- * to cover. Intents are a soft bias to the Morning Batch (Issue 14a), not a hard assignment — they
- * surface alongside each SE's Batch Schedule and stay overridable at the Schedule level (Issue 13b).
+ * SE Planner grid (Issue 14b · FE-11 parity, reference 16, ADR-0022). The Zonal-Manager plant-visit
+ * scheduling tool — separate from the Day Plan (CONTEXT §SE Planner): rows are the zone's SEs, columns
+ * are days across a flexible multi-day window (Schedule Cadence), and each cell holds the plant-visit
+ * intents the ZM wants that SE to cover. Intents are a soft bias to the Morning Batch (Issue 14a), not a
+ * hard assignment — they surface alongside each SE's Batch Schedule and stay overridable (Issue 13b).
  *
  * Assign a plant to a cell by selecting it in the picker and dropping it on (or clicking) the cell;
  * remove via the chip's ×. Writes go straight to POST/DELETE /api/planner and the grid refetches, so it
  * always reflects persisted state. Zone scope is enforced server-side (a ZM sees only their own zone).
+ *
+ * FE-11 is a presentation-only refactor: the bespoke drag-drop grid is re-skinned onto the design tokens
+ * + KPI `MetricStrip` + coverage column, but every test id, the drag/drop dataTransfer contract, the
+ * `SE Planner grid` aria-label, and the CRUD calls are preserved.
  */
 const WINDOW_DAYS = 7;
 
@@ -109,31 +116,45 @@ export function PlannerPage() {
     }
   }
 
+  const metrics: Metric[] = useMemo(() => {
+    const plannedSes = new Set(entries.map((e) => e.seId)).size;
+    return [
+      { label: 'Engineers', value: engineers.length, hint: 'in zone scope', tone: 'info' },
+      { label: 'Plant Intents', value: entries.length, hint: `${dateFrom} – ${dateTo}`, tone: 'success' },
+      { label: 'Planned SEs', value: plannedSes, hint: 'with ≥1 intent', tone: 'brand' },
+      { label: 'Window', value: `${WINDOW_DAYS}d`, hint: 'schedule cadence', tone: 'neutral' },
+    ];
+  }, [engineers, entries, dateFrom, dateTo]);
+
+  const th =
+    'whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-caps';
+
   return (
     <div>
-      <h2 className="mb-1 text-xl font-semibold">SE Planner</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Plant-visit intent for {dateFrom} – {dateTo}. Soft bias to the Morning Batch — overridable on the
-        Batch Schedule.
-      </p>
+      <PageHeader
+        title="SE Planner"
+        subtitle={`Plant-visit intent for ${dateFrom} – ${dateTo}. Soft bias to the Morning Batch — overridable on the Batch Schedule.`}
+        actions={<DateRangeChips />}
+      />
 
       {error && (
-        <p role="alert" className="mb-4 text-sm text-red-700">
+        <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
 
+      <MetricStrip metrics={metrics} />
+
       {/* Plant picker — pick a plant, then drop it on (or click) a cell to assign it as an intent. */}
       <div className="mb-4 flex items-center gap-2 text-sm">
-        <label htmlFor="planner-plant" className="text-slate-600">
+        <label htmlFor="planner-plant" className="text-ink-muted">
           Plant to assign
         </label>
-        <select
+        <FilterSelect
           id="planner-plant"
           aria-label="Plant to assign"
           value={selectedPlantId}
           onChange={(e) => setSelectedPlantId(e.target.value)}
-          className="rounded border px-2 py-1"
         >
           <option value="">Select a plant…</option>
           {plants.map((p) => (
@@ -141,96 +162,103 @@ export function PlannerPage() {
               {p.name}
             </option>
           ))}
-        </select>
+        </FilterSelect>
         {selectedPlantId && (
           <span
             draggable
             data-testid="plant-drag-source"
             onDragStart={(e) => e.dataTransfer.setData('text/plant-id', selectedPlantId)}
-            className="cursor-grab rounded bg-sky-100 px-2 py-0.5 text-xs text-sky-800"
+            className="cursor-grab rounded-full bg-info-bg px-2 py-0.5 text-xs font-medium text-info"
           >
             {plantName(selectedPlantId)}
           </span>
         )}
       </div>
 
-      <table aria-label="SE Planner grid" className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b text-left text-slate-500">
-            <th className="py-2 pr-3">Engineer</th>
-            <th className="py-2 pr-3">Batch Schedule</th>
-            {days.map((d) => (
-              <th key={d} className="py-2 px-2 font-medium">
-                {d}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {engineers.map((eng) => {
-            const sched = scheduleFor(eng.engineerId);
-            return (
-              <tr key={eng.engineerId} className="border-b align-top">
-                <td className="py-2 pr-3 font-medium text-slate-700">{eng.engineerId}</td>
-                <td className="py-2 pr-3" data-testid={`batch-${eng.engineerId}`}>
-                  {sched ? (
-                    <span
-                      data-testid={`batch-status-${eng.engineerId}`}
-                      className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700"
-                    >
-                      {sched.status} · {sched.ticketCount} tickets
-                    </span>
-                  ) : (
-                    <span className="text-xs text-slate-400">No batch</span>
-                  )}
-                </td>
+      <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
+        <div className="overflow-x-auto">
+          <table aria-label="SE Planner grid" className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-line bg-surface-sunken/60">
+                <th className={th}>Engineer</th>
+                <th className={th}>Coverage</th>
+                <th className={th}>Batch Schedule</th>
                 {days.map((d) => (
-                  <td
-                    key={d}
-                    data-testid={`cell-${eng.engineerId}-${d}`}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const dropped = e.dataTransfer.getData('text/plant-id') || selectedPlantId;
-                      void assign(eng.engineerId, d, dropped);
-                    }}
-                    className="min-w-[7rem] border-l p-1 align-top"
-                  >
-                    <div className="flex flex-col gap-1">
-                      {cellEntries(eng.engineerId, d).map((entry) => (
-                        <span
-                          key={entry.id}
-                          data-testid={`intent-${entry.id}`}
-                          className="flex items-center justify-between gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-800"
-                        >
-                          {plantName(entry.plantId)}
-                          <button
-                            type="button"
-                            aria-label={`Remove ${plantName(entry.plantId)}`}
-                            onClick={() => void remove(entry.id)}
-                            className="text-emerald-700 hover:text-red-700"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      ))}
-                      <button
-                        type="button"
-                        aria-label={`Add plant to ${eng.engineerId} on ${d}`}
-                        disabled={!selectedPlantId}
-                        onClick={() => void assign(eng.engineerId, d, selectedPlantId)}
-                        className="rounded border border-dashed px-1 text-xs text-slate-400 hover:text-slate-600 disabled:opacity-40"
-                      >
-                        + add
-                      </button>
-                    </div>
-                  </td>
+                  <th key={d} className={cn(th, 'text-center font-medium')}>
+                    {d}
+                  </th>
                 ))}
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {engineers.map((eng) => {
+                const sched = scheduleFor(eng.engineerId);
+                return (
+                  <tr key={eng.engineerId} className="border-b border-line align-top last:border-b-0">
+                    <td className="px-3 py-2.5 font-medium text-ink-strong">{eng.engineerId}</td>
+                    <td className="px-3 py-2.5">
+                      <Badge tone="neutral">{eng.coverageType}</Badge>
+                    </td>
+                    <td className="px-3 py-2.5" data-testid={`batch-${eng.engineerId}`}>
+                      {sched ? (
+                        <span data-testid={`batch-status-${eng.engineerId}`}>
+                          <Badge tone="info">
+                            {sched.status} · {sched.ticketCount} tickets
+                          </Badge>
+                        </span>
+                      ) : (
+                        <span className="text-xs text-ink-muted">No batch</span>
+                      )}
+                    </td>
+                    {days.map((d) => (
+                      <td
+                        key={d}
+                        data-testid={`cell-${eng.engineerId}-${d}`}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const dropped = e.dataTransfer.getData('text/plant-id') || selectedPlantId;
+                          void assign(eng.engineerId, d, dropped);
+                        }}
+                        className="min-w-[7rem] border-l border-line p-1.5 align-top"
+                      >
+                        <div className="flex flex-col gap-1">
+                          {cellEntries(eng.engineerId, d).map((entry) => (
+                            <span
+                              key={entry.id}
+                              data-testid={`intent-${entry.id}`}
+                              className="flex items-center justify-between gap-1 rounded-md bg-success-bg px-1.5 py-0.5 text-xs font-medium text-success"
+                            >
+                              {plantName(entry.plantId)}
+                              <button
+                                type="button"
+                                aria-label={`Remove ${plantName(entry.plantId)}`}
+                                onClick={() => void remove(entry.id)}
+                                className="text-success hover:text-critical"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                          <button
+                            type="button"
+                            aria-label={`Add plant to ${eng.engineerId} on ${d}`}
+                            disabled={!selectedPlantId}
+                            onClick={() => void assign(eng.engineerId, d, selectedPlantId)}
+                            className="rounded-md border border-dashed border-line px-1 text-xs text-ink-muted hover:text-ink-strong disabled:opacity-40"
+                          >
+                            + add
+                          </button>
+                        </div>
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
