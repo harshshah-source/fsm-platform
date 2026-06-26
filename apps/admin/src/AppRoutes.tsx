@@ -9,6 +9,7 @@ import { ComponentRequestsPage } from './pages/inventory/ComponentRequestsPage';
 import { ShadowUseQueuePage } from './pages/inventory/ShadowUseQueuePage';
 import { RecoveryReceiptQueuePage } from './pages/warehouse/RecoveryReceiptQueuePage';
 import { DashboardHome } from './pages/dashboard/DashboardHome';
+import { HelpCenterPage } from './pages/help/HelpCenterPage';
 import { KitchenSink } from './pages/KitchenSink';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
@@ -198,6 +199,8 @@ export function AppRoutes() {
               </RoleRoute>
             }
           />
+          {/* Help Center — role-scoped static guidance + glossary (FE-26); reachable by all roles. */}
+          <Route path="/help" element={<HelpCenterPage />} />
           {/* Floating-SE territory config — Operations-Head-only (Issue 09). */}
           <Route
             path="/coverage"

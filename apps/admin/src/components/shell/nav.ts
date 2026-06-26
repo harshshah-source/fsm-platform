@@ -7,6 +7,7 @@ import {
   IconClipboard,
   IconClock,
   IconGrid,
+  IconHelp,
   IconMapPin,
   IconPackage,
   IconRoute,
@@ -41,6 +42,12 @@ export function buildNav(role: string): NavGroup[] {
     role === 'ZONAL_MANAGER' || role === 'CENTRAL_SERVICE_MANAGER' || role === 'OPERATIONS_HEAD';
   const isOpsHead = role === 'OPERATIONS_HEAD';
 
+  // Help is reachable from the sidebar for every role (FE-26); the page itself scopes its content.
+  const support: NavGroup = {
+    heading: 'Support',
+    items: [{ label: 'Help', to: '/help', icon: IconHelp }],
+  };
+
   if (role === 'WAREHOUSE_MANAGER') {
     return [
       {
@@ -52,6 +59,7 @@ export function buildNav(role: string): NavGroup[] {
           { label: 'Recovery Receipt', to: '/warehouse/recovery-receipt', icon: IconRotate },
         ],
       },
+      support,
     ];
   }
 
@@ -95,6 +103,8 @@ export function buildNav(role: string): NavGroup[] {
       ],
     });
   }
+
+  groups.push(support);
 
   return groups;
 }

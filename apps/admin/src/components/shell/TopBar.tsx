@@ -24,6 +24,7 @@ const PAGE_TITLES: [string, string][] = [
   ['/warehouse/recovery-receipt', 'Recovery Receipt'],
   ['/coverage', 'Coverage'],
   ['/reports/csm-approval-share', 'CSM Backup Share'],
+  ['/help', 'Help Center'],
   ['/settings', 'Settings'],
 ];
 

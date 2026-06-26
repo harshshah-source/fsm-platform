@@ -155,7 +155,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 - FE-23 — Root-Cause Analytics → FE-05 + **BE 41**  *(ref 23)*
 - FE-24 — System Efficiency → FE-05 + **BE 42**  *(ref 24)*
 - FE-25 — ZM Performance Scorecard → FE-05 + **BE 43**  *(ref 25)*
-- FE-26 — Help Center → FE-02, FE-03  *(ref 27)*
+- FE-26 — Help Center → FE-02, FE-03  *(ref 27)*  **(done — new role-scoped /help: buildHelpSections mirrors nav role logic (Your module / Components & Warehouse / Analytics / Admin), topic cards w/ View Docs links + "Model states & terminology" glossary (6 domain terms); sidebar Support→Help link for all roles (+IconHelp), TopBar breadcrumb; static, no backend; TDD 3 tests)**
 
 *(Mobile parity stays the separate Issue 54 + M-series backlog; it shares only the token language via NativeWind — see `DESIGN-SYSTEM.md` §6.)*
 
