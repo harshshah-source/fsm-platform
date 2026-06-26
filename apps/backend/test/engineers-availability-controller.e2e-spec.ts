@@ -41,6 +41,13 @@ describe('Issue 25 slice 3 — Set Availability HTTP (e2e)', () => {
     app.setGlobalPrefix('api');
     await app.init();
     prisma = app.get(PrismaService);
+    // The in-memory ZM-north token is scoped to zoneId 1; this suite also exercises a
+    // cross-zone (zoneId 2) 403. On a non-pristine DB the org seed creates North/South at
+    // higher sequence ids, so we cannot assume zones 1/2 exist. Ensure them by explicit id
+    // (idempotent; name is @unique so use a namespaced name only when creating). Mirrors the
+    // self-seeding pattern in the component-blocked / install controller e2e suites.
+    await prisma.zone.upsert({ where: { zoneId: 1n }, create: { zoneId: 1n, name: 'Z1-av-' + NS }, update: {} });
+    await prisma.zone.upsert({ where: { zoneId: 2n }, create: { zoneId: 2n, name: 'Z2-av-' + NS }, update: {} });
     seZ1 = await makeSe(1n);
     seZ2 = await makeSe(2n);
   });
