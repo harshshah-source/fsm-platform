@@ -6,6 +6,7 @@ import {
   CUSTOMER_CONFIRMATION_NOTIFIER,
   LoggingCustomerConfirmationNotifier,
 } from './customer-confirmation-notifier';
+import { InstallService } from './install.service';
 import { NonOperationalService } from './non-operational.service';
 import { LoggingRecoveryNotifier, RECOVERY_NOTIFIER } from './recovery-notifier';
 import { RecoveryService } from './recovery.service';
@@ -35,6 +36,7 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
     { provide: CUSTOMER_CONFIRMATION_NOTIFIER, useClass: LoggingCustomerConfirmationNotifier },
     RecoveryService,
     { provide: RECOVERY_NOTIFIER, useClass: LoggingRecoveryNotifier },
+    InstallService,
   ],
   exports: [
     TicketCreationService,
@@ -45,6 +47,7 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
     VehicleUnavailabilityService,
     NonOperationalService,
     RecoveryService,
+    InstallService,
   ],
 })
 export class TicketingModule {}
