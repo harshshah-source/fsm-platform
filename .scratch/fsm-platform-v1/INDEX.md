@@ -110,7 +110,7 @@ lands, all mobile ACs across the backlog are `blocked-by #54`, never silently de
 - 38 — Expense Vouchers end-to-end → 07
 - 39 — Fleet Uptime % monthly report → 05, 08  *(done — backend slice: `device_downtime_summary_monthly` migration + `FleetUptimeAggregationService` (per-device failure-cycle-overlap downtime, eligible-gate snapshot, auto vs SE closure split) + `ReportsService.fleetUptime` (time-weighted, eligible-only denominator, per zone/company/plant, ZM-scoped) + `ReportsModule`/`ReportsController` (`GET /reports/fleet-uptime`, OH `recompute`); 15 e2e green; unblocks FE-21; month-end cron deferred)*
 - 40 — Soft Inactive Count trend → 05  *(done — backend slice: `soft_inactive_count_history` migration + `SoftInactiveCountService` (per-zone twice-daily snapshot + `modeForZone` count-driven DEFICIT/PREVENTIVE switch, configurable 2% threshold) + Recommender consumes/records mode on `RunSummary` + `scoreBreakdown` + `ReportsService.softInactiveTrend` + OH endpoints; 8 e2e green; unblocks FE-21; preventive-mode scoring → #72; twice-daily cron deferred)*
-- 41 — Root Cause Analytics → 16
+- 41 — Root Cause Analytics → 16  *(done — backend slice: `root_cause_summary_monthly` migration + `RootCauseAnalyticsAggregationService` (per-month delete+insert cube of structured `root_cause_category` counts by zone/company/plant/device_type/SE; no free-text parsing) + `ReportsService.rootCause` (% distribution, all 10 categories zero-filled, filterable, ZM zone-scoped) + `ReportsController` (`GET /reports/root-cause`, OH `recompute`); 13 e2e green; unblocks FE-23; month-end cron deferred)*
 - 42 — System Efficiency Report → 08, 18, 30
 - 43 — ZM Performance Scorecard → 13
 - 44 — Device Detail + Lifetime Downtime Trend → 08

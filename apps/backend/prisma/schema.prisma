@@ -1470,6 +1470,29 @@ model DeviceDowntimeSummaryMonthly {
   @@map("device_downtime_summary_monthly")
 }
 
+/// Pre-computed Root Cause Analytics input (Issue 41, CONTEXT §Root Cause Analytics). The aggregation
+/// worker rebuilds, per month, one row per (month, zone, company, plant, device_type, SE,
+/// root_cause_category) holding the count of structured-root-cause troubleshooting submissions — so the
+/// report reads a small pre-aggregated cube instead of scanning raw submissions, and never parses
+/// free-text diagnosis notes (the structured `root_cause_category` is **the** source). Rebuilt per month
+/// (delete + insert) so recompute is idempotent.
+model RootCauseSummaryMonthly {
+  id                BigInt            @id @default(autoincrement())
+  month             DateTime          @db.Date
+  zoneId            BigInt?           @map("zone_id")
+  companyId         BigInt?           @map("company_id")
+  plantId           BigInt?           @map("plant_id")
+  deviceType        String?           @map("device_type")
+  seId              String            @map("se_id") @db.Uuid
+  rootCauseCategory RootCauseCategory @map("root_cause_category")
+  submissionCount   Int               @default(0) @map("submission_count")
+  computedAt        DateTime          @map("computed_at") @db.Timestamptz(6)
+
+  @@index([month])
+  @@index([month, zoneId])
+  @@map("root_cause_summary_monthly")
+}
+
 /// Non-Operational marking (schema D16) — MINIMAL for Issue 05's eligibility read. Issue 05 reads
 /// only `state ∈ (CONFIRMED, ACTIVE)` to exclude a device from the eligible set; one active marking
 /// per device (invariant I13) is a raw-SQL partial-unique. The full dual-confirmation lifecycle

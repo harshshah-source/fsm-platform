@@ -1,6 +1,45 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
+import { Prisma, type RootCauseCategory } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** The documented root-cause taxonomy, canonical (schema) order — the report zero-fills the full set. */
+export const ROOT_CAUSE_CATEGORIES: RootCauseCategory[] = [
+  'POWER_ISSUE',
+  'SIM_NETWORK_ISSUE',
+  'GPS_ANTENNA_ISSUE',
+  'DEVICE_HARDWARE_FAULT',
+  'WIRING_ISSUE',
+  'CONFIGURATION_ISSUE',
+  'VEHICLE_ACCESS_ISSUE',
+  'INSTALLATION_ISSUE',
+  'CUSTOMER_SIDE_ISSUE',
+  'UNKNOWN',
+];
+
+export interface RootCauseSlice {
+  category: RootCauseCategory;
+  count: number;
+  /** Share of total submissions in the filtered window, 0–100, 2 decimals. */
+  pct: number;
+}
+
+export interface RootCauseFilters {
+  fromMonth?: string; // YYYY-MM (inclusive); defaults to current month
+  toMonth?: string; // YYYY-MM (inclusive); defaults to fromMonth
+  zoneId?: number | null;
+  companyId?: number | null;
+  plantId?: number | null;
+  deviceType?: string | null;
+  seId?: string | null;
+}
+
+export interface RootCauseReport {
+  fromMonth: string; // ISO date of the range's first month
+  toMonth: string; // ISO date of the range's last month
+  totalSubmissions: number;
+  filters: { zoneId: number | null; companyId: number | null; plantId: number | null; deviceType: string | null; seId: string | null };
+  distribution: RootCauseSlice[];
+}
 
 export type FleetUptimeGroupBy = 'zone' | 'company' | 'plant';
 
@@ -149,6 +188,57 @@ export class ReportsService {
     return { sinceDays: days, zones: [...byZone.values()] };
   }
 
+  /**
+   * Root Cause Analytics (Issue 41 AC#1–#4): the % distribution of structured device-inactivity root
+   * causes over `root_cause_summary_monthly` — never raw scans, never free-text. Every documented category
+   * is represented (zero-filled, canonical order). Filterable by Zone / Company / Plant / device type / SE
+   * / month range. A ZONAL_MANAGER is pinned to their own zone (their `zoneId` overrides any zone filter);
+   * CSM / Operations Head see all zones and may filter by one.
+   */
+  async rootCause(scope: ReportScope, opts: RootCauseFilters = {}, now: Date = new Date()): Promise<RootCauseReport> {
+    const fromStart = parseMonth(opts.fromMonth ?? defaultMonth(now));
+    const toStart = parseMonth(opts.toMonth ?? opts.fromMonth ?? defaultMonth(now));
+    if (toStart.getTime() < fromStart.getTime()) {
+      throw new BadRequestException({ code: 'INVALID_RANGE', hint: 'fromMonth must be ≤ toMonth' });
+    }
+
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : (opts.zoneId ?? null);
+    const filters = [
+      restrictZone !== null && restrictZone !== undefined ? Prisma.sql`AND zone_id = ${BigInt(restrictZone)}` : Prisma.empty,
+      opts.companyId != null ? Prisma.sql`AND company_id = ${BigInt(opts.companyId)}` : Prisma.empty,
+      opts.plantId != null ? Prisma.sql`AND plant_id = ${BigInt(opts.plantId)}` : Prisma.empty,
+      opts.deviceType != null ? Prisma.sql`AND device_type = ${opts.deviceType}` : Prisma.empty,
+      opts.seId != null ? Prisma.sql`AND se_id = ${opts.seId}::uuid` : Prisma.empty,
+    ];
+
+    const rows = await this.prisma.$queryRaw<{ category: string; count: bigint }[]>(Prisma.sql`
+      SELECT root_cause_category::text AS category, COALESCE(SUM(submission_count), 0)::bigint AS count
+      FROM root_cause_summary_monthly
+      WHERE month >= ${fromStart} AND month <= ${toStart} ${Prisma.join(filters, ' ')}
+      GROUP BY root_cause_category`);
+
+    const counts = new Map(rows.map((r) => [r.category, Number(r.count)]));
+    const total = [...counts.values()].reduce((s, c) => s + c, 0);
+    const distribution = ROOT_CAUSE_CATEGORIES.map((category) => {
+      const count = counts.get(category) ?? 0;
+      return { category, count, pct: total > 0 ? Math.round((count / total) * 100 * 100) / 100 : 0 };
+    });
+
+    return {
+      fromMonth: fromStart.toISOString().slice(0, 10),
+      toMonth: toStart.toISOString().slice(0, 10),
+      totalSubmissions: total,
+      filters: {
+        zoneId: restrictZone ?? null,
+        companyId: opts.companyId ?? null,
+        plantId: opts.plantId ?? null,
+        deviceType: opts.deviceType ?? null,
+        seId: opts.seId ?? null,
+      },
+      distribution,
+    };
+  }
+
   private queryGroups(groupBy: FleetUptimeGroupBy, monthStart: Date, zoneFilter: Prisma.Sql): Promise<RawGroupRow[]> {
     const select = Prisma.sql`
       COUNT(*)::int AS "deviceCount",
@@ -190,6 +280,11 @@ export class ReportsService {
 function uptimePct(downtime: number, window: number): number {
   if (window <= 0) return 100;
   return Math.round((1 - downtime / window) * 100 * 100) / 100;
+}
+
+/** Current month as `YYYY-MM` (UTC). */
+function defaultMonth(now: Date): string {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 /** Parse `YYYY-MM` to the UTC first-of-month Date. */
