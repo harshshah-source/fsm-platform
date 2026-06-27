@@ -88,7 +88,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 71 — SE mobile Install screens (on-site / Install Form / activation result) → 54, 34  *(Issue 34 mobile; blocked by #54)*
 - 72 — Recommender preventive-mode scoring re-prioritisation → 40, 10  *(done — TROUBLESHOOT re-ranking: `scoring.ts` gains `inactivityHours` feature + `repeat_failure_bonus`/`device_age` weights (DEFICIT byte-identical) + `RecommenderService.activeWeights(mode)` selects a `<base>_preventive` set (configured or code-default: repeat penalty→0, repeat bonus + age) so repeat-offenders/aged devices out-score fresh in PREVENTIVE; weightSetRef stamped in scoreBreakdown; 7 e2e green; Install-backlog candidate inclusion → #75)*
 - 74 — ZM Scorecard outcome-causality metrics + weekly trend → 43  *(Issue 43 follow-up; tickets improved/delayed, SLA impact of overrides, manual-vs-auto success, SE overload/utilization, long-pending reduction, time-to-intervention, escalations-handled + weekly trend grain — needs a decision→outcome linkage model that doesn't exist yet)*
-- 75 — Recommender PREVENTIVE-mode Install backlog into candidate set → 72, 10, 11, 33, 34  *(Issue 72 follow-up; bring open INSTALL tickets into the recommender run in PREVENTIVE mode — candidate-selection change, distinct from #72's TROUBLESHOOT re-ranking)*
+- 75 — Recommender PREVENTIVE-mode Install backlog into candidate set → 72, 10, 11, 33, 34  *(done — `installSort` (tier→rank→oldest backlog) + `RecommenderService.runForZone` appends open INSTALL (REQUESTED/UNASSIGNED) after TROUBLESHOOT in PREVENTIVE only; null deviceBucket, backlog-age via preventive weight set; suggest-only (ZM override #13 = human step), DEFICIT untouched; 7 e2e green)*
 
 ## Mobile (foundation + M-series UI)
 

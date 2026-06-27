@@ -6,7 +6,7 @@ import { type CommonKitStatus, InventoryService } from '../inventory/inventory.s
 import { PrismaService } from '../prisma/prisma.service';
 import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
 import { CandidateSelectionService } from './candidate-selection.service';
-import { type CandidateTicket, type DeviceBucket, canonicalSort } from './canonical-sort';
+import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
 import { type ScoringWeights, scoreCandidate } from './scoring';
 
@@ -37,6 +37,21 @@ export interface RunSummary {
   unassignable: number;
   /** The zone's active Recommender mode this run, switched off the Soft Inactive Count (Issue 40). */
   mode: RecommenderMode;
+}
+
+/**
+ * A unified processing-order entry: TROUBLESHOOT candidates (canonical-sorted) followed, in PREVENTIVE
+ * mode, by the Install backlog (Issue 75). Installs carry a null `deviceBucket` (no SLA bucket) and use
+ * their backlog target date as the `ageAnchor` that feeds the PREVENTIVE aged-bias term.
+ */
+interface RunCandidate {
+  ticketId: string;
+  plantId: bigint;
+  companyTier: CompanyTier;
+  companyPriorityRank: string;
+  deviceBucket: DeviceBucket | null;
+  repeatFailure: boolean;
+  ageAnchor: Date | null;
 }
 
 /**
@@ -91,6 +106,19 @@ export class RecommenderService {
     }));
     const sorted = canonicalSort(candidateTickets);
 
+    // TROUBLESHOOT candidates first (canonical order), then — in PREVENTIVE mode only (Issue 75) — the
+    // Install backlog (REQUESTED + UNASSIGNED), ordered by installSort. Installs fill remaining SE capacity.
+    const tsRun: RunCandidate[] = sorted.map((t) => ({
+      ticketId: t.ticketId,
+      plantId: t.plantId,
+      companyTier: t.companyTier,
+      companyPriorityRank: t.companyPriorityRank,
+      deviceBucket: t.deviceBucket,
+      repeatFailure: t.repeatFailure,
+      ageAnchor: t.latestGpsDatetime,
+    }));
+    const runList: RunCandidate[] = [...tsRun, ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId) : [])];
+
     const { weights, weightSetRef } = await this.activeWeights(mode);
     const clusterMultiplier = await this.plantClusterMultiplier();
     const capacity = await this.engineerCapacity();
@@ -104,8 +132,8 @@ export class RecommenderService {
     let recommended = 0;
     let unassignable = 0;
 
-    for (let i = 0; i < sorted.length; i++) {
-      const t = sorted[i];
+    for (let i = 0; i < runList.length; i++) {
+      const t = runList[i];
       const processingRank = i + 1;
       const ordered = await this.candidates.orderedCandidatesForPlant(t.plantId);
 
@@ -171,10 +199,12 @@ export class RecommenderService {
       const scored = scoreCandidate(
         {
           companyPriorityRank: t.companyPriorityRank,
-          dispatchUrgency: urgencyFromBucket(t.deviceBucket),
+          // Install candidates have no SLA bucket → zero dispatch urgency (backlog, not an active outage).
+          dispatchUrgency: t.deviceBucket ? urgencyFromBucket(t.deviceBucket) : 0,
           repeatFailure: t.repeatFailure,
-          // Inactivity age drives the PREVENTIVE aged-device bias (weighted 0 in DEFICIT → no effect).
-          inactivityHours: t.latestGpsDatetime ? Math.max(0, (now.getTime() - t.latestGpsDatetime.getTime()) / 3_600_000) : null,
+          // Age drives the PREVENTIVE aged-bias term (weighted 0 in DEFICIT). For installs the anchor is the
+          // backlog target date, so older Install backlog ranks higher.
+          inactivityHours: t.ageAnchor ? Math.max(0, (now.getTime() - t.ageAnchor.getTime()) / 3_600_000) : null,
           distanceFromPrevStopKm: null, // Floating distance-from-previous-stop deferred (needs day-plan geo)
         },
         weights,
@@ -222,6 +252,41 @@ export class RecommenderService {
     if (uncached.length === 0) return;
     const statuses = await this.availability.currentStatusMany(uncached, now);
     for (const id of uncached) cache.set(id, statuses.get(id) ?? 'AVAILABLE');
+  }
+
+  /**
+   * The zone's Install backlog as RunCandidates (Issue 75) — open INSTALL tickets not yet acted on
+   * (`status = REQUESTED`, `assignment_state = UNASSIGNED`), ordered by `installSort` (tier → rank →
+   * oldest backlog). `ageAnchor` is the install target date (or createdAt), so older backlog ranks higher
+   * under the PREVENTIVE aged-bias term. The recommender only *suggests* — the ZM override path (Issue 13)
+   * remains the human approval/reorder step, so an install is never double-scheduled here.
+   */
+  private async installBacklog(zoneId: bigint): Promise<RunCandidate[]> {
+    const installs = await this.prisma.ticket.findMany({
+      where: { workType: 'INSTALL', status: 'REQUESTED', assignmentState: 'UNASSIGNED', plant: { zoneId } },
+      include: { company: { select: { companyTier: true, companyPriorityRank: true } } },
+    });
+    const ordered = installSort(
+      installs.map((t) => ({
+        ticketId: t.ticketId,
+        companyTier: t.company.companyTier,
+        companyPriorityRank: t.company.companyPriorityRank,
+        backlogAnchor: t.installTargetDate ?? t.createdAt,
+      })),
+    );
+    const byId = new Map(installs.map((t) => [t.ticketId, t]));
+    return ordered.map((c) => {
+      const t = byId.get(c.ticketId)!;
+      return {
+        ticketId: t.ticketId,
+        plantId: t.plantId,
+        companyTier: t.company.companyTier,
+        companyPriorityRank: t.company.companyPriorityRank,
+        deviceBucket: null,
+        repeatFailure: false,
+        ageAnchor: c.backlogAnchor,
+      };
+    });
   }
 
   /** SE Planner entries for the run date, as plant_id → planned se_ids (soft bias, ADR-0022). */

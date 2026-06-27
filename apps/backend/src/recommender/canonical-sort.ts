@@ -65,3 +65,34 @@ export function compareCandidates(a: CandidateTicket, b: CandidateTicket): numbe
 export function canonicalSort<T extends CandidateTicket>(candidates: readonly T[]): T[] {
   return [...candidates].sort(compareCandidates);
 }
+
+/**
+ * An Install-backlog candidate (Issue 75). Installs have no Failure Cycle / SLA bucket, so they are
+ * ordered separately and processed **after** all TROUBLESHOOT candidates (they fill remaining SE
+ * capacity in PREVENTIVE mode). `backlogAnchor` is the install target date (or createdAt) — oldest first.
+ */
+export interface InstallCandidate {
+  ticketId: string;
+  companyTier: CompanyTier;
+  companyPriorityRank: string;
+  backlogAnchor: Date | null;
+}
+
+/** A null backlog anchor sorts last (treated as newest), mirroring `inactiveKey`. */
+const anchorKey = (d: Date | null): number => (d === null ? Number.POSITIVE_INFINITY : d.getTime());
+
+/** Compare two installs: Company Tier desc → Priority Rank asc → oldest backlog → ticketId asc. */
+export function compareInstallCandidates(a: InstallCandidate, b: InstallCandidate): number {
+  if (a.companyTier !== b.companyTier) return tierRank(b.companyTier) - tierRank(a.companyTier);
+  if (a.companyPriorityRank !== b.companyPriorityRank) return a.companyPriorityRank < b.companyPriorityRank ? -1 : 1;
+  const ak = anchorKey(a.backlogAnchor);
+  const bk = anchorKey(b.backlogAnchor);
+  if (ak !== bk) return ak - bk;
+  if (a.ticketId !== b.ticketId) return a.ticketId < b.ticketId ? -1 : 1;
+  return 0;
+}
+
+/** Return the Install backlog in processing order; does not mutate the input. */
+export function installSort<T extends InstallCandidate>(candidates: readonly T[]): T[] {
+  return [...candidates].sort(compareInstallCandidates);
+}
