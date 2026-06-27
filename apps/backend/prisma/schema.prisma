@@ -1462,6 +1462,13 @@ model DeviceDowntimeSummaryMonthly {
   downtimeSeconds      BigInt   @default(0) @map("downtime_seconds")
   autoRecoveryClosures Int      @default(0) @map("auto_recovery_closures")
   seRepairedClosures   Int      @default(0) @map("se_repaired_closures")
+  // Issue 44 cycle-level aggregates (attributed to the cycle's open-month) for the Lifetime Downtime Trend.
+  cycleCount               Int    @default(0) @map("cycle_count")
+  repeatFailureCount       Int    @default(0) @map("repeat_failure_count")
+  longestEpisodeSeconds    BigInt @default(0) @map("longest_episode_seconds")
+  recoverSecondsSum        BigInt @default(0) @map("recover_seconds_sum")
+  recoveredCycles          Int    @default(0) @map("recovered_cycles")
+  componentDowntimeSeconds BigInt @default(0) @map("component_downtime_seconds")
   computedAt           DateTime @map("computed_at") @db.Timestamptz(6)
 
   @@id([deviceId, month])

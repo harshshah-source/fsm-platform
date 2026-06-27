@@ -16,9 +16,11 @@ interface DeviceRow {
   zoneId: bigint | null;
 }
 interface CycleRow {
+  cycleId: string;
   deviceId: bigint;
   openedAt: Date;
   closedAt: Date | null;
+  repeatFailure: boolean;
 }
 interface ClosureRow {
   deviceId: bigint;
@@ -54,9 +56,18 @@ export class FleetUptimeAggregationService {
       LEFT JOIN zones z ON z.zone_id = p.zone_id`);
 
     const cycles = await this.prisma.$queryRaw<CycleRow[]>(Prisma.sql`
-      SELECT device_id AS "deviceId", opened_at AS "openedAt", closed_at AS "closedAt"
+      SELECT cycle_id AS "cycleId", device_id AS "deviceId", opened_at AS "openedAt", closed_at AS "closedAt",
+             repeat_failure AS "repeatFailure"
       FROM failure_cycles
       WHERE opened_at < ${windowEnd} AND (closed_at IS NULL OR closed_at > ${monthStart})`);
+
+    // Cycle ids (opened this month) that incurred a Component Request — drives component-related downtime.
+    const componentCycles = await this.prisma.$queryRaw<{ cycleId: string }[]>(Prisma.sql`
+      SELECT DISTINCT cr.failure_cycle_id AS "cycleId"
+      FROM component_request cr
+      JOIN failure_cycles fc ON fc.cycle_id = cr.failure_cycle_id
+      WHERE fc.opened_at >= ${monthStart} AND fc.opened_at < ${monthEnd}`);
+    const componentCycleIds = new Set(componentCycles.map((c) => c.cycleId));
 
     const closures = await this.prisma.$queryRaw<ClosureRow[]>(Prisma.sql`
       SELECT device_id AS "deviceId", status::text AS "status", COUNT(*)::int AS "count"
@@ -69,13 +80,20 @@ export class FleetUptimeAggregationService {
     const closuresByDevice = groupBy(closures, (c) => c.deviceId);
 
     for (const d of devices) {
-      const downtimeSeconds = (cyclesByDevice.get(d.deviceId) ?? []).reduce(
+      const deviceCycles = cyclesByDevice.get(d.deviceId) ?? [];
+      const downtimeSeconds = deviceCycles.reduce(
         (sum, c) => sum + overlapSeconds(c.openedAt, c.closedAt ?? windowEnd, monthStart, windowEnd),
         0,
       );
       const cls = closuresByDevice.get(d.deviceId) ?? [];
       const autoRecoveryClosures = cls.find((c) => c.status === 'CLOSED_AUTO_RECOVERY')?.count ?? 0;
       const seRepairedClosures = cls.find((c) => c.status === 'CLOSED')?.count ?? 0;
+
+      // Cycle-level metrics, attributed to the month the cycle opened in (an open cycle's episode runs
+      // to the window end). `recover*` covers closed cycles only (average time-to-recover numerator).
+      const openedThisMonth = deviceCycles.filter((c) => c.openedAt >= monthStart && c.openedAt < monthEnd);
+      const episode = (c: CycleRow) => Math.max(0, Math.floor(((c.closedAt ?? windowEnd).getTime() - c.openedAt.getTime()) / 1000));
+      const closedThisMonth = openedThisMonth.filter((c) => c.closedAt !== null);
 
       const data = {
         zoneId: d.zoneId,
@@ -86,6 +104,12 @@ export class FleetUptimeAggregationService {
         downtimeSeconds: BigInt(Math.min(downtimeSeconds, windowSeconds)),
         autoRecoveryClosures,
         seRepairedClosures,
+        cycleCount: openedThisMonth.length,
+        repeatFailureCount: openedThisMonth.filter((c) => c.repeatFailure).length,
+        longestEpisodeSeconds: BigInt(openedThisMonth.reduce((max, c) => Math.max(max, episode(c)), 0)),
+        recoverSecondsSum: BigInt(closedThisMonth.reduce((sum, c) => sum + episode(c), 0)),
+        recoveredCycles: closedThisMonth.length,
+        componentDowntimeSeconds: BigInt(openedThisMonth.filter((c) => componentCycleIds.has(c.cycleId)).reduce((sum, c) => sum + episode(c), 0)),
         computedAt: now,
       };
       await this.prisma.deviceDowntimeSummaryMonthly.upsert({

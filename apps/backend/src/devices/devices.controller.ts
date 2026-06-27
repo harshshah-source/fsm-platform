@@ -14,6 +14,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { type DealType } from '../generated/prisma/enums';
+import { DeviceDetailService, type DeviceCycleView, type DeviceDowntimeTrend } from './device-detail.service';
 import { DeviceService, type DeviceView } from './device.service';
 
 const DEAL_TYPES: readonly DealType[] = ['RECURRING', 'ONE_TIME'];
@@ -27,7 +28,10 @@ const READ_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD
 @Controller('devices')
 @UseGuards(AuthGuard, RoleGuard)
 export class DevicesController {
-  constructor(private readonly devices: DeviceService) {}
+  constructor(
+    private readonly devices: DeviceService,
+    private readonly deviceDetail: DeviceDetailService,
+  ) {}
 
   @Get(':deviceId')
   @Roles(...READ_ROLES)
@@ -36,6 +40,24 @@ export class DevicesController {
     const device = await this.devices.getDevice(id);
     if (!device) throw new NotFoundException({ code: 'DEVICE_NOT_FOUND' });
     return device;
+  }
+
+  /** Device Detail — lifetime Failure-Cycle list (Issue 44). ZM own-zone only; CSM / Operations Head all. */
+  @Get(':deviceId/cycles')
+  @Roles(...READ_ROLES)
+  async cycles(@CurrentUser() user: AccessTokenClaims, @Param('deviceId') deviceId: string): Promise<{ deviceId: string; cycles: DeviceCycleView[] }> {
+    const out = await this.deviceDetail.deviceCycles(this.parseId(deviceId), { role: user.role, zoneId: user.zone_id });
+    if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'DEVICE_NOT_FOUND' });
+    return { deviceId: out.deviceId, cycles: out.cycles };
+  }
+
+  /** Lifetime Downtime Trend — monthly series + lifetime totals + root-cause trend (Issue 44). */
+  @Get(':deviceId/downtime-trend')
+  @Roles(...READ_ROLES)
+  async downtimeTrend(@CurrentUser() user: AccessTokenClaims, @Param('deviceId') deviceId: string): Promise<DeviceDowntimeTrend> {
+    const out = await this.deviceDetail.downtimeTrend(this.parseId(deviceId), { role: user.role, zoneId: user.zone_id });
+    if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'DEVICE_NOT_FOUND' });
+    return out.trend;
   }
 
   @Patch(':deviceId/deal-type')
