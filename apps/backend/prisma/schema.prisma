@@ -1493,6 +1493,42 @@ model RootCauseSummaryMonthly {
   @@map("root_cause_summary_monthly")
 }
 
+/// Pre-computed ZM Performance Scorecard input (Issue 43, CONTEXT §ZM Scorecard). The aggregation worker
+/// rebuilds, per month, one row per (month, zone, ZM user) holding that ZM's audited decision-activity
+/// counts — overrides (total + by type), override-after-ON_SITE, manual assignments — plus the zone's
+/// auto-assignment denominator (`autoAssignedCount`, for override rate) and the zone's Fleet-Uptime inputs
+/// (`zoneDowntime/WindowSeconds`, `zoneEligibleDevices`, for zone SLA compliance). Sourced from
+/// `audit_logs` (native ZM actions: `actor_role = ZONAL_MANAGER`), `plant_batch_assignments`, and
+/// `device_downtime_summary_monthly` — never raw scans. Operations-Head only; never shown to the ZM.
+/// Rebuilt per month (delete + insert) so recompute is idempotent. Every ZM user is represented
+/// (zero-filled) so the comparison is complete. Outcome-causality metrics (tickets improved/delayed,
+/// manual-vs-auto success, SE-overload causality) need a decision→outcome model and are a follow-up.
+model ZmPerformanceSummaryMonthly {
+  id                  BigInt   @id @default(autoincrement())
+  month               DateTime @db.Date
+  zoneId              BigInt   @map("zone_id")
+  zmId                String   @map("zm_id") @db.Uuid
+  overridesTotal      Int      @default(0) @map("overrides_total")
+  removals            Int      @default(0)
+  deferrals           Int      @default(0)
+  reorders            Int      @default(0)
+  swaps               Int      @default(0)
+  reassignments       Int      @default(0)
+  splitBatches        Int      @default(0) @map("split_batches")
+  overrideAfterOnsite Int      @default(0) @map("override_after_onsite")
+  manualAssignments   Int      @default(0) @map("manual_assignments")
+  autoAssignedCount   Int      @default(0) @map("auto_assigned_count")
+  zoneEligibleDevices Int      @default(0) @map("zone_eligible_devices")
+  zoneDowntimeSeconds BigInt   @default(0) @map("zone_downtime_seconds")
+  zoneWindowSeconds   BigInt   @default(0) @map("zone_window_seconds")
+  computedAt          DateTime @map("computed_at") @db.Timestamptz(6)
+
+  @@index([month])
+  @@index([month, zoneId])
+  @@index([month, zmId])
+  @@map("zm_performance_summary_monthly")
+}
+
 /// Non-Operational marking (schema D16) — MINIMAL for Issue 05's eligibility read. Issue 05 reads
 /// only `state ∈ (CONFIRMED, ACTIVE)` to exclude a device from the eligible set; one active marking
 /// per device (invariant I13) is a raw-SQL partial-unique. The full dual-confirmation lifecycle

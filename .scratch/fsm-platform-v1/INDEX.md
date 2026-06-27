@@ -87,6 +87,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 69 — Admin Install-create UI (single form + CSV upload) → 33  *(Issue 33 admin surface; presentation-only over `/api/install` + `/upload`)*
 - 71 — SE mobile Install screens (on-site / Install Form / activation result) → 54, 34  *(Issue 34 mobile; blocked by #54)*
 - 72 — Recommender preventive-mode scoring re-prioritisation → 40, 10  *(Issue 40 follow-up; PREVENTIVE-mode ranking biases repeat-offenders/aged/Install backlog)*
+- 74 — ZM Scorecard outcome-causality metrics + weekly trend → 43  *(Issue 43 follow-up; tickets improved/delayed, SLA impact of overrides, manual-vs-auto success, SE overload/utilization, long-pending reduction, time-to-intervention, escalations-handled + weekly trend grain — needs a decision→outcome linkage model that doesn't exist yet)*
 
 ## Mobile (foundation + M-series UI)
 
@@ -112,5 +113,5 @@ lands, all mobile ACs across the backlog are `blocked-by #54`, never silently de
 - 40 — Soft Inactive Count trend → 05  *(done — backend slice: `soft_inactive_count_history` migration + `SoftInactiveCountService` (per-zone twice-daily snapshot + `modeForZone` count-driven DEFICIT/PREVENTIVE switch, configurable 2% threshold) + Recommender consumes/records mode on `RunSummary` + `scoreBreakdown` + `ReportsService.softInactiveTrend` + OH endpoints; 8 e2e green; unblocks FE-21; preventive-mode scoring → #72; twice-daily cron deferred)*
 - 41 — Root Cause Analytics → 16  *(done — backend slice: `root_cause_summary_monthly` migration + `RootCauseAnalyticsAggregationService` (per-month delete+insert cube of structured `root_cause_category` counts by zone/company/plant/device_type/SE; no free-text parsing) + `ReportsService.rootCause` (% distribution, all 10 categories zero-filled, filterable, ZM zone-scoped) + `ReportsController` (`GET /reports/root-cause`, OH `recompute`); 13 e2e green; unblocks FE-23; month-end cron deferred)*
 - 42 — System Efficiency Report → 08, 18, 30
-- 43 — ZM Performance Scorecard → 13
+- 43 — ZM Performance Scorecard → 13  *(done — backend slice, decision-activity scope: `zm_performance_summary_monthly` migration + `ZmPerformanceAggregationService` (pivots native-ZM `audit_logs` actions → override counts by type + total, override-after-ON_SITE, manual assignments; zone auto-assignment denominator; zone SLA inputs from `device_downtime_summary_monthly`; zero-fills every ZM; idempotent) + `ReportsService.zmScorecard` (ZM-wise comparison + override rate + zone SLA compliance + zone drill-down + per-ZM monthly trend) + `ReportsController` (`GET /reports/zm-scorecard`, OH `recompute`) — OPERATIONS_HEAD only, ZM/CSM/SE → 403; 12 e2e green; outcome-causality metrics + weekly trend → #74; month-end cron deferred)*
 - 44 — Device Detail + Lifetime Downtime Trend → 08

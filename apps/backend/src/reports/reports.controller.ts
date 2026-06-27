@@ -5,9 +5,10 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { FleetUptimeAggregationService, type FleetUptimeAggregationResult } from './fleet-uptime-aggregation.service';
-import { type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SoftInactiveTrend, ReportsService } from './reports.service';
+import { type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SoftInactiveTrend, type ZmScorecardReport, ReportsService } from './reports.service';
 import { type RootCauseAggregationResult, RootCauseAnalyticsAggregationService } from './root-cause-aggregation.service';
 import { type SoftInactiveRecomputeResult, SoftInactiveCountService } from './soft-inactive-count.service';
+import { type ZmPerformanceAggregationResult, ZmPerformanceAggregationService } from './zm-performance-aggregation.service';
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 const GROUP_BYS: FleetUptimeGroupBy[] = ['zone', 'company', 'plant'];
@@ -25,6 +26,7 @@ export class ReportsController {
     private readonly aggregation: FleetUptimeAggregationService,
     private readonly softInactive: SoftInactiveCountService,
     private readonly rootCauseAggregation: RootCauseAnalyticsAggregationService,
+    private readonly zmPerformance: ZmPerformanceAggregationService,
   ) {}
 
   @Get('fleet-uptime')
@@ -97,6 +99,24 @@ export class ReportsController {
   @Roles('OPERATIONS_HEAD')
   recomputeRootCause(@Query('month') month?: string): Promise<RootCauseAggregationResult> {
     return this.rootCauseAggregation.computeMonth(monthToDate(month ?? currentMonth()));
+  }
+
+  /**
+   * ZM Performance Scorecard — ZM-wise comparison, zone drill-down, monthly trend (Issue 43). Gated to
+   * OPERATIONS_HEAD only: never shown to the ZM, and not to CSM/SE.
+   */
+  @Get('zm-scorecard')
+  @Roles('OPERATIONS_HEAD')
+  zmScorecard(@Query('from') from?: string, @Query('to') to?: string, @Query('zoneId') zoneId?: string): Promise<ZmScorecardReport> {
+    return this.reports.zmScorecard({ fromMonth: from, toMonth: to, zoneId: parseOptInt(zoneId, 'zoneId') });
+  }
+
+  /** Recompute a month's ZM scorecard on demand (Operations Head). Cron-wired at month-end later. */
+  @Post('zm-scorecard/recompute')
+  @HttpCode(200)
+  @Roles('OPERATIONS_HEAD')
+  recomputeZmScorecard(@Query('month') month?: string): Promise<ZmPerformanceAggregationResult> {
+    return this.zmPerformance.computeMonth(monthToDate(month ?? currentMonth()));
   }
 }
 

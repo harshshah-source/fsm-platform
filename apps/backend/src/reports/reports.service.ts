@@ -41,6 +41,67 @@ export interface RootCauseReport {
   distribution: RootCauseSlice[];
 }
 
+export interface ZmScorecardRow {
+  zmId: string;
+  zmName: string;
+  zoneId: number;
+  zoneName: string;
+  overrides: number;
+  removals: number;
+  deferrals: number;
+  reorders: number;
+  swaps: number;
+  reassignments: number;
+  splitBatches: number;
+  overrideAfterOnsite: number;
+  manualAssignments: number;
+  autoAssigned: number;
+  /** overrides ÷ zone auto-assignments over the range, 0–100, 2 decimals. */
+  overrideRatePct: number;
+  /** Zone Fleet-Uptime compliance over the range (time-weighted), 0–100, 2 decimals. */
+  zoneSlaCompliancePct: number;
+}
+export interface ZmScorecardTrendPoint {
+  month: string;
+  overrides: number;
+  overrideAfterOnsite: number;
+  manualAssignments: number;
+  overrideRatePct: number;
+  zoneSlaCompliancePct: number;
+}
+export interface ZmScorecardSeries {
+  zmId: string;
+  zmName: string;
+  points: ZmScorecardTrendPoint[];
+}
+export interface ZmScorecardReport {
+  fromMonth: string;
+  toMonth: string;
+  zoneId: number | null;
+  rows: ZmScorecardRow[];
+  trend: ZmScorecardSeries[];
+}
+
+type RawZmRow = {
+  zmId: string;
+  zmName: string;
+  zoneId: string;
+  zoneName: string;
+  month: Date;
+  overridesTotal: number;
+  removals: number;
+  deferrals: number;
+  reorders: number;
+  swaps: number;
+  reassignments: number;
+  splitBatches: number;
+  overrideAfterOnsite: number;
+  manualAssignments: number;
+  autoAssignedCount: number;
+  downtime: bigint;
+  window: bigint;
+};
+
 export type FleetUptimeGroupBy = 'zone' | 'company' | 'plant';
 
 interface ReportScope {
@@ -239,6 +300,86 @@ export class ReportsService {
     };
   }
 
+  /**
+   * ZM Performance Scorecard (Issue 43): the ZM-wise comparison (metrics summed over the month range)
+   * with override rate (overrides ÷ zone auto-assignments) and zone SLA compliance (time-weighted Fleet
+   * Uptime over the range), plus the per-ZM monthly trend, read purely from
+   * `zm_performance_summary_monthly`. Optional zone drill-down. Operations-Head only (gated at the
+   * controller — this report is never shown to the ZM and ZMs never enter their own scores).
+   */
+  async zmScorecard(opts: { fromMonth?: string; toMonth?: string; zoneId?: number | null } = {}, now: Date = new Date()): Promise<ZmScorecardReport> {
+    const fromStart = parseMonth(opts.fromMonth ?? defaultMonth(now));
+    const toStart = parseMonth(opts.toMonth ?? opts.fromMonth ?? defaultMonth(now));
+    if (toStart.getTime() < fromStart.getTime()) {
+      throw new BadRequestException({ code: 'INVALID_RANGE', hint: 'fromMonth must be ≤ toMonth' });
+    }
+    const zoneFilter = opts.zoneId != null ? Prisma.sql`AND z.zone_id = ${BigInt(opts.zoneId)}` : Prisma.empty;
+
+    const raw = await this.prisma.$queryRaw<RawZmRow[]>(Prisma.sql`
+      SELECT z.zm_id::text AS "zmId", u.name AS "zmName", z.zone_id::text AS "zoneId", zo.name AS "zoneName",
+             z.month, z.overrides_total AS "overridesTotal", z.removals, z.deferrals, z.reorders, z.swaps,
+             z.reassignments, z.split_batches AS "splitBatches", z.override_after_onsite AS "overrideAfterOnsite",
+             z.manual_assignments AS "manualAssignments", z.auto_assigned_count AS "autoAssignedCount",
+             z.zone_downtime_seconds AS "downtime", z.zone_window_seconds AS "window"
+      FROM zm_performance_summary_monthly z
+      JOIN users u ON u.user_id = z.zm_id
+      JOIN zones zo ON zo.zone_id = z.zone_id
+      WHERE z.month >= ${fromStart} AND z.month <= ${toStart} ${zoneFilter}
+      ORDER BY u.name, z.month ASC`);
+
+    const byZm = new Map<string, { meta: RawZmRow; months: RawZmRow[] }>();
+    for (const r of raw) {
+      let g = byZm.get(r.zmId);
+      if (!g) {
+        g = { meta: r, months: [] };
+        byZm.set(r.zmId, g);
+      }
+      g.months.push(r);
+    }
+
+    const rows: ZmScorecardRow[] = [];
+    const trend: ZmScorecardSeries[] = [];
+    for (const { meta, months } of byZm.values()) {
+      const sum = (pick: (r: RawZmRow) => number) => months.reduce((s, r) => s + pick(r), 0);
+      const downtime = months.reduce((s, r) => s + Number(r.downtime), 0);
+      const window = months.reduce((s, r) => s + Number(r.window), 0);
+      const overrides = sum((r) => r.overridesTotal);
+      const autoAssigned = sum((r) => r.autoAssignedCount);
+      rows.push({
+        zmId: meta.zmId,
+        zmName: meta.zmName,
+        zoneId: Number(meta.zoneId),
+        zoneName: meta.zoneName,
+        overrides,
+        removals: sum((r) => r.removals),
+        deferrals: sum((r) => r.deferrals),
+        reorders: sum((r) => r.reorders),
+        swaps: sum((r) => r.swaps),
+        reassignments: sum((r) => r.reassignments),
+        splitBatches: sum((r) => r.splitBatches),
+        overrideAfterOnsite: sum((r) => r.overrideAfterOnsite),
+        manualAssignments: sum((r) => r.manualAssignments),
+        autoAssigned,
+        overrideRatePct: ratePct(overrides, autoAssigned),
+        zoneSlaCompliancePct: uptimePct(downtime, window),
+      });
+      trend.push({
+        zmId: meta.zmId,
+        zmName: meta.zmName,
+        points: months.map((r) => ({
+          month: r.month.toISOString().slice(0, 10),
+          overrides: r.overridesTotal,
+          overrideAfterOnsite: r.overrideAfterOnsite,
+          manualAssignments: r.manualAssignments,
+          overrideRatePct: ratePct(r.overridesTotal, r.autoAssignedCount),
+          zoneSlaCompliancePct: uptimePct(Number(r.downtime), Number(r.window)),
+        })),
+      });
+    }
+
+    return { fromMonth: fromStart.toISOString().slice(0, 10), toMonth: toStart.toISOString().slice(0, 10), zoneId: opts.zoneId ?? null, rows, trend };
+  }
+
   private queryGroups(groupBy: FleetUptimeGroupBy, monthStart: Date, zoneFilter: Prisma.Sql): Promise<RawGroupRow[]> {
     const select = Prisma.sql`
       COUNT(*)::int AS "deviceCount",
@@ -280,6 +421,12 @@ export class ReportsService {
 function uptimePct(downtime: number, window: number): number {
   if (window <= 0) return 100;
   return Math.round((1 - downtime / window) * 100 * 100) / 100;
+}
+
+/** `numerator/denominator × 100`, 2 decimals. A zero denominator (no assignments) reports 0%. */
+function ratePct(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return Math.round((numerator / denominator) * 100 * 100) / 100;
 }
 
 /** Current month as `YYYY-MM` (UTC). */

@@ -4,6 +4,7 @@ import { FleetUptimeAggregationService } from './fleet-uptime-aggregation.servic
 import { ReportsService } from './reports.service';
 import { RootCauseAnalyticsAggregationService } from './root-cause-aggregation.service';
 import { SoftInactiveCountService } from './soft-inactive-count.service';
+import { ZmPerformanceAggregationService } from './zm-performance-aggregation.service';
 
 /**
  * Reports (Issue 39). The Fleet Uptime % monthly report read (`ReportsService`) + its aggregation
@@ -13,7 +14,7 @@ import { SoftInactiveCountService } from './soft-inactive-count.service';
  */
 @Module({
   imports: [PrismaModule],
-  providers: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService, RootCauseAnalyticsAggregationService],
-  exports: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService, RootCauseAnalyticsAggregationService],
+  providers: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService, RootCauseAnalyticsAggregationService, ZmPerformanceAggregationService],
+  exports: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService, RootCauseAnalyticsAggregationService, ZmPerformanceAggregationService],
 })
 export class ReportsModule {}
