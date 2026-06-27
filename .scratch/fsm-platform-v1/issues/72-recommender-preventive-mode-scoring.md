@@ -1,6 +1,6 @@
 # 72 — Recommender preventive-mode scoring re-prioritisation
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 Origin: Issue 40 follow-up (2026-06-26).
 
@@ -20,11 +20,36 @@ instead of raw clustering.
 
 ## Acceptance criteria
 
-- [ ] PREVENTIVE mode re-prioritises repeat-offenders / aged devices / Install backlog over pure clustering
-- [ ] DEFICIT mode behaviour unchanged from Issue 10/40
-- [ ] Mode-driven ranking is reflected in `scoreBreakdown` for explainability
+- [x] PREVENTIVE mode re-prioritises repeat-offenders / aged devices over pure clustering *(Install backlog → #75; see Disposition)*
+- [x] DEFICIT mode behaviour unchanged from Issue 10/40
+- [x] Mode-driven ranking is reflected in `scoreBreakdown` for explainability
 
 ## Blocked by
 
 - #40 (done)
 - #10
+
+## Disposition
+
+**Done — TROUBLESHOOT re-ranking scope (2026-06-27).** 7 e2e (5 pure scoring + 2 run), recommender
+regression suites (#10/#40) green, `tsc` clean. Scope confirmed with the user: re-rank the existing
+TROUBLESHOOT candidates via a **separate PREVENTIVE weight set**; the **Install-backlog** leg (bringing
+INSTALL tickets into the recommender candidate set — a candidate-selection change touching #11/#33/#34)
+is split out to **#75**.
+
+- **`scoring.ts`** — `scoreCandidate` gains an `inactivityHours` feature + two weight components,
+  `repeat_failure_bonus` and `device_age`. Both default 0, so the DEFICIT set produces a **byte-identical**
+  score (the existing repeat-failure *penalty* is untouched). `ageScore` (inactivity / 7d, clamped 0..1) is
+  exposed in the breakdown.
+- **`RecommenderService.activeWeights(mode)`** — DEFICIT uses the base active set (e.g. `v1`). PREVENTIVE
+  uses a configured `<base>_preventive` set if active, else a **code default** derived from the base: repeat
+  penalty → 0, `repeat_failure_bonus = 0.5`, `device_age = 0.5`. The base set is never mutated. The chosen
+  ref (`v1_preventive`) is stamped into `scoreBreakdown.weightSetRef` (AC#3 explainability).
+- **`runForZone`** passes each candidate's `inactivityHours` (from `latestGpsDatetime`) into the scorer.
+  Result: in PREVENTIVE a repeat-offender on an aged device out-scores a fresh, non-repeat ticket — the
+  opposite of DEFICIT, where repeat-failure is a penalty.
+- **Hard Filters untouched** — activity-ping/`last_activity_at` is never a filter or scoring gate (CONTEXT
+  §3/§16). The canonical sort (ADR-0017) is unchanged; the re-prioritisation is in the explainable score.
+
+**Deferred → #75 (filed, linked in INDEX):** PREVENTIVE-mode Install-backlog inclusion in the recommender
+candidate set.

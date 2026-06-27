@@ -12,6 +12,12 @@ import { type ScoringWeights, scoreCandidate } from './scoring';
 
 const DEFAULT_CLUSTER_MULTIPLIER = 1.25;
 const DEFAULT_WEIGHT_SET = 'v1';
+// PREVENTIVE-mode code defaults (Issue 72), used when no `<ref>_preventive` set is configured in
+// `priority_rule_config`. Repeat-failure flips from penalty to bonus and aged devices add — biasing the
+// planner toward repeat-offenders and aged devices (CONTEXT §5). Tunable via the DB set.
+const PREVENTIVE_SUFFIX = '_preventive';
+const PREVENTIVE_REPEAT_BONUS = 0.5;
+const PREVENTIVE_AGE_WEIGHT = 0.5;
 
 // Device-bucket → dispatch urgency (0..1), monotonic in severity.
 const BUCKET_SEVERITY: DeviceBucket[] = [
@@ -85,7 +91,7 @@ export class RecommenderService {
     }));
     const sorted = canonicalSort(candidateTickets);
 
-    const { weights, weightSetRef } = await this.activeWeights();
+    const { weights, weightSetRef } = await this.activeWeights(mode);
     const clusterMultiplier = await this.plantClusterMultiplier();
     const capacity = await this.engineerCapacity();
 
@@ -167,6 +173,8 @@ export class RecommenderService {
           companyPriorityRank: t.companyPriorityRank,
           dispatchUrgency: urgencyFromBucket(t.deviceBucket),
           repeatFailure: t.repeatFailure,
+          // Inactivity age drives the PREVENTIVE aged-device bias (weighted 0 in DEFICIT → no effect).
+          inactivityHours: t.latestGpsDatetime ? Math.max(0, (now.getTime() - t.latestGpsDatetime.getTime()) / 3_600_000) : null,
           distanceFromPrevStopKm: null, // Floating distance-from-previous-stop deferred (needs day-plan geo)
         },
         weights,
@@ -233,16 +241,38 @@ export class RecommenderService {
     return map;
   }
 
-  /** Active weight set → component→weight map + its ref (stamped into each score_breakdown). */
-  private async activeWeights(): Promise<{ weights: ScoringWeights; weightSetRef: string }> {
+  /**
+   * Active weight set for the run's mode → component→weight map + its ref (stamped into each
+   * score_breakdown). DEFICIT uses the base active set. PREVENTIVE (Issue 72) uses a configured
+   * `<base>_preventive` set if one is active, else a code-default derived from the base: repeat-failure
+   * penalty dropped, a repeat-failure **bonus** and a device-age term added (biasing repeat-offenders +
+   * aged devices). The base/DEFICIT set is never mutated, so DEFICIT scoring is unchanged.
+   */
+  private async activeWeights(mode: RecommenderMode): Promise<{ weights: ScoringWeights; weightSetRef: string }> {
     const active = await this.prisma.priorityRuleConfig.findMany({ where: { active: true }, orderBy: { id: 'asc' } });
-    const weightSetRef =
-      active.find((r) => r.component === 'company_priority_rank')?.weightSetRef ??
-      active[0]?.weightSetRef ??
+    const baseRef =
+      active.find((r) => r.component === 'company_priority_rank' && !r.weightSetRef.endsWith(PREVENTIVE_SUFFIX))?.weightSetRef ??
+      active.find((r) => !r.weightSetRef.endsWith(PREVENTIVE_SUFFIX))?.weightSetRef ??
       DEFAULT_WEIGHT_SET;
-    const weights: ScoringWeights = {};
-    for (const r of active) if (r.weightSetRef === weightSetRef) weights[r.component] = Number(r.weight);
-    return { weights, weightSetRef };
+    const weightsFor = (ref: string): ScoringWeights => {
+      const w: ScoringWeights = {};
+      for (const r of active) if (r.weightSetRef === ref) w[r.component] = Number(r.weight);
+      return w;
+    };
+
+    if (mode !== 'PREVENTIVE') return { weights: weightsFor(baseRef), weightSetRef: baseRef };
+
+    const preventiveRef = `${baseRef}${PREVENTIVE_SUFFIX}`;
+    const configured = weightsFor(preventiveRef);
+    if (Object.keys(configured).length > 0) return { weights: configured, weightSetRef: preventiveRef };
+
+    const weights: ScoringWeights = {
+      ...weightsFor(baseRef),
+      repeat_failure_penalty: 0,
+      repeat_failure_bonus: PREVENTIVE_REPEAT_BONUS,
+      device_age: PREVENTIVE_AGE_WEIGHT,
+    };
+    return { weights, weightSetRef: preventiveRef };
   }
 
   private async plantClusterMultiplier(): Promise<number> {

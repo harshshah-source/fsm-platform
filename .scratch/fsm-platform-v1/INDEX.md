@@ -86,8 +86,9 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect) → 54, 36  *(Issue 36 mobile)*
 - 69 — Admin Install-create UI (single form + CSV upload) → 33  *(Issue 33 admin surface; presentation-only over `/api/install` + `/upload`)*
 - 71 — SE mobile Install screens (on-site / Install Form / activation result) → 54, 34  *(Issue 34 mobile; blocked by #54)*
-- 72 — Recommender preventive-mode scoring re-prioritisation → 40, 10  *(Issue 40 follow-up; PREVENTIVE-mode ranking biases repeat-offenders/aged/Install backlog)*
+- 72 — Recommender preventive-mode scoring re-prioritisation → 40, 10  *(done — TROUBLESHOOT re-ranking: `scoring.ts` gains `inactivityHours` feature + `repeat_failure_bonus`/`device_age` weights (DEFICIT byte-identical) + `RecommenderService.activeWeights(mode)` selects a `<base>_preventive` set (configured or code-default: repeat penalty→0, repeat bonus + age) so repeat-offenders/aged devices out-score fresh in PREVENTIVE; weightSetRef stamped in scoreBreakdown; 7 e2e green; Install-backlog candidate inclusion → #75)*
 - 74 — ZM Scorecard outcome-causality metrics + weekly trend → 43  *(Issue 43 follow-up; tickets improved/delayed, SLA impact of overrides, manual-vs-auto success, SE overload/utilization, long-pending reduction, time-to-intervention, escalations-handled + weekly trend grain — needs a decision→outcome linkage model that doesn't exist yet)*
+- 75 — Recommender PREVENTIVE-mode Install backlog into candidate set → 72, 10, 11, 33, 34  *(Issue 72 follow-up; bring open INSTALL tickets into the recommender run in PREVENTIVE mode — candidate-selection change, distinct from #72's TROUBLESHOOT re-ranking)*
 
 ## Mobile (foundation + M-series UI)
 
