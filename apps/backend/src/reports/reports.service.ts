@@ -41,6 +41,97 @@ export interface RootCauseReport {
   distribution: RootCauseSlice[];
 }
 
+export interface SystemEfficiencyFilters {
+  from?: string; // YYYY-MM-DD (inclusive); defaults to today
+  to?: string; // YYYY-MM-DD (inclusive); defaults to from
+  zoneId?: number | null;
+  companyId?: number | null;
+  plantId?: number | null;
+  deviceType?: string | null;
+  seId?: string | null;
+}
+
+/** The rendered efficiency metrics — additive counts plus derived rates (%) and average stage times (s). */
+export interface EfficiencyMetrics {
+  failureCyclesOpened: number;
+  ticketsCreated: number;
+  troubleshootTicketsCreated: number;
+  autoAssignments: number;
+  manualAssignments: number;
+  overrides: number;
+  autoAssignmentRatePct: number;
+  manualAssignmentRatePct: number;
+  overrideRatePct: number;
+  cyclesResolved: number;
+  verifiedCycles: number;
+  failedVerifications: number;
+  autoRecoveries: number;
+  repeatFailures: number;
+  firstTimeFixes: number;
+  componentPauses: number;
+  agedResolutions: number;
+  autoEscalations: number;
+  repeatFailureRatePct: number;
+  firstTimeFixRatePct: number;
+  failedVerificationRatePct: number;
+  autoRecoveryRatePct: number;
+  slaCompliancePct: number;
+  totalDowntimeSeconds: number;
+  avgDowntimeSeconds: number | null;
+  avgDetectionToTicketSeconds: number | null;
+  avgTicketToAssignmentSeconds: number | null;
+  avgAssignmentToOnsiteSeconds: number | null;
+  avgOnsiteToSubmissionSeconds: number | null;
+  avgSubmissionToVerificationSeconds: number | null;
+  avgWarehouseFulfilmentSeconds: number | null;
+  avgRecoveryClosureSeconds: number | null;
+}
+
+export interface SystemEfficiencyReport {
+  from: string; // ISO date of the range's first day
+  to: string; // ISO date of the range's last day
+  filters: { zoneId: number | null; companyId: number | null; plantId: number | null; deviceType: string | null; seId: string | null };
+  fleet: EfficiencyMetrics;
+  byZone: (EfficiencyMetrics & { zoneId: string | null; zoneName: string | null })[];
+}
+
+/** Raw summed cube row — count columns arrive as `number`, second-sum columns as `bigint`. */
+interface RawEfficiencyRow {
+  zoneId: string | null;
+  zoneName: string | null;
+  failureCyclesOpened: number;
+  ticketsCreated: number;
+  troubleshootTicketsCreated: number;
+  autoAssignments: number;
+  manualAssignments: number;
+  overrides: number;
+  cyclesResolved: number;
+  verifiedCycles: number;
+  failedVerifications: number;
+  autoRecoveries: number;
+  repeatFailures: number;
+  firstTimeFixes: number;
+  componentPauses: number;
+  agedResolutions: number;
+  slaCompliantResolutions: number;
+  autoEscalations: number;
+  downtimeSecondsSum: bigint;
+  detectionToTicketSecondsSum: bigint;
+  detectionToTicketCount: number;
+  ticketToAssignmentSecondsSum: bigint;
+  ticketToAssignmentCount: number;
+  assignmentToOnsiteSecondsSum: bigint;
+  assignmentToOnsiteCount: number;
+  onsiteToSubmissionSecondsSum: bigint;
+  onsiteToSubmissionCount: number;
+  submissionToVerificationSecondsSum: bigint;
+  submissionToVerificationCount: number;
+  warehouseFulfilmentSecondsSum: bigint;
+  warehouseFulfilmentCount: number;
+  recoveryClosureSecondsSum: bigint;
+  recoveryClosureCount: number;
+}
+
 export interface ZmScorecardRow {
   zmId: string;
   zmName: string;
@@ -415,6 +506,88 @@ export class ReportsService {
       GROUP BY z.zone_id, z.name
       ORDER BY z.name`);
   }
+
+  /**
+   * System Efficiency Report (Issue 42): the end-to-end operational pipeline metrics summed over a day
+   * range from `system_efficiency_summary_daily`, with the Fleet/Zone/Company/Plant/device-type/SE
+   * filters (a ZM is restricted to their own zone). Returns a fleet rollup plus a per-zone breakdown
+   * (so auto-escalations-per-zone surfaces); all rates and average stage times are derived from the
+   * additive numerators & denominators — no raw telemetry scan.
+   */
+  async systemEfficiency(scope: ReportScope, opts: SystemEfficiencyFilters = {}, now: Date = new Date()): Promise<SystemEfficiencyReport> {
+    const fromDay = parseDay(opts.from ?? defaultDay(now));
+    const toDay = parseDay(opts.to ?? opts.from ?? defaultDay(now));
+    if (toDay.getTime() < fromDay.getTime()) {
+      throw new BadRequestException({ code: 'INVALID_RANGE', hint: 'from must be ≤ to' });
+    }
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : (opts.zoneId ?? null);
+    const filters = Prisma.join(
+      [
+        restrictZone != null ? Prisma.sql`AND s.zone_id = ${BigInt(restrictZone)}` : Prisma.empty,
+        opts.companyId != null ? Prisma.sql`AND s.company_id = ${BigInt(opts.companyId)}` : Prisma.empty,
+        opts.plantId != null ? Prisma.sql`AND s.plant_id = ${BigInt(opts.plantId)}` : Prisma.empty,
+        opts.deviceType != null ? Prisma.sql`AND s.device_type = ${opts.deviceType}` : Prisma.empty,
+        opts.seId != null ? Prisma.sql`AND s.se_id = ${opts.seId}::uuid` : Prisma.empty,
+      ],
+      ' ',
+    );
+
+    const raw = await this.prisma.$queryRaw<RawEfficiencyRow[]>(Prisma.sql`
+      SELECT s.zone_id::text AS "zoneId", z.name AS "zoneName",
+        COALESCE(SUM(s.failure_cycles_opened), 0)::int AS "failureCyclesOpened",
+        COALESCE(SUM(s.tickets_created), 0)::int AS "ticketsCreated",
+        COALESCE(SUM(s.troubleshoot_tickets_created), 0)::int AS "troubleshootTicketsCreated",
+        COALESCE(SUM(s.auto_assignments), 0)::int AS "autoAssignments",
+        COALESCE(SUM(s.manual_assignments), 0)::int AS "manualAssignments",
+        COALESCE(SUM(s.overrides), 0)::int AS "overrides",
+        COALESCE(SUM(s.cycles_resolved), 0)::int AS "cyclesResolved",
+        COALESCE(SUM(s.verified_cycles), 0)::int AS "verifiedCycles",
+        COALESCE(SUM(s.failed_verifications), 0)::int AS "failedVerifications",
+        COALESCE(SUM(s.auto_recoveries), 0)::int AS "autoRecoveries",
+        COALESCE(SUM(s.repeat_failures), 0)::int AS "repeatFailures",
+        COALESCE(SUM(s.first_time_fixes), 0)::int AS "firstTimeFixes",
+        COALESCE(SUM(s.component_pauses), 0)::int AS "componentPauses",
+        COALESCE(SUM(s.aged_resolutions), 0)::int AS "agedResolutions",
+        COALESCE(SUM(s.sla_compliant_resolutions), 0)::int AS "slaCompliantResolutions",
+        COALESCE(SUM(s.auto_escalations), 0)::int AS "autoEscalations",
+        COALESCE(SUM(s.downtime_seconds_sum), 0)::bigint AS "downtimeSecondsSum",
+        COALESCE(SUM(s.detection_to_ticket_seconds_sum), 0)::bigint AS "detectionToTicketSecondsSum",
+        COALESCE(SUM(s.detection_to_ticket_count), 0)::int AS "detectionToTicketCount",
+        COALESCE(SUM(s.ticket_to_assignment_seconds_sum), 0)::bigint AS "ticketToAssignmentSecondsSum",
+        COALESCE(SUM(s.ticket_to_assignment_count), 0)::int AS "ticketToAssignmentCount",
+        COALESCE(SUM(s.assignment_to_onsite_seconds_sum), 0)::bigint AS "assignmentToOnsiteSecondsSum",
+        COALESCE(SUM(s.assignment_to_onsite_count), 0)::int AS "assignmentToOnsiteCount",
+        COALESCE(SUM(s.onsite_to_submission_seconds_sum), 0)::bigint AS "onsiteToSubmissionSecondsSum",
+        COALESCE(SUM(s.onsite_to_submission_count), 0)::int AS "onsiteToSubmissionCount",
+        COALESCE(SUM(s.submission_to_verification_seconds_sum), 0)::bigint AS "submissionToVerificationSecondsSum",
+        COALESCE(SUM(s.submission_to_verification_count), 0)::int AS "submissionToVerificationCount",
+        COALESCE(SUM(s.warehouse_fulfilment_seconds_sum), 0)::bigint AS "warehouseFulfilmentSecondsSum",
+        COALESCE(SUM(s.warehouse_fulfilment_count), 0)::int AS "warehouseFulfilmentCount",
+        COALESCE(SUM(s.recovery_closure_seconds_sum), 0)::bigint AS "recoveryClosureSecondsSum",
+        COALESCE(SUM(s.recovery_closure_count), 0)::int AS "recoveryClosureCount"
+      FROM system_efficiency_summary_daily s
+      LEFT JOIN zones z ON z.zone_id = s.zone_id
+      WHERE s.day >= ${fromDay} AND s.day <= ${toDay} ${filters}
+      GROUP BY s.zone_id, z.name
+      ORDER BY z.name NULLS LAST`);
+
+    const byZone = raw.map((r) => ({ zoneId: r.zoneId, zoneName: r.zoneName, ...deriveEfficiency(r) }));
+    const fleetSums = raw.reduce<RawEfficiencyRow>((acc, r) => addEfficiency(acc, r), emptyEfficiencyRow());
+
+    return {
+      from: fromDay.toISOString().slice(0, 10),
+      to: toDay.toISOString().slice(0, 10),
+      filters: {
+        zoneId: restrictZone ?? null,
+        companyId: opts.companyId ?? null,
+        plantId: opts.plantId ?? null,
+        deviceType: opts.deviceType ?? null,
+        seId: opts.seId ?? null,
+      },
+      fleet: deriveEfficiency(fleetSums),
+      byZone,
+    };
+  }
 }
 
 /** `(1 − downtime/window) × 100`, 2 decimals. A zero window (no eligible time) reports 100%. */
@@ -442,4 +615,88 @@ function parseMonth(month: string): Date {
   const mon = Number(m[2]);
   if (mon < 1 || mon > 12) throw new BadRequestException({ code: 'INVALID_MONTH', hint: 'month 01–12' });
   return new Date(Date.UTC(year, mon - 1, 1));
+}
+
+/** Current day as `YYYY-MM-DD` (UTC). */
+function defaultDay(now: Date): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/** Parse `YYYY-MM-DD` to the UTC midnight Date. */
+function parseDay(day: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day ?? '');
+  if (!m) throw new BadRequestException({ code: 'INVALID_DAY', hint: 'expected YYYY-MM-DD' });
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  if (Number.isNaN(dt.getTime())) throw new BadRequestException({ code: 'INVALID_DAY', hint: 'expected YYYY-MM-DD' });
+  return dt;
+}
+
+/** `sum/count` rounded to a whole number of seconds, or null when there is no sample. */
+function avgSeconds(sum: number, count: number): number | null {
+  return count > 0 ? Math.round(sum / count) : null;
+}
+
+/** Derive the rendered efficiency metrics (rates + average stage times) from a summed cube row. */
+function deriveEfficiency(r: RawEfficiencyRow): EfficiencyMetrics {
+  const num = (v: number | bigint): number => Number(v);
+  const totalAssignments = num(r.autoAssignments) + num(r.manualAssignments);
+  const cyclesResolved = num(r.cyclesResolved);
+  return {
+    failureCyclesOpened: num(r.failureCyclesOpened),
+    ticketsCreated: num(r.ticketsCreated),
+    troubleshootTicketsCreated: num(r.troubleshootTicketsCreated),
+    autoAssignments: num(r.autoAssignments),
+    manualAssignments: num(r.manualAssignments),
+    overrides: num(r.overrides),
+    autoAssignmentRatePct: ratePct(num(r.autoAssignments), totalAssignments),
+    manualAssignmentRatePct: ratePct(num(r.manualAssignments), totalAssignments),
+    overrideRatePct: ratePct(num(r.overrides), totalAssignments),
+    cyclesResolved,
+    verifiedCycles: num(r.verifiedCycles),
+    failedVerifications: num(r.failedVerifications),
+    autoRecoveries: num(r.autoRecoveries),
+    repeatFailures: num(r.repeatFailures),
+    firstTimeFixes: num(r.firstTimeFixes),
+    componentPauses: num(r.componentPauses),
+    agedResolutions: num(r.agedResolutions),
+    autoEscalations: num(r.autoEscalations),
+    repeatFailureRatePct: ratePct(num(r.repeatFailures), num(r.failureCyclesOpened)),
+    firstTimeFixRatePct: ratePct(num(r.firstTimeFixes), cyclesResolved),
+    failedVerificationRatePct: ratePct(num(r.failedVerifications), num(r.verifiedCycles) + num(r.failedVerifications)),
+    autoRecoveryRatePct: ratePct(num(r.autoRecoveries), cyclesResolved + num(r.autoRecoveries)),
+    slaCompliancePct: ratePct(num(r.slaCompliantResolutions), cyclesResolved),
+    totalDowntimeSeconds: num(r.downtimeSecondsSum),
+    avgDowntimeSeconds: avgSeconds(num(r.downtimeSecondsSum), cyclesResolved),
+    avgDetectionToTicketSeconds: avgSeconds(num(r.detectionToTicketSecondsSum), num(r.detectionToTicketCount)),
+    avgTicketToAssignmentSeconds: avgSeconds(num(r.ticketToAssignmentSecondsSum), num(r.ticketToAssignmentCount)),
+    avgAssignmentToOnsiteSeconds: avgSeconds(num(r.assignmentToOnsiteSecondsSum), num(r.assignmentToOnsiteCount)),
+    avgOnsiteToSubmissionSeconds: avgSeconds(num(r.onsiteToSubmissionSecondsSum), num(r.onsiteToSubmissionCount)),
+    avgSubmissionToVerificationSeconds: avgSeconds(num(r.submissionToVerificationSecondsSum), num(r.submissionToVerificationCount)),
+    avgWarehouseFulfilmentSeconds: avgSeconds(num(r.warehouseFulfilmentSecondsSum), num(r.warehouseFulfilmentCount)),
+    avgRecoveryClosureSeconds: avgSeconds(num(r.recoveryClosureSecondsSum), num(r.recoveryClosureCount)),
+  };
+}
+
+const EFFICIENCY_SUM_FIELDS: (keyof RawEfficiencyRow)[] = [
+  'failureCyclesOpened', 'ticketsCreated', 'troubleshootTicketsCreated', 'autoAssignments', 'manualAssignments',
+  'overrides', 'cyclesResolved', 'verifiedCycles', 'failedVerifications', 'autoRecoveries', 'repeatFailures',
+  'firstTimeFixes', 'componentPauses', 'agedResolutions', 'slaCompliantResolutions', 'autoEscalations',
+  'downtimeSecondsSum', 'detectionToTicketSecondsSum', 'detectionToTicketCount', 'ticketToAssignmentSecondsSum',
+  'ticketToAssignmentCount', 'assignmentToOnsiteSecondsSum', 'assignmentToOnsiteCount', 'onsiteToSubmissionSecondsSum',
+  'onsiteToSubmissionCount', 'submissionToVerificationSecondsSum', 'submissionToVerificationCount',
+  'warehouseFulfilmentSecondsSum', 'warehouseFulfilmentCount', 'recoveryClosureSecondsSum', 'recoveryClosureCount',
+];
+
+function emptyEfficiencyRow(): RawEfficiencyRow {
+  const base = { zoneId: null, zoneName: null } as RawEfficiencyRow;
+  const rec = base as unknown as Record<string, number>;
+  for (const f of EFFICIENCY_SUM_FIELDS) rec[f] = 0;
+  return base;
+}
+
+function addEfficiency(acc: RawEfficiencyRow, r: RawEfficiencyRow): RawEfficiencyRow {
+  const a = acc as unknown as Record<string, number | bigint>;
+  const b = r as unknown as Record<string, number | bigint>;
+  for (const f of EFFICIENCY_SUM_FIELDS) a[f] = Number(a[f]) + Number(b[f]);
+  return acc;
 }

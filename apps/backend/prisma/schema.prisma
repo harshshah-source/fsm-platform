@@ -1704,6 +1704,64 @@ model ZmPerformanceSummaryMonthly {
   @@map("zm_performance_summary_monthly")
 }
 
+/// System Efficiency Report cube (Issue 42, CONTEXT §reporting). One row per
+/// (day, zone, company, plant, device_type, SE) holding **additive** daily counts + stage-time
+/// second-sums for the end-to-end operational pipeline. The report read sums the cells across a date
+/// range + filter set and derives the rates / average stage times from the additive numerators &
+/// denominators (so the report never scans raw telemetry over long ranges). Rebuilt per day (delete +
+/// insert) by `SystemEfficiencyAggregationService` — idempotent; on-demand (BullMQ daily cron deferred,
+/// same posture as the other report workers). Nullable dims → a surrogate `id` PK (NULLs can't sit in a
+/// composite PK); the dims hold the device's zone/company/plant/device_type and the handling SE
+/// (null when no SE has yet been attributed — e.g. detection-only or auto-recovery rows).
+model SystemEfficiencySummaryDaily {
+  id         BigInt   @id @default(autoincrement())
+  day        DateTime @db.Date
+  zoneId     BigInt?  @map("zone_id")
+  companyId  BigInt?  @map("company_id")
+  plantId    BigInt?  @map("plant_id")
+  deviceType String?  @map("device_type")
+  seId       String?  @map("se_id") @db.Uuid
+
+  failureCyclesOpened       Int @default(0) @map("failure_cycles_opened")
+  ticketsCreated            Int @default(0) @map("tickets_created")
+  troubleshootTicketsCreated Int @default(0) @map("troubleshoot_tickets_created")
+  autoAssignments           Int @default(0) @map("auto_assignments")
+  manualAssignments         Int @default(0) @map("manual_assignments")
+  overrides                 Int @default(0) @map("overrides")
+  cyclesResolved            Int @default(0) @map("cycles_resolved")
+  verifiedCycles            Int @default(0) @map("verified_cycles")
+  failedVerifications       Int @default(0) @map("failed_verifications")
+  autoRecoveries            Int @default(0) @map("auto_recoveries")
+  repeatFailures            Int @default(0) @map("repeat_failures")
+  firstTimeFixes            Int @default(0) @map("first_time_fixes")
+  componentPauses           Int @default(0) @map("component_pauses")
+  agedResolutions           Int @default(0) @map("aged_resolutions")
+  slaCompliantResolutions   Int @default(0) @map("sla_compliant_resolutions")
+  autoEscalations           Int @default(0) @map("auto_escalations")
+
+  downtimeSecondsSum                BigInt @default(0) @map("downtime_seconds_sum")
+  detectionToTicketSecondsSum       BigInt @default(0) @map("detection_to_ticket_seconds_sum")
+  detectionToTicketCount            Int    @default(0) @map("detection_to_ticket_count")
+  ticketToAssignmentSecondsSum      BigInt @default(0) @map("ticket_to_assignment_seconds_sum")
+  ticketToAssignmentCount           Int    @default(0) @map("ticket_to_assignment_count")
+  assignmentToOnsiteSecondsSum      BigInt @default(0) @map("assignment_to_onsite_seconds_sum")
+  assignmentToOnsiteCount           Int    @default(0) @map("assignment_to_onsite_count")
+  onsiteToSubmissionSecondsSum      BigInt @default(0) @map("onsite_to_submission_seconds_sum")
+  onsiteToSubmissionCount           Int    @default(0) @map("onsite_to_submission_count")
+  submissionToVerificationSecondsSum BigInt @default(0) @map("submission_to_verification_seconds_sum")
+  submissionToVerificationCount     Int    @default(0) @map("submission_to_verification_count")
+  warehouseFulfilmentSecondsSum     BigInt @default(0) @map("warehouse_fulfilment_seconds_sum")
+  warehouseFulfilmentCount          Int    @default(0) @map("warehouse_fulfilment_count")
+  recoveryClosureSecondsSum         BigInt @default(0) @map("recovery_closure_seconds_sum")
+  recoveryClosureCount              Int    @default(0) @map("recovery_closure_count")
+
+  computedAt DateTime @map("computed_at") @db.Timestamptz(6)
+
+  @@index([day])
+  @@index([day, zoneId])
+  @@map("system_efficiency_summary_daily")
+}
+
 /// Non-Operational marking (schema D16) — MINIMAL for Issue 05's eligibility read. Issue 05 reads
 /// only `state ∈ (CONFIRMED, ACTIVE)` to exclude a device from the eligible set; one active marking
 /// per device (invariant I13) is a raw-SQL partial-unique. The full dual-confirmation lifecycle

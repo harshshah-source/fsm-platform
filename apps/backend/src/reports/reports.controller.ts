@@ -5,9 +5,10 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { FleetUptimeAggregationService, type FleetUptimeAggregationResult } from './fleet-uptime-aggregation.service';
-import { type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SoftInactiveTrend, type ZmScorecardReport, ReportsService } from './reports.service';
+import { type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SoftInactiveTrend, type SystemEfficiencyReport, type ZmScorecardReport, ReportsService } from './reports.service';
 import { type RootCauseAggregationResult, RootCauseAnalyticsAggregationService } from './root-cause-aggregation.service';
 import { type SoftInactiveRecomputeResult, SoftInactiveCountService } from './soft-inactive-count.service';
+import { type SystemEfficiencyAggregationResult, SystemEfficiencyAggregationService } from './system-efficiency-aggregation.service';
 import { type ZmPerformanceAggregationResult, ZmPerformanceAggregationService } from './zm-performance-aggregation.service';
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
@@ -27,6 +28,7 @@ export class ReportsController {
     private readonly softInactive: SoftInactiveCountService,
     private readonly rootCauseAggregation: RootCauseAnalyticsAggregationService,
     private readonly zmPerformance: ZmPerformanceAggregationService,
+    private readonly systemEfficiency: SystemEfficiencyAggregationService,
   ) {}
 
   @Get('fleet-uptime')
@@ -118,6 +120,44 @@ export class ReportsController {
   recomputeZmScorecard(@Query('month') month?: string): Promise<ZmPerformanceAggregationResult> {
     return this.zmPerformance.computeMonth(monthToDate(month ?? currentMonth()));
   }
+
+  /**
+   * System Efficiency Report — end-to-end pipeline metrics over a day range from
+   * `system_efficiency_summary_daily`, ZM zone-scoped, filterable by zone/company/plant/device-type/SE.
+   */
+  @Get('efficiency')
+  @Roles(...MANAGER_ROLES)
+  systemEfficiencyReport(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zoneId') zoneId?: string,
+    @Query('companyId') companyId?: string,
+    @Query('plantId') plantId?: string,
+    @Query('deviceType') deviceType?: string,
+    @Query('seId') seId?: string,
+  ): Promise<SystemEfficiencyReport> {
+    return this.reports.systemEfficiency(
+      { role: user.role, zoneId: user.zone_id },
+      {
+        from,
+        to,
+        zoneId: parseOptInt(zoneId, 'zoneId'),
+        companyId: parseOptInt(companyId, 'companyId'),
+        plantId: parseOptInt(plantId, 'plantId'),
+        deviceType,
+        seId,
+      },
+    );
+  }
+
+  /** Recompute a day's efficiency summary on demand (Operations Head). Cron-wired daily when scheduling lands. */
+  @Post('efficiency/recompute')
+  @HttpCode(200)
+  @Roles('OPERATIONS_HEAD')
+  recomputeEfficiency(@Query('day') day?: string): Promise<SystemEfficiencyAggregationResult> {
+    return this.systemEfficiency.computeDay(dayToDate(day ?? currentDay()));
+  }
 }
 
 /** Parse an optional integer query param, rejecting non-numeric input. */
@@ -144,4 +184,14 @@ function monthToDate(month: string): Date {
 function currentMonth(): string {
   const now = new Date();
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function dayToDate(day: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!m) throw new BadRequestException({ code: 'INVALID_DAY', hint: 'expected YYYY-MM-DD' });
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+}
+
+function currentDay(): string {
+  return new Date().toISOString().slice(0, 10);
 }
