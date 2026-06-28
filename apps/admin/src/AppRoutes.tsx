@@ -26,6 +26,7 @@ import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { TicketDetailDrawer } from './pages/tickets/TicketDetailDrawer';
 import { TicketsPage } from './pages/tickets/TicketsPage';
 import { VerificationReviewPage } from './pages/verification/VerificationReviewPage';
+import { VoucherReviewPage } from './pages/vouchers/VoucherReviewPage';
 
 export function AppRoutes() {
   return (
@@ -196,6 +197,16 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <VerificationReviewPage />
+              </RoleRoute>
+            }
+          />
+          {/* Expense Voucher review — ZM Approve/Reject/Needs-Clarification (own zone); Operations Head
+              also exports the monthly Finance batch + multi-select Mark PAID (Issue 38). Manager roles. */}
+          <Route
+            path="/vouchers"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <VoucherReviewPage />
               </RoleRoute>
             }
           />

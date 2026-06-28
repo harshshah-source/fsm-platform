@@ -127,6 +127,7 @@ model EngineerMaster {
   inventoryTransactions InventoryTransaction[]
   availability    SeAvailability[]
   leaveRequests   LeaveRequest[]
+  expenseVouchers ExpenseVoucher[]
 
   @@index([zoneId])
   @@index([lastActivityAt])
@@ -554,6 +555,84 @@ model TroubleshootingSubmission {
   @@index([failureCycleId])
   @@index([rootCauseCategory, submittedAt])
   @@map("troubleshooting_submissions")
+}
+
+/// Expense-voucher lifecycle (Issue 38, schema D15, CONTEXT §Expense Vouchers).
+/// DRAFT (offline, mobile) → SUBMITTED → ZONAL_MANAGER_REVIEW → APPROVED | REJECTED |
+/// NEEDS_CLARIFICATION → PAID. SE cannot self-approve; PAID requires a prior APPROVED.
+enum VoucherStatus {
+  DRAFT
+  SUBMITTED
+  ZONAL_MANAGER_REVIEW
+  APPROVED
+  REJECTED
+  NEEDS_CLARIFICATION
+  PAID
+
+  @@map("voucher_status")
+}
+
+/// Expense-voucher line-item category (Issue 38, schema D15). Per-category soft limits drive the
+/// ZM "over-limit row in red" review cue; they are service-side advisory, not schema-enforced.
+enum ExpenseCategory {
+  TRAVEL
+  ACCOMMODATION
+  PARTS
+  TOOLS
+  MEAL
+  OTHER
+
+  @@map("expense_category")
+}
+
+/// Expense Voucher header (Issue 38, schema D15). One per SE reimbursement claim. The SE drafts it
+/// offline on mobile with a draft-time `client_submission_id` (dedup scope `(se_id, client_submission_id)`,
+/// same pattern as the troubleshoot form), ≥1 photo across its items, optional Ticket/Plant/Vehicle
+/// links for the ZM activity check. ZM reviews own-zone; Operations Head exports the monthly APPROVED
+/// batch to Finance and marks PAID after Finance confirms. 7-year financial retention.
+model ExpenseVoucher {
+  voucherId          String        @id @default(uuid()) @map("voucher_id") @db.Uuid
+  seId               String        @map("se_id") @db.Uuid
+  clientSubmissionId String        @map("client_submission_id") @db.Uuid
+  status             VoucherStatus @default(DRAFT) @map("status")
+  plantId            BigInt?       @map("plant_id")
+  ticketId           String?       @map("ticket_id") @db.Uuid
+  vehicleId          BigInt?       @map("vehicle_id")
+  totalAmount        Decimal       @default(0) @map("total_amount") @db.Decimal(12, 2)
+  submittedAt        DateTime?     @map("submitted_at") @db.Timestamptz(6)
+  reviewedBy         String?       @map("reviewed_by") @db.Uuid
+  reviewedAt         DateTime?     @map("reviewed_at") @db.Timestamptz(6)
+  reviewNotes        String?       @map("review_notes")
+  paidBatchRef       String?       @map("paid_batch_ref")
+  paidAt             DateTime?     @map("paid_at") @db.Timestamptz(6)
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  engineer EngineerMaster       @relation(fields: [seId], references: [engineerId])
+  items    ExpenseVoucherItem[]
+
+  @@unique([seId, clientSubmissionId])
+  @@index([status, submittedAt])
+  @@map("expense_vouchers")
+}
+
+/// Expense Voucher line item (Issue 38, schema D15). ≥1 per voucher; ≥1 `photoRef` across all items
+/// is mandatory at submit (service-enforced). `amount` ≥ 0.
+model ExpenseVoucherItem {
+  itemId             BigInt          @id @default(autoincrement()) @map("item_id")
+  voucherId          String          @map("voucher_id") @db.Uuid
+  category           ExpenseCategory @map("category")
+  amount             Decimal         @map("amount") @db.Decimal(12, 2)
+  merchantVendorName String?         @map("merchant_vendor_name")
+  expenseDatetime    DateTime?       @map("expense_datetime") @db.Timestamptz(6)
+  photoRef           String?         @map("photo_ref")
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  voucher ExpenseVoucher @relation(fields: [voucherId], references: [voucherId], onDelete: Cascade)
+
+  @@index([voucherId])
+  @@map("expense_voucher_items")
 }
 
 /// Three-phase GPS verification phase (schema D14). PENDING → PHASE_1_PASS → PHASE_2_PASS.

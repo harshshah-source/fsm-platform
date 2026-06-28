@@ -78,6 +78,7 @@ export function buildNav(role: string): NavGroup[] {
       { label: 'Non-Operational', to: '/readiness/non-operational', icon: IconAlert },
       { label: 'Recovery Decisions', to: '/readiness/recovery-decisions', icon: IconRotate },
       { label: 'Leave Requests', to: '/leave-requests', icon: IconClipboard },
+      { label: 'Expense Vouchers', to: '/vouchers', icon: IconClipboard },
     );
   }
 

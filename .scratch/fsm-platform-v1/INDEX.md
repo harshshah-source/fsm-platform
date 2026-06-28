@@ -160,7 +160,7 @@ chart kit are in place; every later FE issue composes these. FE-02 was the trans
 *(Mobile parity stays the separate Issue 54 + M-series backlog; it shares only the token language via NativeWind — see `DESIGN-SYSTEM.md` §6.)*
 
 ## P7 — Vouchers & reporting
-- 38 — Expense Vouchers end-to-end → 07
+- 38 — Expense Vouchers end-to-end → 07  *(done — schema D15 (`expense_vouchers` + items, `(se_id, client_submission_id)` idempotency) + `VouchersService`/`VouchersController` (`/api/vouchers`): SE submit, ZM review (own-zone, activity check + over-limit + Approve/Reject/Needs-Clarification + SE notify seam), SE resubmit, OH monthly Finance CSV export + multi-select Mark PAID; admin `/vouchers` review page (queue recipe + photo lightbox) + OH Finance view; SE mobile capture → #61)*
 - 39 — Fleet Uptime % monthly report → 05, 08
 - 40 — Soft Inactive Count trend → 05
 - 41 — Root Cause Analytics → 16
