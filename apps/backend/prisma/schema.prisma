@@ -359,6 +359,61 @@ model IntradayInsertion {
   @@map("intraday_insertions")
 }
 
+/// Cross-zone capacity allocation (CONTEXT — CSM cross-zone layer, Issue 32). A Platinum Ticket that
+/// can't be covered in its home zone **auto-escalates** to the CSM cross-zone queue (1h CRITICAL / 4h
+/// OPEN unassigned); a ZM can **manually flag** a Gold/Silver Ticket before the auto-trigger. The CSM /
+/// Operations Head resolves each from the `/cross-zone` queue: **approve** (target zone + SE → cross-zone
+/// Formal Assignment), **deny** (mandatory reason — the Ticket stays in its home queue), or **defer**
+/// (review date). A denied AUTO escalation can be **re-escalated to Operations Head** by the home ZM.
+/// One row per Ticket escalation; the Ticket itself is never removed from its home queue (no status flip).
+enum CrossZoneEscalationType {
+  AUTO_PLATINUM
+  MANUAL_FLAG
+
+  @@map("cross_zone_escalation_type")
+}
+
+enum CrossZoneEscalationStatus {
+  PENDING
+  APPROVED
+  DENIED
+  DEFERRED
+  ESCALATED_TO_OPS
+
+  @@map("cross_zone_escalation_status")
+}
+
+model CrossZoneEscalation {
+  escalationId       BigInt                    @id @default(autoincrement()) @map("escalation_id")
+  ticketId           String                    @map("ticket_id") @db.Uuid
+  homeZoneId         BigInt                    @map("home_zone_id")
+  companyTier        CompanyTier               @map("company_tier")
+  escalationType     CrossZoneEscalationType   @map("escalation_type")
+  status             CrossZoneEscalationStatus @default(PENDING)
+  triggerBucket      SlaBucket?                @map("trigger_bucket")
+  flagReason         String?                   @map("flag_reason")
+  decisionReason     String?                   @map("decision_reason")
+  reviewDate         DateTime?                 @map("review_date") @db.Timestamptz(6)
+  targetZoneId       BigInt?                   @map("target_zone_id")
+  assignedSeId       String?                   @map("assigned_se_id") @db.Uuid
+  assignedScheduleId BigInt?                   @map("assigned_schedule_id")
+  assignedBatchId    BigInt?                   @map("assigned_batch_id")
+  raisedByUserId     String?                   @map("raised_by_user_id") @db.Uuid
+  raisedByRole       String?                   @map("raised_by_role")
+  decidedByUserId    String?                   @map("decided_by_user_id") @db.Uuid
+  decidedByRole      String?                   @map("decided_by_role")
+  decidedAt          DateTime?                 @map("decided_at") @db.Timestamptz(6)
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ticket Ticket @relation(fields: [ticketId], references: [ticketId])
+
+  @@index([status, escalationType])
+  @@index([homeZoneId])
+  @@index([ticketId])
+  @@map("cross_zone_escalations")
+}
+
 /// Day-Plan dispatch (LLD §3.6, schema D-sched, Issue 11). Lifecycle states only — the approval
 /// gate is removed (ADR-0007/0019 superseded): no DRAFT/PENDING_REVIEW/APPROVED.
 enum WorkScheduleStatus {
@@ -1481,6 +1536,7 @@ model Ticket {
   events          TicketEvent[]
   recommendations Recommendation[]
   intradayInsertions IntradayInsertion[]
+  crossZoneEscalations CrossZoneEscalation[]
   batchTickets    BatchAssignmentTicket[]
   softStates      SoftState[]
   troubleshootingSubmissions TroubleshootingSubmission[]

@@ -52,6 +52,7 @@ import { SchedulesController } from './scheduling/schedules.controller';
 import { BatchesController } from './scheduling/batches.controller';
 import { IntradayUpdatesController } from './scheduling/intraday-updates.controller';
 import { IntradayModule } from './intraday/intraday.module';
+import { CrossZoneModule } from './cross-zone/cross-zone.module';
 import { SharedPoolModule } from './shared-pool/shared-pool.module';
 import { SharedPoolController } from './shared-pool/shared-pool.controller';
 import { SoftStateModule } from './soft-state/soft-state.module';
@@ -83,6 +84,7 @@ import { ZonesController } from './zones/zones.controller';
     RecommenderModule,
     SchedulingModule,
     IntradayModule,
+    CrossZoneModule,
     SharedPoolModule,
     PlannerModule,
     DashboardModule,
