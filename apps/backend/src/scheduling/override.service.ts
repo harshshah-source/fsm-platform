@@ -238,6 +238,11 @@ export class OverrideService {
      * the change surfaces in the Intra-day Queue view instead of as a system CRITICAL insertion.
      */
     auditAction = 'CRITICAL_ASSIGN',
+    /**
+     * When set (Issue 29 system CRITICAL insertion accept), the assigned batch is moved to the top of
+     * the SE's Day Plan (stopSequence 1) so the urgent ticket leads the day — the rest keep their order.
+     */
+    insertAtTop = false,
   ): Promise<AssignOutcome> {
     const ticket = await this.prisma.ticket.findUnique({ where: { ticketId }, include: { plant: true } });
     if (!ticket || !this.inScope(ticket.plant.zoneId, scope)) return { result: 'NOT_FOUND' };
@@ -278,6 +283,7 @@ export class OverrideService {
           data: { batchId: batch.batchId, ticketId, sortOrder: await this.nextSortOrder(tx, batch.batchId) },
         });
         await tx.ticket.update({ where: { ticketId }, data: { assignmentState: 'FORMALLY_ASSIGNED' } });
+        if (insertAtTop) await this.moveBatchToTop(tx, sched.scheduleId, batch.batchId);
         return { scheduleId: sched.scheduleId, batchId: batch.batchId };
       },
     );
@@ -395,6 +401,17 @@ export class OverrideService {
         dispatchedAt: now,
       },
     });
+  }
+
+  /** Renumber a schedule's batches so `batchId` leads at stopSequence 1; the rest keep their order. */
+  private async moveBatchToTop(tx: Prisma.TransactionClient, scheduleId: bigint, batchId: bigint): Promise<void> {
+    const batches = await tx.plantBatchAssignment.findMany({ where: { scheduleId }, orderBy: { stopSequence: 'asc' } });
+    const target = batches.find((b) => b.batchId === batchId);
+    if (!target) return;
+    const ordered = [target, ...batches.filter((b) => b.batchId !== batchId)];
+    for (let i = 0; i < ordered.length; i++) {
+      await tx.plantBatchAssignment.update({ where: { batchId: ordered[i].batchId }, data: { stopSequence: i + 1 } });
+    }
   }
 
   private async nextStopSequence(tx: Prisma.TransactionClient, scheduleId: bigint): Promise<number> {

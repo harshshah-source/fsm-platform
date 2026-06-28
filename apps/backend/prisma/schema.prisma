@@ -313,6 +313,52 @@ model Recommendation {
   @@map("recommendations")
 }
 
+/// The lifecycle of a system-triggered intra-day CRITICAL/HIGH_CRITICAL insertion + SE Acceptance
+/// (CONTEXT §16, Issues 29/30). Unlike the append-only `Recommendation` explainability record, this is
+/// the *mutable* offer state machine: one row per inserted Ticket, re-pointed to the next-best SE as it
+/// reroutes. `PENDING_ACCEPTANCE` → `ACCEPTED` (Day Plan committed + WhatsApp) | `DECLINED` (reason code) |
+/// `TIMED_OUT` (10-min Acceptance Timeout) → reroute; after 3 retries → `ESCALATION_REQUIRED` (ZM manual
+/// assignment). `retryChain` accumulates every (se, offeredAt, outcome) attempt for the Assignment-History
+/// view. Activity-ping staleness is never a candidate filter — unreachability is resolved by the timeout
+/// reroute (CONTEXT §3/§16).
+enum IntradayInsertionStatus {
+  PENDING_ACCEPTANCE
+  ACCEPTED
+  DECLINED
+  TIMED_OUT
+  ESCALATION_REQUIRED
+
+  @@map("intraday_insertion_status")
+}
+
+model IntradayInsertion {
+  insertionId        BigInt                  @id @default(autoincrement()) @map("insertion_id")
+  ticketId           String                  @map("ticket_id") @db.Uuid
+  zoneId             BigInt                  @map("zone_id")
+  insertionType      String                  @default("SYSTEM_CRITICAL") @map("insertion_type")
+  slaBucket          SlaBucket?              @map("sla_bucket")
+  offeredSeId        String                  @map("offered_se_id") @db.Uuid
+  offeredAt          DateTime                @map("offered_at") @db.Timestamptz(6)
+  acceptanceDeadline DateTime                @map("acceptance_deadline") @db.Timestamptz(6)
+  status             IntradayInsertionStatus @default(PENDING_ACCEPTANCE)
+  respondedAt        DateTime?               @map("responded_at") @db.Timestamptz(6)
+  declineReasonCode  String?                 @map("decline_reason_code")
+  retryCount         Int                     @default(0) @map("retry_count")
+  retryChain         Json                    @default("[]") @map("retry_chain")
+  whatsappSentAt     DateTime?               @map("whatsapp_sent_at") @db.Timestamptz(6)
+  assignedScheduleId BigInt?                 @map("assigned_schedule_id")
+  assignedBatchId    BigInt?                 @map("assigned_batch_id")
+  createdAt          DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ticket Ticket @relation(fields: [ticketId], references: [ticketId])
+
+  @@index([zoneId, status])
+  @@index([ticketId])
+  @@index([status, acceptanceDeadline])
+  @@map("intraday_insertions")
+}
+
 /// Day-Plan dispatch (LLD §3.6, schema D-sched, Issue 11). Lifecycle states only — the approval
 /// gate is removed (ADR-0007/0019 superseded): no DRAFT/PENDING_REVIEW/APPROVED.
 enum WorkScheduleStatus {
@@ -1434,6 +1480,7 @@ model Ticket {
   company         Company          @relation(fields: [companyId], references: [companyId])
   events          TicketEvent[]
   recommendations Recommendation[]
+  intradayInsertions IntradayInsertion[]
   batchTickets    BatchAssignmentTicket[]
   softStates      SoftState[]
   troubleshootingSubmissions TroubleshootingSubmission[]

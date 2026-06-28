@@ -1,6 +1,6 @@
 # 30 — Intra-day timeout retry chain + 3-retry escalation
 
-Status: ready-for-agent
+Status: done
 Type: AFK
 
 ## What to build
@@ -9,13 +9,41 @@ The reroute and escalation behaviour behind intra-day insertions. **Acceptance T
 
 ## Acceptance criteria
 
-- [ ] 10-min Acceptance Timeout flips row to TIMED_OUT and reroutes to next-best SE per strict precedence
-- [ ] Activity-ping staleness is NOT a candidate filter — an SE with a stale/absent `last_activity_at` is still offered the insertion; unreachability is resolved by the timeout reroute (CONTEXT §3/§16)
-- [ ] Offline rerouted SE sees a ghost-assignment notification on reconnect
-- [ ] After 3 retries the row escalates (ESCALATION_REQUIRED) and surfaces "Manual assignment needed"
-- [ ] Manual-assignment modal lists SEs with `SE_AVAILABILITY.status = AVAILABLE` (activity-ping age may be a hint, never a filter)
-- [ ] Full retry chain rendered in Assignment History
+- [x] 10-min Acceptance Timeout flips row to TIMED_OUT and reroutes to next-best SE per strict precedence
+- [x] Activity-ping staleness is NOT a candidate filter — an SE with a stale/absent `last_activity_at` is still offered the insertion; unreachability is resolved by the timeout reroute (CONTEXT §3/§16)
+- [x] Offline rerouted SE sees a ghost-assignment notification on reconnect
+- [x] After 3 retries the row escalates (ESCALATION_REQUIRED) and surfaces "Manual assignment needed"
+- [x] Manual-assignment modal lists SEs with `SE_AVAILABILITY.status = AVAILABLE` (activity-ping age may be a hint, never a filter)
+- [x] Full retry chain rendered in Assignment History
 
 ## Blocked by
 
 - #29
+
+## Disposition (done — 2026-06-28, backend worktree)
+
+Backend slice, built on #29's shared `reroute()` engine. `IntradayInsertionService`:
+- **`sweepTimeouts(now)`** — the on-demand worker (mirrors the reports `recompute` posture; BullMQ cron is a
+  deferred seam): every PENDING insertion past its `acceptanceDeadline` (`offeredAt + 10 min`,
+  `ACCEPTANCE_TIMEOUT_MIN`) times out and reroutes to the next **untried** available candidate (strict
+  precedence). **Activity-ping age is never consulted** — `availableCandidates` filters on
+  `SE_AVAILABILITY = AVAILABLE` only (verified by the stale-`last_activity_at`-still-offered test).
+- **Ghost-assignment notice** — on a TIMED_OUT reroute the previous (offline) SE gets an
+  `INTRADAY_GHOST_ASSIGNMENT` notification ("offered to you … routed to [SE] … no action needed").
+- **3-retry escalation** — `retryCount >= MAX_RETRIES (3)` *or* no untried candidate remains →
+  `ESCALATION_REQUIRED` + an `INTRADAY_ESCALATION_REQUIRED` "Manual assignment needed" alert to the zone's
+  ZM. (Initial offer + 3 reroutes = 4 offers, then escalate.)
+- **`availableSesForManualAssign`** — the ZM manual-assignment modal source: AVAILABLE candidate SEs for the
+  ticket's plant (availability only, never ping age).
+- **`manualAssign`** — ZM commits to a chosen SE (`assignTicket insertAtTop`, no SE-Acceptance gate);
+  insertion → ACCEPTED.
+- **`retryChain`** Json accumulates every `{seId, offeredAt, outcome, reasonCode, at}` attempt — the
+  Assignment-History source (rendered in the Ticket Detail Drawer Assignment-History tab + the queue row's
+  "Retry N of 3").
+
+11 service e2e (shared with #29) + 7 controller e2e green; `tsc` clean.
+
+**Deferred (UI, blocked by #54):** the SE-app ghost-assignment toast render is a mobile surface →
+M-series; backend supplies the notification. The admin Assignment-History rendering of `retryChain` rides
+on the existing Ticket Detail Drawer (FE-09, paused on #70) — `retryChain` is on the payload when that tab
+lands.

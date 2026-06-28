@@ -55,8 +55,8 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 26 — Leave request + SOFT_UNAVAILABLE → 25  *(accepted — backend AC#1–#5 + admin `/leave-requests`; mobile SE submit → M-series)*
 - 27 — Role backup cascade + CSM acting scope → 02  *(accepted — cascade + acting banner + CSM authority + %-report; per-endpoint audit-threading incremental)*
 - 28 — Vehicle Unavailability Report + dual SLA clocks + readiness → 16  *(accepted core — VU report + dual SLA clocks + ZM review page (backend + admin); mobile → 64, readiness source/AC#6 → 65 (authority conflict flagged))*
-- 29 — Intra-day CRITICAL insertion + SE Accept/Decline + WhatsApp → 25, 03
-- 30 — Intra-day timeout retry chain + 3-retry escalation → 29
+- 29 — Intra-day CRITICAL insertion + SE Accept/Decline + WhatsApp → 25, 03  *(done — backend slice: mutable `IntradayInsertion` state machine (migration `20260628100000`, `recommendations` left append-only) + `IntradayInsertionService.fireForZone` (best AVAILABLE candidate, strict precedence, ping never filters) + in-app Accept/Decline push + `accept` → `assignTicket(insertAtTop)` top-of-Day-Plan + first-class SE_ACCEPTANCE WhatsApp + `decline` (reason code → reroute) + `/api/intraday-insertions` controller; 11+7 e2e green; SE-app CRITICAL-INSERTION badge/quick-actions → #54/M-series)*
+- 30 — Intra-day timeout retry chain + 3-retry escalation → 29  *(done — backend slice: `sweepTimeouts` (10-min `ACCEPTANCE_TIMEOUT_MIN` reroute, on-demand worker; cron deferred) + ghost-assignment notice to timed-out SE + 3-retry → `ESCALATION_REQUIRED` + ZM "Manual assignment needed" + `availableSesForManualAssign`/`manualAssign` modal + `retryChain` Assignment-History source; shares #29 e2e; SE-app ghost toast → M-series)*
 - 31 — ZM manual same-day update + ON_SITE conflict warning → 11  *(accepted core — same-day add/remove/reorder + Intra-day Queue (backend + admin); MANUAL_ZM_UPDATE = AuditLog view; mobile cues → 66)*
 - 32 — Cross-zone Platinum auto-escalation + manual flag → 29
 
