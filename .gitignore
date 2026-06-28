@@ -1,6 +1,9 @@
 node_modules/
 dist/
 coverage/
+# `coverage/` above targets test-coverage output; don't let it swallow the app source
+# directory of the same name (Floating-SE Territory page lives here).
+!apps/admin/src/pages/coverage/
 .turbo/
 apps/backend/dist/
 packages/shared/dist/

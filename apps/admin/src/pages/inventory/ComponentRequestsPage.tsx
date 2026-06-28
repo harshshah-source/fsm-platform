@@ -10,26 +10,33 @@ import {
   type ComponentRequestStatus,
   type DeliveryDestination,
 } from '../../api/componentRequests';
+import { DataTable, MetricCard, PageHeader, FilterSelect, type Column } from '../../components/data';
+import { AgeChip, StatusPill } from '../../components/domain';
+import { Button, Field, Input } from '../../components/ui';
 
 /**
- * Warehouse Manager Component Requests queue (Issue 22, `/warehouse/requests`,
- * v2-reference/18-component-requests). Lists active requests (REQUESTED / APPROVED / SHIPPED) newest
- * first with a lifecycle metric strip, and drives the WM legs: Approve → Mark Shipped (tracking +
- * delivery destination) or Reject (mandatory reason). WAREHOUSE_MANAGER only.
+ * Warehouse Manager Component Requests queue (Issue 22 · FE-15 recipe, `/warehouse/requests`,
+ * reference 18) and its read-only manager oversight variant (Issue 23). Lists active requests
+ * (REQUESTED / APPROVED / SHIPPED) newest first with a lifecycle metric strip, and drives the WM legs:
+ * Approve → Mark Shipped (tracking + delivery destination) or Reject (mandatory reason).
+ *
+ * FE-15 applies the canonical queue recipe (`MetricStrip` + `DataTable` + `StatusPill`). The
+ * mandatory-reason / ship legs stay inline (the tests assert their labels + buttons by global query, and
+ * they are already not `window.prompt`) — re-skinned onto `Button`/`Field`/`Input`. The `cr-metric-*` /
+ * `cr-row-*` test ids, the `Component Requests` aria-label, the action labels, the read-only gating, and
+ * the `?tab=Components` ticket navigation are all preserved.
  */
 const METRICS: ComponentRequestStatus[] = ['REQUESTED', 'APPROVED', 'SHIPPED'];
-
-const STATUS_CLASS: Record<ComponentRequestStatus, string> = {
-  REQUESTED: 'bg-amber-100 text-amber-800',
-  APPROVED: 'bg-blue-100 text-blue-800',
-  SHIPPED: 'bg-violet-100 text-violet-800',
-  RECEIVED: 'bg-green-100 text-green-800',
-  REJECTED: 'bg-rose-100 text-rose-800',
+const METRIC_TONE: Record<string, 'warning' | 'info' | 'verified'> = {
+  REQUESTED: 'warning',
+  APPROVED: 'info',
+  SHIPPED: 'verified',
 };
 
 export function ComponentRequestsPage({ readOnly = false }: { readOnly?: boolean } = {}) {
   const navigate = useNavigate();
   const [rows, setRows] = useState<ComponentRequestRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [reason, setReason] = useState('');
@@ -38,9 +45,11 @@ export function ComponentRequestsPage({ readOnly = false }: { readOnly?: boolean
   const [destination, setDestination] = useState<DeliveryDestination>('SE_LOCATION');
 
   const load = useCallback(() => {
+    setLoading(true);
     (readOnly ? apiComponentRequestsOversight() : apiComponentRequests())
       .then(setRows)
-      .catch(() => setError('Failed to load Component Requests'));
+      .catch(() => setError('Failed to load Component Requests'))
+      .finally(() => setLoading(false));
   }, [readOnly]);
 
   useEffect(() => {
@@ -68,151 +77,131 @@ export function ComponentRequestsPage({ readOnly = false }: { readOnly?: boolean
     load();
   };
 
+  const columns: Column<ComponentRequestRow>[] = [
+    { key: 'request', header: 'Request', render: (r) => <span className="font-mono text-xs text-ink-muted">{r.requestId.slice(0, 8)}</span> },
+    { key: 'company', header: 'Company', render: (r) => <span className="text-ink-strong">{r.companyName}</span> },
+    { key: 'zone', header: 'Zone', render: (r) => <span className="text-ink-muted">{r.zoneName}</span> },
+    { key: 'component', header: 'Component', render: (r) => <span className="text-ink">{r.componentName ?? '—'}</span> },
+    { key: 'requestedby', header: 'Requested by', render: (r) => <span className="font-mono text-xs text-ink">{r.seId}</span> },
+    {
+      key: 'ticket',
+      header: 'Ticket',
+      render: (r) => (
+        <button
+          type="button"
+          onClick={() => navigate(`/tickets/${r.ticketId}?tab=Components`)}
+          className="font-mono text-xs text-brand-700 hover:underline"
+        >
+          {r.ticketId.slice(0, 8)}
+        </button>
+      ),
+    },
+    { key: 'status', header: 'Status', render: (r) => <StatusPill status={r.status} /> },
+    { key: 'age', header: 'Age', align: 'right', render: (r) => <AgeChip days={r.ageDays} /> },
+    {
+      key: 'actions',
+      header: 'Actions',
+      render: (row) => {
+        if (readOnly) return <span className="text-xs text-ink-muted">read-only</span>;
+        if (row.status === 'REQUESTED' && rejectingId !== row.requestId) {
+          return (
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="secondary" onClick={() => approve(row.requestId)}>
+                Approve
+              </Button>
+              <Button type="button" size="sm" variant="danger" onClick={() => setRejectingId(row.requestId)}>
+                Reject
+              </Button>
+            </div>
+          );
+        }
+        if (row.status === 'REQUESTED' && rejectingId === row.requestId) {
+          return (
+            <div className="flex flex-col gap-1">
+              <Field label="Rejection reason" htmlFor={`reason-${row.requestId}`}>
+                <Input id={`reason-${row.requestId}`} value={reason} onChange={(e) => setReason(e.target.value)} className="text-xs" />
+              </Field>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" variant="danger" onClick={() => confirmReject(row.requestId)}>
+                  Confirm reject
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={() => { setRejectingId(null); setReason(''); }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          );
+        }
+        if (row.status === 'APPROVED' && shippingId !== row.requestId) {
+          return (
+            <Button type="button" size="sm" variant="secondary" onClick={() => setShippingId(row.requestId)}>
+              Mark Shipped
+            </Button>
+          );
+        }
+        if (row.status === 'APPROVED' && shippingId === row.requestId) {
+          return (
+            <div className="flex flex-col gap-1">
+              <Field label="Tracking ref" htmlFor={`track-${row.requestId}`}>
+                <Input id={`track-${row.requestId}`} value={trackingRef} onChange={(e) => setTrackingRef(e.target.value)} className="text-xs" />
+              </Field>
+              <Field label="Delivery destination" htmlFor={`dest-${row.requestId}`}>
+                <FilterSelect
+                  id={`dest-${row.requestId}`}
+                  value={destination}
+                  onChange={(e) => setDestination(e.target.value as DeliveryDestination)}
+                  className="w-full"
+                >
+                  <option value="SE_LOCATION">SE location</option>
+                  <option value="PLANT_WAREHOUSE">Plant warehouse</option>
+                </FilterSelect>
+              </Field>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" onClick={() => confirmShip(row.requestId)}>
+                  Confirm ship
+                </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={() => { setShippingId(null); setTrackingRef(''); }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      },
+    },
+  ];
+
   return (
     <div>
-      <h2 className="mb-1 text-xl font-semibold">Component Requests</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Spare-part requests raised by SEs when a component is unavailable. Approve and ship, or reject
-        with a reason — the Zonal Manager is notified on rejection.
-      </p>
+      <PageHeader
+        title="Component Requests"
+        subtitle="Spare-part requests raised by SEs when a component is unavailable. Approve and ship, or reject with a reason — the Zonal Manager is notified on rejection."
+      />
 
       {error && (
-        <p role="alert" className="mb-4 text-sm text-red-700">
+        <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
 
-      <div data-testid="cr-metric-strip" className="mb-5 flex gap-3">
+      <div data-testid="cr-metric-strip" className="mb-5 grid grid-cols-3 gap-3">
         {counts.map((c) => (
-          <div key={c.status} data-testid={`cr-metric-${c.status}`} className="rounded border px-4 py-2">
-            <div className="text-2xl font-semibold">{c.n}</div>
-            <div className="text-xs uppercase tracking-wide text-slate-500">{c.status}</div>
+          <div key={c.status} data-testid={`cr-metric-${c.status}`}>
+            <MetricCard label={c.status} value={c.n} tone={METRIC_TONE[c.status]} />
           </div>
         ))}
       </div>
 
-      <table aria-label="Component Requests" className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b text-left text-slate-500">
-            <th className="py-2 pr-3">Request</th>
-            <th className="py-2 pr-3">Company</th>
-            <th className="py-2 pr-3">Zone</th>
-            <th className="py-2 pr-3">Component</th>
-            <th className="py-2 pr-3">Requested by</th>
-            <th className="py-2 pr-3">Ticket</th>
-            <th className="py-2 pr-3">Status</th>
-            <th className="py-2 pr-3">Age</th>
-            <th className="py-2 pr-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={9} className="py-4 text-slate-400">
-                No active component requests.
-              </td>
-            </tr>
-          )}
-          {rows.map((row) => (
-            <tr key={row.requestId} data-testid={`cr-row-${row.requestId}`} className="border-b align-top hover:bg-slate-50">
-              <td className="py-2 pr-3 font-mono text-xs">{row.requestId.slice(0, 8)}</td>
-              <td className="py-2 pr-3">{row.companyName}</td>
-              <td className="py-2 pr-3 text-slate-600">{row.zoneName}</td>
-              <td className="py-2 pr-3">{row.componentName ?? '—'}</td>
-              <td className="py-2 pr-3 font-mono text-xs">{row.seId}</td>
-              <td className="py-2 pr-3">
-                <button
-                  type="button"
-                  onClick={() => navigate(`/tickets/${row.ticketId}?tab=Components`)}
-                  className="font-mono text-xs text-blue-700 hover:underline"
-                >
-                  {row.ticketId.slice(0, 8)}
-                </button>
-              </td>
-              <td className="py-2 pr-3">
-                <span className={`rounded px-2 py-0.5 text-xs ${STATUS_CLASS[row.status]}`}>{row.status}</span>
-              </td>
-              <td className="py-2 pr-3 text-slate-500">{row.ageDays}d</td>
-              <td className="py-2 pr-3">
-                {readOnly && <span className="text-xs text-slate-400">read-only</span>}
-                {!readOnly && row.status === 'REQUESTED' && rejectingId !== row.requestId && (
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => approve(row.requestId)} className="rounded border px-2 py-0.5 text-xs">
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRejectingId(row.requestId)}
-                      className="rounded border px-2 py-0.5 text-xs text-rose-700"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                )}
-                {!readOnly && row.status === 'REQUESTED' && rejectingId === row.requestId && (
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-slate-500" htmlFor={`reason-${row.requestId}`}>
-                      Rejection reason
-                    </label>
-                    <input
-                      id={`reason-${row.requestId}`}
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      className="rounded border px-2 py-0.5 text-xs"
-                    />
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => confirmReject(row.requestId)} className="rounded border px-2 py-0.5 text-xs text-rose-700">
-                        Confirm reject
-                      </button>
-                      <button type="button" onClick={() => { setRejectingId(null); setReason(''); }} className="rounded border px-2 py-0.5 text-xs">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {!readOnly && row.status === 'APPROVED' && shippingId !== row.requestId && (
-                  <button type="button" onClick={() => setShippingId(row.requestId)} className="rounded border px-2 py-0.5 text-xs">
-                    Mark Shipped
-                  </button>
-                )}
-                {!readOnly && row.status === 'APPROVED' && shippingId === row.requestId && (
-                  <div className="flex flex-col gap-1">
-                    <label className="text-xs text-slate-500" htmlFor={`track-${row.requestId}`}>
-                      Tracking ref
-                    </label>
-                    <input
-                      id={`track-${row.requestId}`}
-                      value={trackingRef}
-                      onChange={(e) => setTrackingRef(e.target.value)}
-                      className="rounded border px-2 py-0.5 text-xs"
-                    />
-                    <label className="text-xs text-slate-500" htmlFor={`dest-${row.requestId}`}>
-                      Delivery destination
-                    </label>
-                    <select
-                      id={`dest-${row.requestId}`}
-                      value={destination}
-                      onChange={(e) => setDestination(e.target.value as DeliveryDestination)}
-                      className="rounded border px-2 py-0.5 text-xs"
-                    >
-                      <option value="SE_LOCATION">SE location</option>
-                      <option value="PLANT_WAREHOUSE">Plant warehouse</option>
-                    </select>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => confirmShip(row.requestId)} className="rounded border px-2 py-0.5 text-xs">
-                        Confirm ship
-                      </button>
-                      <button type="button" onClick={() => { setShippingId(null); setTrackingRef(''); }} className="rounded border px-2 py-0.5 text-xs">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        ariaLabel="Component Requests"
+        rowKey={(r) => r.requestId}
+        rowTestId={(r) => `cr-row-${r.requestId}`}
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        empty="No active component requests."
+      />
     </div>
   );
 }

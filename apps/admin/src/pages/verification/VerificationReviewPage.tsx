@@ -6,6 +6,11 @@ import {
   apiVerificationReview,
   type VerificationReviewRow,
 } from '../../api/verification';
+import { MetricStrip } from '../../components/data/MetricStrip';
+import { PageHeader } from '../../components/data/PageHeader';
+import { ChartCard } from '../../components/charts/ChartCard';
+import { ChartLegend, DonutChart } from '../../components/charts/DonutChart';
+import { CHART } from '../../components/charts/colors';
 
 /**
  * GPS Verification Review (Issue 19, `/verification`). The ZM-facing follow-up surface over Issue 18's
@@ -42,6 +47,31 @@ export function VerificationReviewPage() {
   const filters = useMemo(
     () => ({ outcome: outcome || undefined, companyId: companyId || undefined }),
     [outcome, companyId],
+  );
+
+  // Outcome breakdown of the rows currently in view — feeds the KPI strip + donut (FE-05).
+  const counts = useMemo(() => {
+    const c = { partial: 0, fraud: 0, noPings: 0, closed: 0, auto: 0, pending: 0 };
+    for (const r of rows) {
+      if (r.rowType === 'PARTIAL_RECOVERY') c.partial++;
+      else if (r.rowType === 'FAILED_FRAUD') c.fraud++;
+      else if (r.rowType === 'FAILED_NO_PINGS') c.noPings++;
+      else if (r.rowType === 'CLOSED') c.closed++;
+      else if (r.rowType === 'CLOSED_AUTO_RECOVERY') c.auto++;
+      else c.pending++;
+    }
+    return c;
+  }, [rows]);
+
+  const donutData = useMemo(
+    () => [
+      { name: 'Partial recovery', value: counts.partial, color: CHART.warning },
+      { name: 'Failed — fraud', value: counts.fraud, color: CHART.critical },
+      { name: 'Failed — no pings', value: counts.noPings, color: CHART.criticalDeep },
+      { name: 'Closed / auto', value: counts.closed + counts.auto, color: CHART.success },
+      { name: 'Pending', value: counts.pending, color: CHART.neutral },
+    ],
+    [counts],
   );
 
   const refetch = useCallback(() => {
@@ -83,11 +113,36 @@ export function VerificationReviewPage() {
 
   return (
     <div>
-      <h2 className="mb-1 text-xl font-semibold">GPS Verification Review</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Outcomes for submitted Troubleshoot tickets in your zone. Default shows everything still needing
-        attention (non-closed).
-      </p>
+      <PageHeader
+        title="GPS Verification Review"
+        subtitle="Outcomes for submitted Troubleshoot tickets in your zone. Default shows everything still needing attention (non-closed)."
+      />
+
+      <MetricStrip
+        cols={4}
+        metrics={[
+          { label: 'In Review', value: rows.length, tone: 'brand' },
+          { label: 'Partial Recovery', value: counts.partial, tone: 'warning' },
+          { label: 'Failed', value: counts.fraud + counts.noPings, tone: 'critical' },
+          { label: 'Closed / Auto', value: counts.closed + counts.auto, tone: 'success' },
+        ]}
+      />
+
+      <ChartCard title="Verification outcomes" className="mb-5">
+        <div className="grid items-center gap-6 sm:grid-cols-[240px_1fr]">
+          <DonutChart
+            data={donutData}
+            height={200}
+            center={
+              <div className="text-center">
+                <div className="text-2xl font-bold text-ink-strong">{rows.length}</div>
+                <div className="text-[11px] text-ink-muted">Total</div>
+              </div>
+            }
+          />
+          <ChartLegend items={donutData} />
+        </div>
+      </ChartCard>
 
       {error && (
         <p role="alert" className="mb-4 text-sm text-red-700">

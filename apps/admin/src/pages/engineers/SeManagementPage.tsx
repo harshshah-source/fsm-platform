@@ -8,31 +8,48 @@ import {
   type EngineerListRow,
   type SettableStatus,
 } from '../../api/engineers';
+import {
+  DataTable,
+  DateRangeChips,
+  MetricCard,
+  PageHeader,
+  type Column,
+} from '../../components/data';
+import { Badge, Button, Field, Input } from '../../components/ui';
+import { FilterSelect } from '../../components/data';
+import type { BadgeTone } from '../../components/ui/Badge';
+import type { MetricTone } from '../../components/data';
 
 /** The five derived Activity Status buckets surfaced as metric cards (v2-reference/15-se-activity). */
 const METRIC_STATUSES = ['BUSY', 'ON_SITE', 'AVAILABLE', 'OFFLINE', 'SHIFT_ENDING'] as const;
 const SETTABLE: SettableStatus[] = ['ON_LEAVE', 'OFF_SHIFT', 'WEEKLY_OFF', 'SOFT_UNAVAILABLE'];
 
-const BADGE_TONE: Record<string, string> = {
-  BUSY: 'bg-amber-100 text-amber-800',
-  ON_SITE: 'bg-blue-100 text-blue-800',
-  AVAILABLE: 'bg-emerald-100 text-emerald-800',
-  OFFLINE: 'bg-slate-100 text-slate-600',
-  SHIFT_ENDING: 'bg-violet-100 text-violet-800',
+/** Activity-status → semantic tone (shared by the metric cards and the row pills). */
+const ACTIVITY_TONE: Record<string, BadgeTone> = {
+  BUSY: 'warning',
+  ON_SITE: 'info',
+  AVAILABLE: 'success',
+  OFFLINE: 'neutral',
+  SHIFT_ENDING: 'verified',
 };
-const tone = (s: string) => BADGE_TONE[s] ?? 'bg-rose-100 text-rose-800';
+const activityTone = (s: string): BadgeTone => ACTIVITY_TONE[s] ?? 'critical';
 
 /**
- * SE Management page (Issue 25, `/engineers`, v2-reference/15-se-activity). The zone-scoped SE list
- * with the render-time derived Activity Status, coverage, today's ticket count and Common-Kit chip;
- * selecting a row opens the detail panel (Day Plan, per-component Van Stock with shortages in red,
- * availability windows) and — for ZM / CSM, never Operations Head — the Set Availability action.
+ * SE Management page (Issue 25 · FE-10 parity, `/engineers`, reference 15). The zone-scoped SE list with
+ * the render-time derived Activity Status, coverage, today's ticket count and Common-Kit chip; selecting
+ * a row opens the detail panel (Day Plan, per-component Van Stock with shortages in red, availability
+ * windows) and — for ZM / CSM, never Operations Head — the Set Availability action.
+ *
+ * FE-10 is a presentation-only refactor onto `PageHeader` + `MetricCard` + `DataTable`; the engineers
+ * fetch, the derived-status counts, the `se-metric-*` / `se-row-*` test ids, the `SE Management` /
+ * `SE detail` labels, the literal status text, and the Set-Availability flow are all preserved.
  */
 export function SeManagementPage() {
   const { session } = useAuth();
   const canSet = session?.role === 'ZONAL_MANAGER' || session?.role === 'CENTRAL_SERVICE_MANAGER';
 
   const [rows, setRows] = useState<EngineerListRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<EngineerDetail | null>(null);
@@ -43,9 +60,11 @@ export function SeManagementPage() {
   const [reason, setReason] = useState('');
 
   const load = useCallback(() => {
+    setLoading(true);
     apiEngineers()
       .then(setRows)
-      .catch(() => setError('Failed to load engineers'));
+      .catch(() => setError('Failed to load engineers'))
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -83,99 +102,116 @@ export function SeManagementPage() {
     return c;
   }, [rows]);
 
+  const columns: Column<EngineerListRow>[] = [
+    {
+      key: 'name',
+      header: 'Service Engineer',
+      render: (r) => (
+        <button
+          type="button"
+          onClick={() => openDetail(r.seId)}
+          className="font-medium text-brand-700 hover:underline"
+        >
+          {r.name}
+        </button>
+      ),
+    },
+    {
+      key: 'activity',
+      header: 'Activity',
+      render: (r) => <Badge tone={activityTone(r.activityStatus)}>{r.activityStatus}</Badge>,
+    },
+    {
+      key: 'coverage',
+      header: 'Coverage',
+      render: (r) => <span className="text-ink-muted">{r.coverageType}</span>,
+    },
+    {
+      key: 'availability',
+      header: 'Availability',
+      render: (r) => <span className="text-ink-muted">{r.availabilityStatus}</span>,
+    },
+    {
+      key: 'tickets',
+      header: 'Active Tickets',
+      align: 'right',
+      render: (r) => <span className="tabular-nums">{r.activeTicketCount}</span>,
+    },
+    {
+      key: 'kit',
+      header: 'Kit',
+      render: (r) =>
+        r.kitComplete ? (
+          <Badge tone="success">Kit OK</Badge>
+        ) : (
+          <Badge tone="critical">Kit short</Badge>
+        ),
+    },
+  ];
+
   return (
     <div>
-      <h2 className="mb-1 text-xl font-semibold">SE Activity</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Derived SE Activity Status — computed at render time from availability, soft states, and the
-        last activity ping. Never stored. Set planning availability for an SE on the right.
-      </p>
+      <PageHeader
+        title="SE Activity"
+        subtitle="Derived SE Activity Status — computed at render time from availability, soft states, and the last activity ping. Never stored. Set planning availability for an SE on the right."
+        actions={<DateRangeChips />}
+      />
 
       {error && (
-        <p role="alert" className="mb-4 text-sm text-red-700">
+        <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
 
-      <div className="mb-5 flex flex-wrap gap-3">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {METRIC_STATUSES.map((s) => (
-          <div key={s} data-testid={`se-metric-${s}`} className="min-w-[7rem] rounded border px-4 py-2">
-            <div className="text-2xl font-semibold">{counts[s] ?? 0}</div>
-            <div className="text-xs uppercase tracking-wide text-slate-500">{s.replace('_', ' ')}</div>
+          <div key={s} data-testid={`se-metric-${s}`}>
+            <MetricCard
+              label={s.replace('_', ' ')}
+              value={counts[s] ?? 0}
+              tone={activityTone(s) as MetricTone}
+            />
           </div>
         ))}
       </div>
 
       <div className="flex gap-6">
-        <table aria-label="SE Management" className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b text-left text-slate-500">
-              <th className="py-2 pr-3">Service Engineer</th>
-              <th className="py-2 pr-3">Activity</th>
-              <th className="py-2 pr-3">Coverage</th>
-              <th className="py-2 pr-3">Availability</th>
-              <th className="py-2 pr-3">Active Tickets</th>
-              <th className="py-2 pr-3">Kit</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="py-4 text-slate-400">
-                  No engineers in scope.
-                </td>
-              </tr>
-            )}
-            {rows.map((r) => (
-              <tr
-                key={r.seId}
-                data-testid={`se-row-${r.seId}`}
-                className={`border-b align-top hover:bg-slate-50 ${selectedId === r.seId ? 'bg-slate-50' : ''}`}
-              >
-                <td className="py-2 pr-3">
-                  <button type="button" onClick={() => openDetail(r.seId)} className="font-medium text-blue-700 hover:underline">
-                    {r.name}
-                  </button>
-                </td>
-                <td className="py-2 pr-3">
-                  <span className={`rounded px-2 py-0.5 text-xs font-medium ${tone(r.activityStatus)}`}>{r.activityStatus}</span>
-                </td>
-                <td className="py-2 pr-3 text-slate-600">{r.coverageType}</td>
-                <td className="py-2 pr-3 text-slate-600">{r.availabilityStatus}</td>
-                <td className="py-2 pr-3">{r.activeTicketCount}</td>
-                <td className="py-2 pr-3">
-                  {r.kitComplete ? (
-                    <span className="text-xs text-emerald-700">Kit OK</span>
-                  ) : (
-                    <span className="text-xs text-rose-700">Kit short</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="min-w-0 flex-1">
+          <DataTable
+            ariaLabel="SE Management"
+            rowKey={(r) => r.seId}
+            rowTestId={(r) => `se-row-${r.seId}`}
+            columns={columns}
+            rows={rows}
+            loading={loading}
+            empty="No engineers in scope."
+          />
+        </div>
 
         {selectedId && (
-          <section aria-label="SE detail" className="w-80 shrink-0 rounded border p-4 text-sm">
-            {!detail && <p className="text-slate-400">Loading…</p>}
+          <section
+            aria-label="SE detail"
+            className="w-80 shrink-0 rounded-card border border-line bg-surface-card p-4 text-sm shadow-sm"
+          >
+            {!detail && <p className="text-ink-muted">Loading…</p>}
             {detail && (
               <>
-                <h3 className="mb-1 text-base font-semibold">{detail.name}</h3>
-                <p className="mb-3 text-xs text-slate-500">
+                <h3 className="mb-1 text-base font-semibold text-ink-strong">{detail.name}</h3>
+                <p className="mb-3 text-xs text-ink-muted">
                   {detail.coverageType} · {detail.activityStatus}
                 </p>
 
                 <div className="mb-3">
-                  <div className="text-xs uppercase tracking-wide text-slate-400">Day Plan</div>
-                  <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">Day Plan</div>
+                  <div className="text-ink">
                     {detail.dayPlan.status ?? 'No active schedule'} · {detail.dayPlan.ticketCount} ticket(s)
                   </div>
                 </div>
 
                 <div className="mb-3">
-                  <div className="text-xs uppercase tracking-wide text-slate-400">Van Stock</div>
-                  {detail.vanStock.length === 0 && <div className="text-slate-400">No tracked stock</div>}
-                  <ul>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">Van Stock</div>
+                  {detail.vanStock.length === 0 && <div className="text-ink-muted">No tracked stock</div>}
+                  <ul className="text-ink">
                     {detail.vanStock.map((v) => (
                       <li key={v.componentId}>
                         {v.name} · {v.qty}
@@ -183,18 +219,18 @@ export function SeManagementPage() {
                     ))}
                   </ul>
                   {detail.kit.missing.map((m) => (
-                    <div key={m.componentId} className="text-rose-700">
+                    <div key={m.componentId} className="text-critical">
                       {m.name} short by {m.shortBy}
                     </div>
                   ))}
                 </div>
 
                 <div className="mb-3">
-                  <div className="text-xs uppercase tracking-wide text-slate-400">Availability</div>
-                  {detail.availabilityRows.length === 0 && <div className="text-slate-400">No windows</div>}
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">Availability</div>
+                  {detail.availabilityRows.length === 0 && <div className="text-ink-muted">No windows</div>}
                   <ul>
                     {detail.availabilityRows.map((a, i) => (
-                      <li key={i} className="text-xs">
+                      <li key={i} className="text-xs text-ink-muted">
                         {a.status} · {a.windowStart.slice(0, 10)}
                         {a.windowEnd ? `–${a.windowEnd.slice(0, 10)}` : ''}
                       </li>
@@ -203,60 +239,55 @@ export function SeManagementPage() {
                 </div>
 
                 {canSet && (
-                  <div className="mt-4 border-t pt-3">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Set Availability</div>
-                    <label className="block text-xs text-slate-500" htmlFor="avail-status">
-                      Status
-                    </label>
-                    <select
-                      id="avail-status"
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value as SettableStatus)}
-                      className="mb-2 w-full rounded border px-2 py-1 text-sm"
-                    >
-                      {SETTABLE.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                    <label className="block text-xs text-slate-500" htmlFor="avail-start">
-                      Window start
-                    </label>
-                    <input
-                      id="avail-start"
-                      type="datetime-local"
-                      value={windowStart}
-                      onChange={(e) => setWindowStart(e.target.value)}
-                      className="mb-2 w-full rounded border px-2 py-1 text-sm"
-                    />
-                    <label className="block text-xs text-slate-500" htmlFor="avail-end">
-                      Window end (optional)
-                    </label>
-                    <input
-                      id="avail-end"
-                      type="datetime-local"
-                      value={windowEnd}
-                      onChange={(e) => setWindowEnd(e.target.value)}
-                      className="mb-2 w-full rounded border px-2 py-1 text-sm"
-                    />
-                    <label className="block text-xs text-slate-500" htmlFor="avail-reason">
-                      Reason
-                    </label>
-                    <input
-                      id="avail-reason"
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      className="mb-3 w-full rounded border px-2 py-1 text-sm"
-                    />
-                    <button
-                      type="button"
+                  <div className="mt-4 flex flex-col gap-2 border-t border-line pt-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">
+                      Set Availability
+                    </div>
+                    <Field label="Status" htmlFor="avail-status">
+                      <FilterSelect
+                        id="avail-status"
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value as SettableStatus)}
+                        className="w-full"
+                      >
+                        {SETTABLE.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </FilterSelect>
+                    </Field>
+                    <Field label="Window start" htmlFor="avail-start">
+                      <Input
+                        id="avail-start"
+                        type="datetime-local"
+                        value={windowStart}
+                        onChange={(e) => setWindowStart(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Window end (optional)" htmlFor="avail-end">
+                      <Input
+                        id="avail-end"
+                        type="datetime-local"
+                        value={windowEnd}
+                        onChange={(e) => setWindowEnd(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Reason" htmlFor="avail-reason">
+                      <Input
+                        id="avail-reason"
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                      />
+                    </Field>
+                    <Button
+                      size="sm"
                       onClick={submitAvailability}
                       disabled={!windowStart}
-                      className="rounded bg-blue-600 px-3 py-1 text-sm text-white disabled:opacity-40"
+                      className="mt-1 self-start"
                     >
                       Set availability
-                    </button>
+                    </Button>
                   </div>
                 )}
               </>

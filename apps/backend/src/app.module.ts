@@ -69,6 +69,8 @@ import { RecoveryController } from './ticketing/recovery.controller';
 import { InstallController } from './ticketing/install.controller';
 import { VerificationModule } from './verification/verification.module';
 import { VerificationController } from './verification/verification.controller';
+import { VouchersModule } from './vouchers/vouchers.module';
+import { VouchersController } from './vouchers/vouchers.controller';
 import { ZonesController } from './zones/zones.controller';
 
 @Module({
@@ -96,6 +98,7 @@ import { ZonesController } from './zones/zones.controller';
     EngineersModule,
     RoleBackupModule,
     NotificationsModule,
+    VouchersModule,
   ],
   controllers: [
     MeController,
@@ -140,6 +143,7 @@ import { ZonesController } from './zones/zones.controller';
     RoleBackupController,
     NotificationsController,
     AuditTrailController,
+    VouchersController,
   ],
   providers: [AuthGuard, RoleGuard, ZoneScopeGuard],
 })

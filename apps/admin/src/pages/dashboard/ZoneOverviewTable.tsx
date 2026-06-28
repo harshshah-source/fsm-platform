@@ -1,12 +1,18 @@
 import { useMemo, useState } from 'react';
 import type { ZoneOverviewRow } from '../../api/dashboard';
+import { DataTable, FilterBar, FilterSelect, type Column } from '../../components/data';
+import { Button } from '../../components/ui';
+import { cn } from '../../lib/cn';
 import { downloadCsv, toCsv } from '../../lib/csv';
 import { BUCKET_CLASS, BUCKET_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
 
 /**
- * Zone Overview table (Issue 06 AC#2/#5). One row per zone: total inactive + per-SLA-bucket counts
- * in severity order with the reference colour coding, plus a trend-vs-previous-day cell (a neutral
- * "—" placeholder until the daily-history table lands, Issue 40) and a CSV export.
+ * Zone Overview table (Issue 06 AC#2/#5 · FE-06). One row per zone: total inactive + per-SLA-bucket
+ * counts in severity order with the reference colour coding, plus a trend-vs-previous-day cell (a
+ * neutral "—" placeholder until the daily-history table lands, Issue 40) and a CSV export.
+ *
+ * Presentation-only refactor (FE-06): re-skinned onto the canonical `DataTable`; the `aria-label`,
+ * the `bucket-<B>` / `trend` test ids, the filter labels, and the export button are all preserved.
  */
 export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
   const [zoneFilter, setZoneFilter] = useState('');
@@ -33,18 +39,63 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
     downloadCsv('zone-overview.csv', toCsv(headers, body));
   };
 
+  const columns: Column<ZoneOverviewRow>[] = [
+    {
+      key: 'zone',
+      header: 'Zone',
+      render: (r) => <span className="font-medium text-ink-strong">{r.zoneName}</span>,
+    },
+    {
+      key: 'total',
+      header: 'Total',
+      align: 'right',
+      render: (r) => <span className="tabular-nums">{r.totalInactive}</span>,
+    },
+    ...SLA_BUCKETS.map<Column<ZoneOverviewRow>>((b) => ({
+      key: b,
+      header: BUCKET_LABEL[b],
+      align: 'right',
+      render: (r) => {
+        const count = r.byBucket[b] ?? 0;
+        return (
+          <span
+            data-testid={`bucket-${b}`}
+            className={cn(
+              'inline-block min-w-7 rounded-full px-1.5 text-center text-xs font-semibold tabular-nums',
+              count > 0 ? BUCKET_CLASS[b] : 'text-ink-muted/40',
+            )}
+          >
+            {count}
+          </span>
+        );
+      },
+    })),
+    {
+      key: 'trend',
+      header: 'Trend',
+      align: 'right',
+      render: (r) => (
+        <span data-testid="trend" className="text-ink-muted">
+          {r.trendPctVsPrevDay === null ? '—' : `${r.trendPctVsPrevDay}%`}
+        </span>
+      ),
+    },
+  ];
+
   return (
     <section aria-labelledby="zone-overview-heading" className="mb-8">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 id="zone-overview-heading" className="text-lg font-semibold">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3
+          id="zone-overview-heading"
+          className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps"
+        >
           Zone Overview
         </h3>
-        <div className="flex items-center gap-2 text-sm">
-          <select
+        <FilterBar className="mb-0">
+          <FilterSelect
             aria-label="Filter by zone"
             value={zoneFilter}
             onChange={(e) => setZoneFilter(e.target.value)}
-            className="rounded border px-2 py-1"
           >
             <option value="">All zones</option>
             {[...new Set(rows.map((r) => r.zoneName))].map((z) => (
@@ -52,12 +103,11 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
                 {z}
               </option>
             ))}
-          </select>
-          <select
+          </FilterSelect>
+          <FilterSelect
             aria-label="Filter by bucket"
             value={bucketFilter}
             onChange={(e) => setBucketFilter(e.target.value)}
-            className="rounded border px-2 py-1"
           >
             <option value="">All buckets</option>
             {SLA_BUCKETS.map((b) => (
@@ -65,54 +115,19 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
                 {BUCKET_LABEL[b]}
               </option>
             ))}
-          </select>
-          <button type="button" onClick={exportCsv} className="rounded border px-2 py-1">
+          </FilterSelect>
+          <Button variant="secondary" size="sm" onClick={exportCsv}>
             Export Zone Overview
-          </button>
-        </div>
+          </Button>
+        </FilterBar>
       </div>
-      <table aria-label="Zone Overview" className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b text-left">
-            <th className="py-1 pr-3">Zone</th>
-            <th className="py-1 pr-3">Total</th>
-            {SLA_BUCKETS.map((b) => (
-              <th key={b} className="py-1 pr-2">
-                {BUCKET_LABEL[b]}
-              </th>
-            ))}
-            <th className="py-1 pr-2">Trend</th>
-          </tr>
-        </thead>
-        <tbody>
-          {visible.map((r) => (
-            <tr key={r.zoneId} className="border-b">
-              <td className="py-1 pr-3 font-medium">{r.zoneName}</td>
-              <td className="py-1 pr-3">{r.totalInactive}</td>
-              {SLA_BUCKETS.map((b) => {
-                const count = r.byBucket[b] ?? 0;
-                return (
-                  <td key={b} className="py-1 pr-2">
-                    <span
-                      data-testid={`bucket-${b}`}
-                      className={`inline-block min-w-6 rounded px-1 text-center ${
-                        count > 0 ? BUCKET_CLASS[b] : 'text-slate-300'
-                      }`}
-                    >
-                      {count}
-                    </span>
-                  </td>
-                );
-              })}
-              <td className="py-1 pr-2">
-                <span data-testid="trend" className="text-slate-500">
-                  {r.trendPctVsPrevDay === null ? '—' : `${r.trendPctVsPrevDay}%`}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        ariaLabel="Zone Overview"
+        rowKey={(r) => r.zoneId}
+        columns={columns}
+        rows={visible}
+        empty="No inactive devices in scope."
+      />
     </section>
   );
 }

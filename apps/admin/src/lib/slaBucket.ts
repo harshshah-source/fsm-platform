@@ -25,6 +25,22 @@ export const BUCKET_LABEL: Record<SlaBucket, string> = {
   WARNING: 'Warning',
 };
 
+/**
+ * Concrete hex per bucket for chart surfaces that need colour strings rather than Tailwind classes
+ * (the Ops-Head SLA `DistributionBar`, reference 04 §1.6). Same green→red→violet heat ramp as
+ * `BUCKET_CLASS`; this is the single SLA-colour source promoted for chart use (DESIGN-SYSTEM §9.3).
+ */
+export const BUCKET_HEX: Record<SlaBucket, string> = {
+  LONG_PENDING: '#6d28d9',
+  VERY_SEVERE: '#8f1d12',
+  SEVERE: '#c4341f',
+  HIGH_CRITICAL: '#e0492e',
+  CRITICAL: '#f08a24',
+  RISK: '#eab308',
+  EARLY_RISK: '#9acd32',
+  WARNING: '#3fae6a',
+};
+
 /** Colour coding per the severity table — deepest red at the top, cooling toward WARNING. */
 export const BUCKET_CLASS: Record<SlaBucket, string> = {
   LONG_PENDING: 'bg-red-900 text-white',

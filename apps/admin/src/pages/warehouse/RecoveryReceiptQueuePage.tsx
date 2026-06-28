@@ -1,20 +1,30 @@
 import { useEffect, useState } from 'react';
 import { apiConfirmRecoveryReceipt, apiRecoveryAwaitingReceipt, type RecoveryRow } from '../../api/recovery';
+import { DataTable, MetricCard, PageHeader, type Column } from '../../components/data';
+import { StatusPill } from '../../components/domain';
+import { Button } from '../../components/ui';
 
 /**
- * Recovery "Awaiting Warehouse Receipt" queue (Issue 36, `/warehouse/recovery-receipt`). The Warehouse
- * Manager physically checks the returned device + serial against the Collection-Form data and confirms
- * receipt — which auto-closes the Recovery Ticket (`AUTO_CLOSED_ON_WAREHOUSE_RECEIPT`, no ZM approval).
- * Follows the sibling warehouse queue pages' house style (no dedicated v2 reference image).
+ * Recovery "Awaiting Warehouse Receipt" queue (Issue 36 · FE-16 recipe, `/warehouse/recovery-receipt`,
+ * reference 20 house style). The Warehouse Manager physically checks the returned device + serial against
+ * the Collection-Form data and confirms receipt — which auto-closes the Recovery Ticket
+ * (`AUTO_CLOSED_ON_WAREHOUSE_RECEIPT`, no ZM approval).
+ *
+ * FE-16 applies the canonical queue recipe (`PageHeader` + `MetricCard` + `DataTable` + `StatusPill`);
+ * the `Awaiting Warehouse Receipt` aria-label, the `rcv-row-*` / `rcv-receipt-*` test ids, and the
+ * single-click Confirm-Receipt action (asserted as a direct POST) are preserved.
  */
 export function RecoveryReceiptQueuePage() {
   const [rows, setRows] = useState<RecoveryRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = () => {
+    setLoading(true);
     apiRecoveryAwaitingReceipt()
       .then(setRows)
-      .catch(() => setError('Failed to load the Recovery receipt queue'));
+      .catch(() => setError('Failed to load the Recovery receipt queue'))
+      .finally(() => setLoading(false));
   };
   useEffect(load, []);
 
@@ -27,58 +37,51 @@ export function RecoveryReceiptQueuePage() {
     }
   };
 
+  const columns: Column<RecoveryRow>[] = [
+    { key: 'ticket', header: 'Ticket', render: (r) => <span className="font-mono text-xs text-ink-muted">{r.ticketId.slice(0, 8)}</span> },
+    { key: 'device', header: 'Device', render: (r) => <span className="font-mono text-xs text-ink-strong">{r.deviceId}</span> },
+    { key: 'serial', header: 'Confirmed serial', render: (r) => <span className="font-mono text-xs text-ink">{r.collectedDeviceSerial ?? '—'}</span> },
+    { key: 'notes', header: 'Condition notes', render: (r) => <span className="text-ink-muted">{r.collectionConditionNotes ?? '—'}</span> },
+    { key: 'status', header: 'Status', render: (r) => <StatusPill status={r.status} /> },
+    {
+      key: 'actions',
+      header: 'Actions',
+      render: (r) => (
+        <Button type="button" size="sm" data-testid={`rcv-receipt-${r.ticketId}`} onClick={() => confirm(r.ticketId)}>
+          Confirm Receipt
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <div>
-      <h2 className="mb-1 text-xl font-semibold">Recovery — Awaiting Warehouse Receipt</h2>
-      <p className="mb-4 text-sm text-slate-500">
-        Devices collected in the field, awaiting your physical check + serial confirmation. Confirming
-        receipt auto-closes the Recovery Ticket.
-      </p>
+      <PageHeader
+        title="Recovery — Awaiting Warehouse Receipt"
+        subtitle="Devices collected in the field, awaiting your physical check + serial confirmation. Confirming receipt auto-closes the Recovery Ticket."
+      />
 
       {error && (
-        <p role="alert" className="mb-4 text-sm text-red-700">
+        <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
 
-      <table aria-label="Awaiting Warehouse Receipt" className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b text-left text-slate-500">
-            <th className="py-2 pr-3">Ticket</th>
-            <th className="py-2 pr-3">Device</th>
-            <th className="py-2 pr-3">Confirmed serial</th>
-            <th className="py-2 pr-3">Condition notes</th>
-            <th className="py-2 pr-3">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={5} className="py-4 text-slate-400">
-                Nothing awaiting receipt.
-              </td>
-            </tr>
-          )}
-          {rows.map((row) => (
-            <tr key={row.ticketId} data-testid={`rcv-row-${row.ticketId}`} className="border-b align-top hover:bg-slate-50">
-              <td className="py-2 pr-3 font-mono text-xs">{row.ticketId.slice(0, 8)}</td>
-              <td className="py-2 pr-3 font-mono text-xs">{row.deviceId}</td>
-              <td className="py-2 pr-3 font-mono text-xs">{row.collectedDeviceSerial ?? '—'}</td>
-              <td className="py-2 pr-3 text-slate-600">{row.collectionConditionNotes ?? '—'}</td>
-              <td className="py-2 pr-3">
-                <button
-                  type="button"
-                  data-testid={`rcv-receipt-${row.ticketId}`}
-                  onClick={() => confirm(row.ticketId)}
-                  className="rounded bg-emerald-700 px-2 py-0.5 text-xs font-medium text-white hover:bg-emerald-600"
-                >
-                  Confirm Receipt
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="mb-5 grid grid-cols-3 gap-3">
+        <div>
+          <MetricCard label="Awaiting Receipt" value={rows.length} tone="warning" />
+        </div>
+      </div>
+
+      <DataTable
+        ariaLabel="Awaiting Warehouse Receipt"
+        rowKey={(r) => r.ticketId}
+        rowTestId={(r) => `rcv-row-${r.ticketId}`}
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        empty="Nothing awaiting receipt."
+      />
     </div>
   );
 }

@@ -1,73 +1,102 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiListSchedules, type ScheduleRow } from '../../api/schedules';
+import { DataTable, MetricStrip, PageHeader, type Column, type Metric } from '../../components/data';
+import { Badge } from '../../components/ui';
+import type { BadgeTone } from '../../components/ui/Badge';
 
 /**
- * ZM Batch-Schedule list (Issue 13b AC#1). One row per SE Work Schedule with batch/ticket counts and an
- * AUTO_ASSIGNED / OVERRIDDEN status badge. Monitoring only: system batches auto-dispatch to the SE Day
- * Plan, so there is no Approve action and no approval countdown (the gate was removed — ADR-0019
- * superseded). Zone scope is enforced server-side (a ZM sees their own zone; CSM / Ops Head see all).
+ * ZM Batch-Schedule list (Issue 13b AC#1 · FE-12 parity, reference 12). One row per SE Work Schedule with
+ * batch/ticket counts and an AUTO_ASSIGNED / OVERRIDDEN status badge. Monitoring only: system batches
+ * auto-dispatch to the SE Day Plan, so there is **no Approve action and no approval countdown** (the gate
+ * was removed — CONTEXT.md Decisions §7, ADR-0019 superseded). Zone scope is enforced server-side.
+ *
+ * FE-12 is a presentation-only refactor onto `PageHeader` + `MetricStrip` + the canonical `DataTable`;
+ * the monitoring fetch, the `Batch Schedules` aria-label, the `schedule-status-*` test ids, the
+ * row→`/schedules/:seId` navigation, and the absence of any Approve gate are all preserved.
  */
-const STATUS_CLASS: Record<string, string> = {
-  AUTO_ASSIGNED: 'bg-slate-200 text-slate-700',
-  OVERRIDDEN: 'bg-amber-100 text-amber-800',
+const STATUS_TONE: Record<string, BadgeTone> = {
+  AUTO_ASSIGNED: 'neutral',
+  OVERRIDDEN: 'warning',
 };
 
 export function SchedulesPage() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<ScheduleRow[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
+    setLoading(true);
     apiListSchedules()
       .then((r) => alive && setRows(r))
-      .catch(() => alive && setError('Failed to load schedules'));
+      .catch(() => alive && setError('Failed to load schedules'))
+      .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
   }, []);
 
+  const metrics: Metric[] = useMemo(() => {
+    const overridden = rows.filter((r) => r.status === 'OVERRIDDEN').length;
+    const tickets = rows.reduce((s, r) => s + r.ticketCount, 0);
+    const batches = rows.reduce((s, r) => s + r.batchCount, 0);
+    return [
+      { label: 'Schedules', value: rows.length, hint: 'SEs with a day plan', tone: 'info' },
+      { label: 'Auto-Assigned', value: rows.length - overridden, hint: 'no gate', tone: 'success' },
+      { label: 'Overridden', value: overridden, hint: 'ZM adjusted', tone: 'warning' },
+      { label: 'Tickets', value: tickets, hint: `${batches} batches`, tone: 'brand' },
+    ];
+  }, [rows]);
+
+  const columns: Column<ScheduleRow>[] = [
+    {
+      key: 'engineer',
+      header: 'Engineer',
+      render: (r) => <span className="font-medium text-brand-700">{r.seId}</span>,
+    },
+    {
+      key: 'dates',
+      header: 'Dates',
+      render: (r) => (
+        <span className="text-ink">{r.dateFrom === r.dateTo ? r.dateFrom : `${r.dateFrom} – ${r.dateTo}`}</span>
+      ),
+    },
+    { key: 'batches', header: 'Batches', align: 'right', render: (r) => <span className="tabular-nums">{r.batchCount}</span> },
+    { key: 'tickets', header: 'Tickets', align: 'right', render: (r) => <span className="tabular-nums">{r.ticketCount}</span> },
+    {
+      key: 'status',
+      header: 'Status',
+      render: (r) => (
+        <span data-testid={`schedule-status-${r.status}`}>
+          <Badge tone={STATUS_TONE[r.status] ?? 'neutral'}>{r.status}</Badge>
+        </span>
+      ),
+    },
+  ];
+
   return (
     <div>
-      <h2 className="mb-4 text-xl font-semibold">Batch Schedules</h2>
+      <PageHeader
+        title="Batch Schedule"
+        subtitle="Auto-assigned SE day plans — monitoring only. Batches dispatch automatically; no approval gate."
+      />
       {error && (
-        <p role="alert" className="mb-4 text-sm text-red-700">
+        <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
-      <table aria-label="Batch Schedules" className="w-full text-sm">
-        <thead>
-          <tr className="border-b text-left text-slate-500">
-            <th className="py-2">Engineer</th>
-            <th className="py-2">Dates</th>
-            <th className="py-2">Batches</th>
-            <th className="py-2">Tickets</th>
-            <th className="py-2">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.scheduleId} className="border-b">
-              <td className="py-2">
-                <Link to={`/schedules/${r.seId}`} className="text-slate-700 hover:underline">
-                  {r.seId}
-                </Link>
-              </td>
-              <td className="py-2">{r.dateFrom === r.dateTo ? r.dateFrom : `${r.dateFrom} – ${r.dateTo}`}</td>
-              <td className="py-2">{r.batchCount}</td>
-              <td className="py-2">{r.ticketCount}</td>
-              <td className="py-2">
-                <span
-                  data-testid={`schedule-status-${r.status}`}
-                  className={`rounded px-2 py-0.5 text-xs ${STATUS_CLASS[r.status] ?? 'bg-slate-200 text-slate-700'}`}
-                >
-                  {r.status}
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <MetricStrip metrics={metrics} />
+      <DataTable
+        ariaLabel="Batch Schedules"
+        rowKey={(r) => r.scheduleId}
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        onRowClick={(r) => navigate(`/schedules/${r.seId}`)}
+        empty="No schedules in scope."
+      />
     </div>
   );
 }

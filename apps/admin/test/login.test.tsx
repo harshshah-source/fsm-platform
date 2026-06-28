@@ -48,7 +48,7 @@ describe('Admin shell — login flow', () => {
     await userEvent.type(screen.getByLabelText(/password/i), 'correct-password');
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
-    expect(await screen.findByText('ZONAL_MANAGER')).toBeInTheDocument();
+    expect(await screen.findByText(/zonal manager/i)).toBeInTheDocument();
     expect(screen.getByText(/Zone 1/)).toBeInTheDocument();
     expect(sessionStorage.getItem('fsm.accessToken')).toBe('access-1');
   });
@@ -62,7 +62,7 @@ describe('Admin shell — login flow', () => {
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/invalid email or password/i);
-    expect(screen.getByRole('heading', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /welcome back/i })).toBeInTheDocument();
     expect(sessionStorage.getItem('fsm.accessToken')).toBeNull();
   });
 
@@ -76,11 +76,11 @@ describe('Admin shell — login flow', () => {
     await userEvent.type(screen.getByLabelText(/email/i), 'zm.north@fsm.test');
     await userEvent.type(screen.getByLabelText(/password/i), 'correct-password');
     await userEvent.click(screen.getByRole('button', { name: /sign in/i }));
-    await screen.findByText('ZONAL_MANAGER');
+    await screen.findByText(/zonal manager/i);
 
     await userEvent.click(screen.getByRole('button', { name: /log out/i }));
 
-    expect(await screen.findByRole('heading', { name: /sign in/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /welcome back/i })).toBeInTheDocument();
     expect(sessionStorage.getItem('fsm.accessToken')).toBeNull();
   });
 });

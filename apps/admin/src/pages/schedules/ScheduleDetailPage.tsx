@@ -12,18 +12,26 @@ import {
   type ScheduleStopTicket,
   type ZoneEngineer,
 } from '../../api/schedules';
+import { Badge, Button } from '../../components/ui';
+import type { BadgeTone } from '../../components/ui/Badge';
 
 /**
- * ZM Schedule detail (Issue 13b AC#2/#3/#4). The ordered stop list for one SE's Work Schedule, each
- * stop showing plant + device count and its tickets with a "Why suggested?" reasoning chip. ZM override
- * controls (Remove / Defer per ticket; Swap SE / Split per stop; Reassign per ticket) commit
- * immediately via `POST /api/batches/:id/override` with a mandatory free-text reason; the page refetches
- * to reflect the OVERRIDDEN flip — no approval gate. The SE-moving actions pick a target from the
- * zone-scoped engineer list. Reorder is slice 4; the ON_SITE conflict banner is slice 5.
+ * ZM Schedule detail (Issue 13b AC#2/#3/#4 · FE-12 parity, reference 12). The ordered stop list for one
+ * SE's Work Schedule, each stop showing plant + device count and its tickets with a "Why suggested?"
+ * reasoning chip. ZM override controls (Remove / Defer per ticket; Swap SE / Split per stop; Reassign per
+ * ticket) commit immediately via `POST /api/batches/:id/override` with a mandatory free-text reason; the
+ * page refetches to reflect the OVERRIDDEN flip — no approval gate. The SE-moving actions pick a target
+ * from the zone-scoped engineer list.
+ *
+ * FE-12 is a presentation-only refactor onto the design tokens + `Button` / `Badge`; every test id
+ * (`schedule-stop`, `ticket-row-*`, `schedule-status-*`, `onsite-conflict-banner`), the override-control
+ * labels, the mandatory-reason gating, the override commands, and the conflict-confirm flow are all
+ * preserved. The per-ticket Recommender reasoning stays gated behind "Why suggested?" (the schedule
+ * payload carries no independent ticket-state badges — see FE-12 follow-up #71).
  */
-const STATUS_CLASS: Record<string, string> = {
-  AUTO_ASSIGNED: 'bg-slate-200 text-slate-700',
-  OVERRIDDEN: 'bg-amber-100 text-amber-800',
+const STATUS_TONE: Record<string, BadgeTone> = {
+  AUTO_ASSIGNED: 'neutral',
+  OVERRIDDEN: 'warning',
 };
 
 export function ScheduleDetailPage() {
@@ -81,13 +89,13 @@ export function ScheduleDetailPage() {
 
   if (error) {
     return (
-      <p role="alert" className="text-sm text-red-700">
+      <p role="alert" className="text-sm text-critical">
         {error}
       </p>
     );
   }
   if (!detail) {
-    return <p className="text-sm text-slate-500">Loading…</p>;
+    return <p className="text-sm text-ink-muted">Loading…</p>;
   }
 
   // The current SE is never a swap/reassign target for their own work.
@@ -95,19 +103,16 @@ export function ScheduleDetailPage() {
 
   return (
     <div>
-      <Link to="/schedules" className="text-sm text-slate-500 hover:underline">
+      <Link to="/schedules" className="text-sm text-ink-muted hover:underline">
         ← Schedules
       </Link>
-      <h2 className="mb-1 mt-2 text-xl font-semibold">{detail.seId}</h2>
-      <p className="mb-4 flex items-center gap-2 text-sm text-slate-500">
+      <h2 className="mb-1 mt-2 text-xl font-semibold text-ink-strong">{detail.seId}</h2>
+      <p className="mb-5 flex items-center gap-2 text-sm text-ink-muted">
         <span>
           {detail.dateFrom === detail.dateTo ? detail.dateFrom : `${detail.dateFrom} – ${detail.dateTo}`}
         </span>
-        <span
-          data-testid={`schedule-status-${detail.status}`}
-          className={`rounded px-2 py-0.5 text-xs ${STATUS_CLASS[detail.status] ?? 'bg-slate-200 text-slate-700'}`}
-        >
-          {detail.status}
+        <span data-testid={`schedule-status-${detail.status}`}>
+          <Badge tone={STATUS_TONE[detail.status] ?? 'neutral'}>{detail.status}</Badge>
         </span>
       </p>
 
@@ -115,26 +120,18 @@ export function ScheduleDetailPage() {
         <div
           role="alert"
           data-testid="onsite-conflict-banner"
-          className="mb-4 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+          className="mb-4 rounded-card border border-warning/40 bg-warning-bg p-3 text-sm text-warning"
         >
           <p className="font-semibold">SE is ON_SITE on affected work</p>
           <p className="mt-1">{conflict.info.message}</p>
           <p className="mt-1 text-xs">Affected tickets: {conflict.info.ticketIds.join(', ')}</p>
           <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              onClick={confirmOverride}
-              className="rounded border border-amber-400 px-2 py-0.5 text-xs text-amber-900 hover:bg-amber-100"
-            >
+            <Button type="button" size="sm" variant="primary" onClick={confirmOverride}>
               Confirm override
-            </button>
-            <button
-              type="button"
-              onClick={() => setConflict(null)}
-              className="rounded border px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
-            >
+            </Button>
+            <Button type="button" size="sm" variant="secondary" onClick={() => setConflict(null)}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -181,92 +178,81 @@ function Stop({
   };
 
   return (
-    <li data-testid="schedule-stop" className="rounded border p-3">
+    <li data-testid="schedule-stop" className="rounded-card border border-line bg-surface-card p-3 shadow-sm">
       <div className="mb-2 flex items-center justify-between">
-        <div>
-          <span className="text-xs text-slate-400">Stop {stop.stopSequence}</span>
-          <span className="ml-2 font-semibold">{stop.plantName}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-ink-caps">Stop {stop.stopSequence}</span>
+          <span className="font-semibold text-ink-strong">{stop.plantName}</span>
+          <Badge tone={stop.status === 'OVERRIDDEN' ? 'warning' : 'neutral'}>
+            {stop.status === 'AUTO_ASSIGNED' ? 'AUTO' : stop.status}
+          </Badge>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-slate-500">{stop.deviceCount} devices</span>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => (v === 'swap' ? null : 'swap'))}
-            className="rounded border px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-50"
-          >
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-ink-muted">{stop.deviceCount} devices</span>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setOpen((v) => (v === 'swap' ? null : 'swap'))}>
             Swap SE
-          </button>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => (v === 'split' ? null : 'split'))}
-            className="rounded border px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-50"
-          >
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setOpen((v) => (v === 'split' ? null : 'split'))}>
             Split batch
-          </button>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => (v === 'reorder' ? null : 'reorder'))}
-            className="rounded border px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-50"
-          >
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setOpen((v) => (v === 'reorder' ? null : 'reorder'))}>
             Reorder
-          </button>
+          </Button>
         </div>
       </div>
 
       {open === 'reorder' && (
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1 text-xs">
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md bg-surface-sunken/60 p-2">
+          <label className="flex items-center gap-1 text-xs text-ink-muted">
             Move to position
             <input
               type="number"
               min={1}
               value={position}
               onChange={(e) => setPosition(e.target.value)}
-              className="w-16 rounded border px-1 py-0.5 text-xs"
+              className="w-16 rounded-md border border-line px-2 py-1 text-xs"
             />
           </label>
           <ReasonInput value={reason} onChange={setReason} />
-          <button
+          <Button
             type="button"
+            size="sm"
             disabled={position === '' || reason.trim() === '' || busy}
             onClick={() => commit({ action: 'REORDER', stopSequence: Number(position), reasonCode: reason })}
-            className="rounded border px-1.5 py-0.5 text-xs text-amber-800 disabled:text-slate-300"
           >
             Confirm reorder
-          </button>
+          </Button>
         </div>
       )}
 
       {open === 'swap' && (
-        <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md bg-surface-sunken/60 p-2">
           <SePicker label="Target SE" value={newSeId} onChange={setNewSeId} targets={targets} />
           <ReasonInput value={reason} onChange={setReason} />
-          <button
+          <Button
             type="button"
+            size="sm"
             disabled={newSeId === '' || reason.trim() === '' || busy}
             onClick={() => commit({ action: 'SWAP_SE', newSeId, reasonCode: reason })}
-            className="rounded border px-1.5 py-0.5 text-xs text-amber-800 disabled:text-slate-300"
           >
             Confirm swap
-          </button>
+          </Button>
         </div>
       )}
 
       {open === 'split' && (
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-500">Tick the tickets to move:</span>
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md bg-surface-sunken/60 p-2">
+          <span className="text-xs text-ink-muted">Tick the tickets to move:</span>
           <SePicker label="Target SE" value={newSeId} onChange={setNewSeId} targets={targets} />
           <ReasonInput value={reason} onChange={setReason} />
-          <button
+          <Button
             type="button"
+            size="sm"
             disabled={selected.size === 0 || newSeId === '' || reason.trim() === '' || busy}
-            onClick={() =>
-              commit({ action: 'SPLIT_BATCH', ticketIds: [...selected], newSeId, reasonCode: reason })
-            }
-            className="rounded border px-1.5 py-0.5 text-xs text-amber-800 disabled:text-slate-300"
+            onClick={() => commit({ action: 'SPLIT_BATCH', ticketIds: [...selected], newSeId, reasonCode: reason })}
           >
             Confirm split
-          </button>
+          </Button>
         </div>
       )}
 
@@ -319,7 +305,10 @@ function TicketRow({
   };
 
   return (
-    <li data-testid={`ticket-row-${ticket.ticketId}`} className="flex flex-wrap items-center gap-2">
+    <li
+      data-testid={`ticket-row-${ticket.ticketId}`}
+      className="flex flex-wrap items-center gap-2 rounded-md px-2 py-1 hover:bg-surface-sunken/50"
+    >
       {splitSelect && (
         <input
           type="checkbox"
@@ -328,58 +317,48 @@ function TicketRow({
           onChange={splitSelect.onToggle}
         />
       )}
-      <span>Ticket {ticket.ticketId}</span>
+      <span className="font-medium text-ink-strong">Ticket {ticket.ticketId}</span>
       <WhySuggested ticket={ticket} />
-      <button
-        type="button"
-        onClick={() => setOpen((v) => (v === 'remove' ? null : 'remove'))}
-        className="rounded border px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-50"
-      >
+      <Button type="button" size="sm" variant="ghost" onClick={() => setOpen((v) => (v === 'remove' ? null : 'remove'))}>
         Remove
-      </button>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => (v === 'defer' ? null : 'defer'))}
-        className="rounded border px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-50"
-      >
+      </Button>
+      <Button type="button" size="sm" variant="ghost" onClick={() => setOpen((v) => (v === 'defer' ? null : 'defer'))}>
         Defer
-      </button>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => (v === 'reassign' ? null : 'reassign'))}
-        className="rounded border px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-50"
-      >
+      </Button>
+      <Button type="button" size="sm" variant="ghost" onClick={() => setOpen((v) => (v === 'reassign' ? null : 'reassign'))}>
         Reassign
-      </button>
+      </Button>
 
       {open === 'remove' && (
         <span className="flex items-center gap-2">
           <ReasonInput value={reason} onChange={setReason} />
-          <button
+          <Button
             type="button"
+            size="sm"
+            variant="danger"
             disabled={reason.trim() === '' || busy}
             onClick={() => commit({ action: 'REMOVE_TICKET', ticketId: ticket.ticketId, reasonCode: reason })}
-            className="rounded border px-1.5 py-0.5 text-xs text-red-700 disabled:text-slate-300"
           >
             Confirm remove
-          </button>
+          </Button>
         </span>
       )}
 
       {open === 'defer' && (
         <span className="flex items-center gap-2">
-          <label className="flex items-center gap-1 text-xs">
+          <label className="flex items-center gap-1 text-xs text-ink-muted">
             Defer to
             <input
               type="date"
               value={deferTo}
               onChange={(e) => setDeferTo(e.target.value)}
-              className="rounded border px-1 py-0.5 text-xs"
+              className="rounded-md border border-line px-2 py-1 text-xs"
             />
           </label>
           <ReasonInput value={reason} onChange={setReason} />
-          <button
+          <Button
             type="button"
+            size="sm"
             disabled={deferTo === '' || reason.trim() === '' || busy}
             onClick={() =>
               commit({
@@ -389,10 +368,9 @@ function TicketRow({
                 reasonCode: reason,
               })
             }
-            className="rounded border px-1.5 py-0.5 text-xs text-amber-800 disabled:text-slate-300"
           >
             Confirm defer
-          </button>
+          </Button>
         </span>
       )}
 
@@ -400,16 +378,14 @@ function TicketRow({
         <span className="flex items-center gap-2">
           <SePicker label="Target SE" value={newSeId} onChange={setNewSeId} targets={targets} />
           <ReasonInput value={reason} onChange={setReason} />
-          <button
+          <Button
             type="button"
+            size="sm"
             disabled={newSeId === '' || reason.trim() === '' || busy}
-            onClick={() =>
-              commit({ action: 'REASSIGN', ticketId: ticket.ticketId, newSeId, reasonCode: reason })
-            }
-            className="rounded border px-1.5 py-0.5 text-xs text-amber-800 disabled:text-slate-300"
+            onClick={() => commit({ action: 'REASSIGN', ticketId: ticket.ticketId, newSeId, reasonCode: reason })}
           >
             Confirm reassign
-          </button>
+          </Button>
         </span>
       )}
     </li>
@@ -419,12 +395,12 @@ function TicketRow({
 /** The mandatory free-text override reason field (v1 — no controlled vocabulary yet). */
 function ReasonInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <label className="flex items-center gap-1 text-xs">
+    <label className="flex items-center gap-1 text-xs text-ink-muted">
       Reason
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border px-1 py-0.5 text-xs"
+        className="rounded-md border border-line px-2 py-1 text-xs"
       />
     </label>
   );
@@ -443,12 +419,12 @@ function SePicker({
   targets: ZoneEngineer[];
 }) {
   return (
-    <label className="flex items-center gap-1 text-xs">
+    <label className="flex items-center gap-1 text-xs text-ink-muted">
       {label}
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border px-1 py-0.5 text-xs"
+        className="rounded-md border border-line px-2 py-1 text-xs"
       >
         <option value="">Select…</option>
         {targets.map((e) => (
@@ -468,16 +444,11 @@ function WhySuggested({ ticket }: { ticket: ScheduleStopTicket }) {
 
   return (
     <span>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="rounded border px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-50"
-      >
+      <Button type="button" size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         Why suggested?
-      </button>
+      </Button>
       {open && (
-        <span className="ml-2 text-xs text-slate-600">
+        <span className="ml-2 text-xs text-ink-muted">
           {r
             ? `Tier ${r.companyTier ?? '—'} · Bucket ${r.deviceBucket ?? '—'} · Rank ${r.companyPriorityRank ?? '—'} · Cluster ×${r.clusterMultiplier ?? '—'}`
             : 'No recommendation reasoning recorded.'}

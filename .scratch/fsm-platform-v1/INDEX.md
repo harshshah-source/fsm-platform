@@ -13,6 +13,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - [`UI-OWNERSHIP-PLAN.md`](./UI-OWNERSHIP-PLAN.md) — backend capability → Admin/Mobile surface map (Issues 01–21).
 - [`UI-RECOVERY-PLAN.md`](./UI-RECOVERY-PLAN.md) — roadmap to ≥80% parity vs v2 mockups.
 - [`DOC-RECONCILIATION-GOVERNANCE-REVIEW.md`](./DOC-RECONCILIATION-GOVERNANCE-REVIEW.md) — documentation reconciliation review.
+- [`DESIGN-SYSTEM.md`](./DESIGN-SYSTEM.md) — **reference-derived design system** (the visual authority for all FE-series issues; governs tokens, components, page composition, fidelity rules).
 
 ## Foundation
 - 01 — Foundation skeleton & infrastructure (HITL)
@@ -61,7 +62,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 32 — Cross-zone Platinum auto-escalation + manual flag → 29  *(done — backend slice: parallel `CrossZoneEscalation` record (migration `20260628140000`; Ticket never leaves its home queue) + `CrossZoneEscalationService.sweepAutoEscalations` (Platinum 1h CRITICAL+ / 4h OPEN → CSM+OH queue, one per ticket) + `flag` (ZM Gold/Silver own-zone) + `approve` (cross-zone `assignTicket`) / `deny` (stays home) / `defer` + `reEscalateToOps` (denied AUTO → OH) + `listForScope` auto/manual split + home-ZM decision notifications + `/api/cross-zone` controller; 10+6 e2e green; admin `/cross-zone` page → #78)*
 
 ## P6 — Install / Recovery / Non-Op
-- 33 — Install Ticket create (single + CSV, scoped) → 07  *(done — backend slice: additive `tickets` migration + `InstallService` (single + all-or-nothing CSV with line-numbered errors) + `InstallController` (`/api/install` + `/upload`, ZM/CSM/OH scope, #47 audit attribution); 12 e2e green; admin Install-create UI → #69)*
+- 33 — Install Ticket create (single + CSV, scoped) → 07  *(done — backend slice: additive `tickets` migration (`created_by`/`created_by_role`/`install_trigger_source`/`install_batch_id`/CSV cols) + `InstallService` (single + all-or-nothing CSV with line-numbered errors) + `InstallController` (`/api/install` + `/upload`, ZM/CSM/OH scope, #47 audit attribution); 12 e2e green; admin Install-create UI → #69)*
 - 34 — Install lifecycle + verification + serial visibility → 33, 18  *(done — backend slice: additive lifecycle migration (`fitted_*`/`activated_at`) + `InstallLifecycleService` (schedule/on-site/FITTED→ACTIVATED + first-valid-ping verification sweep: CLOSED / FAILED_ACTIVATION, no geofence) + `install-notifier` seam + `InstallController` SE/manager endpoints + WM serial read (AC#5); 20 e2e green; SE mobile Install screens → #71)*
 - 35 — Non-Operational dual-confirmation marking → 07  *(done — dual-confirmation lifecycle + OH 7-day override + CONFIRMED side-effects (auto-close tickets, Recovery-Ticket auto-create, eligibility exclusion) + customer tokenised-email seam (backend) + admin dual-confirmation queue & Mark modal; UI refinements → #67)*
 - 36 — Recovery Ticket lifecycle + warehouse receipt auto-close + unable-to-collect → 35  *(done — full field lifecycle + Collection-Form validation + WM receipt auto-close + unable-to-collect routing + notifier seam (backend) + WM "Awaiting Receipt" admin queue; SE mobile screens → #68; ZM decision-queue actions → #37)*
@@ -85,13 +86,17 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 67 — Non-Op Mark modal ticket enumeration + queue zone-scope + Recovery toast → 35  *(Issue 35 UI refinements)*
 - 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect) → 54, 36  *(Issue 36 mobile)*
 - 69 — Admin Install-create UI (single form + CSV upload) → 33  *(Issue 33 admin surface; presentation-only over `/api/install` + `/upload`)*
+- 70 — Per-ticket troubleshoot/install **form read** endpoint (`GET /tickets/:id/forms`) → 16  *(surfaced by FE-09 2026-06-26: the Ticket Detail Drawer Forms tab has no backend read; ticket detail payload carries no form data. Blocks FE-09 AC#2 Forms tab only — Verification/Assignment-History/Components are buildable. Needs SE troubleshoot-form persistence read + RBAC scope. (#69 is the Install-create admin UI per #33.))*
 - 71 — SE mobile Install screens (on-site / Install Form / activation result) → 54, 34  *(Issue 34 mobile; blocked by #54)*
 - 72 — Recommender preventive-mode scoring re-prioritisation → 40, 10  *(done — TROUBLESHOOT re-ranking: `scoring.ts` gains `inactivityHours` feature + `repeat_failure_bonus`/`device_age` weights (DEFICIT byte-identical) + `RecommenderService.activeWeights(mode)` selects a `<base>_preventive` set (configured or code-default: repeat penalty→0, repeat bonus + age) so repeat-offenders/aged devices out-score fresh in PREVENTIVE; weightSetRef stamped in scoreBreakdown; 7 e2e green; Install-backlog candidate inclusion → #75)*
+- 73 — Warehouse **stock read** endpoint + Low-Stock / Fulfillment-SLA KPIs → 21, 24  *(surfaced by FE-17 2026-06-26: the Warehouse-Manager dashboard (ref 05) Warehouse Stock table + Low-Stock/Fulfillment-SLA KPI cards have no backend source — `api/inventory` exposes only `apiComponentBlocked`. Add a zone-warehouse stock-level read (per-SKU on-hand/reserved/available + low-stock threshold), then fill `WarehouseDashboard`'s stock `SectionCard` + KPIs. FE-17 ships chrome + gated placeholders.)*
 - 74 — ZM Scorecard outcome-causality metrics + weekly trend → 43  *(Issue 43 follow-up; tickets improved/delayed, SLA impact of overrides, manual-vs-auto success, SE overload/utilization, long-pending reduction, time-to-intervention, escalations-handled + weekly trend grain — needs a decision→outcome linkage model that doesn't exist yet)*
+- 75 — Recommender PREVENTIVE-mode Install backlog into candidate set → 72, 10, 11, 33, 34  *(done — `installSort` (tier→rank→oldest backlog) + `RecommenderService.runForZone` appends open INSTALL (REQUESTED/UNASSIGNED) after TROUBLESHOOT in PREVENTIVE only; null deviceBucket, backlog-age via preventive weight set; suggest-only (ZM override #13 = human step), DEFICIT untouched; 7 e2e green)*
 - 76 — Notification spine adoption + external channel adapters → 03  *(Issue 03 follow-up, HITL; rewire the per-feature notifier seams (day-plan/recovery/install/customer-confirmation/component-request/escalation) through `NotificationService` + real FCM/APNs/WhatsApp/SMS/SMTP adapters once accounts + WhatsApp templates exist)*
 - 77 — SE mobile intra-day CRITICAL insertion accept/decline screen + `CRITICAL INSERTION` Day-Plan badge + ghost-assignment toast → 54, 29, 30  *(Issues 29/30 mobile; blocked by #54. Backend complete: `/api/intraday-insertions` accept/decline + the `IntradayInsertion` record + audit + top-of-Day-Plan ordering the screen renders from. Notification-shade quick-action chips + the ghost-assignment toast + the day-plan badge are SE-app surfaces.)*
 - 78 — Admin Cross-Zone page (`/cross-zone`) — Auto-Escalations (Platinum) vs Manual (Gold/Silver) split + Approve (target zone + SE) / Deny / Defer row actions + ZM flag + re-escalate → 32  *(Issue 32 admin surface; presentation-only over `/api/cross-zone` — list/flag/sweep/approve/deny/defer/re-escalate already implemented + RBAC server-side. Manager-only, no mobile.)*
-- 75 — Recommender PREVENTIVE-mode Install backlog into candidate set → 72, 10, 11, 33, 34  *(done — `installSort` (tier→rank→oldest backlog) + `RecommenderService.runForZone` appends open INSTALL (REQUESTED/UNASSIGNED) after TROUBLESHOOT in PREVENTIVE only; null deviceBucket, backlog-age via preventive weight set; suggest-only (ZM override #13 = human step), DEFICIT untouched; 7 e2e green)*
+- 79 — Schedule-stop ticket **state on the payload** (slaBucket / tier / PARTIAL_RECOVERY flag) → 13b, 18  *(renumbered from #71 at 2026-06-28 integration merge — collided with backend branch's SE-mobile-Install #71. Surfaced by FE-12 2026-06-26: `ScheduleStopTicket` carries only `ticketId`/`sortOrder`/`reasoning`; the reasoning (tier/bucket) is gated behind "Why suggested?" and must stay hidden, so the reference 12 per-ticket PARTIAL/CRITICAL/tier card badges have no un-gated source. Add ungated ticket-state to the stop payload, then add the badges to the day-plan stop cards. FE-12 ships without these badges.)*
+- 80 — `Modal`-ize the remaining `window.prompt` reason legs → FE-16, 36, 37, 35  *(renumbered from #72 at 2026-06-28 integration merge — collided with backend branch's Recommender-preventive #72. Surfaced by FE-16 2026-06-26: recovery Reschedule / Close-FAILED_RECOVERY reason + non-op Override-confirm reason still use `window.prompt`; the queue tests assert a direct/prompt→POST on click, so converting to a confirm/reason `Modal` (DESIGN-SYSTEM §5.4) needs coordinated updates to `recovery-decision-queue.test` + `non-operational-queue.test`. Presentation-only, no API change. Receipt-confirm may also gain a confirm `Modal`.)*
 
 ## Mobile (foundation + M-series UI)
 
@@ -111,8 +116,58 @@ lands, all mobile ACs across the backlog are `blocked-by #54`, never silently de
 
 *(M8 daily-status/Profile and Issue 20 QR are the deferred 20% — to be filed/sequenced last.)*
 
+## FE — Enterprise UI parity (Admin, presentation-layer)
+
+Tracer-bullet **frontend** slices that bring the backend-verification admin UI to pixel-faithful parity
+with the v2 reference mockups. Each slice replaces presentation only — routing, API clients, RBAC,
+business logic, and the test selector-contract are preserved (see `DESIGN-SYSTEM.md` §9 + the Frontend
+Master Plan). Charts/reports (FE-21–25) are **backend-gated** on their reporting issues (39–44).
+
+**Phase F0 — foundation ✅ COMPLETE (2026-06-26).** Verified green at the milestone commit: admin
+`tsc --noEmit` clean · **vitest 94/94** · `vite build` OK. Design system + component library + hooks +
+chart kit are in place; every later FE issue composes these. FE-02 was the transition milestone.
+- FE-00 — Visual-regression + component-audit harness  *(partial — `/_kitchensink` done; Playwright baseline script still to file)*
+- FE-01 — Design tokens + base primitives + Login parity → FE-00  *(ref 00)*  **(done)**
+- FE-02 — AppShell (Sidebar + TopBar + Footer) → FE-01  *(all chrome)*  **(done)**
+- FE-03 — Data primitives (`DataTable`/`FilterBar`/states) + async hooks → FE-01  *(ref 17)*  **(done)**
+- FE-04 — Domain badges (`SLABadge`/`StatusPill`/…) + overlays (`Sheet`/`Modal`/`Tabs`) → FE-01, FE-03  **(done)**
+- FE-05 — Chart + metric primitives (recharts) → FE-01  *(ref 14/21/22/23/24/25)*  **(done)**
+
+**Phase F1 — Dashboard:**
+- FE-06 — Zone Dashboard (ZM) parity → FE-02/03/04/05  *(ref 01)*  **(done — KPI MetricStrip + reference Action-Required grid + DataTable overviews + Critical-Queue cards; selector contract preserved; Fleet Uptime % = documented omission → BE-39/40/FE-21; Playwright baseline → FE-00)**
+- FE-07 — Role-variant dashboards (CSM-acting / Central / Ops-Head) → FE-06  *(ref 02/03/04)*  **(done — DashboardHome variant selector; OpsHead Pan-India + Central Tower + ZM/acting collapse; ScorecardTable + EscalationQueueList + BUCKET_HEX; Auto-Dispatch row = documented omission → BE-42/FE-24)**
+
+**Phase F2 — Tickets:**
+- FE-08 — Tickets list parity → FE-04  *(ref 07)*  **(done — PageHeader + FilterBar + DataTable badge columns; fetch/query-params + filter aria-labels + bucket-*/badge-* test ids + row-click drawer nav preserved)**
+- FE-09 — Ticket Detail Drawer parity + fill stub tabs → FE-04, FE-08  *(ref 08/09/28)*  **(PAUSED 2026-06-26, Strategic-HITL backlog-ownership — Verification/Assignment-History/Components fillable, but Forms tab has no BE read endpoint → blocked by #70; user chose to pause & do other FE work)**
+
+**Phase F3 — Daily ops:**
+- FE-10 — SE Activity parity → FE-03/04/05  *(ref 15)*  **(done — PageHeader + MetricCard row + DataTable; se-metric-*/se-row-* ids, SE Management/SE detail labels, literal status text, Set-Availability flow + Ops-Head read-only preserved)**
+- FE-11 — SE Planner grid parity → FE-03/04  *(ref 16)*  **(done — PageHeader + MetricStrip + Coverage column + token grid; cell-*/intent-*/batch-*/plant-drag-source ids, drag dataTransfer, POST/DELETE CRUD preserved)**
+- FE-12 — Schedules + Schedule Detail parity (no Approve gate) → FE-03/04  *(ref 12)*  **(done — SchedulesPage on DataTable+MetricStrip (no Approve gate); ScheduleDetailPage reskinned (AUTO framing, token stop cards + Button override controls); all override/conflict selectors preserved; reasoning stays gated; per-ticket PARTIAL/CRITICAL/tier badges → #79)**
+- FE-13 — Intra-day Queue parity → FE-03/04  *(ref 13)*  **(done — PageHeader + MetricCard row + DataTable severity accents; iq-metric-*/iq-row-* ids preserved; SE-Acceptance column forward-compatible placeholder for 29/30)**
+- FE-14 — Readiness / Vehicle Unavailability parity (no EXPECTED_BACK) → FE-03/04  *(ref 10/11)*  **(done — PageHeader + MetricCard strip + DataTable dual-clock cells + StatusPill; vu-metric-*/vu-row-*/vu-primary-*/vu-secondary-* ids + Confirm-date/Resume-SLA actions preserved; EXPECTED_BACK omitted)**
+
+**Phase F4 — Warehouse & components:**
+- FE-15 — Component queues (one recipe) → FE-03/04  *(ref 18/19)*  **(done — queue recipe (MetricCard+DataTable+StatusPill+AgeChip) on ComponentRequestsPage (+readOnly) & ShadowUseQueuePage; cr-*/su-* ids + WM action legs preserved; mandatory-reason legs stay inline, not Modal/Toast — selector-contract priority)**
+- FE-16 — Recovery + Non-Op queues parity → FE-03/04  *(ref 20)*  **(done — recipe on RecoveryReceipt/RecoveryDecision/NonOperational queues; Non-Op Mark dual-confirm modal preserved+reskinned; rcv-*/rdq-*/nonop-* ids preserved; window.prompt→Modal upgrade → #80)**
+- FE-17 — Warehouse persona dashboard → FE-07, FE-15  *(ref 05)*  **(done — DashboardHome thin role selector → WarehouseDashboard (WM) vs ManagerDashboard; Zone Warehouse Fulfillment KPI + Component-Request-Queue + Shadow-Use panels over existing WM data; Warehouse Stock table + Low-Stock/Fulfillment KPIs gated → #73)**
+
+**Phase F5 — Config & analytics:**
+- FE-18 — Settings parity → FE-03/04  *(ref 26)*  **(done — PageHeader + DateRangeChips + token tabs; SlaRulesTable (colour legend) + AccessMatrixGrid (feature×role) added; 8 CRUD sections restyled via shared Field/input/btn; all org.* CRUD + aria-labels + OH gating preserved; zone before/after deltas gated)**
+- FE-19 — Territory page reskin (polygon editor deferred) → FE-03  **(done — TerritoryPage on PageHeader + Field/FilterSelect (native selects retained for selectOptions/getByLabelText) + SectionCard; membership list now via canonical DataTable (role list→table, "Current territory" name kept); all org/geo + se-territory CRUD + polygon deferred affordance preserved)**
+- FE-20 — CSM Backup-Share report parity → FE-05  **(done — CsmApprovalSharePage on PageHeader + MetricStrip (4 KPIs derived from loaded rows) + BarChartCard (share by zone) + DataTable; table aria-label "CSM Backup Share" + csm-row-* ids + %-cell text preserved; apiCsmApprovalShare + route-level OH gate untouched)**
+- FE-21 — Reports landing + Fleet Uptime + Soft-Inactive → FE-05 + **BE 39/40**  *(ref 21)*
+- FE-22 — Device Detail + downtime trend → FE-05 + **BE 44**  *(ref 22; closes 49 tag UI)*
+- FE-23 — Root-Cause Analytics → FE-05 + **BE 41**  *(ref 23)*
+- FE-24 — System Efficiency → FE-05 + **BE 42**  *(ref 24)*
+- FE-25 — ZM Performance Scorecard → FE-05 + **BE 43**  *(ref 25)*
+- FE-26 — Help Center → FE-02, FE-03  *(ref 27)*  **(done — new role-scoped /help: buildHelpSections mirrors nav role logic (Your module / Components & Warehouse / Analytics / Admin), topic cards w/ View Docs links + "Model states & terminology" glossary (6 domain terms); sidebar Support→Help link for all roles (+IconHelp), TopBar breadcrumb; static, no backend; TDD 3 tests)**
+
+*(Mobile parity stays the separate Issue 54 + M-series backlog; it shares only the token language via NativeWind — see `DESIGN-SYSTEM.md` §6.)*
+
 ## P7 — Vouchers & reporting
-- 38 — Expense Vouchers end-to-end → 07
+- 38 — Expense Vouchers end-to-end → 07  *(done — schema D15 (`expense_vouchers` + items, `(se_id, client_submission_id)` idempotency) + `VouchersService`/`VouchersController` (`/api/vouchers`): SE submit, ZM review (own-zone, activity check + over-limit + Approve/Reject/Needs-Clarification + SE notify seam), SE resubmit, OH monthly Finance CSV export + multi-select Mark PAID; admin `/vouchers` review page (queue recipe + photo lightbox) + OH Finance view; SE mobile capture → #61)*
 - 39 — Fleet Uptime % monthly report → 05, 08  *(done — backend slice: `device_downtime_summary_monthly` migration + `FleetUptimeAggregationService` (per-device failure-cycle-overlap downtime, eligible-gate snapshot, auto vs SE closure split) + `ReportsService.fleetUptime` (time-weighted, eligible-only denominator, per zone/company/plant, ZM-scoped) + `ReportsModule`/`ReportsController` (`GET /reports/fleet-uptime`, OH `recompute`); 15 e2e green; unblocks FE-21; month-end cron deferred)*
 - 40 — Soft Inactive Count trend → 05  *(done — backend slice: `soft_inactive_count_history` migration + `SoftInactiveCountService` (per-zone twice-daily snapshot + `modeForZone` count-driven DEFICIT/PREVENTIVE switch, configurable 2% threshold) + Recommender consumes/records mode on `RunSummary` + `scoreBreakdown` + `ReportsService.softInactiveTrend` + OH endpoints; 8 e2e green; unblocks FE-21; preventive-mode scoring → #72; twice-daily cron deferred)*
 - 41 — Root Cause Analytics → 16  *(done — backend slice: `root_cause_summary_monthly` migration + `RootCauseAnalyticsAggregationService` (per-month delete+insert cube of structured `root_cause_category` counts by zone/company/plant/device_type/SE; no free-text parsing) + `ReportsService.rootCause` (% distribution, all 10 categories zero-filled, filterable, ZM zone-scoped) + `ReportsController` (`GET /reports/root-cause`, OH `recompute`); 13 e2e green; unblocks FE-23; month-end cron deferred)*

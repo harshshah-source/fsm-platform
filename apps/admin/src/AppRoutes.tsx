@@ -9,6 +9,8 @@ import { ComponentRequestsPage } from './pages/inventory/ComponentRequestsPage';
 import { ShadowUseQueuePage } from './pages/inventory/ShadowUseQueuePage';
 import { RecoveryReceiptQueuePage } from './pages/warehouse/RecoveryReceiptQueuePage';
 import { DashboardHome } from './pages/dashboard/DashboardHome';
+import { HelpCenterPage } from './pages/help/HelpCenterPage';
+import { KitchenSink } from './pages/KitchenSink';
 import { LoginPage } from './pages/LoginPage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
@@ -24,6 +26,7 @@ import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { TicketDetailDrawer } from './pages/tickets/TicketDetailDrawer';
 import { TicketsPage } from './pages/tickets/TicketsPage';
 import { VerificationReviewPage } from './pages/verification/VerificationReviewPage';
+import { VoucherReviewPage } from './pages/vouchers/VoucherReviewPage';
 
 export function AppRoutes() {
   return (
@@ -33,6 +36,9 @@ export function AppRoutes() {
       <SnapshotBanner />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+
+        {/* Dev-only design-system audit surface (FE-00/FE-01); excluded from production builds. */}
+        {import.meta.env.DEV && <Route path="/_kitchensink" element={<KitchenSink />} />}
 
         {/* Authenticated shell layout — nav + header + an Outlet for the active page. */}
         <Route
@@ -194,6 +200,18 @@ export function AppRoutes() {
               </RoleRoute>
             }
           />
+          {/* Expense Voucher review — ZM Approve/Reject/Needs-Clarification (own zone); Operations Head
+              also exports the monthly Finance batch + multi-select Mark PAID (Issue 38). Manager roles. */}
+          <Route
+            path="/vouchers"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <VoucherReviewPage />
+              </RoleRoute>
+            }
+          />
+          {/* Help Center — role-scoped static guidance + glossary (FE-26); reachable by all roles. */}
+          <Route path="/help" element={<HelpCenterPage />} />
           {/* Floating-SE territory config — Operations-Head-only (Issue 09). */}
           <Route
             path="/coverage"

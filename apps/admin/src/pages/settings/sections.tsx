@@ -1,5 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import * as org from '../../api/org';
+import { BUCKET_CLASS, BUCKET_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { cn } from '../../lib/cn';
+import type { Role } from '@fsm/shared';
 
 /** Loads a list once on mount and exposes the items + an error string + a setter for optimistic
  * appends. Kept deliberately small — each config section owns its own create form. */
@@ -27,14 +30,104 @@ function useList<T>(fetcher: () => Promise<T[]>): {
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1 text-sm">
-      <span className="text-slate-600">{label}</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">{label}</span>
       {children}
     </label>
   );
 }
 
-const inputClass = 'rounded border px-2 py-1';
-const btnClass = 'rounded bg-slate-800 px-3 py-1 text-sm text-white';
+const inputClass =
+  'h-9 rounded-md border border-line bg-surface-card px-3 text-sm text-ink-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40';
+const btnClass =
+  'inline-flex h-9 items-center rounded-md bg-brand-600 px-4 text-sm font-medium text-white transition-colors hover:bg-brand-700';
+const tableClass = 'w-full border-collapse text-sm';
+const cellClass = 'px-3 py-2 text-ink';
+const cardWrap = 'overflow-hidden rounded-card border border-line bg-surface-card shadow-sm';
+
+/**
+ * Read-only colour-coded SLA bucket legend (FE-18, reference 26 "SLA bucket rules"). The bucket ramp is
+ * the single colour source (`lib/slaBucket`); exact thresholds are configured in the SLA-rules CRUD below.
+ */
+export function SlaRulesTable() {
+  return (
+    <div className="mb-6">
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-caps">SLA bucket rules</h3>
+      <div className={cn(cardWrap, 'p-3')}>
+        <ul className="flex flex-col gap-1.5">
+          {SLA_BUCKETS.map((b) => (
+            <li key={b} className="flex items-center justify-between gap-3 text-sm">
+              <span className={cn('inline-block min-w-28 rounded-full px-2 py-0.5 text-center text-xs font-semibold', BUCKET_CLASS[b])}>
+                {BUCKET_LABEL[b]}
+              </span>
+              <span className="text-xs text-ink-muted">severity {SLA_BUCKETS.length - SLA_BUCKETS.indexOf(b)} / {SLA_BUCKETS.length}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+const MATRIX_ROLES: Role[] = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD', 'WAREHOUSE_MANAGER', 'SERVICE_ENGINEER'];
+const ROLE_SHORT: Record<Role, string> = {
+  ZONAL_MANAGER: 'ZM',
+  CENTRAL_SERVICE_MANAGER: 'CSM',
+  OPERATIONS_HEAD: 'OH',
+  WAREHOUSE_MANAGER: 'WM',
+  SERVICE_ENGINEER: 'SE',
+};
+const ACCESS_FEATURES: { feature: string; roles: Role[] }[] = [
+  { feature: 'Dashboard', roles: ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD', 'WAREHOUSE_MANAGER'] },
+  { feature: 'Tickets', roles: ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] },
+  { feature: 'Schedules / Planner', roles: ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] },
+  { feature: 'Readiness / Recovery', roles: ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] },
+  { feature: 'Component Requests', roles: ['WAREHOUSE_MANAGER', 'ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] },
+  { feature: 'Shadow Use / Warehouse', roles: ['WAREHOUSE_MANAGER'] },
+  { feature: 'Reports / Analytics', roles: ['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] },
+  { feature: 'Settings', roles: ['OPERATIONS_HEAD'] },
+];
+
+/**
+ * Read-only feature × role access matrix (FE-18, reference 26 "Role access matrix"). Mirrors the shell's
+ * role-scoped navigation; a check means the role sees that surface, a dash means it is hidden.
+ */
+export function AccessMatrixGrid() {
+  return (
+    <section>
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-caps">Role access matrix</h3>
+      <div className={cardWrap}>
+        <table aria-label="Role access matrix" className={tableClass}>
+          <thead>
+            <tr className="border-b border-line bg-surface-sunken/60 text-left">
+              <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-ink-caps">Feature</th>
+              {MATRIX_ROLES.map((r) => (
+                <th key={r} className="px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
+                  {ROLE_SHORT[r]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ACCESS_FEATURES.map((f) => (
+              <tr key={f.feature} className="border-b border-line last:border-b-0">
+                <td className={cellClass}>{f.feature}</td>
+                {MATRIX_ROLES.map((r) => (
+                  <td key={r} className="px-3 py-2 text-center">
+                    {f.roles.includes(r) ? (
+                      <span className="text-success" aria-label={`${f.feature} allowed for ${r}`}>✓</span>
+                    ) : (
+                      <span className="text-ink-muted/40" aria-label={`${f.feature} hidden for ${r}`}>–</span>
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
 
 export function ZonesSection() {
   const { items, setItems } = useList(org.listZones);
@@ -111,7 +204,7 @@ export function PlantsSection() {
           {error}
         </p>
       )}
-      <table className="text-sm">
+      <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-line [&_td]:px-3 [&_td]:py-2">
         <tbody>
           {items.map((p) => (
             <tr key={p.plantId}>
@@ -158,7 +251,7 @@ export function CompaniesSection() {
           Add company
         </button>
       </form>
-      <table className="text-sm">
+      <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-line [&_td]:px-3 [&_td]:py-2">
         <tbody>
           {items.map((c) => (
             <CompanyRow
@@ -290,7 +383,7 @@ export function UsersSection() {
           Add user
         </button>
       </form>
-      <table className="text-sm">
+      <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-line [&_td]:px-3 [&_td]:py-2">
         <tbody>
           {items.map((u) => (
             <tr key={u.userId}>
@@ -312,6 +405,7 @@ export function SlaRulesSection() {
   const [submitWithinMinutes, setSubmit] = useState('');
   return (
     <section>
+      <SlaRulesTable />
       <form
         className="mb-4 flex flex-wrap items-end gap-2"
         onSubmit={async (e) => {
@@ -346,7 +440,7 @@ export function SlaRulesSection() {
           Save SLA rule
         </button>
       </form>
-      <table className="text-sm">
+      <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-line [&_td]:px-3 [&_td]:py-2">
         <tbody>
           {items.map((r) => (
             <tr key={`${r.scope}:${r.key}`}>
@@ -394,7 +488,7 @@ export function ScoringWeightsSection() {
           Save weight
         </button>
       </form>
-      <table className="text-sm">
+      <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-line [&_td]:px-3 [&_td]:py-2">
         <tbody>
           {items.map((w) => (
             <tr key={`${w.weightSetRef}:${w.component}`}>
@@ -547,7 +641,7 @@ export function CommonKitSection() {
           Save kit item
         </button>
       </form>
-      <table className="text-sm">
+      <table className="w-full border-collapse text-sm [&_td]:border-b [&_td]:border-line [&_td]:px-3 [&_td]:py-2">
         <tbody>
           {items.map((k) => (
             <tr key={k.id}>
