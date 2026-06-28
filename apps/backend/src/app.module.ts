@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from './audit/audit.module';
+import { AuditTrailController } from './audit/audit-trail.controller';
 import { AuthModule } from './auth/auth.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RoleGuard } from './common/guards/role.guard';
@@ -23,6 +24,8 @@ import { EngineersController } from './engineers/engineers.controller';
 import { LeaveRequestController } from './engineers/leave-request.controller';
 import { RoleBackupModule } from './roles/role-backup.module';
 import { RoleBackupController } from './roles/role-backup.controller';
+import { NotificationsModule } from './notifications/notifications.module';
+import { NotificationsController } from './notifications/notifications.controller';
 import { MeController } from './me/me.controller';
 import { OrgModule } from './org/org.module';
 import { PlannerModule } from './planner/planner.module';
@@ -88,6 +91,7 @@ import { ZonesController } from './zones/zones.controller';
     ComponentRequestModule,
     EngineersModule,
     RoleBackupModule,
+    NotificationsModule,
   ],
   controllers: [
     MeController,
@@ -130,6 +134,8 @@ import { ZonesController } from './zones/zones.controller';
     EngineersController,
     LeaveRequestController,
     RoleBackupController,
+    NotificationsController,
+    AuditTrailController,
   ],
   providers: [AuthGuard, RoleGuard, ZoneScopeGuard],
 })

@@ -944,6 +944,71 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+/// Notification delivery channel (Issue 03). IN_APP always fires; PUSH→SMS→WHATSAPP→EMAIL form the
+/// general fallback chain; WHATSAPP is also the first-class SE-Acceptance Confirmation channel.
+enum NotificationChannel {
+  IN_APP
+  PUSH
+  SMS
+  WHATSAPP
+  EMAIL
+
+  @@map("notification_channel")
+}
+
+/// Per-channel delivery outcome (Issue 03). SENT = delivered (or first-class committed); ATTEMPTED = tried
+/// in the fallback chain without confirmation; SKIPPED = not tried (a prior channel already SENT); FAILED.
+enum NotificationDeliveryStatus {
+  SENT
+  ATTEMPTED
+  SKIPPED
+  FAILED
+
+  @@map("notification_delivery_status")
+}
+
+/// A user-facing notification (Issue 03). One row per recipient per notifiable event — the in-app
+/// notification ALWAYS fires (per role). `metadata` carries event payload (e.g. Accept/Decline action data
+/// for push). `inAppReadAt` tracks the per-user read state. Delivery across channels is recorded in
+/// `notification_deliveries`.
+model Notification {
+  id              BigInt    @id @default(autoincrement())
+  recipientUserId String    @map("recipient_user_id") @db.Uuid
+  recipientRole   Role      @map("recipient_role")
+  type            String
+  entityType      String?   @map("entity_type")
+  entityId        String?   @map("entity_id")
+  title           String
+  body            String?
+  metadata        Json?     @db.JsonB
+  inAppReadAt     DateTime? @map("in_app_read_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  deliveries NotificationDelivery[]
+
+  @@index([recipientUserId, createdAt(sort: Desc)])
+  @@index([recipientUserId, inAppReadAt])
+  @@map("notifications")
+}
+
+/// One channel's delivery attempt for a Notification (Issue 03). The general fallback chain records each
+/// channel it tries (ATTEMPTED until one is SENT); the SE-Acceptance WhatsApp Confirmation is recorded
+/// SENT with `firstClass = true` (shown as "sent", not "attempted"). The actual external send is a
+/// deferred seam (`NotificationChannelGateway`).
+model NotificationDelivery {
+  id             BigInt                     @id @default(autoincrement())
+  notificationId BigInt                     @map("notification_id")
+  channel        NotificationChannel
+  status         NotificationDeliveryStatus
+  firstClass     Boolean                    @default(false) @map("first_class")
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+  @@map("notification_deliveries")
+}
+
 // ─── Issue 05: device-state → ticket spine (schema D2/D5/D6) + minimal eligibility inputs ───
 
 /// Deal type — commercial arrangement; drives Recovery Ticket creation on Non-Op (Issues 35/36).
