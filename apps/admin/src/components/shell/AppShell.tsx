@@ -3,6 +3,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { Button } from '../ui/Button';
 import { Footer } from './Footer';
 import { Sidebar } from './Sidebar';
+import { SidebarProvider } from './SidebarContext';
 import { TopBar } from './TopBar';
 
 /**
@@ -17,30 +18,32 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex min-h-screen bg-surface-app">
-      <Sidebar role={session.role} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar />
+    <SidebarProvider>
+      <div className="flex min-h-screen bg-surface-app">
+        <Sidebar role={session.role} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar />
 
-        {actingZone != null && (
-          <div
-            role="status"
-            className="flex items-center justify-between bg-warning-bg px-6 py-2 text-sm text-warning"
-          >
-            <span>
-              Acting as Zonal Manager for Zone {actingZone} (audited as {session.role})
-            </span>
-            <Button type="button" size="sm" variant="secondary" onClick={() => setActingZone(null)}>
-              Exit acting mode
-            </Button>
-          </div>
-        )}
+          {actingZone != null && (
+            <div
+              role="status"
+              className="flex items-center justify-between bg-warning-bg px-6 py-2 text-sm text-warning"
+            >
+              <span>
+                Acting as Zonal Manager for Zone {actingZone} (audited as {session.role})
+              </span>
+              <Button type="button" size="sm" variant="secondary" onClick={() => setActingZone(null)}>
+                Exit acting mode
+              </Button>
+            </div>
+          )}
 
-        <main className="flex-1 p-6">
-          <Outlet />
-        </main>
-        <Footer />
+          <main className="flex-1 p-6">
+            <Outlet />
+          </main>
+          <Footer />
+        </div>
       </div>
-    </div>
+    </SidebarProvider>
   );
 }
