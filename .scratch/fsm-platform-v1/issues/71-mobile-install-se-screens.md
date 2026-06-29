@@ -49,7 +49,7 @@ as the #68 Recovery mobile follow-up — never silently deferred.
 ## Photo handling ⚠
 
 - `photoRef` is an optional STRING reference, not a blob/multipart. The capture→ref step needs the
-  media-upload endpoint (**to be filed — see INDEX "Backend follow-ups"**); block only the optional-photo AC on it.
+  media-upload endpoint (**#81 — Media Upload API**); block only the optional-photo AC on it.
 
 ## Permissions
 
@@ -82,4 +82,4 @@ as the #68 Recovery mobile follow-up — never silently deferred.
 
 - #54 (Mobile Foundation)
 - #34 (done)
-- (optional-photo AC) media-upload backend issue — to be filed
+- (optional-photo AC) #81 — Media Upload API

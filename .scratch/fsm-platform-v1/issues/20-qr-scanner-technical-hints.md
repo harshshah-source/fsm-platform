@@ -18,9 +18,9 @@ affect lifecycle, SLA, assignment, scoring, verification, or closure.
 
 > **Backend split (dependency correction).** Neither backend capability exists today. Split into:
 > 1. **Backend: ticket-search** — `GET /api/tickets/search?vehicleNo=|deviceId=` (active eligible
->    tickets; disambiguation when >1). To be filed.
+>    tickets; disambiguation when >1). Owned by **#83**.
 > 2. **Backend: Technical Hints** — derive hints from latest snapshot telemetry per PRD §641 Flow 14
->    (rules below) + expose on the ticket payload + a raw-telemetry read. To be filed.
+>    (rules below) + expose on the ticket payload + a raw-telemetry read. Owned by **#84**.
 > 3. **This issue (20, mobile)** — scanner + hints UI, consuming (1) and (2). Now also blocked by #54.
 
 ## Business rules (authority)
@@ -38,7 +38,7 @@ affect lifecycle, SLA, assignment, scoring, verification, or closure.
 - [ ] Ticket Detail shows all hints + full raw telemetry, always visible; "Telemetry unavailable" when missing
 - [ ] No hint changes Ticket state, SLA, or assignment
 
-## API contract (authority: new backend issues — to be filed)
+## API contract (authority: #83 Ticket Search + #84 Technical Hints)
 
 - `GET /api/tickets/search?vehicleNo=|deviceId=` → active eligible ticket(s); >1 → disambiguation list.
 - Technical Hints + raw telemetry on the ticket detail payload (or a dedicated read) per PRD §641.
@@ -81,5 +81,5 @@ affect lifecycle, SLA, assignment, scoring, verification, or closure.
 - #07
 - #16
 - #54 (Mobile Foundation)
-- Backend: ticket-search — to be filed
-- Backend: Technical Hints derivation + read — to be filed
+- #83 — Ticket Search API
+- #84 — Technical Hints API

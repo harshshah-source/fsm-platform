@@ -39,7 +39,7 @@ Idempotent submit via `client_submission_id`. Also hosts the resubmit form for t
 ## Photo handling ⚠
 
 - `photoRefs` is an array of STRING references, not blobs/multipart. The capture→ref step needs the
-  media-upload endpoint (**to be filed — see INDEX "Backend follow-ups"**); block the photo AC on it.
+  media-upload endpoint (**#81 — Media Upload API**); block the photo AC on it.
 
 ## Permissions
 
@@ -75,4 +75,4 @@ Idempotent submit via `client_submission_id`. Also hosts the resubmit form for t
 ## Blocked by
 
 - #54, #16
-- (photo AC) media-upload backend issue — to be filed
+- (photo AC) #81 — Media Upload API

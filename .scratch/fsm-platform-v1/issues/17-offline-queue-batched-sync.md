@@ -19,7 +19,7 @@ closed by another SE) is distinct from an idempotency duplicate.
 
 > **Backend split (dependency correction).** The batched-sync **endpoint** is backend and **not built**.
 > This issue is now the **mobile queue only**. The transport is owned by a new backend issue:
-> **"Backend: `POST /api/sync/batch`"** (to be filed — see INDEX "Backend follow-ups"). Decision recorded:
+> **#82 — Offline Batch Sync API** (`POST /api/sync/batch`). Decision recorded:
 > use the dedicated batch endpoint; do **not** also replay to per-type endpoints (one transport only).
 
 ## Business rules (authority)
@@ -36,7 +36,7 @@ closed by another SE) is distinct from an idempotency duplicate.
 - [ ] Completed Tickets cleared after retention window without touching pending submissions
 - [ ] Queue cap (default 500) enforced with near-limit warning; no silent auto-delete of pending items
 
-## API contract (authority: new backend issue — to be filed)
+## API contract (authority: #82 — Offline Batch Sync API)
 
 - `POST /api/sync/batch` — request `{ items: [{ submissionType, clientSubmissionId, payload }] }`;
   response per-item `{ clientSubmissionId, result: 'DELIVERED'|'DUPLICATE'|'CONFLICT', code? }`.
@@ -73,4 +73,4 @@ closed by another SE) is distinct from an idempotency duplicate.
 
 - #16
 - #54 (Mobile Foundation — offline seam)
-- Backend: `POST /api/sync/batch` — to be filed
+- #82 — Offline Batch Sync API (`POST /api/sync/batch`)

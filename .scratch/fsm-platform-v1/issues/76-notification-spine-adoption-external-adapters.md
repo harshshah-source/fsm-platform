@@ -24,7 +24,8 @@ audit-trail viewer — over a single external-delivery seam (`NotificationChanne
    `Logging*Notifier` defaults can delegate to the spine.
 2. **Real external channel adapters** behind `NotificationChannelGateway` — FCM (Android) / APNs (iOS) push
    incl. quick-action Accept/Decline payloads, WhatsApp Business, SMS, SMTP. Each reports SENT/FAILED so the
-   fallback chain resolves correctly.
+   fallback chain resolves correctly. Includes a **device push-token registration endpoint**
+   (`POST /api/notifications/device-token`, SE-bound; clear on logout) consumed by the mobile push client (#89).
 3. Per-role notifiable-event coverage audit (new assignments, SLA warnings, verification failures, component
    approvals, batch status changes, recovery decisions, leave decisions) — ensure each fires the spine.
 
@@ -32,6 +33,7 @@ audit-trail viewer — over a single external-delivery seam (`NotificationChanne
 
 - [ ] Every existing per-feature notifier routes through `NotificationService` (in-app always fires)
 - [ ] FCM/APNs push adapter delivers, incl. Accept/Decline quick-action payloads
+- [ ] Device push-token registration endpoint (`POST /api/notifications/device-token`) registers/clears an SE's token (consumed by #89)
 - [ ] WhatsApp / SMS / SMTP adapters deliver; fallback chain resolves on real SENT/FAILED
 - [ ] All listed per-role notifiable events produce a notification
 

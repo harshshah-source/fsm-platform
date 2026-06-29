@@ -38,7 +38,7 @@ receipt), submission, and a status list. Drafts are **offline-capable** with a `
 ## Photo handling ⚠
 
 - `photoRef` is a STRING reference, not a blob/multipart. The capture→ref step needs the media-upload
-  endpoint (**to be filed — see INDEX "Backend follow-ups"**); block the photo AC on it.
+  endpoint (**#81 — Media Upload API**); block the photo AC on it.
 
 ## Permissions
 
@@ -71,4 +71,5 @@ receipt), submission, and a status list. Drafts are **offline-capable** with a `
 ## Blocked by
 
 - #54, #38
-- (photo AC) media-upload backend issue — to be filed
+- (offline-draft AC) #17 — Offline queue (which depends on #82 sync transport)
+- (photo AC) #81 — Media Upload API
