@@ -87,8 +87,8 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 49 — Device `deal_type` column + Operations-Head manual tagging → 05, 02  *(done — Ops-Head audited tag endpoint + device read path; column pre-existed; admin tag control → #44)*
 - 50 — Fix test isolation in dashboard-company-plant e2e → —  *(bug; test-only)*
 - 51 — Expected-component Hard-Filter leg + `expected_components` → 21, 22  *(closes Issue 21 AC#2b)*
-- 52 — SE mobile Home: Van Stock + Common-Kit badge → 21  *(closes Issue 21 AC#5 UI; needs mobile ticket screens)*
-- 53 — Push on Common-Kit-zero + Component-Blocked → Action Required cross-link → 21, 03  *(closes Issue 21 AC#6 + AC#4 cross-link; needs notification spine)*
+- 52 — SE mobile Home: Van Stock + Common-Kit badge → **SUPERSEDED → #55** (kit badge) + #60 (van-stock list); retained for history, do not implement
+- 53 — Push on Common-Kit-zero + Component-Blocked → Action Required cross-link → 21, 03  *(closes Issue 21 AC#6 + AC#4 cross-link; re-scoped: a specific trigger of the push pipeline #89, blocked-by adapters #76)*
 - 62 — Ticket Detail Components tab: request status + WAITING_COMPONENT pause → 22  *(done — drawer Components tab + `/component-requests/by-ticket/:id`; closes Issue 22 Components-tab UI)*
 - 63 — SE mobile full-screen 409 (Ticket already closed) screen → 54, 24  *(closes Issue 24 AC#3 mobile)*
 - 64 — SE mobile Vehicle Unavailability file screen + Transporter tap-to-call + readiness hints → 28, 54  *(closes Issue 28 mobile AC#1 + AC#5 render)*
@@ -116,16 +116,40 @@ deferred (04/07/11/12/15/16/18/21). **Mobile Foundation (54) blocks every M-seri
 lands, all mobile ACs across the backlog are `blocked-by #54`, never silently deferred. See
 `DEV-GOVERNANCE-CHANGE-SET.md` Part 3.3.
 
+> **Mobile TDD-readiness normalization (audit 2026-06-29):** every mobile issue (17, 20, 54–61, 63,
+> 64, 66, 68, 71, 77, 85–89) now carries the TDD specification standard — **API contract**, **validation
+> & error codes**, **permissions**, **navigation**, **offline behaviour**, **edge cases**, and **test
+> targets** — with every contract pinned to the verified backend on the integrated line. Business logic
+> was documented, not changed. Backend gaps surfaced by the audit are owned by **#81–#84** (below);
+> they are no longer hidden inside mobile issues. See `docs/progress/HANDOFF-2026-06-29-mobile-tdd-prep.md`.
+
 - 54 — Mobile Foundation (RN shell + bottom-tabs + component kit + offline-aware client) → 01
 - 55 — M1: SE Home (last-sync, Day Plan/Next Visit/Plant Workload, kit badge, Open Ticket Pool) → 54, 04, 11, 21, 12
 - 56 — M2: Tickets / Day-Plan / Shared Pool → 54, 07, 11, 12
 - 57 — M3: Ticket Detail (ready + verification-pending) + soft-state actions → 54, 07, 15, 18
-- 58 — M4: Troubleshoot form (mobile) → 54, 16
+- 58 — M4: Troubleshoot form (mobile) → 54, 16  *(photo leg → #81)*
 - 59 — M5: Verification view + PARTIAL_RECOVERY badge + CTA → 54, 18
-- 60 — M6: Stock / Inventory (van stock) → 54, 21
-- 61 — M7: Vouchers (capture) → 54, 38
+- 60 — M6: Stock / Inventory (van stock) + SE Confirm-Receipt → 54, 21, 22
+- 61 — M7: Vouchers (capture) → 54, 38  *(photo leg → #81)*
+- 77 — M8e: Intra-day CRITICAL Accept/Decline + ghost toast → 54, 29, 30  *(push offer → #89/#76)*
+- 85 — M8a: SE Notifications (in-app list) → 54, 03
+- 86 — M8b: SE Leave Request → 54, 26
+- 87 — M8c: SE Availability — SOFT_UNAVAILABLE → 54, 25
+- 88 — M8d: SE Profile / Settings / Daily Status → 54, 01  *(Daily-Status source `needs-info`)*
+- 89 — SE Push Notifications (token registration + handlers) → 54, 76, 77, 85  *(blocked-by external adapters #76)*
 
-*(M8 daily-status/Profile and Issue 20 QR are the deferred 20% — to be filed/sequenced last.)*
+*(Mobile follow-ups whose mobile halves attach to specific backend issues: 63 (409 → 24), 64 (VU → 28,
+readiness chip → 65), 66 (same-day cues → 31), 68 (recovery → 36), 71 (install → 34); 17 offline queue
+and 20 QR/Technical-Hints now depend on the new backend issues #82 and #83/#84 respectively. Issue 52
+is **superseded → #55**. M8 daily-status data source remains `needs-info`.)*
+
+### Backend follow-ups (mobile dependencies — surfaced by the 2026-06-29 mobile audit)
+
+These are genuine backend gaps the mobile issues consume; each is its own issue (not merged into a mobile slice):
+- 81 — Media Upload API (`photoRef` for troubleshoot/voucher/install photos) → 01  *(consumed by 58/61/71)*
+- 82 — Offline Batch Sync API (`POST /api/sync/batch`) → 15, 16, 38  *(consumed by 17)*
+- 83 — Ticket Search API (`GET /api/tickets/search` for QR/manual lookup) → 07, 12  *(consumed by 20)*
+- 84 — Technical Hints API (derived telemetry signals + raw read, PRD §641) → 04, 07  *(consumed by 20)*
 
 ## FE — Enterprise UI parity (Admin, presentation-layer)
 
