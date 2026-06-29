@@ -5,3 +5,4 @@ export * from './BarChartCard';
 export * from './TrendChart';
 export * from './RadialGauge';
 export * from './DistributionBar';
+export * from './ReportGrid';

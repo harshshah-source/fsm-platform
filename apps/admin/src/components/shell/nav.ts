@@ -94,6 +94,13 @@ export function buildNav(role: string): NavGroup[] {
     });
   }
 
+  if (isManager) {
+    groups.push({
+      heading: 'Analytics',
+      items: [{ label: 'Reports', to: '/reports', icon: IconGrid }],
+    });
+  }
+
   if (isOpsHead) {
     groups.push({
       heading: 'Admin',

@@ -23,6 +23,7 @@ import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
+import { ReportsPage } from './pages/reports/ReportsPage';
 import { TicketDetailDrawer } from './pages/tickets/TicketDetailDrawer';
 import { TicketsPage } from './pages/tickets/TicketsPage';
 import { VerificationReviewPage } from './pages/verification/VerificationReviewPage';
@@ -76,6 +77,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <SeManagementPage />
+              </RoleRoute>
+            }
+          />
+          {/* Reports landing — Fleet Uptime (39) + Soft-Inactive trend (40), manager roles (FE-21). */}
+          <Route
+            path="/reports"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <ReportsPage />
               </RoleRoute>
             }
           />
