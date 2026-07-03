@@ -59,6 +59,12 @@ export class AutoPlantMysqlClient implements OnModuleDestroy {
   private readonly logger = new Logger(AutoPlantMysqlClient.name);
   private pool: Pool | null = null;
 
+  /** True when the two-schema AutoPlant env is set — lets the health surface report "configured but
+   * unreachable" (VPN down) distinctly from "not configured" (dev/test/CI), without opening a pool. */
+  isConfigured(): boolean {
+    return readAutoPlantMysqlConfig() !== null;
+  }
+
   private getPool(): Pool {
     if (this.pool) return this.pool;
     const cfg = readAutoPlantMysqlConfig();

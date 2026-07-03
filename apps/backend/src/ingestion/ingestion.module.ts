@@ -1,10 +1,16 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
+import { AuthGuard } from '../common/guards/auth.guard';
+import { RoleGuard } from '../common/guards/role.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { AutoPlantMysqlClient, readAutoPlantMysqlConfig } from './autoplant/autoplant-mysql.client';
 import {
   AutoPlantSourceReader,
   type AutoPlantSourceReaderDeps,
 } from './autoplant/autoplant-source-reader';
+import { AutoPlantHealthService } from './autoplant/health.service';
+import { IntegrationHealthController } from './autoplant/integration-health.controller';
+import { MasterSyncRunService } from './autoplant/master-sync-run.service';
 import { SnapshotIngestionService } from './snapshot-ingestion.service';
 import { SnapshotIngestionWorker } from './snapshot-ingestion.worker';
 import { SnapshotQueryService } from './snapshot-query.service';
@@ -21,11 +27,27 @@ import { InMemorySourceReader, SOURCE_READER, type SourceReader } from './source
  * `SOURCE_READER` token, neither of which Nest can resolve by type.
  */
 @Module({
-  controllers: [],
+  // AuthModule (→ TokenService) + the guards are imported/provided locally so IntegrationHealthController's
+  // @UseGuards(AuthGuard, RoleGuard) resolves inside this module — the app-level controllers (SnapshotsController
+  // et al.) stay in AppModule; this one is self-contained to avoid touching the concurrently-edited AppModule.
+  imports: [AuthModule],
+  controllers: [IntegrationHealthController],
   providers: [
+    AuthGuard,
+    RoleGuard,
     SnapshotRunService,
     SnapshotIngestionService,
     SnapshotQueryService,
+    // Master-sync run bookkeeping (Phase 4). Decision-free + self-contained; the MasterSyncService
+    // itself is NOT registered — its scope/zone/source ports are business-/VPN-gated (Phase 7 wiring).
+    MasterSyncRunService,
+    // AutoPlant integration health surface — the client doubles as the connectivity probe.
+    {
+      provide: AutoPlantHealthService,
+      useFactory: (prisma: PrismaService, client: AutoPlantMysqlClient) =>
+        new AutoPlantHealthService(prisma, client),
+      inject: [PrismaService, AutoPlantMysqlClient],
+    },
     // Connection seam to the read-only AutoPlant MySQL source. Bound now so the app can reach and
     // read AutoPlant; the real SourceReader (JSON mapping + normalization) still swaps in behind
     // SOURCE_READER later. Lazy pool → an unset config never blocks boot.
@@ -61,6 +83,8 @@ import { InMemorySourceReader, SOURCE_READER, type SourceReader } from './source
     SnapshotQueryService,
     SnapshotIngestionWorker,
     AutoPlantMysqlClient,
+    MasterSyncRunService,
+    AutoPlantHealthService,
   ],
 })
 export class IngestionModule {}
