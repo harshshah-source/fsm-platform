@@ -1482,14 +1482,15 @@ model Vehicle {
   transporterId BigInt?  @map("transporter_id")
   companyId     BigInt   @map("company_id")
   // AutoPlant deployment status mirror (Phase 2a): ACTIVE / DEPLOYED / UNDEPLOYED. The FK from
-  // transporterId -> transporters is deferred to Phase 4 (after the master-sync populates
-  // transporters), to avoid violating existing dangling transporter_id values on current rows.
+  // transporterId -> transporters is wired in Phase 4 (migration 20260703120000), once the master-sync
+  // populates transporters; dangling pre-sync values were nulled by that migration first.
   status        String?
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  plant   Plant    @relation(fields: [plantId], references: [plantId])
-  company Company  @relation(fields: [companyId], references: [companyId])
+  plant       Plant        @relation(fields: [plantId], references: [plantId])
+  company     Company      @relation(fields: [companyId], references: [companyId])
+  transporter Transporter? @relation(fields: [transporterId], references: [transporterId])
   devices Device[]
   tickets Ticket[]
 
@@ -1510,6 +1511,8 @@ model Transporter {
   status              String?
   createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  vehicles Vehicle[]
 
   @@index([companyId])
   @@map("transporters")
