@@ -43,6 +43,20 @@ export class SnapshotRunService {
     }
   }
 
+  /**
+   * The last SUCCESS/PARTIAL run's persisted cursor (its `data_as_of`, a UTC instant), or null when no
+   * prior run has ingested data. The `AutoPlantSourceReader` resumes from this across runs (blueprint
+   * §6.2 option a) — keeps the worker generic while making ingestion incremental (R10).
+   */
+  async lastResumeCursor(): Promise<string | null> {
+    const last = await this.prisma.snapshotRun.findFirst({
+      where: { status: { in: ['SUCCESS', 'PARTIAL'] }, cursor: { not: null } },
+      orderBy: { runId: 'desc' },
+      select: { cursor: true },
+    });
+    return last?.cursor ?? null;
+  }
+
   async finishRun(
     runId: bigint,
     params: {
