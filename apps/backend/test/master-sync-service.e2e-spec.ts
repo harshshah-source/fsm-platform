@@ -68,7 +68,8 @@ describe('Phase 4 — MasterSyncService', () => {
       region_name: null,
       plant_state: 'Andhra Pradesh',
       plant_district: 'Kadapa',
-      plant_code: 'T001',
+      master_plant_id: Number(SRC_PLANT),
+      master_plant_code: 'T001',
       status: 'ACTIVE',
     },
   ];

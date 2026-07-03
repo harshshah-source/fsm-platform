@@ -49,7 +49,10 @@ const KADAPPA: MstPlantRow = {
   region_name: null,
   plant_state: 'Andhra Pradesh',
   plant_district: 'Kadapa',
-  plant_code: '1000',
+  // master_plant_* is a DISTINCT parent reference (≠ plant_id/plant_code) — pin that it maps from the
+  // right columns (real data has plants where these differ, e.g. plant 4561 → master_plant_id 4460).
+  master_plant_id: 4460,
+  master_plant_code: 'MP-KDP',
   status: 'ACTIVE',
 };
 
@@ -140,8 +143,9 @@ describe('Phase 4 — mapPlant (R6: zoneId/districtId are FSM-owned inputs, neve
       sourceZoneName: 'South India',
       plantState: 'Andhra Pradesh',
       plantDistrict: 'Kadapa',
-      masterPlantId: 3038n,
-      masterPlantCode: '1000',
+      // from master_plant_id/master_plant_code — NOT plant_id (3038) / plant_code.
+      masterPlantId: 4460n,
+      masterPlantCode: 'MP-KDP',
       status: 'ACTIVE',
     });
   });

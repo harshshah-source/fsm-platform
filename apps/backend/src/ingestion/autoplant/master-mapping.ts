@@ -74,7 +74,10 @@ export interface MstPlantRow {
   region_name: string | null;
   plant_state: string | null;
   plant_district: string | null;
-  plant_code: string | null;
+  // `master_plant_*` is a DISTINCT parent/grouping reference in ap_masters.mst_plant — NOT the plant's
+  // own plant_id/plant_code (verified against docs/autoplant: e.g. plant 4561 → master_plant_id 4460).
+  master_plant_id: number | string | null;
+  master_plant_code: string | null;
   status: string | null;
 }
 
@@ -215,8 +218,8 @@ export function mapPlant(
     sourceRegionName: cleanStr(row.region_name),
     plantState: cleanStr(row.plant_state),
     plantDistrict: cleanStr(row.plant_district),
-    masterPlantId: sourcePlantId,
-    masterPlantCode: cleanStr(row.plant_code),
+    masterPlantId: toBigIntOrNull(row.master_plant_id),
+    masterPlantCode: cleanStr(row.master_plant_code),
     status: cleanStr(row.status),
   };
   return {

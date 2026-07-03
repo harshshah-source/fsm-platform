@@ -44,15 +44,18 @@ Replace the synthetic org seed with a `MasterSyncService` that upserts FSM maste
 | **R14** | The **scope values** — which `mst_company.company_type` + `status` rows are FSM's fleet (mixes Shippers, Transporters, INACTIVE, test rows). The *mechanism* (`MasterSyncScope` predicate) ships; only the values are missing. | AutoPlant + Ops Head | Mirroring verbatim pollutes ops + the Fleet-Uptime denominator |
 | **R6** | The `plant_state → FSM operational-zone` map + the breaking `plants.zone_id → nullable` migration (+ `UNZONED` holding zone + Ops-Head exception queue + ~16 cross-zone/planner/override call-site ripples). `PlantZoneResolver` port ships; the real resolver + migration are gated. | Ops Head | Wrong ZM row-scope / dashboard mis-scoping |
 | **R13** | The real company **tier/rank** feed (CRM/SAP or Ops-Head seed). Insert-only safe default (`SILVER`/`C`) ships; the truth is not in AutoPlant. | Ops Head / SAP | Recommender canonical sort degenerates (all companies equal) |
-| — | **`ap_masters` schema reconciliation** — exact `mst_plant` column identifiers (the source doc has DESCRIBEs for `mst_company`/`mst_transporter`/`mst_vehicle` but only a sample SELECT for `mst_plant`) + read-only VPN access to build & validate the real `AutoPlantMasterSource`. | AutoPlant DB team | The live reader can't be written faithfully or tested against real columns |
+| — | ~~**`ap_masters` schema reconciliation**~~ **RESOLVED 2026-07-03** — authoritative DESCRIBEs + sample data landed under `docs/autoplant/`. Two corrections applied: `mst_plant.master_plant_id`/`master_plant_code` are a **distinct** parent reference (fixed `mapPlant`); `mst_vehicle.company_id` is unreliable (0) so the reader resolves company via the plant. | AutoPlant DB team | — |
 
 ## Remaining engineering (unblocks once the gates clear)
 
-- [ ] Real `AutoPlantMasterSource implements MasterSyncSource` over `ap_masters` (+ the master columns of
-      `tb_vehiclemaster`), chunked reads (§5.7). **Blocked by** the `ap_masters` schema/VPN reconciliation.
+- [x] Real `AutoPlantMasterSource implements MasterSyncSource` over `ap_masters` — schema-qualified reads,
+      `mst_vehicle LEFT JOIN mst_plant` for the authoritative company; 5 unit tests. (Chunked / delta reads
+      per §5.7 remain a later optimisation.)
 - [ ] Concrete `PlantZoneResolver` (R6 map) + the `plants.zone_id` nullable migration + `UNZONED` +
       Ops-Head exception queue. **Blocked by R6.**
-- [ ] Bind `MASTER_SYNC_SCOPE` from config once R14 lands; wire `MasterSyncService` into a Nest module.
+- [ ] Wire `MasterSyncService` into a Nest module: bind `MASTER_SYNC_SOURCE` to `AutoPlantMasterSource`
+      (`new AutoPlantMasterSource({ query: client.query, mastersSchema: cfg.dbMasters })`, config-guarded like
+      `SOURCE_READER`), `MASTER_SYNC_SCOPE` from config once R14 lands, `PLANT_ZONE_RESOLVER` once R6 lands.
 - [ ] Phase 7 scheduler (`@nestjs/schedule` vs BullMQ — **architecture-HITL**) ordering
       master → snapshot → recompute → ticket → recommender, respecting the single-in-flight guards.
 - [ ] Reconcile row counts FSM vs AutoPlant; confirm SE coverage/territory MV FKs still resolve; re-sync
