@@ -93,13 +93,18 @@ export interface VehicleMasterMasterRow {
   deployment_status: string | null;
 }
 
-// ── Scoping predicate (R14 mechanism — the VALUES come from the caller, never baked in) ──
+// ── Scoping predicate — anchored on the AUTHORITATIVE mst_plant, not mst_company ──
+//
+// The fleet is defined at the PLANT grain: mst_plant is the authoritative master (DB team) and its
+// `company_id` is NOT NULL, whereas mst_company.company_type is dirty (real customers are typed 'NA')
+// and mst_vehicle.company_id is 0. So companies are DERIVED (created only when an in-scope plant names
+// them) — no company allow-list. A plant is in scope when its status is allowed AND the PlantZoneResolver
+// (R6) can place it; the resolver + Ops-Head exception queue own the residual (test plants in real
+// states). See docs/architecture/autoplant-integration investigation + issue 96.
 
 export interface MasterSyncScope {
-  /** AutoPlant `company_type` values that are FSM's fleet (empty ⇒ no restriction on this axis). */
-  companyTypes: string[];
-  /** `status` values to include (empty ⇒ no restriction on this axis). */
-  statuses: string[];
+  /** `mst_plant.status` values that are FSM's fleet (empty ⇒ no status restriction). Baseline: ACTIVE. */
+  plantStatuses: string[];
 }
 
 const inList = (value: string | null, allowed: string[]): boolean => {
@@ -108,9 +113,9 @@ const inList = (value: string | null, allowed: string[]): boolean => {
   return allowed.some((a) => a.trim().toLowerCase() === v);
 };
 
-/** True when a company falls inside the (caller-supplied) FSM fleet scope — R14. */
-export function companyMatchesScope(row: MstCompanyRow, scope: MasterSyncScope): boolean {
-  return inList(row.company_type, scope.companyTypes) && inList(row.status, scope.statuses);
+/** True when a plant falls inside the fleet scope by status (zone-resolvability is checked separately). */
+export function plantInScope(row: MstPlantRow, scope: MasterSyncScope): boolean {
+  return inList(row.status, scope.plantStatuses);
 }
 
 // ── Entity maps ──

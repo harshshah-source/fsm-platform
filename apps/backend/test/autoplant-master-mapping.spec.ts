@@ -4,7 +4,7 @@ import {
   mapPlant,
   mapVehicle,
   mapDevice,
-  companyMatchesScope,
+  plantInScope,
   DEFAULT_INSERT_TIER,
   DEFAULT_INSERT_RANK,
   type MstCompanyRow,
@@ -97,17 +97,16 @@ describe('Phase 4 — mapCompany', () => {
   });
 });
 
-describe('Phase 4 — companyMatchesScope (R14 mechanism, values supplied by caller)', () => {
-  it('includes a company only when both type and status match the supplied scope', () => {
-    const scope = { companyTypes: ['Shipper'], statuses: ['ACTIVE'] };
-    expect(companyMatchesScope(UTCL, scope)).toBe(true);
-    expect(companyMatchesScope({ ...UTCL, company_type: 'Transporter' }, scope)).toBe(false);
-    expect(companyMatchesScope({ ...UTCL, status: 'INACTIVE' }, scope)).toBe(false);
+describe('Phase 4 — plantInScope (fleet scope anchored on mst_plant.status, not company_type)', () => {
+  it('includes a plant by status; company_type is never consulted', () => {
+    const scope = { plantStatuses: ['ACTIVE'] };
+    expect(plantInScope(KADAPPA, scope)).toBe(true);
+    expect(plantInScope({ ...KADAPPA, status: 'INACTIVE' }, scope)).toBe(false);
   });
 
-  it('matches case-insensitively and treats an empty list as "no restriction on that axis"', () => {
-    expect(companyMatchesScope(UTCL, { companyTypes: ['shipper'], statuses: [] })).toBe(true);
-    expect(companyMatchesScope(UTCL, { companyTypes: [], statuses: ['active'] })).toBe(true);
+  it('matches case-insensitively and treats an empty list as "no status restriction"', () => {
+    expect(plantInScope(KADAPPA, { plantStatuses: ['active'] })).toBe(true);
+    expect(plantInScope({ ...KADAPPA, status: 'INACTIVE' }, { plantStatuses: [] })).toBe(true);
   });
 });
 

@@ -2,12 +2,12 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MasterSyncRunService, type EntityStat, type MasterSyncOutcome } from './master-sync-run.service';
 import {
-  companyMatchesScope,
   mapCompany,
   mapDevice,
   mapPlant,
   mapTransporter,
   mapVehicle,
+  plantInScope,
   toBigIntOrNull,
   type CompanyDefaults,
   type MasterSyncScope,
@@ -57,12 +57,14 @@ const emptyStat = (): EntityStat => ({ inserted: 0, updated: 0, skipped: 0 });
  * `vehicles` / `devices` from AutoPlant, keyed by `source_*_id`, in FK dependency order (companies →
  * transporters → plants → vehicles → devices), recording a `master_sync_runs` row for observability.
  *
- * The synchroniser only lands the **mechanism**. Two decisions stay business-gated and arrive as
- * injected collaborators — never invented here:
- *  - **R14 scoping** — which companies/plants are FSM's fleet. Supplied as {@link MasterSyncScope};
- *    with no scope configured the sync refuses to run rather than mirroring transporters/test rows.
- *  - **R6 operational zone** — {@link PlantZoneResolver}; an unmappable plant is deferred, not
- *    force-assigned to an invented zone.
+ * **Plant-first derivation.** `mst_plant` is the authoritative master (DB team) and its `company_id` is
+ * NOT NULL, so scope is anchored on plants, and companies are DERIVED — created only when an in-scope
+ * plant names them. This removes any company allow-list and drops all reliance on the dirty
+ * `mst_company.company_type` (real customers are typed 'NA'): transporters own no plants so they never
+ * become companies, and INACTIVE/vendor companies fall out because no active in-scope plant references
+ * them. The one gated decision left is **R6** — the {@link PlantZoneResolver} (state→zone map); an
+ * unmappable plant is deferred, not force-zoned, and the residual test-plant-in-a-real-state is an
+ * Ops-Head exception-queue concern at the plant grain, not a company list.
  *
  * The anti-drift guarantee (Risk R4) is structural: the pure `master-mapping` layer excludes every
  * FSM-owned column from its `update` set, so a re-sync can never clobber `ops_override`/tier/rank,
@@ -82,69 +84,28 @@ export class MasterSyncService {
   ) {}
 
   async sync(): Promise<MasterSyncResult> {
-    // R14 gate — no invented default. Until Ops Head + AutoPlant define the fleet scope, the sync is
-    // inert rather than mirroring the whole (transporter/test/INACTIVE-polluted) master set.
-    if (!this.scope) {
-      throw new Error(
-        'MasterSyncService: no scope configured (R14). Set which company_type/status rows are FSM’s ' +
-          'fleet before running — mirroring ap_masters verbatim pollutes ops + the Fleet-Uptime denominator.',
-      );
-    }
+    // Scope is anchored on mst_plant.status; ACTIVE is the documented baseline (§5.5), not a business
+    // gate (that is the injected PlantZoneResolver, R6). Callers may narrow/widen the status set.
+    const scope: MasterSyncScope = this.scope ?? { plantStatuses: ['ACTIVE'] };
 
     const { runId } = await this.runService.startRun();
     const stats: Record<string, EntityStat> = {
+      plants: emptyStat(),
       companies: emptyStat(),
       transporters: emptyStat(),
-      plants: emptyStat(),
       vehicles: emptyStat(),
       devices: emptyStat(),
     };
 
     try {
-      // 1. Companies (scoped) → source→FSM id map for downstream FK resolution.
-      const companyIdBySource = new Map<string, bigint>();
-      const inScope = (await this.source.readCompanies()).filter((c) => companyMatchesScope(c, this.scope!));
-      for (const c of inScope) {
-        const plan = mapCompany(c, this.companyDefaults);
-        const existed = await this.prisma.company.findUnique({
-          where: plan.where,
-          select: { companyId: true },
-        });
-        const row = await this.prisma.company.upsert({
-          where: plan.where,
-          create: plan.create,
-          update: plan.update,
-          select: { companyId: true },
-        });
-        companyIdBySource.set(plan.where.sourceCompanyId.toString(), row.companyId);
-        existed ? stats.companies.updated++ : stats.companies.inserted++;
-      }
-
-      // 2. Transporters — best-effort company FK, keyed by source_transporter_id.
-      const transporterIdBySource = new Map<string, bigint>();
-      for (const t of await this.source.readTransporters()) {
-        const companyId = companyIdBySource.get(String(toBigIntOrNull(t.company_id))) ?? null;
-        const plan = mapTransporter(t, { companyId });
-        const existed = await this.prisma.transporter.findUnique({
-          where: plan.where,
-          select: { transporterId: true },
-        });
-        const row = await this.prisma.transporter.upsert({
-          where: plan.where,
-          create: plan.create,
-          update: plan.update,
-          select: { transporterId: true },
-        });
-        transporterIdBySource.set(plan.where.sourceTransporterId.toString(), row.transporterId);
-        existed ? stats.transporters.updated++ : stats.transporters.inserted++;
-      }
-
-      // 3. Plants — only in-scope companies; operational zone via the (gated) resolver, else deferred.
+      // 1. Plants — the scope anchor. In-scope = status allowed ∧ zone-resolvable (R6). Plants carry no
+      //    company FK in FSM, so they upsert first; each in-scope plant's (NOT NULL) company_id is
+      //    collected so the companies it references get created on demand.
       const plantIdBySource = new Map<string, bigint>();
+      const neededCompanyIds = new Set<string>();
       for (const p of await this.source.readPlants()) {
-        const companyKey = String(toBigIntOrNull(p.company_id));
-        if (!companyIdBySource.has(companyKey)) {
-          stats.plants.skipped++; // plant of an out-of-scope company
+        if (!plantInScope(p, scope)) {
+          stats.plants.skipped++; // out-of-scope plant status (e.g. INACTIVE)
           continue;
         }
         const zone = await this.zoneResolver.resolve(p);
@@ -164,7 +125,53 @@ export class MasterSyncService {
           select: { plantId: true },
         });
         plantIdBySource.set(plan.where.sourcePlantId.toString(), row.plantId);
+        const companyKey = toBigIntOrNull(p.company_id);
+        if (companyKey != null) neededCompanyIds.add(companyKey.toString());
         existed ? stats.plants.updated++ : stats.plants.inserted++;
+      }
+
+      // 2. Companies — DERIVED: upsert only those an in-scope plant references. No allow-list, and
+      //    mst_company.company_type is never consulted (a Transporter-typed plant owner is still an FSM
+      //    customer; an unreferenced/INACTIVE-only company is inert and skipped).
+      const companyIdBySource = new Map<string, bigint>();
+      for (const c of await this.source.readCompanies()) {
+        const key = BigInt(String(c.company_id).trim()).toString();
+        if (!neededCompanyIds.has(key)) {
+          stats.companies.skipped++; // no in-scope plant references this company
+          continue;
+        }
+        const plan = mapCompany(c, this.companyDefaults);
+        const existed = await this.prisma.company.findUnique({
+          where: plan.where,
+          select: { companyId: true },
+        });
+        const row = await this.prisma.company.upsert({
+          where: plan.where,
+          create: plan.create,
+          update: plan.update,
+          select: { companyId: true },
+        });
+        companyIdBySource.set(plan.where.sourceCompanyId.toString(), row.companyId);
+        existed ? stats.companies.updated++ : stats.companies.inserted++;
+      }
+
+      // 3. Transporters — best-effort company FK, keyed by source_transporter_id.
+      const transporterIdBySource = new Map<string, bigint>();
+      for (const t of await this.source.readTransporters()) {
+        const companyId = companyIdBySource.get(String(toBigIntOrNull(t.company_id))) ?? null;
+        const plan = mapTransporter(t, { companyId });
+        const existed = await this.prisma.transporter.findUnique({
+          where: plan.where,
+          select: { transporterId: true },
+        });
+        const row = await this.prisma.transporter.upsert({
+          where: plan.where,
+          create: plan.create,
+          update: plan.update,
+          select: { transporterId: true },
+        });
+        transporterIdBySource.set(plan.where.sourceTransporterId.toString(), row.transporterId);
+        existed ? stats.transporters.updated++ : stats.transporters.inserted++;
       }
 
       // 4/5. Vehicles + devices (both from the tb_vehiclemaster master columns).
