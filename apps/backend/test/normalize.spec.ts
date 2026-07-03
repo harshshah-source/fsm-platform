@@ -39,7 +39,7 @@ describe('Issue 04 slice 6 — UTC normalization', () => {
 
   it('normalizes the timestamp while preserving telemetry verbatim', () => {
     const raw: RawSourceRow = {
-      deviceId: 9_200_001n,
+      deviceId: '9200001',
       gpsWallClock: '2026-06-19 13:30:00',
       sourceUtcOffsetMinutes: 330,
       lat: 12.971599,
@@ -54,7 +54,7 @@ describe('Issue 04 slice 6 — UTC normalization', () => {
     const row = normalizeSourceRow(raw);
 
     expect(row.gpsDatetime.toISOString()).toBe('2026-06-19T08:00:00.000Z');
-    expect(row.deviceId).toBe(9_200_001n);
+    expect(row.deviceId).toBe('9200001');
     expect(row.lat).toBe(12.971599);
     expect(row.lon).toBe(77.594566);
     expect(row.mainsStatus).toBe(1);

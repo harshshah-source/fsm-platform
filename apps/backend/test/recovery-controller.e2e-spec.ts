@@ -9,7 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * manager schedules to the SE, the assigned SE marks on-site + collected, the Warehouse Manager
  * confirms receipt (auto-close). Role gating + the Collection-Form validation are enforced.
  */
-const DEV = 9_362_001n;
+const DEV = String(9_362_001n);
 
 describe('Issue 36 slice 3 — /api/recovery (e2e)', () => {
   let app: INestApplication;

@@ -18,7 +18,7 @@ describe('Issue 06 slice 3 — /api/dashboard/critical-queue', () => {
   let prisma: PrismaService;
   let companyId: bigint;
   let zmPlantId: bigint;
-  const deviceIds = [9_063_001n, 9_063_002n];
+  const deviceIds = [9_063_001n, 9_063_002n].map(String);
 
   const login = async (email: string): Promise<string> => {
     const res = await request(app.getHttpServer())
@@ -28,7 +28,7 @@ describe('Issue 06 slice 3 — /api/dashboard/critical-queue', () => {
     return res.body.accessToken as string;
   };
 
-  const seedTicketed = async (deviceId: bigint, plantId: bigint, bucket: string) => {
+  const seedTicketed = async (deviceId: string, plantId: bigint, bucket: string) => {
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({
       data: {

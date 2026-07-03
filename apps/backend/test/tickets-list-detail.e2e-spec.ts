@@ -9,9 +9,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * the `/api/tickets/:id` detail lifecycle (AC#1/#2/#5/#6).
  */
 const ZM_ZONE = 1;
-const D1 = 9_072_001n; // zone 1, CRITICAL
-const D2 = 9_072_002n; // zone 1, WARNING, repeat
-const D3 = 9_072_003n; // other zone, LONG_PENDING
+const D1 = String(9_072_001n); // zone 1, CRITICAL
+const D2 = String(9_072_002n); // zone 1, WARNING, repeat
+const D3 = String(9_072_003n); // other zone, LONG_PENDING
 const ALL = [D1, D2, D3];
 
 describe('Issue 07 slice B — /api/tickets list + detail', () => {
@@ -32,7 +32,7 @@ describe('Issue 07 slice B — /api/tickets list + detail', () => {
   };
 
   const seedTicket = async (
-    deviceId: bigint,
+    deviceId: string,
     plantId: bigint,
     bucket: string,
     opts: { repeat?: boolean } = {},

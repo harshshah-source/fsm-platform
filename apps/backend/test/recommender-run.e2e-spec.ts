@@ -24,7 +24,7 @@ describe('Issue 10 slice 6 — RecommenderService.runForZone', () => {
   let dedicated: string;
   let multi: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const NOW = new Date('2026-06-21T06:00:00Z');
 
@@ -42,7 +42,7 @@ describe('Issue 10 slice 6 — RecommenderService.runForZone', () => {
 
   /** Seed an inactive device + OPEN TROUBLESHOOT ticket at a plant; returns the ticketId. */
   const makeTicket = async (plant: bigint, gpsAgeMin: number): Promise<string> => {
-    const deviceId = BigInt(9_300_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(9_300_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

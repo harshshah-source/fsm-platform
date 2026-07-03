@@ -9,7 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * the customer confirms via the public one-time token link; Operations-Head-only override. The request
  * path uses `@CurrentActor()`, so an Operations Head acting in a ZM's zone has `acted_as_role` audited.
  */
-const DEV = 9_354_001n;
+const DEV = String(9_354_001n);
 
 describe('Issue 35 slice 4 — /api/non-op (e2e)', () => {
   let app: INestApplication;
@@ -85,7 +85,7 @@ describe('Issue 35 slice 4 — /api/non-op (e2e)', () => {
   it('Operations Head acting in a ZM zone has acted_as_role audited on the request', async () => {
     const oh = await login('ops.head@fsm.test');
     // device with no active marking — reuse a fresh one
-    const dev2 = 9_354_002n;
+    const dev2 = String(9_354_002n);
     await prisma.device.create({ data: { deviceId: dev2, dealType: 'ONE_TIME' } });
     await request(app.getHttpServer())
       .post('/api/non-op')

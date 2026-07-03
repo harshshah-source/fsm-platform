@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 /** Emitted when an Install Ticket's first valid post-fitment ping arrives — Ticket CLOSED, SE notified. */
 export interface InstallVerifiedEvent {
   ticketId: string;
-  deviceId: bigint;
+  deviceId: string;
   seId: string | null;
 }
 
@@ -11,7 +11,7 @@ export interface InstallVerifiedEvent {
  *  return or escalate. */
 export interface InstallFailedActivationEvent {
   ticketId: string;
-  deviceId: bigint;
+  deviceId: string;
   seId: string | null;
 }
 

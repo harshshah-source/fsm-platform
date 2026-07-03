@@ -24,7 +24,7 @@ describe('Issue 03 slice 4 — /api/audit-trail/tickets/:id (e2e)', () => {
   let zone1Plant: bigint;
   let otherTicket: string;
   let zone1Ticket: string;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const cycleIds: string[] = [];
   const ticketIds: string[] = [];
   const auditIds: bigint[] = [];
@@ -53,7 +53,7 @@ describe('Issue 03 slice 4 — /api/audit-trail/tickets/:id (e2e)', () => {
   });
 
   async function makeTicket(plant: bigint): Promise<string> {
-    const deviceId = BigInt(9_030_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(9_030_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: NOW } });

@@ -3,14 +3,14 @@ import { Logger } from '@nestjs/common';
 /** Emitted when a Recovery Ticket auto-closes on warehouse receipt — SE + ZM are notified (AC#4). */
 export interface RecoveryClosedEvent {
   ticketId: string;
-  deviceId: bigint;
+  deviceId: string;
   seId: string | null;
 }
 
 /** Emitted when an SE reports Unable to Collect — routes the ticket to the ZM decision queue. */
 export interface RecoveryUnableToCollectEvent {
   ticketId: string;
-  deviceId: bigint;
+  deviceId: string;
   seId: string | null;
   reasonCode: string;
 }
@@ -23,7 +23,7 @@ export interface RecoveryUnableToCollectEvent {
 /** Emitted when a ZM escalates an unable-to-collect Recovery Ticket to Operations Head (Issue 37). */
 export interface RecoveryEscalatedEvent {
   ticketId: string;
-  deviceId: bigint;
+  deviceId: string;
   escalatedByRole: string;
 }
 

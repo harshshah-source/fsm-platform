@@ -57,7 +57,7 @@ export type SkipReason =
 
 export interface UsableRow {
   vehicleNo: string;
-  deviceId: bigint;
+  deviceId: string;
   /** UTC instant of the latest ping, or null when the CSV timestamp was absent/unparseable. */
   gpsDatetime: Date | null;
   lat: number | null;
@@ -241,7 +241,11 @@ export function loadBook8Dataset(csvPath: string = defaultCsvPath()): Book8Datas
       continue;
     }
 
-    const deviceId = BigInt(devRaw);
+    // Device id is a String key (leading-zero / alphanumeric ids survive verbatim). Book8 ids are
+    // clean numeric strings; `deviceNum` is the numeric view used only for the synthetic deal-type /
+    // eligibility derivations below.
+    const deviceId = devRaw;
+    const deviceNum = BigInt(devRaw);
     const plantCodeRaw = f[C.plantId]?.trim() ?? '';
     const plantCode = isNull(plantCodeRaw) || plantCodeRaw === '0' ? PLANT_SENTINEL_CODE : plantCodeRaw;
     const companyRaw = f[C.company]?.trim() ?? '';
@@ -265,10 +269,10 @@ export function loadBook8Dataset(csvPath: string = defaultCsvPath()): Book8Datas
       companyKey,
       transporterId,
       // Deal type: even device ids → RECURRING (provider-owned, Recovery-eligible), odd → ONE_TIME.
-      dealType: deviceId % 2n === 0n ? 'RECURRING' : 'ONE_TIME',
+      dealType: deviceNum % 2n === 0n ? 'RECURRING' : 'ONE_TIME',
       // Eligibility rule: 9 of every 10 devices get a recent PGI (eligible); device ids ending in 0
       // are deliberately left without PGI to exercise the ineligible → no-ticket negative path.
-      pgiEligible: deviceId % 10n !== 0n,
+      pgiEligible: deviceNum % 10n !== 0n,
     });
   }
 

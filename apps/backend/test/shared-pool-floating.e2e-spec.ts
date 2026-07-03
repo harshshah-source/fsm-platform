@@ -23,13 +23,13 @@ describe('Issue 12 slice 4 — Floating-SE territory coverage in the Shared Pool
   let outPlant: bigint;
   let floating: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   let inTicket: string;
   const NOW = new Date('2026-06-21T06:00:00Z');
 
   const makeTicket = async (plant: bigint): Promise<string> => {
-    const deviceId = BigInt(10_000_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(10_000_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

@@ -21,7 +21,7 @@ describe('Issue 40 slice 1 — SoftInactiveCountService', () => {
   let zoneB: bigint; // no devices
   let plantA: bigint;
   let plantC: bigint;
-  let devSeq = 9_400_000n;
+  let devSeq = String(9_400_000n);
   const devices: bigint[] = [];
 
   beforeAll(async () => {
@@ -49,7 +49,7 @@ describe('Issue 40 slice 1 — SoftInactiveCountService', () => {
   });
 
   async function dev(plantId: bigint, eligible: boolean, inactive: boolean): Promise<void> {
-    const deviceId = devSeq++;
+    const deviceId = String(devSeq++);
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     await prisma.deviceState.create({

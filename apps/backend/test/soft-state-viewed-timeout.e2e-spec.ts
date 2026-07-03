@@ -19,12 +19,12 @@ describe('Issue 15 slice 5 — VIEWED timeout', () => {
   let companyId: bigint;
   let plantId: bigint;
   let se: string;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const T0 = new Date('2026-06-23T06:00:00Z');
 
   const makeTicket = async (): Promise<string> => {
-    const deviceId = BigInt(10_900_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(10_900_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: T0 } });

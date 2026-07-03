@@ -13,7 +13,12 @@
 
 /** One raw telemetry ping from the source — the verbatim shape, before UTC normalization (slice 6). */
 export interface SourceSnapshotRow {
-  deviceId: bigint;
+  /**
+   * AutoPlant `tb_vehiclemaster.device_id` is `varchar(255)` — real data carries leading-zero IMEIs
+   * (`0869925073271551`), alphanumeric vendor ids (`AP03TC0959`), and NULLs. Device identity is a
+   * String across the whole spine so those survive verbatim (a BigInt key corrupts/drops them).
+   */
+  deviceId: string;
   gpsDatetime: Date;
   lat?: number | null;
   lon?: number | null;

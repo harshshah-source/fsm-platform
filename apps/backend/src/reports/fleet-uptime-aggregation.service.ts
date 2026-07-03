@@ -9,7 +9,7 @@ export interface FleetUptimeAggregationResult {
 }
 
 interface DeviceRow {
-  deviceId: bigint;
+  deviceId: string;
   eligible: boolean;
   plantId: bigint | null;
   companyId: bigint | null;
@@ -17,13 +17,13 @@ interface DeviceRow {
 }
 interface CycleRow {
   cycleId: string;
-  deviceId: bigint;
+  deviceId: string;
   openedAt: Date;
   closedAt: Date | null;
   repeatFailure: boolean;
 }
 interface ClosureRow {
-  deviceId: bigint;
+  deviceId: string;
   status: string;
   count: number;
 }
@@ -130,8 +130,8 @@ function overlapSeconds(open: Date, close: Date, winStart: Date, winEnd: Date): 
   return Math.max(0, Math.floor((end - start) / 1000));
 }
 
-function groupBy<T>(rows: T[], key: (row: T) => bigint): Map<bigint, T[]> {
-  const map = new Map<bigint, T[]>();
+function groupBy<T>(rows: T[], key: (row: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>();
   for (const row of rows) {
     const k = key(row);
     const list = map.get(k);

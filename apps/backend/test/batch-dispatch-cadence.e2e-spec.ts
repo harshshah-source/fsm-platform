@@ -21,7 +21,7 @@ describe('Issue 11 slice 7 — configurable Schedule Cadence', () => {
   let plantId: bigint;
   let se: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const NOW = new Date('2026-06-21T06:00:00Z');
   const WEEK_FROM = new Date('2026-06-22T00:00:00Z');
@@ -48,7 +48,7 @@ describe('Issue 11 slice 7 — configurable Schedule Cadence', () => {
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
     await prisma.seCoverage.create({ data: { seId: se, plantId, coverageType: 'DEDICATED' } });
 
-    const deviceId = BigInt(9_800_000_000 + (NS % 100_000));
+    const deviceId = String(9_800_000_000 + (NS % 100_000));
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

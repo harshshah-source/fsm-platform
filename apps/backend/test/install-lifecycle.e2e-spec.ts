@@ -46,7 +46,7 @@ describe('Issue 34 — InstallLifecycleService transitions', () => {
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: createdTicketIds } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: createdTicketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: createdTicketIds } } });
-    await prisma.device.deleteMany({ where: { deviceId: { gte: 9_340_000n, lt: 9_341_000n } } });
+    await prisma.device.deleteMany({ where: { deviceId: { gte: '9340000', lt: '9341000' } } });
     await prisma.vehicle.deleteMany({ where: { vehicleId } });
     await prisma.plant.deleteMany({ where: { plantId } });
     await prisma.company.deleteMany({ where: { companyId } });
@@ -55,8 +55,8 @@ describe('Issue 34 — InstallLifecycleService transitions', () => {
   });
 
   /** Create a fresh INSTALL ticket at a given status with its own device. */
-  const makeTicket = async (status: 'REQUESTED' | 'SCHEDULED' | 'ON_SITE', assigned: string | null): Promise<{ ticketId: string; deviceId: bigint }> => {
-    const deviceId = deviceSeq++;
+  const makeTicket = async (status: 'REQUESTED' | 'SCHEDULED' | 'ON_SITE', assigned: string | null): Promise<{ ticketId: string; deviceId: string }> => {
+    const deviceId = String(deviceSeq++);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     const t = await prisma.ticket.create({
       data: {

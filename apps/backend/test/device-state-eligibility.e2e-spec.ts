@@ -12,10 +12,10 @@ import { SettingsService } from '../src/settings/settings.service';
  *  - no PGI                    → ineligible
  *  - CONFIRMED Non-Op marking  → ineligible even with a fresh PGI
  */
-const DEV_ELIGIBLE = 9_054_001n;
-const DEV_STALE_PGI = 9_054_002n;
-const DEV_NO_PGI = 9_054_003n;
-const DEV_NONOP = 9_054_004n;
+const DEV_ELIGIBLE = String(9_054_001n);
+const DEV_STALE_PGI = String(9_054_002n);
+const DEV_NO_PGI = String(9_054_003n);
+const DEV_NONOP = String(9_054_004n);
 const ALL = [DEV_ELIGIBLE, DEV_STALE_PGI, DEV_NO_PGI, DEV_NONOP];
 
 describe('Issue 05 slice 4 — eligibility on device_states', () => {
@@ -49,7 +49,7 @@ describe('Issue 05 slice 4 — eligibility on device_states', () => {
     await prisma.onModuleDestroy();
   });
 
-  const eligibilityOf = async (deviceId: bigint): Promise<boolean> => {
+  const eligibilityOf = async (deviceId: string): Promise<boolean> => {
     const state = await prisma.deviceState.findUnique({ where: { deviceId } });
     return state!.eligibleForUptime;
   };

@@ -10,9 +10,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * outside its own zone is rejected; an Operations Head acting in a ZM's zone has `acted_as_role`
  * audited (#47). Seeded `zm.north@fsm.test` is ZM of zone 1.
  */
-const DEV_A = 9_362_001n;
-const DEV_B = 9_362_002n;
-const DEV_C = 9_362_003n;
+const DEV_A = String(9_362_001n);
+const DEV_B = String(9_362_002n);
+const DEV_C = String(9_362_003n);
 const ALL_DEV = [DEV_A, DEV_B, DEV_C];
 
 describe('Issue 33 slice 3 — /api/install (e2e)', () => {

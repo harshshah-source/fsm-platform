@@ -26,7 +26,7 @@ const UNABLE_REASONS = new Set<UnableToCollectReason>([
 export interface RecoveryView {
   ticketId: string;
   status: TicketStatus;
-  deviceId: bigint;
+  deviceId: string;
   assignedSeId: string | null;
   collectedDeviceSerial: string | null;
   collectionConditionNotes: string | null;
@@ -50,7 +50,7 @@ type TicketRow = {
   ticketId: string;
   workType: $Enums.WorkType;
   status: TicketStatus;
-  deviceId: bigint;
+  deviceId: string;
   assignedSeId: string | null;
   unableToCollectReason: $Enums.UnableToCollectReason | null;
   collectedDeviceSerial: string | null;
@@ -408,7 +408,7 @@ function eventActor(actor: RequestActor): { actorId: string | null; actorRole: $
 function toView(row: {
   ticketId: string;
   status: TicketStatus;
-  deviceId: bigint;
+  deviceId: string;
   assignedSeId: string | null;
   collectedDeviceSerial: string | null;
   collectionConditionNotes: string | null;

@@ -23,7 +23,7 @@ describe('Issue 41 slice 1 — RootCauseAnalyticsAggregationService.computeMonth
   let plantId: bigint;
   let se: string;
   let seB: string;
-  let devSeq = 9_410_000n;
+  let devSeq = String(9_410_000n);
   const devices: bigint[] = [];
   const cycleIds: string[] = [];
   const ticketIds: string[] = [];
@@ -73,7 +73,7 @@ describe('Issue 41 slice 1 — RootCauseAnalyticsAggregationService.computeMonth
     seId?: string;
     deviceType?: string | null;
   }): Promise<void> {
-    const deviceId = devSeq++;
+    const deviceId = String(devSeq++);
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: opts.deviceType ?? null } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: opts.submittedAt } });

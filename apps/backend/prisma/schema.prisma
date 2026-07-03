@@ -790,7 +790,7 @@ model VerificationRun {
   runId                   String         @id @default(uuid()) @map("run_id") @db.Uuid
   ticketId                String         @map("ticket_id") @db.Uuid
   submissionId            String?        @map("submission_id") @db.Uuid
-  deviceId                BigInt         @map("device_id")
+  deviceId                String         @map("device_id")
   startedAt               DateTime       @map("started_at") @db.Timestamptz(6)
   seGpsLat                Float?         @map("se_gps_lat")
   seGpsLon                Float?         @map("se_gps_lon")
@@ -1126,7 +1126,7 @@ model SnapshotRunChunk {
 model RawDeviceSnapshot {
   id                BigInt   @default(autoincrement())
   runId             BigInt   @map("run_id")
-  deviceId          BigInt   @map("device_id")
+  deviceId          String   @map("device_id")
   gpsDatetime       DateTime @map("gps_datetime") @db.Timestamptz(6)
   lat               Float?
   lon               Float?
@@ -1448,10 +1448,11 @@ enum NonOpReason {
 }
 
 /// A single GPS unit — the per-device-id verification anchor (schema D2). `deviceId` is the business
-/// bigint from the AutoPlant source (not a surrogate). `currentVehicleId` denormalises the active
-/// fitment; the time-windowed `vehicle_device_mappings` history table lands with verification (Issue 18).
+/// String from the AutoPlant source (`tb_vehiclemaster.device_id` varchar(255) — leading-zero IMEIs,
+/// alphanumeric vendor ids, not a surrogate). `currentVehicleId` denormalises the active fitment; the
+/// time-windowed `vehicle_device_mappings` history table lands with verification (Issue 18).
 model Device {
-  deviceId         BigInt    @id @map("device_id")
+  deviceId         String    @id @map("device_id")
   currentVehicleId BigInt?   @map("current_vehicle_id")
   dealType         DealType? @map("deal_type")
   deviceType       String?   @map("device_type")
@@ -1534,7 +1535,7 @@ model MasterSyncRun {
 /// DeviceStateService; denormalised vehicle/plant/company/transporter avoid joins on the hot path.
 /// The `inactivity_hours >= 0` CHECK is appended as raw SQL in the migration.
 model DeviceState {
-  deviceId            BigInt     @id @map("device_id")
+  deviceId            String     @id @map("device_id")
   latestGpsDatetime   DateTime?  @map("latest_gps_datetime") @db.Timestamptz(6)
   isInactive          Boolean    @default(false) @map("is_inactive")
   inactivityHours     Decimal?   @map("inactivity_hours") @db.Decimal(12, 4)
@@ -1561,7 +1562,7 @@ model DeviceState {
 /// on the active states, added as raw SQL in the migration. Issue 05 opens OPEN cycles only.
 model FailureCycle {
   cycleId                    String            @id @default(uuid()) @map("cycle_id") @db.Uuid
-  deviceId                   BigInt            @map("device_id")
+  deviceId                   String            @map("device_id")
   state                      FailureCycleState @default(OPEN)
   openedAt                   DateTime          @map("opened_at") @db.Timestamptz(6)
   closedAt                   DateTime?         @map("closed_at") @db.Timestamptz(6)
@@ -1646,7 +1647,7 @@ model Ticket {
   workType           WorkType        @map("work_type")
   status             TicketStatus
   failureCycleId     String?         @unique @map("failure_cycle_id") @db.Uuid
-  deviceId           BigInt          @map("device_id")
+  deviceId           String          @map("device_id")
   vehicleId          BigInt?         @map("vehicle_id")
   plantId            BigInt          @map("plant_id")
   companyId          BigInt          @map("company_id")
@@ -1748,7 +1749,7 @@ model TicketEvent {
 /// the SAP integration that populates it is external (deferred), rows seeded directly for now.
 model PgiHistory {
   id       BigInt   @id @default(autoincrement())
-  deviceId BigInt   @map("device_id")
+  deviceId String   @map("device_id")
   pgiDate  DateTime @map("pgi_date") @db.Date
   orderRef String?  @map("order_ref")
 
@@ -1783,7 +1784,7 @@ model SoftInactiveCountHistory {
 /// the month window; `eligible` snapshots the uptime gate (active PGI ≤15d AND not Non-Op) so the
 /// denominator is Eligible Devices only; auto-recovery vs SE-repaired closures are counted separately.
 model DeviceDowntimeSummaryMonthly {
-  deviceId             BigInt   @map("device_id")
+  deviceId             String   @map("device_id")
   month                DateTime @db.Date
   zoneId               BigInt?  @map("zone_id")
   companyId            BigInt?  @map("company_id")
@@ -1931,7 +1932,7 @@ model SystemEfficiencySummaryDaily {
 /// (tokens, roles, reason_code, effective-window editing) lands with Issue 35 as an additive migration.
 model NonOperationalMarking {
   markingId     String     @id @default(uuid()) @map("marking_id") @db.Uuid
-  deviceId      BigInt     @map("device_id")
+  deviceId      String     @map("device_id")
   state         NonOpState @default(REQUESTED)
   effectiveFrom DateTime?  @map("effective_from") @db.Timestamptz(6)
   effectiveTo   DateTime?  @map("effective_to") @db.Timestamptz(6)

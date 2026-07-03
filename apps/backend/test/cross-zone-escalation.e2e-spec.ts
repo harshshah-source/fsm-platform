@@ -31,7 +31,7 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
   let otherZmUserId: string;
 
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
   let ZM: CrossZoneActor;
@@ -43,7 +43,7 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
     ageMin: number;
   }): Promise<string> => {
     const companyId = opts.tier === 'PLATINUM' ? platinumCompanyId : goldCompanyId;
-    const deviceId = BigInt(12_800_000_000 + ((NS + deviceIds.length) % 100_000) + deviceIds.length);
+    const deviceId = String(12_800_000_000 + ((NS + deviceIds.length) % 100_000) + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

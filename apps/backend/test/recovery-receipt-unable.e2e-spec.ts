@@ -10,7 +10,7 @@ import type { RequestActor } from '../src/common/request-actor';
  * (`AUTO_CLOSED_ON_WAREHOUSE_RECEIPT`, no ZM approval) and notifies SE + ZM. The SE tapping Unable to
  * Collect with a mandatory reason routes the ticket to the ZM decision queue (Issue 37).
  */
-const DEV = 9_361_001n;
+const DEV = String(9_361_001n);
 const SE_ID = '11111111-1111-1111-1111-111111111111';
 
 const zm: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };

@@ -8,8 +8,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * returned with 1-based line numbers (no partial corruption). A clean batch creates every ticket under
  * one shared `install_batch_id`. A missing required header column rejects the whole upload.
  */
-const DEV_1 = 9_361_001n;
-const DEV_2 = 9_361_002n;
+const DEV_1 = String(9_361_001n);
+const DEV_2 = String(9_361_002n);
 const ALL_DEV = [DEV_1, DEV_2];
 
 const ohActor: RequestActor = {

@@ -9,7 +9,7 @@ import type { RequestActor } from '../src/common/request-actor';
  * device serial is mandatory and validated against the ticket's device, and condition notes are
  * mandatory. Transitions are state-guarded and only the assigned SE may drive the field legs.
  */
-const DEV = 9_360_001n;
+const DEV = String(9_360_001n);
 const SE_ID = '11111111-1111-1111-1111-111111111111';
 const OTHER_SE = '22222222-2222-2222-2222-222222222222';
 

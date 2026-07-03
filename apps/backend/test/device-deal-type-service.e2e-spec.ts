@@ -13,13 +13,13 @@ const OH = { userId: '49000000-0000-0000-0000-000000000000', role: 'OPERATIONS_H
 describe('Issue 49 slice 1 — DeviceService.setDealType', () => {
   let prisma: PrismaService;
   let svc: DeviceService;
-  let deviceId: bigint;
+  let deviceId: string;
 
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
     svc = new DeviceService(prisma, new AuditService(prisma));
-    deviceId = BigInt(12_000_000_000 + (NS % 100_000));
+    deviceId = String(12_000_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId } });
   });
 
@@ -47,7 +47,7 @@ describe('Issue 49 slice 1 — DeviceService.setDealType', () => {
   });
 
   it('returns NOT_FOUND for an unknown device', async () => {
-    const out = await svc.setDealType(BigInt(99_999_999_999), 'RECURRING', OH);
+    const out = await svc.setDealType(String(99_999_999_999), 'RECURRING', OH);
     expect(out.result).toBe('NOT_FOUND');
   });
 

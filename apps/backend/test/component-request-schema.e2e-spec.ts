@@ -18,7 +18,7 @@ describe('Issue 22 slice 1 — component request schema', () => {
   let plantId: bigint;
   let componentId: bigint;
   let se: string;
-  let deviceId: bigint;
+  let deviceId: string;
   let ticketId: string;
   let cycleId: string;
   let submissionId: string;
@@ -41,7 +41,7 @@ describe('Issue 22 slice 1 — component request schema', () => {
     se = u.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
 
-    deviceId = BigInt(11_500_000_000 + (NS % 1_000_000));
+    deviceId = String(11_500_000_000 + (NS % 1_000_000));
     await prisma.device.create({ data: { deviceId } });
     cycleId = (await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: new Date() } })).cycleId;
     ticketId = (

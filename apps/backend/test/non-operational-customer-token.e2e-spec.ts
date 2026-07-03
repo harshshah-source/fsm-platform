@@ -12,8 +12,8 @@ import type { RequestActor } from '../src/common/request-actor';
  * marking issues a one-time token and fires it through the CustomerConfirmationNotifier seam (Issue 03
  * replaces the stub). The customer confirms by presenting the token; a used or expired token is rejected.
  */
-const DEV = 9_353_001n;
-const DEV2 = 9_353_002n;
+const DEV = String(9_353_001n);
+const DEV2 = String(9_353_002n);
 const ALL = [DEV, DEV2];
 
 const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };

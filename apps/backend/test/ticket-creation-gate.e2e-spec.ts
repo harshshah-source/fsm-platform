@@ -10,10 +10,10 @@ import { TicketCreationService } from '../src/ticketing/ticket-creation.service'
  *  - even with a stale has_open_failure_cycle flag, the I1 active-cycle partial-unique prevents a
  *    second open ticket (no second open ticket for the same device — the real invariant)
  */
-const DEV_INELIGIBLE = 9_056_001n;
-const DEV_ACTIVE = 9_056_002n;
-const DEV_DUP = 9_056_003n;
-const DEV_STALE = 9_056_004n;
+const DEV_INELIGIBLE = String(9_056_001n);
+const DEV_ACTIVE = String(9_056_002n);
+const DEV_DUP = String(9_056_003n);
+const DEV_STALE = String(9_056_004n);
 const ALL = [DEV_INELIGIBLE, DEV_ACTIVE, DEV_DUP, DEV_STALE];
 
 describe('Issue 05 slice 6 — creation gate + duplicate invariant', () => {
@@ -25,7 +25,7 @@ describe('Issue 05 slice 6 — creation gate + duplicate invariant', () => {
 
   const NOW = new Date(Date.UTC(2026, 5, 20, 12, 0, 0));
 
-  const seedState = (deviceId: bigint, over: { isInactive: boolean; eligible: boolean }) =>
+  const seedState = (deviceId: string, over: { isInactive: boolean; eligible: boolean }) =>
     prisma.deviceState.create({
       data: {
         deviceId,

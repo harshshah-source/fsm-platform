@@ -17,7 +17,7 @@ describe('Issue 40 slice 3 — /api/reports/soft-inactive-* (e2e)', () => {
 
   let zoneX: bigint;
   let plantX: bigint;
-  const devices = [9_402_900n, 9_402_901n];
+  const devices = [9_402_900n, 9_402_901n].map(String);
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

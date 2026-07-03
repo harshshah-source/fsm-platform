@@ -7,8 +7,8 @@ import { AutoRecoveryService } from '../src/ticketing/auto-recovery.service';
  * goes VERIFIED, the open-cycle flag clears, and a lifecycle event is recorded. A device that has
  * not recovered stays OPEN.
  */
-const DEV_RECOVERED = 9_081_001n;
-const DEV_STILL_DOWN = 9_081_002n;
+const DEV_RECOVERED = String(9_081_001n);
+const DEV_STILL_DOWN = String(9_081_002n);
 const ALL = [DEV_RECOVERED, DEV_STILL_DOWN];
 
 describe('Issue 08 slice 2 — AutoRecoveryService', () => {
@@ -23,7 +23,7 @@ describe('Issue 08 slice 2 — AutoRecoveryService', () => {
   const opened = new Date(NOW.getTime() - 120 * 60_000);
   const minsAfterOpen = (m: number) => new Date(opened.getTime() + m * 60_000);
 
-  const seed = async (deviceId: bigint, pingOffsets: number[]) => {
+  const seed = async (deviceId: string, pingOffsets: number[]) => {
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({
       data: {

@@ -11,7 +11,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * Seeded actors: `zm.north` (ZM zone 1), `se.north` (SE id 2222…, zone 1), `wm` (Warehouse Manager).
  */
 const SE_NORTH_ID = '22222222-2222-2222-2222-222222222222';
-const DEV = 9_344_900n;
+const DEV = String(9_344_900n);
 
 describe('Issue 34 — /api/install/:id lifecycle (e2e)', () => {
   let app: INestApplication;

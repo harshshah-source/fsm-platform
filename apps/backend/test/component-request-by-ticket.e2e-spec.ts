@@ -21,7 +21,7 @@ describe('Issue 62 slice 1 — ComponentRequestService.byTicket', () => {
   let componentId: bigint;
   let se: string;
   let ticketId: string;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
   beforeAll(async () => {
@@ -43,7 +43,7 @@ describe('Issue 62 slice 1 — ComponentRequestService.byTicket', () => {
     se = seUser.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
 
-    const deviceId = BigInt(11_800_000_000 + (NS % 100_000));
+    const deviceId = String(11_800_000_000 + (NS % 100_000));
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'WAITING_COMPONENT', openedAt: NOW } });

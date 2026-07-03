@@ -143,7 +143,7 @@ export class VerificationService {
   }
 
   private async verifyTicket(
-    ticket: { ticketId: string; deviceId: bigint; failureCycleId: string | null; status: string },
+    ticket: { ticketId: string; deviceId: string; failureCycleId: string | null; status: string },
     now: Date,
   ): Promise<'CLOSED' | 'FRAUD' | 'FAILED' | 'PENDING'> {
     // Phase-1 anchor: the latest troubleshoot submission for this ticket.
@@ -223,7 +223,7 @@ export class VerificationService {
   }
 
   private async getOrCreateRun(
-    ticket: { ticketId: string; deviceId: bigint },
+    ticket: { ticketId: string; deviceId: string },
     submission: { submissionId: string; submittedAt: Date; seGpsLat: number | null; seGpsLon: number | null },
     now: Date,
   ) {
@@ -246,7 +246,7 @@ export class VerificationService {
 
   /** Persist the terminal run outcome and transition the ticket (+ cycle on CLOSED), audited, one tx. */
   private async finalize(
-    ticket: { ticketId: string; failureCycleId: string | null; status: string; deviceId: bigint },
+    ticket: { ticketId: string; failureCycleId: string | null; status: string; deviceId: string },
     runId: string,
     runData: Prisma.VerificationRunUpdateInput,
     outcome: 'CLOSED' | 'FAILED_VERIFICATION',

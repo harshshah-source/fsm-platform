@@ -8,7 +8,9 @@ import { loadBook8Dataset, defaultCsvPath } from './book8-dataset';
 const HAS_FILE = existsSync(defaultCsvPath());
 
 describe.skipIf(!HAS_FILE)('Book8 dataset parser', () => {
-  const ds = loadBook8Dataset();
+  // `describe.skipIf` still runs this body during collection, so guard the (throwing) file read —
+  // the tests are skipped anyway when the CSV is absent (CI without the 26 MB fixture).
+  const ds = HAS_FILE ? loadBook8Dataset() : (undefined as unknown as ReturnType<typeof loadBook8Dataset>);
 
   it('classifies the full file deterministically', () => {
     const c = ds.classification;

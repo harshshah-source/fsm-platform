@@ -19,11 +19,11 @@ describe('Shadow Use Queue HTTP surface (e2e)', () => {
   let companyId: bigint;
   let plantId: bigint;
   let componentId: bigint;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
   const seedShadow = async (): Promise<string> => {
-    const deviceId = BigInt(12_900_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(12_900_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'SUBMITTED', openedAt: new Date() } });

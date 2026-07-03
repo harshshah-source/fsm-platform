@@ -49,7 +49,7 @@ describe('Issue 34 — InstallLifecycleService.runInstallVerification', () => {
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: createdTicketIds } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: createdTicketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: createdTicketIds } } });
-    await prisma.device.deleteMany({ where: { deviceId: { gte: 9_342_000n, lt: 9_343_000n } } });
+    await prisma.device.deleteMany({ where: { deviceId: { gte: '9342000', lt: '9343000' } } });
     await prisma.plant.deleteMany({ where: { plantId } });
     await prisma.company.deleteMany({ where: { companyId } });
     await prisma.zone.deleteMany({ where: { zoneId } });
@@ -57,8 +57,8 @@ describe('Issue 34 — InstallLifecycleService.runInstallVerification', () => {
   });
 
   /** An ACTIVATED install ticket whose device is freshly fitted (verification anchor = T_ACT). */
-  const makeActivated = async (): Promise<{ ticketId: string; deviceId: bigint }> => {
-    const deviceId = deviceSeq++;
+  const makeActivated = async (): Promise<{ ticketId: string; deviceId: string }> => {
+    const deviceId = String(deviceSeq++);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     const t = await prisma.ticket.create({
       data: {
@@ -72,7 +72,7 @@ describe('Issue 34 — InstallLifecycleService.runInstallVerification', () => {
     return { ticketId: t.ticketId, deviceId };
   };
 
-  const ping = (deviceId: bigint, at: Date, lat = 0, lon = 0): Promise<unknown> =>
+  const ping = (deviceId: string, at: Date, lat = 0, lon = 0): Promise<unknown> =>
     prisma.rawDeviceSnapshot.create({ data: { runId: snapshotRunId, deviceId, gpsDatetime: at, lat, lon } });
 
   it('first valid post-fitment ping → Ticket CLOSED + verified push (no geofence)', async () => {

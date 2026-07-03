@@ -32,7 +32,7 @@ describe('Issue 29/30 — intra-day CRITICAL insertion + accept/decline + timeou
   let ses: string[] = [];
   let sortedSes: string[] = [];
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
   const makeSe = async (): Promise<string> => {
@@ -47,7 +47,7 @@ describe('Issue 29/30 — intra-day CRITICAL insertion + accept/decline + timeou
   };
 
   const makeCriticalTicket = async (bucket: 'CRITICAL' | 'HIGH_CRITICAL' = 'CRITICAL'): Promise<string> => {
-    const deviceId = BigInt(11_700_000_000 + ((NS + deviceIds.length) % 100_000) + deviceIds.length);
+    const deviceId = String(11_700_000_000 + ((NS + deviceIds.length) % 100_000) + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

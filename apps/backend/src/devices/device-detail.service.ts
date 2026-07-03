@@ -76,7 +76,7 @@ export type DowntimeTrendOutcome = { result: 'OK'; trend: DeviceDowntimeTrend } 
 export class DeviceDetailService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async deviceCycles(deviceId: bigint, scope: DeviceScope, now: Date = new Date()): Promise<DeviceCyclesOutcome> {
+  async deviceCycles(deviceId: string, scope: DeviceScope, now: Date = new Date()): Promise<DeviceCyclesOutcome> {
     if (!(await this.visible(deviceId, scope))) return { result: 'NOT_FOUND' };
 
     const cycles = await this.prisma.failureCycle.findMany({
@@ -121,7 +121,7 @@ export class DeviceDetailService {
     return { result: 'OK', deviceId: String(deviceId), cycles: views };
   }
 
-  async downtimeTrend(deviceId: bigint, scope: DeviceScope): Promise<DowntimeTrendOutcome> {
+  async downtimeTrend(deviceId: string, scope: DeviceScope): Promise<DowntimeTrendOutcome> {
     if (!(await this.visible(deviceId, scope))) return { result: 'NOT_FOUND' };
 
     const summaries = await this.prisma.deviceDowntimeSummaryMonthly.findMany({ where: { deviceId }, orderBy: { month: 'asc' } });
@@ -169,7 +169,7 @@ export class DeviceDetailService {
   }
 
   /** Device exists and is visible to this scope (ZM → own zone only). */
-  private async visible(deviceId: bigint, scope: DeviceScope): Promise<boolean> {
+  private async visible(deviceId: string, scope: DeviceScope): Promise<boolean> {
     const device = await this.prisma.device.findUnique({ where: { deviceId }, select: { deviceId: true } });
     if (!device) return false;
     if (scope.role !== 'ZONAL_MANAGER') return true;
@@ -178,7 +178,7 @@ export class DeviceDetailService {
   }
 
   /** The device's zone via its hot `device_states` plant, falling back to its most recent ticket's plant. */
-  private async deviceZone(deviceId: bigint): Promise<number | null> {
+  private async deviceZone(deviceId: string): Promise<number | null> {
     const ds = await this.prisma.deviceState.findUnique({ where: { deviceId }, select: { plantId: true } });
     if (ds?.plantId != null) {
       const plant = await this.prisma.plant.findUnique({ where: { plantId: ds.plantId }, select: { zoneId: true } });

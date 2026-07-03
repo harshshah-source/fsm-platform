@@ -19,7 +19,7 @@ describe('Issue 44 slice 4 — device detail endpoints (e2e)', () => {
 
   let companyId: bigint;
   let plantId: bigint;
-  let deviceId: bigint;
+  let deviceId: string;
   const cycleIds: string[] = [];
   const ticketIds: string[] = [];
 
@@ -33,7 +33,7 @@ describe('Issue 44 slice 4 — device detail endpoints (e2e)', () => {
     await prisma.zone.upsert({ where: { zoneId: 1n }, update: {}, create: { zoneId: 1n, name: 'Zone-1-seed' } });
     companyId = (await prisma.company.create({ data: { name: 'Co-ddc-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-ddc-' + NS, zoneId: 1n } })).plantId;
-    deviceId = BigInt(9_447_000_000 + (NS % 100_000));
+    deviceId = String(9_447_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     await prisma.deviceState.create({ data: { deviceId, eligibleForUptime: true, plantId, companyId, computedAt: new Date() } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'VERIFIED', openedAt: new Date(Date.UTC(2026, 4, 5)), closedAt: new Date(Date.UTC(2026, 4, 6)) } });
@@ -83,8 +83,11 @@ describe('Issue 44 slice 4 — device detail endpoints (e2e)', () => {
     await request(app.getHttpServer()).get('/api/devices/999999999999/cycles').set('Authorization', `Bearer ${oh}`).expect(404);
   });
 
-  it('rejects a non-numeric device id (400)', async () => {
+  // Device ids are opaque strings (AutoPlant `tb_vehiclemaster.device_id` varchar(255) — leading-zero
+  // IMEIs, alphanumeric vendor ids). An alphanumeric id is a valid shape, so an unknown one is 404, not
+  // a 400 malformed-id rejection.
+  it('accepts an alphanumeric device id and 404s when unknown', async () => {
     const oh = await login('ops.head@fsm.test');
-    await request(app.getHttpServer()).get('/api/devices/abc/cycles').set('Authorization', `Bearer ${oh}`).expect(400);
+    await request(app.getHttpServer()).get('/api/devices/AP03TC0959/cycles').set('Authorization', `Bearer ${oh}`).expect(404);
   });
 });

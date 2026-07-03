@@ -30,11 +30,11 @@ describe('verification controller (e2e)', () => {
   let companyId: bigint;
   let plantId: bigint;
   let snapshotRunId: bigint;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
-  const makeTicket = async (): Promise<{ ticketId: string; deviceId: bigint }> => {
-    const deviceId = BigInt(11_700_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+  const makeTicket = async (): Promise<{ ticketId: string; deviceId: string }> => {
+    const deviceId = String(11_700_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: T0 } });
@@ -47,7 +47,7 @@ describe('verification controller (e2e)', () => {
     ticketIds.push(ticket.ticketId);
     return { ticketId: ticket.ticketId, deviceId };
   };
-  const addPing = (deviceId: bigint, time: Date, loc: { lat: number; lon: number }) =>
+  const addPing = (deviceId: string, time: Date, loc: { lat: number; lon: number }) =>
     prisma.rawDeviceSnapshot.create({ data: { runId: snapshotRunId, deviceId, gpsDatetime: time, lat: loc.lat, lon: loc.lon } });
   const submitForm = (ticketId: string) =>
     submit.submit({ ticketId, seId: SE_ID, clientSubmissionId: randomUUID(), rootCauseCategory: 'POWER_ISSUE', seGps: ANCHOR, presenceSource: 'FORM_GPS', actor: { userId: SE_ID, role: 'SERVICE_ENGINEER' }, now: T0 });

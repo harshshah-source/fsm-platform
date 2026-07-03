@@ -36,7 +36,7 @@ describe('Issue 40 slice 2 — RecommenderService mode switch', () => {
   });
 
   async function dev(plantId: bigint, eligible: boolean, inactive: boolean): Promise<void> {
-    const deviceId = BigInt(9_401_000) + BigInt(devices.length);
+    const deviceId = String(9_401_000 + devices.length);
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     await prisma.deviceState.create({ data: { deviceId, eligibleForUptime: eligible, isInactive: inactive, plantId, computedAt: NOW } });

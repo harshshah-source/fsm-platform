@@ -24,7 +24,7 @@ describe('Issue 31 slice 1 — ZM same-day update (ADD)', () => {
   let se: string;
   let ticketId: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const ZM = { userId: '31111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null };
   const NOW = new Date('2026-06-25T06:00:00Z');
@@ -51,7 +51,7 @@ describe('Issue 31 slice 1 — ZM same-day update (ADD)', () => {
     se = u.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
 
-    const deviceId = BigInt(10_900_000_000 + (NS % 100_000));
+    const deviceId = String(10_900_000_000 + (NS % 100_000));
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: NOW } });

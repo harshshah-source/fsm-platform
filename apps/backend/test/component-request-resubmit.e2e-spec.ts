@@ -28,7 +28,7 @@ describe('Issue 22 slice 5 — ZM-confirmed resubmit: ownership + reopen', () =>
   let zm: string;
   const seByCoverage = new Map<CoverageType, string>();
   const engineerIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const zmActor = () => ({ userId: zm, role: 'ZONAL_MANAGER' });
 
@@ -36,7 +36,7 @@ describe('Issue 22 slice 5 — ZM-confirmed resubmit: ownership + reopen', () =>
     se: string,
     deliveryDestination: DeliveryDestination,
   ): Promise<{ requestId: string; cycleId: string; ticketId: string }> => {
-    const deviceId = BigInt(11_900_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(11_900_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({

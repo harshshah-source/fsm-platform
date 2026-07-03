@@ -10,7 +10,7 @@ import type { RequestActor } from '../src/common/request-actor';
  * or escalated to Operations Head. Manual closure records the closure type by acting role
  * (ZM_MANUAL_CLOSE / OPERATIONS_HEAD_OVERRIDE_CLOSE / CSM_ACTING_CLOSE) with full audit fields.
  */
-const DEV = 9_370_001n;
+const DEV = String(9_370_001n);
 const SE_ID = '11111111-1111-1111-1111-111111111111';
 const SE2 = '99999999-9999-9999-9999-999999999999';
 

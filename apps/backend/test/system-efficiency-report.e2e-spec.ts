@@ -21,7 +21,7 @@ describe('Issue 42 — System Efficiency Report', () => {
   let zoneId: bigint;
   let companyId: bigint;
   let plantId: bigint;
-  let deviceId: bigint;
+  let deviceId: string;
   let se: string;
   let tsTicketId: string;
   let recoveryTicketId: string;
@@ -46,7 +46,7 @@ describe('Issue 42 — System Efficiency Report', () => {
     userIds.push(se);
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
 
-    deviceId = BigInt(13_900_000_000 + (NS % 100_000));
+    deviceId = String(13_900_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-EFF' } });
     await prisma.deviceState.create({ data: { deviceId, plantId, companyId, computedAt: at(0) } });
 

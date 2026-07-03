@@ -10,12 +10,12 @@ const t = (iso: string) => new Date(iso);
 
 // Intentionally shuffled input covering every tie-break level.
 const INPUT: CandidateTicket[] = [
-  { ticketId: 'A', companyTier: 'PLATINUM', deviceBucket: 'CRITICAL', companyPriorityRank: 'B', latestGpsDatetime: t('2026-06-20T10:00:00Z'), deviceId: 5n },
-  { ticketId: 'B', companyTier: 'PLATINUM', deviceBucket: 'CRITICAL', companyPriorityRank: 'A', latestGpsDatetime: t('2026-06-20T12:00:00Z'), deviceId: 9n },
-  { ticketId: 'C', companyTier: 'PLATINUM', deviceBucket: 'LONG_PENDING', companyPriorityRank: 'C', latestGpsDatetime: t('2026-06-20T09:00:00Z'), deviceId: 1n },
-  { ticketId: 'D', companyTier: 'GOLD', deviceBucket: 'VERY_SEVERE', companyPriorityRank: 'A', latestGpsDatetime: t('2026-06-20T08:00:00Z'), deviceId: 2n },
-  { ticketId: 'E', companyTier: 'PLATINUM', deviceBucket: 'CRITICAL', companyPriorityRank: 'A', latestGpsDatetime: t('2026-06-20T10:00:00Z'), deviceId: 3n },
-  { ticketId: 'F', companyTier: 'PLATINUM', deviceBucket: 'CRITICAL', companyPriorityRank: 'A', latestGpsDatetime: t('2026-06-20T10:00:00Z'), deviceId: 7n },
+  { ticketId: 'A', companyTier: 'PLATINUM', deviceBucket: 'CRITICAL', companyPriorityRank: 'B', latestGpsDatetime: t('2026-06-20T10:00:00Z'), deviceId: '5' },
+  { ticketId: 'B', companyTier: 'PLATINUM', deviceBucket: 'CRITICAL', companyPriorityRank: 'A', latestGpsDatetime: t('2026-06-20T12:00:00Z'), deviceId: '9' },
+  { ticketId: 'C', companyTier: 'PLATINUM', deviceBucket: 'LONG_PENDING', companyPriorityRank: 'C', latestGpsDatetime: t('2026-06-20T09:00:00Z'), deviceId: '1' },
+  { ticketId: 'D', companyTier: 'GOLD', deviceBucket: 'VERY_SEVERE', companyPriorityRank: 'A', latestGpsDatetime: t('2026-06-20T08:00:00Z'), deviceId: '2' },
+  { ticketId: 'E', companyTier: 'PLATINUM', deviceBucket: 'CRITICAL', companyPriorityRank: 'A', latestGpsDatetime: t('2026-06-20T10:00:00Z'), deviceId: '3' },
+  { ticketId: 'F', companyTier: 'PLATINUM', deviceBucket: 'CRITICAL', companyPriorityRank: 'A', latestGpsDatetime: t('2026-06-20T10:00:00Z'), deviceId: '7' },
 ];
 
 describe('Issue 10 slice 2 — canonical candidate sort (ADR-0017)', () => {

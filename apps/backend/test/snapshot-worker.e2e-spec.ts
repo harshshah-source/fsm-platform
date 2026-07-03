@@ -14,9 +14,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * with per-chunk retry (chunk-independent), and finalizes: SUCCESS (all chunks ok), PARTIAL (some
  * failed, some ok), or FAILED (none ok). `data_as_of` is the max ingested `gps_datetime`.
  */
-const DEV = (n: number): bigint => BigInt(9_100_000 + n);
+const DEV = (n: number): string => String(9_100_000 + n);
 
-const row = (deviceId: bigint, minute: number): SourceSnapshotRow => ({
+const row = (deviceId: string, minute: number): SourceSnapshotRow => ({
   deviceId,
   gpsDatetime: new Date(Date.UTC(2026, 5, 19, 8, minute, 0)),
   lat: 12.97,

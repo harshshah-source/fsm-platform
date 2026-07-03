@@ -11,9 +11,9 @@ import type { $Enums } from '../src/generated/prisma/client';
  * Cycles), and — only for a RECURRING device with a physical-retrieval reason — a RECOVERY ticket is
  * auto-created in REQUESTED and queued (its number returned for the toast).
  */
-const DEV_RECURRING = 9_352_001n; // RECURRING + COMPANY_PAUSED → recovery ticket
-const DEV_ONE_TIME = 9_352_002n; // ONE_TIME → no recovery ticket
-const DEV_RECUR_NONQUAL = 9_352_003n; // RECURRING but COMPLIANCE_HOLD → no recovery ticket
+const DEV_RECURRING = String(9_352_001n); // RECURRING + COMPANY_PAUSED → recovery ticket
+const DEV_ONE_TIME = String(9_352_002n); // ONE_TIME → no recovery ticket
+const DEV_RECUR_NONQUAL = String(9_352_003n); // RECURRING but COMPLIANCE_HOLD → no recovery ticket
 const ALL = [DEV_RECURRING, DEV_ONE_TIME, DEV_RECUR_NONQUAL];
 
 const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
@@ -27,7 +27,7 @@ describe('Issue 35 slice 3 — CONFIRMED side-effects', () => {
 
   const NOW = new Date(Date.UTC(2026, 5, 25, 12, 0, 0));
 
-  const seedDevice = async (deviceId: bigint, dealType: $Enums.DealType, withTicket: boolean) => {
+  const seedDevice = async (deviceId: string, dealType: $Enums.DealType, withTicket: boolean) => {
     await prisma.device.create({ data: { deviceId, dealType } });
     await prisma.deviceState.create({
       data: { deviceId, eligibleForUptime: true, hasOpenFailureCycle: withTicket, plantId, companyId, computedAt: NOW },
@@ -41,7 +41,7 @@ describe('Issue 35 slice 3 — CONFIRMED side-effects', () => {
     }
   };
 
-  const confirm = async (deviceId: bigint, reasonCode: $Enums.NonOpReason) => {
+  const confirm = async (deviceId: string, reasonCode: $Enums.NonOpReason) => {
     const req = await service.requestMarking({ deviceId, reasonCode }, zm, NOW);
     if (req.result !== 'OK') throw new Error(req.result);
     await service.confirmByManager(req.marking.markingId, zm, NOW);

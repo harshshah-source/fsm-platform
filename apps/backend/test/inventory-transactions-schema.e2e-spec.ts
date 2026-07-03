@@ -17,7 +17,7 @@ describe('Issue 24 slice 1 — inventory_transactions schema', () => {
   let plantId: bigint;
   let componentId: bigint;
   let se: string;
-  let deviceId: bigint;
+  let deviceId: string;
   let ticketId: string;
 
   beforeAll(async () => {
@@ -31,7 +31,7 @@ describe('Issue 24 slice 1 — inventory_transactions schema', () => {
     const u = await prisma.user.create({ data: { name: 'SE ' + tag, role: 'SERVICE_ENGINEER', phone: 'se-' + tag, email: `se-${tag}@it.test`, zoneId } });
     se = u.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
-    deviceId = BigInt(12_500_000_000 + (NS % 1_000_000));
+    deviceId = String(12_500_000_000 + (NS % 1_000_000));
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: new Date() } });
     ticketId = (await prisma.ticket.create({ data: { workType: 'TROUBLESHOOT', status: 'OPEN', failureCycleId: cycle.cycleId, deviceId, plantId, companyId, companyTier: 'GOLD', lastStateChangedAt: new Date() } })).ticketId;

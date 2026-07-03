@@ -7,8 +7,8 @@ import { TicketCreationService } from '../src/ticketing/ticket-creation.service'
  * `repeat_failure = true` and a `previous_failure_cycle_id` link; the prior VERIFIED cycle is never
  * mutated. A first-time device opens a plain OPEN cycle.
  */
-const DEV_REPEAT = 9_084_001n;
-const DEV_FIRST = 9_084_002n;
+const DEV_REPEAT = String(9_084_001n);
+const DEV_FIRST = String(9_084_002n);
 const ALL = [DEV_REPEAT, DEV_FIRST];
 
 describe('Issue 08 slice 4 — repeat-failure detection', () => {
@@ -21,7 +21,7 @@ describe('Issue 08 slice 4 — repeat-failure detection', () => {
 
   const NOW = new Date(Date.UTC(2026, 5, 20, 12, 0, 0));
 
-  const seedState = (deviceId: bigint) =>
+  const seedState = (deviceId: string) =>
     prisma.deviceState.create({
       data: {
         deviceId,

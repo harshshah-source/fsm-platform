@@ -30,14 +30,14 @@ describe('Issue 31 slice 2 — ZM same-day REMOVE + REORDER', () => {
   let tA: string;
   let tB: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const ZM = { userId: '31222222-2222-2222-2222-222222222222', role: 'ZONAL_MANAGER', actedAsRole: null };
   const NOW = new Date('2026-06-25T06:00:00Z');
   let scope: { role: string; zoneId: number };
 
   const makeTicket = async (gpsAgeMin: number): Promise<string> => {
-    const deviceId = BigInt(11_100_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(11_100_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

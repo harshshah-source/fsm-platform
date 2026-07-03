@@ -22,7 +22,7 @@ describe('Issue 44 slice 3 — DeviceDetailService.downtimeTrend', () => {
   let companyId: bigint;
   let plantA: bigint;
   let seId: string;
-  let deviceId: bigint;
+  let deviceId: string;
   const userIds: string[] = [];
   const cycleIds: string[] = [];
   const ticketIds: string[] = [];
@@ -43,7 +43,7 @@ describe('Issue 44 slice 3 — DeviceDetailService.downtimeTrend', () => {
     userIds.push(seId);
     await prisma.engineerMaster.create({ data: { engineerId: seId, coverageType: 'DEDICATED', zoneId: zoneA, dailyCapacity: 10 } });
 
-    deviceId = BigInt(9_446_000_000 + (NS % 100_000));
+    deviceId = String(9_446_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     await prisma.deviceState.create({ data: { deviceId, eligibleForUptime: true, plantId: plantA, companyId, computedAt: MAY } });
 

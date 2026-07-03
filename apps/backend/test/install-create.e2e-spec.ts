@@ -9,8 +9,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * the opening lifecycle event. Per-row validation rejects a missing vehicle/device/plant/company, a
  * vehicle that already has an active device, and a plant outside the creator's zone authority.
  */
-const DEV_FREE = 9_360_001n; // unmapped device, installable
-const DEV_MAPPED = 9_360_002n; // already actively fitted to a vehicle
+const DEV_FREE = String(9_360_001n); // unmapped device, installable
+const DEV_MAPPED = String(9_360_002n); // already actively fitted to a vehicle
 const ALL_DEV = [DEV_FREE, DEV_MAPPED];
 
 const zmActor: RequestActor = {
@@ -165,7 +165,7 @@ describe('Issue 33 slice 1 — InstallService.createSingle', () => {
     expect(noCompany).toEqual({ result: 'ERROR', code: 'COMPANY_NOT_FOUND' });
 
     const noDevice = await service.createSingle(
-      { ...baseRow(), deviceId: 8_888_888n },
+      { ...baseRow(), deviceId: '8888888' },
       { role: 'OPERATIONS_HEAD', zoneId: null },
       ohActor,
       NOW,
@@ -205,7 +205,7 @@ describe('Issue 33 slice 1 — InstallService.createSingle', () => {
     const vehB = await prisma.vehicle.create({
       data: { vehicleNo: 'INST-B-' + stamp, plantId: plantB, companyId },
     });
-    const devB = 9_360_003n;
+    const devB = String(9_360_003n);
     await prisma.device.create({ data: { deviceId: devB, deviceType: 'GPS-X' } });
 
     const ohOk = await service.createSingle(

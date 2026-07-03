@@ -9,7 +9,7 @@ import { DashboardService } from '../src/dashboard/dashboard.service';
  * closure (closure_type other than AUTO_CLOSED_ON_WAREHOUSE_RECEIPT) is listed as non-standard so it
  * never silently bypasses warehouse receipt.
  */
-const DEV = 9_371_001n;
+const DEV = String(9_371_001n);
 
 describe('Issue 37 slice 2 — stalled + non-standard closures', () => {
   let prisma: PrismaService;

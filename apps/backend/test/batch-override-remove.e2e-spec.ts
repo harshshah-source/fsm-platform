@@ -39,7 +39,7 @@ describe('Issue 13a slice 2 — OverrideService REMOVE_TICKET', () => {
   let se: string;
   let batchId: bigint;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   let removedTicket: string;
   let keptTicket: string;
@@ -47,7 +47,7 @@ describe('Issue 13a slice 2 — OverrideService REMOVE_TICKET', () => {
   const NOW = new Date('2026-06-21T06:00:00Z');
 
   const makeTicket = async (plant: bigint, gpsAgeMin: number): Promise<string> => {
-    const deviceId = BigInt(10_200_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(10_200_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

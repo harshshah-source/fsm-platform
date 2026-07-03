@@ -55,7 +55,7 @@ interface FittedBody {
   photoRef?: string;
 }
 
-/** JSON-safe Install lifecycle view (BigInt deviceId → string; Dates serialize as ISO). */
+/** JSON-safe Install lifecycle view (String deviceId; Dates serialize as ISO). */
 interface InstallViewDto extends Omit<InstallView, 'deviceId'> {
   deviceId: string;
 }
@@ -216,8 +216,11 @@ function parseSingleBody(body: SingleBody): InstallRowInput {
   const vehicleNo = (body.vehicleNo ?? '').trim();
   const plantId = parseId(body.plantId, 'plantId');
   const companyId = parseId(body.companyId, 'companyId');
-  const deviceId = parseId(body.deviceId, 'deviceId');
+  // device_id is an opaque string (leading-zero IMEIs / alphanumeric vendor ids) — kept verbatim,
+  // only checked non-empty; plant/company remain numeric.
+  const deviceId = (body.deviceId ?? '').trim();
   if (!vehicleNo) throw new BadRequestException({ code: 'MISSING_REQUIRED_FIELD', field: 'vehicleNo' });
+  if (!deviceId) throw new BadRequestException({ code: 'MISSING_REQUIRED_FIELD', field: 'deviceId' });
 
   let targetDate: Date | null = null;
   if (body.targetDate) {

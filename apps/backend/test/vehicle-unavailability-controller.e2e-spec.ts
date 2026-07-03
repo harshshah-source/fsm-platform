@@ -17,7 +17,7 @@ describe('Issue 28 slice 3 — Vehicle Unavailability HTTP (e2e)', () => {
   let prisma: PrismaService;
   let plantId: bigint;
   let companyId: bigint;
-  let deviceId: bigint;
+  let deviceId: string;
   let ticketId: string;
 
   beforeAll(async () => {
@@ -29,7 +29,7 @@ describe('Issue 28 slice 3 — Vehicle Unavailability HTTP (e2e)', () => {
 
     companyId = (await prisma.company.create({ data: { name: 'Co-vuc-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-vuc-' + NS, zoneId: 1n } })).plantId;
-    deviceId = BigInt(9_700_000_000 + (NS % 100_000));
+    deviceId = String(9_700_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: new Date('2026-06-25T10:00:00Z') } });
     const ticket = await prisma.ticket.create({

@@ -14,7 +14,7 @@ const NS = Date.now();
 describe('/api/devices deal_type (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  let deviceId: bigint;
+  let deviceId: string;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -22,7 +22,7 @@ describe('/api/devices deal_type (e2e)', () => {
     app.setGlobalPrefix('api');
     await app.init();
     prisma = app.get(PrismaService);
-    deviceId = BigInt(12_100_000_000 + (NS % 100_000));
+    deviceId = String(12_100_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId } });
   });
 

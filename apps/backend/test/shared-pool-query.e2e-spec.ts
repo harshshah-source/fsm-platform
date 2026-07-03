@@ -20,7 +20,7 @@ describe('Issue 12 slice 3 — SharedPoolService.getSharedPool (coverage scoping
   let otherPlant: bigint;
   let se: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   let openCoveredTicket: string;
   const NOW = new Date('2026-06-21T06:00:00Z');
@@ -30,7 +30,7 @@ describe('Issue 12 slice 3 — SharedPoolService.getSharedPool (coverage scoping
     assignmentState: 'UNASSIGNED' | 'FORMALLY_ASSIGNED',
     status: 'OPEN' | 'CLOSED' = 'OPEN',
   ): Promise<string> => {
-    const deviceId = BigInt(9_900_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(9_900_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

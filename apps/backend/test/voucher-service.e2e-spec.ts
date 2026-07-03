@@ -87,7 +87,7 @@ describe('Issue 38 — VouchersService', () => {
     seA = await makeSe(zoneA, 'A');
     seB = await makeSe(zoneB, 'B');
 
-    const deviceId = 9_380_001n;
+    const deviceId = '9380001';
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     ticketId = (
       await prisma.ticket.create({
@@ -111,7 +111,7 @@ describe('Issue 38 — VouchersService', () => {
       await prisma.expenseVoucher.deleteMany({ where: { voucherId: { in: createdVoucherIds } } });
     }
     await prisma.ticket.deleteMany({ where: { ticketId } });
-    await prisma.device.deleteMany({ where: { deviceId: 9_380_001n } });
+    await prisma.device.deleteMany({ where: { deviceId: '9380001' } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: [seA, seB] } } });
     await prisma.user.deleteMany({ where: { userId: { in: [seA, seB] } } });
     await prisma.plant.deleteMany({ where: { plantId: plantA } });

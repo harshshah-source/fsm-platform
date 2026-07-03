@@ -12,10 +12,10 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * Test devices use a 9_000_00x namespace; rows + their run header are cleaned up per test so
  * the idempotency counts are deterministic against the persistent local DB.
  */
-const DEV_A = 9_000_001n;
-const DEV_B = 9_000_002n;
+const DEV_A = String(9_000_001n);
+const DEV_B = String(9_000_002n);
 
-const row = (deviceId: bigint, minute: number): SourceSnapshotRow => ({
+const row = (deviceId: string, minute: number): SourceSnapshotRow => ({
   deviceId,
   gpsDatetime: new Date(Date.UTC(2026, 5, 19, 8, minute, 0)),
   lat: 12.971599,

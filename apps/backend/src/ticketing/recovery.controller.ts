@@ -22,7 +22,7 @@ import { type RecoveryOutcome, type RecoveryView, RecoveryService } from './reco
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 const UNABLE_REASONS: readonly UnableToCollectReason[] = ['COMPANY_REFUSED', 'VEHICLE_UNREACHABLE', 'DEVICE_MISSING', 'OTHER'];
 
-/** JSON-safe recovery view (BigInt deviceId → string). */
+/** JSON-safe recovery view (String deviceId). */
 interface RecoveryDto extends Omit<RecoveryView, 'deviceId'> {
   deviceId: string;
 }

@@ -7,7 +7,7 @@
  * rows. Two deliberate accommodations for the corrupted export:
  *
  *   1. device_id is unrecoverable (scientific-notation collapse), so we mint a STABLE synthetic
- *      BigInt device_id per `vehicle_no` (vehicle_no is 100% unique). The map is built once up front
+ *      String device_id per `vehicle_no` (vehicle_no is 100% unique). The map is built once up front
  *      and exposed via getSeedData() so the test can seed devices/vehicles with matching ids.
  *   2. CSV dates are `DD-MM-YYYY HH:mm` (no seconds); we reformat to the ISO shape the PRODUCTION
  *      `normalizeGpsTimestamp` expects and reuse it (IST +330) — so UTC normalization is tested for
@@ -23,7 +23,7 @@ const SYNTH_BASE = 900_000_000_000_000n; // '9' prefix marks the id synthetic
 const IST_OFFSET_MIN = 330;
 
 export interface CsvDeviceSeed {
-  deviceId: bigint;
+  deviceId: string;
   vehicleNo: string;
   plantCode: string; // raw plant_id from CSV (used to group plants in the test)
   plantName: string;
@@ -78,7 +78,7 @@ export class CsvSourceReader implements SourceReader {
       devType: ix('DEVICE_TYPE'), main: ix('MAIN_STATUS'),
     };
 
-    const idOf = new Map<string, bigint>();
+    const idOf = new Map<string, string>();
     let seq = 0;
     let taken = 0;
     for (let i = 1; i < lines.length && taken < limit; i++) {
@@ -86,7 +86,7 @@ export class CsvSourceReader implements SourceReader {
       const f = splitCsvLine(lines[i]);
       const vno = f[C.vno];
       if (isNull(vno)) continue; // no stable key → unusable row
-      if (!idOf.has(vno)) idOf.set(vno, SYNTH_BASE + BigInt(++seq));
+      if (!idOf.has(vno)) idOf.set(vno, String(SYNTH_BASE + BigInt(++seq)));
       const deviceId = idOf.get(vno)!;
 
       this.seeds.push({

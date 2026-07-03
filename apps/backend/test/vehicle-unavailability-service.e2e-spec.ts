@@ -20,7 +20,7 @@ describe('Issue 28 slice 2 — Vehicle Unavailability service', () => {
   let companyId: bigint;
   let plantId: bigint;
   let se: string;
-  let deviceId: bigint;
+  let deviceId: string;
   let cycleId: string;
   let ticketId: string;
   const userIds: string[] = [];
@@ -41,7 +41,7 @@ describe('Issue 28 slice 2 — Vehicle Unavailability service', () => {
     userIds.push(se);
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId: zoneA, dailyCapacity: 10 } });
 
-    deviceId = BigInt(9_600_000_000 + (NS % 100_000));
+    deviceId = String(9_600_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: OPENED } });
     cycleId = cycle.cycleId;

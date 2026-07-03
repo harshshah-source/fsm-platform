@@ -23,7 +23,7 @@ export interface CandidateTicket {
   deviceBucket: DeviceBucket;
   companyPriorityRank: string;
   latestGpsDatetime: Date | null;
-  deviceId: bigint;
+  deviceId: string;
 }
 
 // Higher index = higher priority (processed first), matching the "descending" intent of ADR-0017.

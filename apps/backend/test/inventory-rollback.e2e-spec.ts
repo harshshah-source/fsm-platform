@@ -26,11 +26,11 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
   let cable: bigint;
   let se: string;
   let snapshotRunId: bigint;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
-  const makeTicket = async (): Promise<{ ticketId: string; deviceId: bigint; cycleId: string }> => {
-    const deviceId = BigInt(12_700_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+  const makeTicket = async (): Promise<{ ticketId: string; deviceId: string; cycleId: string }> => {
+    const deviceId = String(12_700_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: T0 } });
@@ -39,7 +39,7 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
     await prisma.deviceState.create({ data: { deviceId, isInactive: true, hasOpenFailureCycle: true, plantId, companyId, computedAt: T0 } });
     return { ticketId: ticket.ticketId, deviceId, cycleId: cycle.cycleId };
   };
-  const addPing = (deviceId: bigint, time: Date, loc: { lat: number; lon: number }) =>
+  const addPing = (deviceId: string, time: Date, loc: { lat: number; lon: number }) =>
     prisma.rawDeviceSnapshot.create({ data: { runId: snapshotRunId, deviceId, gpsDatetime: time, lat: loc.lat, lon: loc.lon } });
   const submitForm = (ticketId: string) =>
     submit.submit({ ticketId, seId: se, clientSubmissionId: randomUUID(), rootCauseCategory: 'WIRING_ISSUE', seGps: ANCHOR, presenceSource: 'FORM_GPS', consumedComponents: [{ componentId: cable, qty: 2 }], actor: { userId: se, role: 'SERVICE_ENGINEER' }, now: T0 });

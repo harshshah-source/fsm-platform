@@ -9,8 +9,8 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * lifecycle event records the acting manager; a second attempt 409s (no longer open).
  */
 const ZM_ZONE = 1;
-const DEV_ZM = 9_082_001n;
-const DEV_OTHER = 9_082_002n;
+const DEV_ZM = String(9_082_001n);
+const DEV_OTHER = String(9_082_002n);
 const ALL = [DEV_ZM, DEV_OTHER];
 
 describe('Issue 08 slice 3 — manual auto-recovery close', () => {
@@ -30,7 +30,7 @@ describe('Issue 08 slice 3 — manual auto-recovery close', () => {
     return res.body.accessToken as string;
   };
 
-  const seedOpen = async (deviceId: bigint, plantId: bigint) => {
+  const seedOpen = async (deviceId: string, plantId: bigint) => {
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({
       data: { deviceId, state: 'OPEN', openedAt: new Date() },

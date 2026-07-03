@@ -25,7 +25,7 @@ describe('Issue 75 slice 2 — RecommenderService install backlog', () => {
   let installTicket: string;
   let defInstall: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
   beforeAll(async () => {
@@ -105,8 +105,8 @@ describe('Issue 75 slice 2 — RecommenderService install backlog', () => {
     await prisma.deviceState.create({ data: { deviceId, isInactive: true, eligibleForUptime: true, plantId: plant, companyId, computedAt: NOW } });
   }
 
-  function nextDevice(): bigint {
-    const id = BigInt(9_750_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+  function nextDevice(): string {
+    const id = String(9_750_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(id);
     return id;
   }

@@ -87,7 +87,7 @@ describe.runIf(RUN)('Book8 isolated test environment', () => {
       expect(ticketable.length).toBeGreaterThan(0);
       expect((bucketDist['CRITICAL'] ?? 0) + (bucketDist['HIGH_CRITICAL'] ?? 0)).toBeGreaterThan(0);
       // No ticket exists for an ineligible (no-PGI) device id ending in 0.
-      expect(ourTickets.every((t) => t.deviceId % 10n !== 0n)).toBe(true);
+      expect(ourTickets.every((t) => BigInt(t.deviceId) % 10n !== 0n)).toBe(true);
 
       // ── Report ─────────────────────────────────────────────────────────────────────────────────
       const c = ds.classification;

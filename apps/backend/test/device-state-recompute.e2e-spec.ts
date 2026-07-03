@@ -13,8 +13,8 @@ import { SettingsService } from '../src/settings/settings.service';
  *
  * Test assets live in a 9_05x namespace and are torn down per file against the persistent local DB.
  */
-const INACTIVE_DEV = 9_051_001n;
-const ACTIVE_DEV = 9_051_002n;
+const INACTIVE_DEV = String(9_051_001n);
+const ACTIVE_DEV = String(9_051_002n);
 
 describe('Issue 05 slice 3 — DeviceStateService.recompute', () => {
   let prisma: PrismaService;

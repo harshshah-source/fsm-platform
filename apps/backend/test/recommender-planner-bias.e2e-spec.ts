@@ -23,7 +23,7 @@ describe('Issue 14a slice 3 — recommender planner bias', () => {
   let multiBias: string; // multi on pBias — planner-named
   let dedFallback: string; // dedicated on pFallback
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   let biasTicket: string;
   let fallbackTicket: string;
@@ -41,7 +41,7 @@ describe('Issue 14a slice 3 — recommender planner bias', () => {
   };
 
   const makeTicket = async (plant: bigint): Promise<string> => {
-    const deviceId = BigInt(10_700_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(10_700_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

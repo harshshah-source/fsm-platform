@@ -7,8 +7,8 @@ import { RepeatEscalationService } from '../src/ticketing/repeat-escalation.serv
  * 3+ it escalates the device's active cycle + ticket to ESCALATED and records a lifecycle event.
  * Below the threshold nothing changes. The device still down — the episode is not closed.
  */
-const DEV_ESC = 9_088_001n; // 3 repeat cycles in 7d → escalates
-const DEV_TWO = 9_088_002n; // 2 repeat cycles in 7d → stays put
+const DEV_ESC = String(9_088_001n); // 3 repeat cycles in 7d → escalates
+const DEV_TWO = String(9_088_002n); // 2 repeat cycles in 7d → stays put
 const ALL = [DEV_ESC, DEV_TWO];
 
 describe('Issue 08 slice 5 — RepeatEscalationService.runEscalationScan', () => {
@@ -22,7 +22,7 @@ describe('Issue 08 slice 5 — RepeatEscalationService.runEscalationScan', () =>
   const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86_400_000);
 
   /** A closed (VERIFIED) repeat episode that still counts via its immutable repeat_failure flag. */
-  const seedClosedRepeat = (deviceId: bigint, openedDaysAgo: number) =>
+  const seedClosedRepeat = (deviceId: string, openedDaysAgo: number) =>
     prisma.failureCycle.create({
       data: {
         deviceId,
@@ -34,7 +34,7 @@ describe('Issue 08 slice 5 — RepeatEscalationService.runEscalationScan', () =>
     });
 
   /** The device's current active REPEAT cycle + its open ticket. */
-  const seedActiveRepeat = async (deviceId: bigint) => {
+  const seedActiveRepeat = async (deviceId: string) => {
     const cycle = await prisma.failureCycle.create({
       data: { deviceId, state: 'REPEAT', openedAt: daysAgo(1), repeatFailure: true },
     });

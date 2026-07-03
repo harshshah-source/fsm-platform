@@ -60,7 +60,7 @@ const RECOVERY_REASONS = new Set<NonOpReason>([
 ]);
 
 export interface RequestMarkingInput {
-  deviceId: bigint;
+  deviceId: string;
   reasonCode: NonOpReason;
   reasonText?: string | null;
   /** Window start; defaults to `now`. */
@@ -71,7 +71,7 @@ export interface RequestMarkingInput {
 
 export interface NonOpMarkingView {
   markingId: string;
-  deviceId: bigint;
+  deviceId: string;
   state: NonOpState;
   reasonCode: NonOpReason | null;
   reasonText: string | null;
@@ -108,7 +108,7 @@ export type OverrideOutcome =
 /** A row as returned by `tx.nonOperationalMarking.*`; narrowed to the columns the service reads. */
 type MarkingRow = {
   markingId: string;
-  deviceId: bigint;
+  deviceId: string;
   state: NonOpState;
   reasonCode: NonOpReason | null;
   reasonText: string | null;
@@ -489,7 +489,7 @@ function isUuid(value: string): boolean {
 
 function toView(row: {
   markingId: string;
-  deviceId: bigint;
+  deviceId: string;
   state: NonOpState;
   reasonCode: NonOpReason | null;
   reasonText: string | null;

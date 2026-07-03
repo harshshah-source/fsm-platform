@@ -10,8 +10,8 @@ import type { RequestActor } from '../src/common/request-actor';
  * AWAITING_ZM_CONFIRMATION. The dual-confirmation queue lists open rows sorted by `awaiting_since`
  * asc, each carrying a days-elapsed badge.
  */
-const DEV_A = 9_350_001n;
-const DEV_B = 9_350_002n;
+const DEV_A = String(9_350_001n);
+const DEV_B = String(9_350_002n);
 const ALL = [DEV_A, DEV_B];
 
 const zm: RequestActor = {
@@ -106,7 +106,7 @@ describe('Issue 35 slice 1 — NonOperationalService request + queue', () => {
     const noText = await service.requestMarking({ deviceId: DEV_B, reasonCode: 'OTHER' }, zm, NOW);
     expect(noText.result).toBe('INVALID_REASON_TEXT');
     const missing = await service.requestMarking(
-      { deviceId: 9_999_999n, reasonCode: 'COMPANY_PAUSED' },
+      { deviceId: '9999999', reasonCode: 'COMPANY_PAUSED' },
       zm,
       NOW,
     );

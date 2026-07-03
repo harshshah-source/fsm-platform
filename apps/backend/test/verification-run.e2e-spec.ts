@@ -26,12 +26,12 @@ describe('Issue 18 slice 3 — verification run', () => {
   let plantId: bigint;
   let se: string;
   let snapshotRunId: bigint;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const actor = () => ({ userId: se, role: 'SERVICE_ENGINEER' });
 
-  const makeTicket = async (): Promise<{ ticketId: string; deviceId: bigint; cycleId: string }> => {
-    const deviceId = BigInt(11_600_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+  const makeTicket = async (): Promise<{ ticketId: string; deviceId: string; cycleId: string }> => {
+    const deviceId = String(11_600_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: T0 } });
@@ -54,7 +54,7 @@ describe('Issue 18 slice 3 — verification run', () => {
     return { ticketId: ticket.ticketId, deviceId, cycleId: cycle.cycleId };
   };
 
-  const addPing = async (deviceId: bigint, time: Date, loc: { lat: number; lon: number }) => {
+  const addPing = async (deviceId: string, time: Date, loc: { lat: number; lon: number }) => {
     await prisma.rawDeviceSnapshot.create({
       data: { runId: snapshotRunId, deviceId, gpsDatetime: time, lat: loc.lat, lon: loc.lon },
     });

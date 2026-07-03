@@ -20,11 +20,11 @@ describe('Issue 23 slice 2 — WAITING_COMPONENT > 7 days in Action Required', (
   const zones: Record<'A' | 'B', bigint> = { A: 0n, B: 0n };
   let companyId: bigint;
   const plantByZone: Record<'A' | 'B', bigint> = { A: 0n, B: 0n };
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
   const seedWaiting = async (zoneKey: 'A' | 'B', pausedAt: Date): Promise<void> => {
-    const deviceId = BigInt(12_300_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(12_300_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({

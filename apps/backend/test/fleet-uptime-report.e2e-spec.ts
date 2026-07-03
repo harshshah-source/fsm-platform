@@ -21,7 +21,7 @@ describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
   let companyId: bigint;
   let plantA: bigint;
   let plantB: bigint;
-  let devSeq = 9_391_000n;
+  let devSeq = String(9_391_000n);
   const devices: bigint[] = [];
 
   beforeAll(async () => {
@@ -45,7 +45,7 @@ describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
   });
 
   async function summary(zoneId: bigint, plantId: bigint, eligible: boolean, downtime: number, auto: number, se: number): Promise<void> {
-    const deviceId = devSeq++;
+    const deviceId = String(devSeq++);
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     await prisma.deviceDowntimeSummaryMonthly.create({

@@ -21,13 +21,13 @@ describe('Issue 22 slice 4 — SE confirm receipt + SLA resume switch', () => {
   let plantId: bigint;
   let componentId: bigint;
   let se: string;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const seActor = () => ({ userId: se, role: 'SERVICE_ENGINEER' });
 
   // Seed a SHIPPED request whose cycle is WAITING_COMPONENT with SLA paused at PAUSED_AT.
   const makeShipped = async (): Promise<{ requestId: string; cycleId: string }> => {
-    const deviceId = BigInt(11_800_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(11_800_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({

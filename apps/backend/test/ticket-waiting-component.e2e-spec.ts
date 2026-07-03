@@ -21,7 +21,7 @@ describe('Issue 23 slice 3 — ticket list WAITING_COMPONENT flag', () => {
   let plantId: bigint;
   let componentId: bigint;
   let se: string;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   let waitingTicketId = '';
   let plainTicketId = '';
@@ -41,7 +41,7 @@ describe('Issue 23 slice 3 — ticket list WAITING_COMPONENT flag', () => {
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
 
     // Waiting-component ticket (cycle WAITING_COMPONENT, SLA paused, a REQUESTED component request).
-    const d1 = BigInt(12_400_000_000 + (NS % 100_000) * 10);
+    const d1 = String(12_400_000_000 + (NS % 100_000) * 10);
     deviceIds.push(d1);
     await prisma.device.create({ data: { deviceId: d1 } });
     const c1 = await prisma.failureCycle.create({
@@ -60,7 +60,7 @@ describe('Issue 23 slice 3 — ticket list WAITING_COMPONENT flag', () => {
     });
 
     // Plain OPEN ticket — no component request, not waiting.
-    const d2 = BigInt(12_400_000_000 + (NS % 100_000) * 10 + 1);
+    const d2 = String(12_400_000_000 + (NS % 100_000) * 10 + 1);
     deviceIds.push(d2);
     await prisma.device.create({ data: { deviceId: d2 } });
     const c2 = await prisma.failureCycle.create({ data: { deviceId: d2, state: 'OPEN', openedAt: NOW } });

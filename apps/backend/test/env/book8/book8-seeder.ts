@@ -22,7 +22,7 @@ export interface SeedSummary {
   vehicles: number;
   devices: number;
   pgiRows: number;
-  deviceIds: bigint[];
+  deviceIds: string[];
 }
 
 const chunk = <T>(arr: readonly T[], size: number): T[][] => {

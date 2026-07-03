@@ -19,14 +19,14 @@ describe('Issue 23 slice 1 — component request oversight (zone-scoped read)', 
   let companyId: bigint;
   let componentId: bigint;
   let se: string;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const reqByZone: Record<'A' | 'B', string> = { A: '', B: '' };
 
   const seedRequest = async (zoneKey: 'A' | 'B'): Promise<string> => {
     const zoneId = zones[zoneKey];
     const plantId = (await prisma.plant.create({ data: { name: `P-ov-${zoneKey}-${NS}`, zoneId } })).plantId;
-    const deviceId = BigInt(12_200_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(12_200_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'WAITING_COMPONENT', openedAt: NOW } });

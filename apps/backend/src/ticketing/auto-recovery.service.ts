@@ -93,7 +93,7 @@ export class AutoRecoveryService {
     ticketId: string,
     fromStatus: string,
     cycleId: string,
-    deviceId: bigint,
+    deviceId: string,
     now: Date,
     actor: AutoRecoveryActor | null = null,
   ): Promise<void> {

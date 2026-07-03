@@ -21,12 +21,12 @@ describe('Issue 22 slice 2 — component-unavailable submit raises a request + p
   let plantId: bigint;
   let componentId: bigint;
   let se: string;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const actor = () => ({ userId: se, role: 'SERVICE_ENGINEER' });
 
   const makeTicket = async (): Promise<{ ticketId: string; cycleId: string }> => {
-    const deviceId = BigInt(11_600_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(11_600_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: NOW } });

@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Param,
   Patch,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
@@ -15,7 +16,7 @@ import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { type DealType } from '../generated/prisma/enums';
 import { DeviceDetailService, type DeviceCycleView, type DeviceDowntimeTrend } from './device-detail.service';
-import { DeviceService, type DeviceView } from './device.service';
+import { DeviceService, type DeviceListRow, type DeviceView } from './device.service';
 
 const DEAL_TYPES: readonly DealType[] = ['RECURRING', 'ONE_TIME'];
 const READ_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
@@ -32,6 +33,20 @@ export class DevicesController {
     private readonly devices: DeviceService,
     private readonly deviceDetail: DeviceDetailService,
   ) {}
+
+  /** Device Detail list (FE-22). Manager read, zone-scoped; optional `search` + `limit`. */
+  @Get()
+  @Roles(...READ_ROLES)
+  list(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+  ): Promise<DeviceListRow[]> {
+    return this.devices.listDevices(
+      { role: user.role, zoneId: user.zone_id },
+      { search, limit: limit === undefined ? undefined : Number(limit) },
+    );
+  }
 
   @Get(':deviceId')
   @Roles(...READ_ROLES)
@@ -77,8 +92,11 @@ export class DevicesController {
     return out.device;
   }
 
-  private parseId(deviceId: string): bigint {
-    if (!/^\d+$/.test(deviceId)) throw new BadRequestException({ code: 'INVALID_DEVICE_ID' });
-    return BigInt(deviceId);
+  // Device ids are opaque strings from AutoPlant (`tb_vehiclemaster.device_id` varchar(255)) —
+  // leading-zero IMEIs and alphanumeric vendor ids are valid, so we only reject the empty id.
+  private parseId(deviceId: string): string {
+    const id = deviceId.trim();
+    if (id === '') throw new BadRequestException({ code: 'INVALID_DEVICE_ID' });
+    return id;
   }
 }

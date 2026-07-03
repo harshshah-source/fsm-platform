@@ -9,7 +9,7 @@ import { TicketCreationService } from '../src/ticketing/ticket-creation.service'
  * (work_type=TROUBLESHOOT, status=OPEN, company_tier denormalised), then flips
  * `has_open_failure_cycle` on the state row. One Troubleshoot Ticket per device.
  */
-const DEVICE = 9_055_001n;
+const DEVICE = String(9_055_001n);
 
 describe('Issue 05 slice 5 — TicketCreationService', () => {
   let prisma: PrismaService;

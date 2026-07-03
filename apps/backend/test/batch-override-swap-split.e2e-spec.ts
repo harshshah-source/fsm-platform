@@ -35,14 +35,14 @@ describe('Issue 13a slice 4 — SWAP_SE / REASSIGN / SPLIT_BATCH', () => {
   let splitMoved: string;
   let splitKept: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const ZM = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null };
   const NOW = new Date('2026-06-21T06:00:00Z');
   const scope = { role: 'ZONAL_MANAGER', zoneId: 0 };
 
   const makeTicket = async (plant: bigint, gpsAgeMin: number): Promise<string> => {
-    const deviceId = BigInt(10_400_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(10_400_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({

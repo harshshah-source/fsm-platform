@@ -3,7 +3,7 @@ import { Logger } from '@nestjs/common';
 /** Emitted when a Non-Op marking needs the customer's confirmation via a one-time email link. */
 export interface CustomerConfirmationRequest {
   markingId: string;
-  deviceId: bigint;
+  deviceId: string;
   /** The one-time confirmation token embedded in the link the customer receives. */
   token: string;
   /** Absolute confirmation URL (token included) the customer clicks to confirm. */

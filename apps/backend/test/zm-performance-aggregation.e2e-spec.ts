@@ -92,7 +92,7 @@ describe('Issue 43 slice 1 — ZmPerformanceAggregationService.computeMonth', ()
   }
 
   async function downtimeRow(downtime: number): Promise<void> {
-    const deviceId = BigInt(9_430_000 + devices.length + (NS % 1000));
+    const deviceId = String(9_430_000 + devices.length + (NS % 1000));
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceDowntimeSummaryMonthly.create({

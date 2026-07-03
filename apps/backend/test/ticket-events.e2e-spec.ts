@@ -6,7 +6,7 @@ import { TicketCreationService } from '../src/ticketing/ticket-creation.service'
  * the opening transition (→ OPEN) so the Detail Drawer's Lifecycle tab has real data from event one.
  * Later issues append their transitions; the table is append-only.
  */
-const DEVICE = 9_071_001n;
+const DEVICE = String(9_071_001n);
 
 describe('Issue 07 slice A — ticket_events opening transition', () => {
   let prisma: PrismaService;

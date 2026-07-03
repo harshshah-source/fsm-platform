@@ -26,7 +26,7 @@ describe('Issue 25 slice 5 — SE Management list', () => {
   let seBusy: string; // zone A — TROUBLESHOOT_STARTED soft state → BUSY
   let seB: string; // zone B
   const userIds: string[] = [];
-  let deviceId: bigint;
+  let deviceId: string;
   let ticketId: string;
 
   const makeSe = async (zoneId: bigint, name: string): Promise<string> => {
@@ -65,7 +65,7 @@ describe('Issue 25 slice 5 — SE Management list', () => {
     );
 
     // seBusy: an active TROUBLESHOOT_STARTED soft state on a ticket → derived BUSY.
-    deviceId = BigInt(9_500_000_000 + (NS % 100_000));
+    deviceId = String(9_500_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: NOW } });
     const ticket = await prisma.ticket.create({

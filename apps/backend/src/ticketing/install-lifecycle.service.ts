@@ -26,7 +26,7 @@ export interface InstallVerificationSweepResult {
 export interface InstallView {
   ticketId: string;
   status: TicketStatus;
-  deviceId: bigint;
+  deviceId: string;
   assignedSeId: string | null;
   fittedGpsSerial: string | null;
   fittedSimSerial: string | null;
@@ -56,7 +56,7 @@ interface TicketRow {
   ticketId: string;
   workType: $Enums.WorkType;
   status: TicketStatus;
-  deviceId: bigint;
+  deviceId: string;
   assignedSeId: string | null;
 }
 
@@ -185,7 +185,7 @@ export class InstallLifecycleService {
   }
 
   /** ACTIVATED → CLOSED on a verified first ping (SYSTEM-driven, audited, one tx). */
-  private async closeVerified(t: { ticketId: string; deviceId: bigint }, now: Date): Promise<void> {
+  private async closeVerified(t: { ticketId: string; deviceId: string }, now: Date): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.ticket.update({ where: { ticketId: t.ticketId }, data: { status: 'CLOSED', closedAt: now, lastStateChangedAt: now } });
       await tx.ticketEvent.create({ data: { ticketId: t.ticketId, fromState: 'ACTIVATED', toState: 'CLOSED', reasonCode: 'INSTALL_VERIFIED', at: now } });
@@ -194,7 +194,7 @@ export class InstallLifecycleService {
   }
 
   /** ACTIVATED → FAILED_ACTIVATION when the activation window elapses with no valid ping (SYSTEM, audited). */
-  private async failActivation(t: { ticketId: string; deviceId: bigint }, now: Date): Promise<void> {
+  private async failActivation(t: { ticketId: string; deviceId: string }, now: Date): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.ticket.update({ where: { ticketId: t.ticketId }, data: { status: 'FAILED_ACTIVATION', lastStateChangedAt: now } });
       await tx.ticketEvent.create({ data: { ticketId: t.ticketId, fromState: 'ACTIVATED', toState: 'FAILED_ACTIVATION', reasonCode: 'INSTALL_FAILED_ACTIVATION', at: now } });
@@ -256,7 +256,7 @@ function eventActor(actor: RequestActor): { actorId: string | null; actorRole: $
 function toView(row: {
   ticketId: string;
   status: TicketStatus;
-  deviceId: bigint;
+  deviceId: string;
   assignedSeId: string | null;
   fittedGpsSerial: string | null;
   fittedSimSerial: string | null;

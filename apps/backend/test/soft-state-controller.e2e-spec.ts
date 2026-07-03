@@ -19,11 +19,11 @@ describe('SE soft-state controller (e2e)', () => {
   let zoneId: bigint;
   let companyId: bigint;
   let plantId: bigint;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
   const makeTicket = async (): Promise<string> => {
-    const deviceId = BigInt(11_300_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(11_300_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: new Date() } });

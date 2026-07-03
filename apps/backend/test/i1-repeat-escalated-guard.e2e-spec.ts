@@ -8,8 +8,8 @@ import { Prisma } from '../src/generated/prisma/client';
  * UNIQUE `failure_cycles_one_active_per_device` must reject a second active cycle for the device —
  * the DB is the final guard behind the `has_open_failure_cycle` fast-path.
  */
-const DEV_REPEAT = 9_087_001n;
-const DEV_ESCALATED = 9_087_002n;
+const DEV_REPEAT = String(9_087_001n);
+const DEV_ESCALATED = String(9_087_002n);
 const ALL = [DEV_REPEAT, DEV_ESCALATED];
 
 const isUniqueViolation = (e: unknown): boolean =>

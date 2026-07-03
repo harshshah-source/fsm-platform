@@ -22,7 +22,7 @@ describe('Issue 41 slice 3 — /api/reports/root-cause (e2e)', () => {
   let plantId: bigint;
   let seId: string;
   const userIds: string[] = [];
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const cycleIds: string[] = [];
   const ticketIds: string[] = [];
   const submissionIds: string[] = [];
@@ -65,7 +65,7 @@ describe('Issue 41 slice 3 — /api/reports/root-cause (e2e)', () => {
   });
 
   async function addSubmission(category: 'POWER_ISSUE' | 'SIM_NETWORK_ISSUE', submittedAt: Date): Promise<void> {
-    const deviceId = BigInt(9_413_000_000 + deviceIds.length + (NS % 1000));
+    const deviceId = String(9_413_000_000 + deviceIds.length + (NS % 1000));
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: submittedAt } });

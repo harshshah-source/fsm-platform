@@ -20,7 +20,7 @@ describe('Issue 44 slice 1 — FleetUptimeAggregationService cycle metrics', () 
   let companyId: bigint;
   let plantId: bigint;
   let seId: string;
-  let devSeq = 9_440_000n;
+  let devSeq = String(9_440_000n);
   const devices: bigint[] = [];
   const cycleIds: string[] = [];
   const ticketIds: string[] = [];
@@ -59,14 +59,14 @@ describe('Issue 44 slice 1 — FleetUptimeAggregationService cycle metrics', () 
   });
 
   async function makeDevice(): Promise<bigint> {
-    const deviceId = devSeq++;
+    const deviceId = String(devSeq++);
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     await prisma.deviceState.create({ data: { deviceId, eligibleForUptime: true, plantId, companyId, computedAt: NOW } });
     return deviceId;
   }
 
-  async function addCycle(deviceId: bigint, openedAt: Date, closedAt: Date | null, opts: { repeat?: boolean; withComponent?: boolean } = {}): Promise<string> {
+  async function addCycle(deviceId: string, openedAt: Date, closedAt: Date | null, opts: { repeat?: boolean; withComponent?: boolean } = {}): Promise<string> {
     const cycle = await prisma.failureCycle.create({
       data: { deviceId, state: closedAt ? 'VERIFIED' : 'OPEN', openedAt, closedAt, repeatFailure: opts.repeat ?? false },
     });
@@ -88,7 +88,7 @@ describe('Issue 44 slice 1 — FleetUptimeAggregationService cycle metrics', () 
     return cycle.cycleId;
   }
 
-  const summaryFor = (deviceId: bigint) =>
+  const summaryFor = (deviceId: string) =>
     prisma.deviceDowntimeSummaryMonthly.findUniqueOrThrow({ where: { deviceId_month: { deviceId, month: MAY } } });
 
   it('counts cycles opened in the month, repeat-failures, longest episode and recover totals', async () => {

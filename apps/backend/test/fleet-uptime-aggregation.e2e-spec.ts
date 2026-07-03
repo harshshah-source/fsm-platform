@@ -21,7 +21,7 @@ describe('Issue 39 slice 1 — FleetUptimeAggregationService.computeMonth', () =
   let zoneId: bigint;
   let companyId: bigint;
   let plantId: bigint;
-  let devSeq = 9_390_000n;
+  let devSeq = String(9_390_000n);
   const devices: bigint[] = [];
   const cycleIds: string[] = [];
   const ticketIds: string[] = [];
@@ -50,7 +50,7 @@ describe('Issue 39 slice 1 — FleetUptimeAggregationService.computeMonth', () =
 
   /** A device with a device_states row (eligible toggle). */
   const makeDevice = async (eligible: boolean): Promise<bigint> => {
-    const deviceId = devSeq++;
+    const deviceId = String(devSeq++);
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     await prisma.deviceState.create({
@@ -59,13 +59,13 @@ describe('Issue 39 slice 1 — FleetUptimeAggregationService.computeMonth', () =
     return deviceId;
   };
 
-  const addCycle = async (deviceId: bigint, openedAt: Date, closedAt: Date | null): Promise<void> => {
+  const addCycle = async (deviceId: string, openedAt: Date, closedAt: Date | null): Promise<void> => {
     const cycleId = randomUUID();
     cycleIds.push(cycleId);
     await prisma.failureCycle.create({ data: { cycleId, deviceId, state: closedAt ? 'VERIFIED' : 'OPEN', openedAt, closedAt } });
   };
 
-  const addClosedTicket = async (deviceId: bigint, status: 'CLOSED' | 'CLOSED_AUTO_RECOVERY', closedAt: Date): Promise<void> => {
+  const addClosedTicket = async (deviceId: string, status: 'CLOSED' | 'CLOSED_AUTO_RECOVERY', closedAt: Date): Promise<void> => {
     // A TROUBLESHOOT ticket requires a parent failure cycle (check constraint). Zero-length cycle
     // (openedAt == closedAt) so it adds no downtime — this case only exercises closure counting.
     const cycleId = randomUUID();
@@ -77,7 +77,7 @@ describe('Issue 39 slice 1 — FleetUptimeAggregationService.computeMonth', () =
     ticketIds.push(t.ticketId);
   };
 
-  const summaryFor = (deviceId: bigint) =>
+  const summaryFor = (deviceId: string) =>
     prisma.deviceDowntimeSummaryMonthly.findUniqueOrThrow({ where: { deviceId_month: { deviceId, month: MONTH } } });
 
   it('a device with no failure cycles → zero downtime, full-month window, eligible mirrored', async () => {

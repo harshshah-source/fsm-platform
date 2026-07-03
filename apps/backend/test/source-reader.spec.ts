@@ -13,7 +13,7 @@ import {
  */
 
 const row = (deviceId: number, minute: number): SourceSnapshotRow => ({
-  deviceId: BigInt(deviceId),
+  deviceId: String(deviceId),
   gpsDatetime: new Date(Date.UTC(2026, 5, 19, 8, minute, 0)),
   lat: 12.9 + deviceId / 1000,
   lon: 77.5 + deviceId / 1000,
@@ -46,7 +46,22 @@ describe('Issue 04 slice 2 — SourceReader (AutoPlant seam)', () => {
     const { rows } = await drain(reader, 2);
 
     expect(rows).toHaveLength(5);
-    expect(rows.map((r) => r.deviceId)).toEqual([1n, 2n, 3n, 4n, 5n]);
+    expect(rows.map((r) => r.deviceId)).toEqual(['1', '2', '3', '4', '5']);
+  });
+
+  // Device identity is a String (AutoPlant `tb_vehiclemaster.device_id` is varchar(255)): real data
+  // has leading-zero IMEIs and alphanumeric vendor ids that a BigInt key silently corrupts or drops.
+  // The reader must carry them through verbatim.
+  it('preserves leading-zero and alphanumeric device ids verbatim', async () => {
+    const source: SourceSnapshotRow[] = [
+      { deviceId: '0869925073271551', gpsDatetime: new Date(Date.UTC(2026, 5, 19, 8, 0, 0)) },
+      { deviceId: 'AP03TC0959', gpsDatetime: new Date(Date.UTC(2026, 5, 19, 8, 1, 0)) },
+    ];
+    const reader = new InMemorySourceReader(source);
+
+    const { rows } = await drain(reader, 10);
+
+    expect(rows.map((r) => r.deviceId)).toEqual(['0869925073271551', 'AP03TC0959']);
   });
 
   it('signals exhaustion with a null cursor', async () => {

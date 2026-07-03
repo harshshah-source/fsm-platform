@@ -20,7 +20,7 @@ describe('Issue 06 slice 1 — /api/dashboard/zone-overview', () => {
   let otherZoneId: bigint;
   let zmPlantId: bigint;
   let otherPlantId: bigint;
-  const deviceIds: bigint[] = [9_061_001n, 9_061_002n, 9_061_003n];
+  const deviceIds: string[] = [9_061_001n, 9_061_002n, 9_061_003n].map(String);
 
   const login = async (email: string): Promise<string> => {
     const res = await request(app.getHttpServer())
@@ -30,7 +30,7 @@ describe('Issue 06 slice 1 — /api/dashboard/zone-overview', () => {
     return res.body.accessToken as string;
   };
 
-  const seedState = (deviceId: bigint, plantId: bigint, bucket: string | null) =>
+  const seedState = (deviceId: string, plantId: bigint, bucket: string | null) =>
     prisma.deviceState.create({
       data: {
         deviceId,

@@ -8,9 +8,9 @@ import type { RequestActor } from '../src/common/request-actor';
  * CONFIRMED is reachable only after BOTH the manager and the customer confirm (in either order),
  * or via an Operations-Head override-confirm after 7 days of no response, with a mandatory reason.
  */
-const DEV_DUAL = 9_351_001n;
-const DEV_REVERSE = 9_351_002n;
-const DEV_OVERRIDE = 9_351_003n;
+const DEV_DUAL = String(9_351_001n);
+const DEV_REVERSE = String(9_351_002n);
+const DEV_OVERRIDE = String(9_351_003n);
 const ALL = [DEV_DUAL, DEV_REVERSE, DEV_OVERRIDE];
 
 const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
@@ -27,7 +27,7 @@ describe('Issue 35 slice 2 — dual confirmation + override', () => {
   const NOW = new Date(Date.UTC(2026, 5, 25, 12, 0, 0));
   const later = (ms: number) => new Date(NOW.getTime() + ms);
 
-  const request = async (deviceId: bigint) => {
+  const request = async (deviceId: string) => {
     const out = await service.requestMarking({ deviceId, reasonCode: 'COMPANY_PAUSED' }, zm, NOW);
     if (out.result !== 'OK') throw new Error(out.result);
     return out.marking.markingId;

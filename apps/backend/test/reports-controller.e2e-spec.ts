@@ -11,7 +11,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * spec's own (unique) plant isolates exact numbers. Seeded: `zm.north` (ZM zone 1), `ops.head`,
  * `se.north`. May 2026 is a completed month so the window is the full month (31 days).
  */
-const DEV = 9_393_900n;
+const DEV = String(9_393_900n);
 const MAY_SECONDS = 31 * 86_400;
 const DOWNTIME = 2 * 86_400; // a 2-day May outage
 const EXPECTED_UPTIME = Math.round((1 - DOWNTIME / MAY_SECONDS) * 100 * 100) / 100; // 93.55

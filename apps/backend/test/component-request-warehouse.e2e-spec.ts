@@ -21,13 +21,13 @@ describe('Issue 22 slice 3 — warehouse manager component-request flow', () => 
   let componentId: bigint;
   let se: string;
   let wm: string;
-  const deviceIds: bigint[] = [];
+  const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const wmActor = () => ({ userId: wm, role: 'WAREHOUSE_MANAGER' });
 
   // Seed a REQUESTED component request directly (this slice tests the WM service, not the raise).
   const makeRequest = async (createdAt = NOW): Promise<string> => {
-    const deviceId = BigInt(11_700_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    const deviceId = String(11_700_000_000 + (NS % 100_000) * 10 + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
     const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'WAITING_COMPONENT', openedAt: NOW } });

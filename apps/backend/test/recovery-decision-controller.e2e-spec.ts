@@ -9,7 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * closes FAILED_RECOVERY, escalates, or manually closes an unable-to-collect recovery ticket; an SE
  * is forbidden. Manual close records the closure type by acting role.
  */
-const DEV = 9_372_001n;
+const DEV = String(9_372_001n);
 
 describe('Issue 37 slice 3 — /api/recovery decision-queue (e2e)', () => {
   let app: INestApplication;

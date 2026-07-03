@@ -18,7 +18,7 @@ export interface InstallRowInput {
   plantId: bigint;
   companyId: bigint;
   deviceType?: string | null;
-  deviceId: bigint;
+  deviceId: string;
   simId?: string | null;
   targetDate?: Date | null;
   notes?: string | null;
@@ -70,7 +70,7 @@ interface ResolvedRow {
   plantId: bigint;
   companyId: bigint;
   companyTier: $Enums.CompanyTier;
-  deviceId: bigint;
+  deviceId: string;
 }
 
 /** The interactive-transaction client AuditService.withAudit hands to the work callback. */
@@ -216,7 +216,7 @@ export class InstallService {
     ticketId: string;
     workType: $Enums.WorkType;
     status: $Enums.TicketStatus;
-    deviceId: bigint;
+    deviceId: string;
     vehicleId: bigint | null;
     plantId: bigint;
     companyId: bigint;
@@ -277,7 +277,7 @@ function toView(ticket: {
   ticketId: string;
   workType: $Enums.WorkType;
   status: $Enums.TicketStatus;
-  deviceId: bigint;
+  deviceId: string;
   vehicleId: bigint | null;
   plantId: bigint;
   companyId: bigint;
@@ -346,8 +346,10 @@ function parseCsv(
     }
     const plantId = parseBigInt(plantRaw);
     const companyId = parseBigInt(companyRaw);
-    const deviceId = parseBigInt(deviceRaw);
-    if (plantId === null || companyId === null || deviceId === null) {
+    // device_id is an opaque string (leading-zero IMEIs / alphanumeric vendor ids) — kept verbatim,
+    // non-empty already checked above; only plant/company must be numeric.
+    const deviceId = deviceRaw;
+    if (plantId === null || companyId === null) {
       errors.push({ line: lineNo, code: 'INVALID_NUMBER' });
       continue;
     }

@@ -23,7 +23,7 @@ describe('Issue 25 slice 4 — Recommender excludes unavailable SEs', () => {
   let plantId: bigint;
   let dedicated: string;
   const userIds: string[] = [];
-  let deviceId: bigint;
+  let deviceId: string;
   let ticketId: string;
 
   beforeAll(async () => {
@@ -62,7 +62,7 @@ describe('Issue 25 slice 4 — Recommender excludes unavailable SEs', () => {
     });
     await prisma.seCoverage.create({ data: { seId: dedicated, plantId, coverageType: 'DEDICATED' } });
 
-    deviceId = BigInt(9_400_000_000 + (NS % 100_000));
+    deviceId = String(9_400_000_000 + (NS % 100_000));
     await prisma.device.create({ data: { deviceId } });
     await prisma.deviceState.create({
       data: {

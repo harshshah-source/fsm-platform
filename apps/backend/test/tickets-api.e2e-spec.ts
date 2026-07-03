@@ -13,7 +13,7 @@ import { TicketCreationService } from '../src/ticketing/ticket-creation.service'
  *  - GET /api/tickets/:id  — same roles — one ticket; 404 TICKET_NOT_FOUND otherwise.
  *  - SE is forbidden (SEs read work via the Day Plan / Shared Pool, not this manager surface).
  */
-const DEVICE = 9_057_001n;
+const DEVICE = String(9_057_001n);
 
 describe('Issue 05 slice 7 — /api/tickets', () => {
   let app: INestApplication;

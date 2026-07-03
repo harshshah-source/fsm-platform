@@ -44,7 +44,7 @@ interface RequestBody {
   effectiveTo?: string | null;
 }
 
-/** JSON-safe marking view (BigInt deviceId → string; dates serialise as ISO via JSON). */
+/** JSON-safe marking view (String deviceId; dates serialise as ISO via JSON). */
 interface MarkingDto extends Omit<NonOpMarkingView, 'deviceId'> {
   deviceId: string;
 }
@@ -135,11 +135,14 @@ export class NonOperationalPublicController {
   }
 }
 
-function parseDeviceId(raw: string): bigint {
-  if (raw === undefined || raw === null || !/^\d+$/.test(String(raw))) {
+// Device ids are opaque strings from AutoPlant (leading-zero IMEIs / alphanumeric vendor ids); only
+// a missing/empty id is rejected here.
+function parseDeviceId(raw: string): string {
+  const id = raw == null ? '' : String(raw).trim();
+  if (id === '') {
     throw new BadRequestException({ code: 'INVALID_DEVICE_ID' });
   }
-  return BigInt(raw);
+  return id;
 }
 
 function parseDate(raw: string | null | undefined, code: string): Date | undefined {
