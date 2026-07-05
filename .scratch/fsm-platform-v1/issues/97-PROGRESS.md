@@ -8,8 +8,8 @@ Branch: `feat/autoplant-integration`. One slice = one PR-sized commit; `main` st
 
 | Slice | Title (review ref) | State | Commit | Tests |
 |---|---|---|---|---|
-| 1 | MySQL fail-fast timeouts (A4) | ✅ done (uncommitted) | — | 5 new · 825/830 suite |
-| 2 | Stale-run reaper, both run tables (A2) | ⬜ not started | — | — |
+| 1 | MySQL fail-fast timeouts (A4) | 🔵 committed `7bfad51` | `7bfad51` | 5 new · 825/830 suite |
+| 2 | Stale-run reaper, both run tables (A2) | ✅ done | — | 6 new · 831/836 suite |
 | 3 | PARTIAL-cursor lower-bound fix (A3) | ⬜ not started | — | — |
 | 4 | Itemised master-sync skip accounting (A5) | ⬜ not started | — | — |
 | 5 | Reconciliation counts in health (A6) | ⬜ not started | — | — |
@@ -73,7 +73,44 @@ edit. Same env-overridable outcome, smaller blast radius.
 
 ---
 
-## Slice 2 — Stale-run reaper (review A2) — next
-Shared reaper marks `RUNNING` rows older than `INGESTION_STALE_RUN_MIN` → `FAILED` before `startRun()`
-takes the lock, for **both** `master_sync_runs` and `snapshot_runs`; then delete the CLI snapshot-only
-`deleteMany({status:'RUNNING'})` workaround.
+## Slice 2 — Stale-run reaper (review A2) — DONE
+
+**Design.** Shared threshold helper `src/ingestion/stale-run.ts` (`readStaleRunMs` from
+`INGESTION_STALE_RUN_MIN`, default 30 min; `ORPHANED_RUN_ERROR`, `DEFAULT_STALE_RUN_MIN`). Each run
+service owns a table-specific `reapStaleRuns(now)` (the tables diverge — `master_sync_runs` has an
+`error` column, `snapshot_runs` does not), called at the top of `startRun()` before the guard.
+
+**Done in this session (implementation — all in place):**
+- `src/ingestion/stale-run.ts` — new shared helper. ✅
+- `master-sync-run.service.ts` — `reapStaleRuns()` (status→FAILED, finishedAt, error=ORPHANED) + called
+  first in `startRun()`. ✅
+- `snapshot-run.service.ts` — `reapStaleRuns()` (status→FAILED, finishedAt; no error col) + called
+  first in `startRun()`. ✅
+- `test/stale-run-reaper.e2e-spec.ts` — **1 of 6 tests written** (master reap → proceed). GREEN.
+
+### Cycle log
+- **Cycle 1 (tracer, prior session).** master: orphaned RUNNING (startedAt = 1h ago) is reaped →
+  FAILED; next `startRun()` opens a fresh run instead of 409-ing.
+- **Cycles 2–6 (this session; impl already in place, each test green on first run).**
+  2. master: fresh RUNNING NOT reaped → 409 `RUN_IN_PROGRESS`, row still RUNNING.
+  3. master: reaped row carries `error === ORPHANED_RUN_ERROR` + non-null `finishedAt`
+     (via `reapStaleRuns()` directly).
+  4. snapshot: orphaned RUNNING reaped (FAILED + finishedAt; no error col) → `startRun()` proceeds.
+  5. snapshot: fresh RUNNING still 409s, row untouched.
+  6. pure `readStaleRunMs`: default 30·60000; `INGESTION_STALE_RUN_MIN='5'` → 300000; garbage/negative
+     → default; `DEFAULT_STALE_RUN_MIN === 30`.
+- **REFACTOR.** Deleted the now-redundant CLI workaround in `autoplant-sync.ts`
+  (`prisma.snapshotRun.deleteMany({status:'RUNNING'})`) — the reaper inside `startRun()` supersedes it.
+
+**Result.** `test/stale-run-reaper.e2e-spec.ts` 6/6 green · full backend suite **831 passed / 5
+skipped / 0 failed** · `tsc --noEmit` clean.
+
+**Files touched:** `src/ingestion/stale-run.ts` (new), `master-sync-run.service.ts`,
+`snapshot-run.service.ts`, `autoplant-sync.ts` (workaround removed),
+`test/stale-run-reaper.e2e-spec.ts` (new).
+
+---
+
+## Slice 3+ — not started
+See the issue file §5 for slices 3–7. Order: A3 PARTIAL-cursor → A5 skips → A6 reconciliation →
+overlap-safe tick → A1 scheduler.

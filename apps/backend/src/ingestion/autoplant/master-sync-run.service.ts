@@ -1,6 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ORPHANED_RUN_ERROR, readStaleRunMs } from '../stale-run';
 
 export type MasterSyncOutcome = 'SUCCESS' | 'FAILED' | 'PARTIAL';
 
@@ -30,7 +31,22 @@ const runInProgress = (): ConflictException =>
 export class MasterSyncRunService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Reap orphaned RUNNING rows (older than the stale threshold) → FAILED, so a process death never
+   * permanently locks out future runs (review A2). Runs before the guard is taken; a fresh RUNNING
+   * row (within the threshold) is left alone and still 409s. Returns the number reaped.
+   */
+  async reapStaleRuns(now: Date = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - readStaleRunMs());
+    const { count } = await this.prisma.masterSyncRun.updateMany({
+      where: { status: 'RUNNING', startedAt: { lt: cutoff } },
+      data: { status: 'FAILED', finishedAt: now, error: ORPHANED_RUN_ERROR },
+    });
+    return count;
+  }
+
   async startRun(): Promise<{ runId: bigint }> {
+    await this.reapStaleRuns();
     try {
       const run = await this.prisma.$transaction(async (tx) => {
         const locked = await tx.$queryRaw<{ locked: boolean }[]>`

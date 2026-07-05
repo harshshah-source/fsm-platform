@@ -1,5 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { readStaleRunMs } from './stale-run';
 
 export type SnapshotRunOutcome = 'SUCCESS' | 'FAILED' | 'PARTIAL';
 
@@ -23,7 +24,23 @@ const runInProgress = (): ConflictException =>
 export class SnapshotRunService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Reap orphaned RUNNING rows (older than the stale threshold) → FAILED, so a process death never
+   * permanently locks out future runs (review A2). `snapshot_runs` has no `error` column, so the
+   * status flip + `finished_at` are the record. Runs before the guard is taken; a fresh RUNNING row
+   * still 409s. Supersedes the CLI-only `deleteMany({status:'RUNNING'})` workaround.
+   */
+  async reapStaleRuns(now: Date = new Date()): Promise<number> {
+    const cutoff = new Date(now.getTime() - readStaleRunMs());
+    const { count } = await this.prisma.snapshotRun.updateMany({
+      where: { status: 'RUNNING', startedAt: { lt: cutoff } },
+      data: { status: 'FAILED', finishedAt: now },
+    });
+    return count;
+  }
+
   async startRun(): Promise<{ runId: bigint }> {
+    await this.reapStaleRuns();
     try {
       const run = await this.prisma.$transaction(async (tx) => {
         const locked = await tx.$queryRaw<{ locked: boolean }[]>`
