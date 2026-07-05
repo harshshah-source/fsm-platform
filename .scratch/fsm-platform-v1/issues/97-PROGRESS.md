@@ -11,7 +11,7 @@ Branch: `feat/autoplant-integration`. One slice = one PR-sized commit; `main` st
 | 1 | MySQL fail-fast timeouts (A4) | 🔵 committed `7bfad51` | `7bfad51` | 5 new · 825/830 suite |
 | 2 | Stale-run reaper, both run tables (A2) | ✅ done | — | 6 new · 831/836 suite |
 | 3 | PARTIAL-cursor lower-bound fix (A3) | ✅ done | — | 4 new · 835/840 suite |
-| 4 | Itemised master-sync skip accounting (A5) | ⬜ not started | — | — |
+| 4 | Itemised master-sync skip accounting (A5) | ✅ done | — | 6 new · 841/846 suite |
 | 5 | Reconciliation counts in health (A6) | ⬜ not started | — | — |
 | 6 | Overlap-safe telemetry tick | ⬜ not started | — | — |
 | 7 | In-process `@nestjs/schedule` scheduler (A1) | ⬜ not started | — | — |
@@ -139,6 +139,50 @@ chunk's `min(gpsDatetime)`** so the next run re-reads that window (`>=` resume i
 
 ---
 
-## Slice 4+ — not started
-See the issue file §5 for slices 4–7. Order: A5 skips → A6 reconciliation → overlap-safe tick →
-A1 scheduler.
+## Slice 4 — Itemised master-sync skip accounting (review A5)
+
+**Design.** New additive table `master_sync_rejects` (migration `20260705120000`,
+`(run_id, entity, source_key, reason)` + composite index) enumerating every skipped natural key.
+`EntityStat` gains optional `skippedByReason` (total `skipped` unchanged — existing specs untouched).
+In `MasterSyncService.sync()`: one `skip(entity, sourceKey, reason)` helper at all 5 existing skip
+sites (no new business rules); rejects buffered and flushed in ONE batched `createMany` per run,
+capped at 5000 rows, best-effort (try/catch + warn — accounting never fails the sync), flushed on
+both SUCCESS and FAILED paths.
+
+**Reason vocabulary (one code per pre-existing skip site):**
+plants `OUT_OF_SCOPE_STATUS` · `ZONE_UNRESOLVED` | companies `NO_INSCOPE_PLANT` |
+vehicles `PLANT_NOT_SYNCED` · `COMPANY_NOT_SYNCED` | devices `VEHICLE_NOT_SYNCED` · `NO_FITTED_DEVICE`
+(device rejects keyed by device id when present, else vehicle_no).
+
+### Cycle log
+- **Cycle 1 (tracer).** RED: `skippedByReason` undefined. GREEN: migration + model + `skip()`/
+  `flushRejects()` infra, wired at the plants-status site.
+- **Cycles 2–5.** RED→GREEN per site: plants ZONE_UNRESOLVED → companies NO_INSCOPE_PLANT →
+  vehicles PLANT/COMPANY_NOT_SYNCED split → devices VEHICLE_NOT_SYNCED/NO_FITTED_DEVICE split.
+- **Cycle 6 (failure mode).** `createMany` mocked to reject → sync still SUCCESS, counters persisted
+  on the run row, only the itemised rows lost (WARN logged).
+- **REFACTOR.** Folded into GREEN — every skip site is already a single `skip()` call.
+
+**Suite incident (unrelated to this slice, diagnosed + recovered).** The first done-bar run failed
+1 test: a vitest worker crashed ("Worker exited unexpectedly") on `reports-controller.e2e-spec.ts`
+BEFORE its `afterAll`, leaking its recomputed May-2026 `device_downtime_summary_monthly` row (device
+9393900); `fleet-uptime-report.e2e-spec.ts` — whose fleet total is a GLOBAL eligible-count — then saw
+4 devices instead of 3. Cleaned the leaked fixture rows by hand (summary/cycle/state/device +
+`P-rep-%` plant + `Co-rep-%` company), re-ran both specs green, re-ran the full suite.
+*Latent fragility to keep in mind:* any worker crash skips `afterAll` cleanup, and
+global-count assertions (fleet total) are sensitive to any leak for the same month. The crash
+recurred once more on a different, DB-free file (`schedules-route-conflicts`) — environmental
+(memory pressure), not test-specific; the third run was clean with every file accounted.
+
+**Result.** `test/master-sync-skip-accounting.e2e-spec.ts` 6/6 green · full backend suite
+**841 passed / 5 skipped / 0 failed** (Slice-5 RED tracer excluded from this bar by design) ·
+`tsc --noEmit` clean · migration `20260705120000` applies with no drift.
+
+**Files touched:** `prisma/schema.prisma` + `prisma/migrations/20260705120000_add_master_sync_rejects/`,
+`master-sync-run.service.ts` (EntityStat), `master-sync.service.ts`,
+`test/master-sync-skip-accounting.e2e-spec.ts` (new).
+
+---
+
+## Slice 5+ — not started
+See the issue file §5 for slices 5–7. Order: A6 reconciliation → overlap-safe tick → A1 scheduler.

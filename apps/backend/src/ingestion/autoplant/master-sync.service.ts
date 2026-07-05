@@ -53,6 +53,13 @@ export interface MasterSyncResult {
 const emptyStat = (): EntityStat => ({ inserted: 0, updated: 0, skipped: 0 });
 
 /**
+ * Cap on `master_sync_rejects` rows written per run (review A5). The itemisation exists to answer
+ * "which rows and why" after a run; beyond this bound the per-reason counters still carry the
+ * totals, and writing tens of thousands of reject rows per sync would cost more than it informs.
+ */
+const REJECT_CAP_PER_RUN = 5000;
+
+/**
  * Master synchroniser (blueprint §5) — upserts `company_master` / `transporters` / `plants` /
  * `vehicles` / `devices` from AutoPlant, keyed by `source_*_id`, in FK dependency order (companies →
  * transporters → plants → vehicles → devices), recording a `master_sync_runs` row for observability.
@@ -97,6 +104,32 @@ export class MasterSyncService {
       devices: emptyStat(),
     };
 
+    // Itemised skip accounting (review A5): every skip site splits its counter per reason and
+    // buffers the skipped natural key; the buffer is flushed to `master_sync_rejects` in one
+    // batched write, best-effort — accounting must never fail the sync it accounts for.
+    const rejects: { entity: string; sourceKey: string; reason: string }[] = [];
+    const skip = (entity: keyof typeof stats & string, sourceKey: string, reason: string): void => {
+      const stat = stats[entity];
+      stat.skipped++;
+      stat.skippedByReason ??= {};
+      stat.skippedByReason[reason] = (stat.skippedByReason[reason] ?? 0) + 1;
+      if (rejects.length < REJECT_CAP_PER_RUN) rejects.push({ entity, sourceKey, reason });
+    };
+    const flushRejects = async (): Promise<void> => {
+      if (rejects.length === 0) return;
+      try {
+        await this.prisma.masterSyncReject.createMany({
+          data: rejects.map((r) => ({ runId, ...r })),
+        });
+      } catch (e) {
+        this.logger.warn(
+          `Master sync ${runId}: failed to write ${rejects.length} reject rows: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    };
+
     try {
       // 1. Plants — the scope anchor. In-scope = status allowed ∧ zone-resolvable (R6). Plants carry no
       //    company FK in FSM, so they upsert first; each in-scope plant's (NOT NULL) company_id is
@@ -105,12 +138,12 @@ export class MasterSyncService {
       const neededCompanyIds = new Set<string>();
       for (const p of await this.source.readPlants()) {
         if (!plantInScope(p, scope)) {
-          stats.plants.skipped++; // out-of-scope plant status (e.g. INACTIVE)
+          skip('plants', String(p.plant_id), 'OUT_OF_SCOPE_STATUS'); // e.g. INACTIVE
           continue;
         }
         const zone = await this.zoneResolver.resolve(p);
         if (!zone) {
-          stats.plants.skipped++; // unmappable → deferred (no invented UNZONED holding zone; R6)
+          skip('plants', String(p.plant_id), 'ZONE_UNRESOLVED'); // deferred, never force-zoned (R6)
           continue;
         }
         const plan = mapPlant(p, { zoneId: zone.zoneId, districtId: zone.districtId });
@@ -137,7 +170,7 @@ export class MasterSyncService {
       for (const c of await this.source.readCompanies()) {
         const key = BigInt(String(c.company_id).trim()).toString();
         if (!neededCompanyIds.has(key)) {
-          stats.companies.skipped++; // no in-scope plant references this company
+          skip('companies', key, 'NO_INSCOPE_PLANT'); // inert company — nothing in scope names it
           continue;
         }
         const plan = mapCompany(c, this.companyDefaults);
@@ -181,7 +214,12 @@ export class MasterSyncService {
         const plantId = plantIdBySource.get(String(toBigIntOrNull(v.plant_id)));
         const companyId = companyIdBySource.get(String(toBigIntOrNull(v.company_id)));
         if (plantId == null || companyId == null) {
-          stats.vehicles.skipped++; // vehicle hangs off an unsynced (out-of-scope/deferred) plant/company
+          // Vehicle hangs off an unsynced (out-of-scope/deferred) plant or company.
+          skip(
+            'vehicles',
+            v.vehicle_no.trim(),
+            plantId == null ? 'PLANT_NOT_SYNCED' : 'COMPANY_NOT_SYNCED',
+          );
           continue;
         }
         const transporterId = transporterIdBySource.get(String(toBigIntOrNull(v.transporter_id))) ?? null;
@@ -206,7 +244,9 @@ export class MasterSyncService {
         const currentVehicleId = vehicleIdByNo.get(v.vehicle_no.trim());
         const plan = currentVehicleId == null ? null : mapDevice(v, { currentVehicleId });
         if (!plan) {
-          stats.devices.skipped++; // no fitted device, or the vehicle wasn't synced
+          // Itemise by device id when the row carries one; a deviceless row falls back to its vehicle.
+          const deviceKey = String(v.device_id ?? '').trim() || v.vehicle_no.trim();
+          skip('devices', deviceKey, currentVehicleId == null ? 'VEHICLE_NOT_SYNCED' : 'NO_FITTED_DEVICE');
           continue;
         }
         const existed = await this.prisma.device.findUnique({
@@ -217,11 +257,13 @@ export class MasterSyncService {
         existed ? stats.devices.updated++ : stats.devices.inserted++;
       }
 
+      await flushRejects();
       await this.runService.finishRun(runId, { status: 'SUCCESS', entityStats: stats });
       this.logger.log(`Master sync ${runId} SUCCESS ${JSON.stringify(stats)}`);
       return { runId, status: 'SUCCESS', stats };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      await flushRejects(); // partial accounting is still worth keeping on a FAILED run
       await this.runService.finishRun(runId, { status: 'FAILED', entityStats: stats, error: message });
       this.logger.error(`Master sync ${runId} FAILED: ${message}`);
       throw e;

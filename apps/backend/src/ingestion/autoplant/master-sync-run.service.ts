@@ -10,6 +10,8 @@ export interface EntityStat {
   inserted: number;
   updated: number;
   skipped: number;
+  /** Itemised split of `skipped` per reason code (Issue 97 Slice 4 / review A5). */
+  skippedByReason?: Record<string, number>;
 }
 
 /** Thrown (as 409) when a master sync is requested while one is already in flight. */

@@ -16,7 +16,6 @@ datasource db {
 /// RBAC roles — tops out at OPERATIONS_HEAD; intentionally no ADMIN (schema D1). Mirrors
 /// the canonical `@fsm/shared` ROLES.
 enum Role {
-  
   SERVICE_ENGINEER
   ZONAL_MANAGER
   CENTRAL_SERVICE_MANAGER
@@ -105,35 +104,35 @@ model User {
 /// is text for now — the `notify_channel` enum lands with the notification spine (Issue 03).
 /// `lastActivityAt` is visibility/telemetry only and never gates scoring (ADR-0023/0024).
 model EngineerMaster {
-  engineerId                  String       @id @map("engineer_id") @db.Uuid
-  coverageType                CoverageType @map("coverage_type")
-  zoneId                      BigInt       @map("zone_id")
-  dailyCapacity               Int          @map("daily_capacity")
-  shiftStart                  DateTime?    @map("shift_start") @db.Time(6)
-  shiftEnd                    DateTime?    @map("shift_end") @db.Time(6)
-  preferredNotificationChannel String?     @map("preferred_notification_channel")
-  lastActivityAt              DateTime?    @map("last_activity_at") @db.Timestamptz(6)
-  isActive                    Boolean      @default(true) @map("is_active")
-  createdAt                   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  engineerId                   String       @id @map("engineer_id") @db.Uuid
+  coverageType                 CoverageType @map("coverage_type")
+  zoneId                       BigInt       @map("zone_id")
+  dailyCapacity                Int          @map("daily_capacity")
+  shiftStart                   DateTime?    @map("shift_start") @db.Time(6)
+  shiftEnd                     DateTime?    @map("shift_end") @db.Time(6)
+  preferredNotificationChannel String?      @map("preferred_notification_channel")
+  lastActivityAt               DateTime?    @map("last_activity_at") @db.Timestamptz(6)
+  isActive                     Boolean      @default(true) @map("is_active")
+  createdAt                    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                    DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  user      User                        @relation(fields: [engineerId], references: [userId])
-  zone      Zone                        @relation(fields: [zoneId], references: [zoneId])
-  coverage        SeCoverage[]
-  territory       EngineerTerritoryCoverage[]
-  recommendations Recommendation[]
-  workSchedules   WorkSchedule[]
-  batches         PlantBatchAssignment[]
-  plannerEntries  SePlanner[]
-  softStates      SoftState[]
-  submissions     TroubleshootingSubmission[]
-  vanStock        SeVanStock[]
-  componentBlocks ComponentBlockedQueue[]
-  componentRequests ComponentRequest[]
+  user                  User                        @relation(fields: [engineerId], references: [userId])
+  zone                  Zone                        @relation(fields: [zoneId], references: [zoneId])
+  coverage              SeCoverage[]
+  territory             EngineerTerritoryCoverage[]
+  recommendations       Recommendation[]
+  workSchedules         WorkSchedule[]
+  batches               PlantBatchAssignment[]
+  plannerEntries        SePlanner[]
+  softStates            SoftState[]
+  submissions           TroubleshootingSubmission[]
+  vanStock              SeVanStock[]
+  componentBlocks       ComponentBlockedQueue[]
+  componentRequests     ComponentRequest[]
   inventoryTransactions InventoryTransaction[]
-  availability    SeAvailability[]
-  leaveRequests   LeaveRequest[]
-  expenseVouchers ExpenseVoucher[]
+  availability          SeAvailability[]
+  leaveRequests         LeaveRequest[]
+  expenseVouchers       ExpenseVoucher[]
 
   @@index([zoneId])
   @@index([lastActivityAt])
@@ -169,11 +168,13 @@ model Zone {
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  plants        Plant[]
-  users         User[]
-  engineers     EngineerMaster[]
-  workSchedules WorkSchedule[]
+  plants         Plant[]
+  users          User[]
+  engineers      EngineerMaster[]
+  workSchedules  WorkSchedule[]
   warehouseStock ZoneWarehouseStock[]
+  zoneMappings   ZoneMapping[]
+  plantOverrides PlantZoneOverride[]
 
   @@index([zonalManagerUserId])
   @@map("zones")
@@ -184,38 +185,38 @@ model Zone {
 /// the `plant_eligible_floating_se` MV for Floating-SE territory membership (Issue 09); it is an
 /// `Unsupported` type (geometry is raw-SQL-only in Prisma). `districtId` FK→`districts`.
 model Plant {
-  plantId    BigInt   @id @default(autoincrement()) @map("plant_id")
-  name       String
+  plantId          BigInt                                @id @default(autoincrement()) @map("plant_id")
+  name             String
   // FSM OPERATIONAL zone (ZM authority) — the ZM row-scoping key. This is NOT AutoPlant's per-company
   // zone (that lives in sourceZone* below). Relaxing this to nullable (so AutoPlant-synced plants can
   // be "unzoned" until Ops assigns them) is DEFERRED to Phase 4, where unzoned-plant behaviour and its
   // ~16 call-site ripples (cross-zone/planner/override) are designed deliberately.
-  zoneId     BigInt   @map("zone_id")
-  districtId BigInt?  @map("district_id")
-  location   Unsupported("geometry(Point, 4326)")?
+  zoneId           BigInt                                @map("zone_id")
+  districtId       BigInt?                               @map("district_id")
+  location         Unsupported("geometry(Point, 4326)")?
   // AutoPlant org-hierarchy mirror from ap_masters.mst_plant (Phase 2a) — the AUTHORITATIVE master.
   // sourcePlantId keys the idempotent upsert; source_zone/region + plant_state/district are stored
   // verbatim for audit, reporting drill-down, Floating-SE district resolution, and to DERIVE the
   // operational zone_id (later, once the partition is decided). status mirrors ACTIVE/INACTIVE.
-  sourcePlantId    BigInt?  @unique @map("source_plant_id")
-  sourceZoneId     BigInt?  @map("source_zone_id")
-  sourceZoneName   String?  @map("source_zone_name")
-  sourceRegionId   BigInt?  @map("source_region_id")
-  sourceRegionName String?  @map("source_region_name")
-  plantState       String?  @map("plant_state")
-  plantDistrict    String?  @map("plant_district")
-  masterPlantId    BigInt?  @map("master_plant_id")
-  masterPlantCode  String?  @map("master_plant_code")
+  sourcePlantId    BigInt?                               @unique @map("source_plant_id")
+  sourceZoneId     BigInt?                               @map("source_zone_id")
+  sourceZoneName   String?                               @map("source_zone_name")
+  sourceRegionId   BigInt?                               @map("source_region_id")
+  sourceRegionName String?                               @map("source_region_name")
+  plantState       String?                               @map("plant_state")
+  plantDistrict    String?                               @map("plant_district")
+  masterPlantId    BigInt?                               @map("master_plant_id")
+  masterPlantCode  String?                               @map("master_plant_code")
   status           String?
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt        DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime                              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  zone     Zone         @relation(fields: [zoneId], references: [zoneId])
-  district District?    @relation(fields: [districtId], references: [districtId])
-  coverage SeCoverage[]
-  vehicles Vehicle[]
-  tickets  Ticket[]
-  batches  PlantBatchAssignment[]
+  zone           Zone                   @relation(fields: [zoneId], references: [zoneId])
+  district       District?              @relation(fields: [districtId], references: [districtId])
+  coverage       SeCoverage[]
+  vehicles       Vehicle[]
+  tickets        Ticket[]
+  batches        PlantBatchAssignment[]
   plannerEntries SePlanner[]
 
   @@index([zoneId])
@@ -258,10 +259,10 @@ model District {
 /// `Unsupported` (raw-SQL only) and the map-drawing editor is deferred; v1 configures territory via
 /// the State/Region/District hierarchical selectors.
 model EngineerTerritoryCoverage {
-  id         BigInt  @id @default(autoincrement())
-  seId       String  @map("se_id") @db.Uuid
-  districtId BigInt? @map("district_id")
-  regionId   BigInt? @map("region_id")
+  id         BigInt                                       @id @default(autoincrement())
+  seId       String                                       @map("se_id") @db.Uuid
+  districtId BigInt?                                      @map("district_id")
+  regionId   BigInt?                                      @map("region_id")
   state      String?
   polygon    Unsupported("geometry(MultiPolygon, 4326)")?
 
@@ -646,34 +647,34 @@ enum RootCauseCategory {
 /// The multi `submission_components` join + expected-component auto-populate land with the inventory
 /// slice (Issue 21); this table holds the scalar component-unavailable signal only.
 model TroubleshootingSubmission {
-  submissionId             String            @id @default(uuid()) @map("submission_id") @db.Uuid
-  ticketId                 String            @map("ticket_id") @db.Uuid
-  failureCycleId           String            @map("failure_cycle_id") @db.Uuid
-  submissionType           SubmissionType    @map("submission_type")
-  clientSubmissionId       String            @map("client_submission_id") @db.Uuid
-  seId                     String            @map("se_id") @db.Uuid
-  seGpsLat                 Float?            @map("se_gps_lat")
-  seGpsLon                 Float?            @map("se_gps_lon")
-  presenceSource           PresenceSource    @map("presence_source")
+  submissionId             String                                @id @default(uuid()) @map("submission_id") @db.Uuid
+  ticketId                 String                                @map("ticket_id") @db.Uuid
+  failureCycleId           String                                @map("failure_cycle_id") @db.Uuid
+  submissionType           SubmissionType                        @map("submission_type")
+  clientSubmissionId       String                                @map("client_submission_id") @db.Uuid
+  seId                     String                                @map("se_id") @db.Uuid
+  seGpsLat                 Float?                                @map("se_gps_lat")
+  seGpsLon                 Float?                                @map("se_gps_lon")
+  presenceSource           PresenceSource                        @map("presence_source")
   onsiteCaptureGps         Unsupported("geometry(Point, 4326)")? @map("onsite_capture_gps")
-  componentUnavailable     Boolean           @default(false) @map("component_unavailable")
-  componentUnavailableItem BigInt?           @map("component_unavailable_item")
-  rootCauseCategory        RootCauseCategory @map("root_cause_category")
-  rootCauseSubcategory     String?           @map("root_cause_subcategory")
-  rootCauseNotes           String?           @map("root_cause_notes")
-  actionTakenCategory      String?           @map("action_taken_category")
-  actionTakenNotes         String?           @map("action_taken_notes")
-  diagnosisNotes           String?           @map("diagnosis_notes")
-  submittedAt              DateTime          @map("submitted_at") @db.Timestamptz(6)
-  photoRefs                String[]          @map("photo_refs")
-  createdAt                DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  componentUnavailable     Boolean                               @default(false) @map("component_unavailable")
+  componentUnavailableItem BigInt?                               @map("component_unavailable_item")
+  rootCauseCategory        RootCauseCategory                     @map("root_cause_category")
+  rootCauseSubcategory     String?                               @map("root_cause_subcategory")
+  rootCauseNotes           String?                               @map("root_cause_notes")
+  actionTakenCategory      String?                               @map("action_taken_category")
+  actionTakenNotes         String?                               @map("action_taken_notes")
+  diagnosisNotes           String?                               @map("diagnosis_notes")
+  submittedAt              DateTime                              @map("submitted_at") @db.Timestamptz(6)
+  photoRefs                String[]                              @map("photo_refs")
+  createdAt                DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  ticket       Ticket         @relation(fields: [ticketId], references: [ticketId])
-  failureCycle FailureCycle   @relation(fields: [failureCycleId], references: [cycleId])
-  engineer     EngineerMaster @relation(fields: [seId], references: [engineerId])
-  verificationRuns VerificationRun[]
-  componentRequest ComponentRequest?
+  ticket                Ticket                 @relation(fields: [ticketId], references: [ticketId])
+  failureCycle          FailureCycle           @relation(fields: [failureCycleId], references: [cycleId])
+  engineer              EngineerMaster         @relation(fields: [seId], references: [engineerId])
+  verificationRuns      VerificationRun[]
+  componentRequest      ComponentRequest?
   inventoryTransactions InventoryTransaction[]
 
   @@unique([seId, clientSubmissionId])
@@ -820,11 +821,11 @@ model ComponentMaster {
   category      String?
   serialTracked Boolean @default(false) @map("serial_tracked")
 
-  vanStock  SeVanStock[]
-  commonKit CommonKitDefinition[]
-  componentRequests ComponentRequest[]
+  vanStock              SeVanStock[]
+  commonKit             CommonKitDefinition[]
+  componentRequests     ComponentRequest[]
   inventoryTransactions InventoryTransaction[]
-  warehouseStock ZoneWarehouseStock[]
+  warehouseStock        ZoneWarehouseStock[]
 
   @@map("component_master")
 }
@@ -907,24 +908,24 @@ model ComponentBlockedQueue {
 /// REQUESTED → APPROVED | REJECTED → SHIPPED → RECEIVED. One request per raising submission
 /// (idempotent raise). `delivery_destination` drives Floating-SE resubmit ownership.
 model ComponentRequest {
-  requestId           String                  @id @default(uuid()) @map("request_id") @db.Uuid
-  ticketId            String                  @map("ticket_id") @db.Uuid
-  failureCycleId      String                  @map("failure_cycle_id") @db.Uuid
-  submissionId        String                  @unique @map("submission_id") @db.Uuid
-  seId                String                  @map("se_id") @db.Uuid
-  componentId         BigInt?                 @map("component_id")
-  status              ComponentRequestStatus  @default(REQUESTED)
-  deliveryDestination DeliveryDestination?    @map("delivery_destination")
-  trackingRef         String?                 @map("tracking_ref")
-  rejectionReason     String?                 @map("rejection_reason")
-  wmActorId           String?                 @map("wm_actor_id") @db.Uuid
-  approvedAt          DateTime?               @map("approved_at") @db.Timestamptz(6)
-  shippedAt           DateTime?               @map("shipped_at") @db.Timestamptz(6)
-  rejectedAt          DateTime?               @map("rejected_at") @db.Timestamptz(6)
-  receivedAt          DateTime?               @map("received_at") @db.Timestamptz(6)
-  version             Int                     @default(0)
-  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  requestId           String                 @id @default(uuid()) @map("request_id") @db.Uuid
+  ticketId            String                 @map("ticket_id") @db.Uuid
+  failureCycleId      String                 @map("failure_cycle_id") @db.Uuid
+  submissionId        String                 @unique @map("submission_id") @db.Uuid
+  seId                String                 @map("se_id") @db.Uuid
+  componentId         BigInt?                @map("component_id")
+  status              ComponentRequestStatus @default(REQUESTED)
+  deliveryDestination DeliveryDestination?   @map("delivery_destination")
+  trackingRef         String?                @map("tracking_ref")
+  rejectionReason     String?                @map("rejection_reason")
+  wmActorId           String?                @map("wm_actor_id") @db.Uuid
+  approvedAt          DateTime?              @map("approved_at") @db.Timestamptz(6)
+  shippedAt           DateTime?              @map("shipped_at") @db.Timestamptz(6)
+  rejectedAt          DateTime?              @map("rejected_at") @db.Timestamptz(6)
+  receivedAt          DateTime?              @map("received_at") @db.Timestamptz(6)
+  version             Int                    @default(0)
+  createdAt           DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   ticket       Ticket                    @relation(fields: [ticketId], references: [ticketId])
   failureCycle FailureCycle              @relation(fields: [failureCycleId], references: [cycleId])
@@ -1491,8 +1492,8 @@ model Vehicle {
   plant       Plant        @relation(fields: [plantId], references: [plantId])
   company     Company      @relation(fields: [companyId], references: [companyId])
   transporter Transporter? @relation(fields: [transporterId], references: [transporterId])
-  devices Device[]
-  tickets Ticket[]
+  devices     Device[]
+  tickets     Ticket[]
 
   @@index([plantId])
   @@index([companyId])
@@ -1518,6 +1519,67 @@ model Transporter {
   @@map("transporters")
 }
 
+/// Zone-mapping crosswalk status. PENDING = the raw value was seen during a sync but no admin has
+/// mapped it yet (it lands the plant in the UNZONED holding zone); MAPPED = an admin bound it to an
+/// FSM operational zone; IGNORED = an admin marked it junk (still lands UNZONED, but off the work queue).
+enum ZoneMappingStatus {
+  PENDING
+  MAPPED
+  IGNORED
+
+  @@map("zone_mapping_status")
+}
+
+/// FSM-owned, admin-editable value→zone crosswalk (the R6 translation layer). AutoPlant stays the
+/// source of truth for the RAW value (`mst_plant.zone_name`); FSM owns the OPERATIONAL mapping to a
+/// Zone. No zone logic is hardcoded — the map lives here as data (same posture as `sla_rule_config` /
+/// `priority_rule_config`). Keyed by `(source_field, source_value_key)` where `source_value_key` is
+/// the NORMALIZED raw value (trim/lowercase/collapse) so "West Zone"/"WEST"/"West" collapse to one row.
+/// `fsm_zone_id` NULL ⇒ PENDING (unmapped). Unseen values are auto-discovered as PENDING rows during
+/// sync (the admin work queue); `seen_count`/`last_seen_at` triage the queue. Because master-sync is
+/// insert-only on `plants.zone_id` (anti-drift), edits here take effect via the FSM-owned re-apply
+/// operation (`ZoneMappingService.reapply`), never by a re-sync clobbering the operational zone.
+model ZoneMapping {
+  id             BigInt            @id @default(autoincrement())
+  sourceField    String            @map("source_field")
+  sourceValueKey String            @map("source_value_key")
+  sourceValueRaw String?           @map("source_value_raw")
+  fsmZoneId      BigInt?           @map("fsm_zone_id")
+  status         ZoneMappingStatus @default(PENDING)
+  seenCount      Int               @default(0) @map("seen_count")
+  lastSeenAt     DateTime?         @map("last_seen_at") @db.Timestamptz(6)
+  createdBy      String?           @map("created_by") @db.Uuid
+  updatedBy      String?           @map("updated_by") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  zone Zone? @relation(fields: [fsmZoneId], references: [zoneId])
+
+  @@unique([sourceField, sourceValueKey])
+  @@index([status])
+  @@index([fsmZoneId])
+  @@map("zone_mappings")
+}
+
+/// Per-plant zone override (the escape hatch). Highest-precedence tier of the resolver: a specific
+/// AutoPlant plant (`source_plant_id`) is pinned to an FSM zone regardless of its raw `zone_name` —
+/// the fix for the conflict cases the value-map can't express (e.g. a `karnataka` plant AutoPlant
+/// labels "North"). Admin-owned; applied by the same FSM-owned re-apply operation.
+model PlantZoneOverride {
+  id            BigInt   @id @default(autoincrement())
+  sourcePlantId BigInt   @unique @map("source_plant_id")
+  fsmZoneId     BigInt   @map("fsm_zone_id")
+  reason        String?
+  createdBy     String?  @map("created_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  zone Zone @relation(fields: [fsmZoneId], references: [zoneId])
+
+  @@index([fsmZoneId])
+  @@map("plant_zone_overrides")
+}
+
 /// Master-sync run bookkeeping — mirrors snapshot_runs for the AutoPlant ap_masters synchroniser
 /// (company/plant/transporter/vehicle/device). Observability only (Phase 2a); the syncer lands later.
 model MasterSyncRun {
@@ -1531,6 +1593,21 @@ model MasterSyncRun {
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("master_sync_runs")
+}
+
+/// Itemised master-sync skip accounting (Issue 97 Slice 4 / review A5) — one row per skipped source
+/// row, so an operator can answer "which 3,200 and why" with one indexed query. Written best-effort
+/// at the end of a sync (a reject-write failure never fails the sync); rows are capped per run.
+model MasterSyncReject {
+  rejectId  BigInt   @id @default(autoincrement()) @map("reject_id")
+  runId     BigInt   @map("run_id")
+  entity    String
+  sourceKey String   @map("source_key")
+  reason    String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([runId, entity, reason])
+  @@map("master_sync_rejects")
 }
 
 /// Derived current device state, one row per device (upsert) — the queue/dashboard hot table
@@ -1580,9 +1657,9 @@ model FailureCycle {
   createdAt                  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                  DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  device               Device         @relation(fields: [deviceId], references: [deviceId])
-  previousFailureCycle FailureCycle?  @relation("RepeatChain", fields: [previousFailureCycleId], references: [cycleId], onDelete: NoAction, onUpdate: NoAction)
-  repeats              FailureCycle[] @relation("RepeatChain")
+  device               Device                      @relation(fields: [deviceId], references: [deviceId])
+  previousFailureCycle FailureCycle?               @relation("RepeatChain", fields: [previousFailureCycleId], references: [cycleId], onDelete: NoAction, onUpdate: NoAction)
+  repeats              FailureCycle[]              @relation("RepeatChain")
   ticket               Ticket?
   submissions          TroubleshootingSubmission[]
   componentRequests    ComponentRequest[]
@@ -1598,23 +1675,23 @@ model FailureCycle {
 /// the expected-availability date. The Secondary SLA Clock (true elapsed, never pauses) is derived
 /// from the Failure Cycle's `opened_at` and shown only to ZM/CSM/Operations Head.
 model VehicleUnavailabilityReport {
-  id                   BigInt                @id @default(autoincrement())
-  ticketId             String                @map("ticket_id") @db.Uuid
-  failureCycleId       String?               @map("failure_cycle_id") @db.Uuid
-  seId                 String                @map("se_id") @db.Uuid
-  reasonCode           VehicleUnavailReason  @map("reason_code")
-  transporterContacted Boolean               @default(false) @map("transporter_contacted")
-  expectedFrom         DateTime              @map("expected_from") @db.Timestamptz(6)
-  expectedTo           DateTime?             @map("expected_to") @db.Timestamptz(6)
+  id                   BigInt               @id @default(autoincrement())
+  ticketId             String               @map("ticket_id") @db.Uuid
+  failureCycleId       String?              @map("failure_cycle_id") @db.Uuid
+  seId                 String               @map("se_id") @db.Uuid
+  reasonCode           VehicleUnavailReason @map("reason_code")
+  transporterContacted Boolean              @default(false) @map("transporter_contacted")
+  expectedFrom         DateTime             @map("expected_from") @db.Timestamptz(6)
+  expectedTo           DateTime?            @map("expected_to") @db.Timestamptz(6)
   notes                String?
-  gpsLat               Float?                @map("gps_lat")
-  gpsLng               Float?                @map("gps_lng")
-  status               VehicleUnavailStatus  @default(OPEN)
-  resolvedBy           String?               @map("resolved_by") @db.Uuid
-  resolvedByRole       String?               @map("resolved_by_role")
-  resolvedAt           DateTime?             @map("resolved_at") @db.Timestamptz(6)
-  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  gpsLat               Float?               @map("gps_lat")
+  gpsLng               Float?               @map("gps_lng")
+  status               VehicleUnavailStatus @default(OPEN)
+  resolvedBy           String?              @map("resolved_by") @db.Uuid
+  resolvedByRole       String?              @map("resolved_by_role")
+  resolvedAt           DateTime?            @map("resolved_at") @db.Timestamptz(6)
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   ticket Ticket @relation(fields: [ticketId], references: [ticketId])
 
@@ -1646,71 +1723,71 @@ enum VehicleUnavailStatus {
 /// batch …) are added by their owning issues (11/33/34/36/37). `companyTier` is denormalised at
 /// creation. The `work_type='TROUBLESHOOT' ⇒ failure_cycle_id IS NOT NULL` CHECK is raw SQL.
 model Ticket {
-  ticketId           String          @id @default(uuid()) @map("ticket_id") @db.Uuid
-  workType           WorkType        @map("work_type")
-  status             TicketStatus
-  failureCycleId     String?         @unique @map("failure_cycle_id") @db.Uuid
-  deviceId           String          @map("device_id")
-  vehicleId          BigInt?         @map("vehicle_id")
-  plantId            BigInt          @map("plant_id")
-  companyId          BigInt          @map("company_id")
-  companyTier        CompanyTier     @map("company_tier")
-  assignmentState    AssignmentState @default(UNASSIGNED) @map("assignment_state")
-  repeatFailure      Boolean         @default(false) @map("repeat_failure")
-  lastStateChangedAt DateTime        @map("last_state_changed_at") @db.Timestamptz(6)
-  version            Int             @default(0)
+  ticketId                 String                 @id @default(uuid()) @map("ticket_id") @db.Uuid
+  workType                 WorkType               @map("work_type")
+  status                   TicketStatus
+  failureCycleId           String?                @unique @map("failure_cycle_id") @db.Uuid
+  deviceId                 String                 @map("device_id")
+  vehicleId                BigInt?                @map("vehicle_id")
+  plantId                  BigInt                 @map("plant_id")
+  companyId                BigInt                 @map("company_id")
+  companyTier              CompanyTier            @map("company_tier")
+  assignmentState          AssignmentState        @default(UNASSIGNED) @map("assignment_state")
+  repeatFailure            Boolean                @default(false) @map("repeat_failure")
+  lastStateChangedAt       DateTime               @map("last_state_changed_at") @db.Timestamptz(6)
+  version                  Int                    @default(0)
   // Back-reference to the Non-Op marking that closed this ticket (CLOSED_NON_OPERATIONAL) or
   // auto-created it (the RECOVERY ticket) — Issue 35 / CONTEXT.md §14.
-  nonOpMarkingId     String?         @map("nonop_marking_id") @db.Uuid
+  nonOpMarkingId           String?                @map("nonop_marking_id") @db.Uuid
   // RECOVERY field-workflow columns (Issue 36). The assignee collects; the Collection Form captures
   // the confirmed device serial + condition; closure is classified by `closureType` (CONTEXT §14).
-  assignedSeId       String?         @map("assigned_se_id") @db.Uuid
-  collectedDeviceSerial    String?   @map("collected_device_serial")
-  collectionConditionNotes String?   @map("collection_condition_notes")
+  assignedSeId             String?                @map("assigned_se_id") @db.Uuid
+  collectedDeviceSerial    String?                @map("collected_device_serial")
+  collectionConditionNotes String?                @map("collection_condition_notes")
   unableToCollectReason    UnableToCollectReason? @map("unable_to_collect_reason")
-  unableToCollectAt        DateTime? @map("unable_to_collect_at") @db.Timestamptz(6)
-  closureType        ClosureType?    @map("closure_type")
-  closureReason      String?         @map("closure_reason")
-  closedAt           DateTime?       @map("closed_at") @db.Timestamptz(6)
+  unableToCollectAt        DateTime?              @map("unable_to_collect_at") @db.Timestamptz(6)
+  closureType              ClosureType?           @map("closure_type")
+  closureReason            String?                @map("closure_reason")
+  closedAt                 DateTime?              @map("closed_at") @db.Timestamptz(6)
   // INSTALL work-type columns (Issue 33, ADR-0011 / CONTEXT.md §11). Manual creation by ZM/CSM/OH
   // records the actor (`createdBy` + `createdByRole`) and the channel (`installTriggerSource`); a CSV
   // bulk upload stamps one shared `installBatchId` across its rows. `installSimId` / `installTargetDate`
   // / `installNotes` are the optional CSV columns. TROUBLESHOOT/RECOVERY tickets leave these null.
-  createdBy            String?               @map("created_by") @db.Uuid
-  createdByRole        Role?                 @map("created_by_role")
-  installTriggerSource InstallTriggerSource? @map("install_trigger_source")
-  installSimId         String?               @map("install_sim_id")
-  installTargetDate    DateTime?             @map("install_target_date") @db.Date
-  installNotes         String?               @map("install_notes")
-  installBatchId       String?               @map("install_batch_id") @db.Uuid
+  createdBy                String?                @map("created_by") @db.Uuid
+  createdByRole            Role?                  @map("created_by_role")
+  installTriggerSource     InstallTriggerSource?  @map("install_trigger_source")
+  installSimId             String?                @map("install_sim_id")
+  installTargetDate        DateTime?              @map("install_target_date") @db.Date
+  installNotes             String?                @map("install_notes")
+  installBatchId           String?                @map("install_batch_id") @db.Uuid
   // INSTALL fitment capture + lifecycle anchors (Issue 34, CONTEXT.md §4). The SE records the GPS
   // device serial + SIM serial (WM-verifiable) and an optional photo at FITTED; `activatedAt` is the
   // warranty start and the anchor the install auto-verification watches for the first valid ping.
-  fittedGpsSerial      String?               @map("fitted_gps_serial")
-  fittedSimSerial      String?               @map("fitted_sim_serial")
-  fittedPhotoRef       String?               @map("fitted_photo_ref")
-  fittedAt             DateTime?             @map("fitted_at") @db.Timestamptz(6)
-  activatedAt          DateTime?             @map("activated_at") @db.Timestamptz(6)
-  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  fittedGpsSerial          String?                @map("fitted_gps_serial")
+  fittedSimSerial          String?                @map("fitted_sim_serial")
+  fittedPhotoRef           String?                @map("fitted_photo_ref")
+  fittedAt                 DateTime?              @map("fitted_at") @db.Timestamptz(6)
+  activatedAt              DateTime?              @map("activated_at") @db.Timestamptz(6)
+  createdAt                DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  failureCycle FailureCycle? @relation(fields: [failureCycleId], references: [cycleId])
-  device       Device        @relation(fields: [deviceId], references: [deviceId])
-  vehicle      Vehicle?      @relation(fields: [vehicleId], references: [vehicleId])
-  nonOpMarking NonOperationalMarking? @relation(fields: [nonOpMarkingId], references: [markingId])
-  plant           Plant            @relation(fields: [plantId], references: [plantId])
-  company         Company          @relation(fields: [companyId], references: [companyId])
-  events          TicketEvent[]
-  recommendations Recommendation[]
-  intradayInsertions IntradayInsertion[]
-  crossZoneEscalations CrossZoneEscalation[]
-  batchTickets    BatchAssignmentTicket[]
-  softStates      SoftState[]
-  troubleshootingSubmissions TroubleshootingSubmission[]
-  verificationRuns VerificationRun[]
-  componentBlocks ComponentBlockedQueue[]
-  componentRequests ComponentRequest[]
-  inventoryTransactions InventoryTransaction[]
+  failureCycle                 FailureCycle?                 @relation(fields: [failureCycleId], references: [cycleId])
+  device                       Device                        @relation(fields: [deviceId], references: [deviceId])
+  vehicle                      Vehicle?                      @relation(fields: [vehicleId], references: [vehicleId])
+  nonOpMarking                 NonOperationalMarking?        @relation(fields: [nonOpMarkingId], references: [markingId])
+  plant                        Plant                         @relation(fields: [plantId], references: [plantId])
+  company                      Company                       @relation(fields: [companyId], references: [companyId])
+  events                       TicketEvent[]
+  recommendations              Recommendation[]
+  intradayInsertions           IntradayInsertion[]
+  crossZoneEscalations         CrossZoneEscalation[]
+  batchTickets                 BatchAssignmentTicket[]
+  softStates                   SoftState[]
+  troubleshootingSubmissions   TroubleshootingSubmission[]
+  verificationRuns             VerificationRun[]
+  componentBlocks              ComponentBlockedQueue[]
+  componentRequests            ComponentRequest[]
+  inventoryTransactions        InventoryTransaction[]
   vehicleUnavailabilityReports VehicleUnavailabilityReport[]
 
   @@index([status, plantId])
@@ -1787,24 +1864,24 @@ model SoftInactiveCountHistory {
 /// the month window; `eligible` snapshots the uptime gate (active PGI ≤15d AND not Non-Op) so the
 /// denominator is Eligible Devices only; auto-recovery vs SE-repaired closures are counted separately.
 model DeviceDowntimeSummaryMonthly {
-  deviceId             String   @map("device_id")
-  month                DateTime @db.Date
-  zoneId               BigInt?  @map("zone_id")
-  companyId            BigInt?  @map("company_id")
-  plantId              BigInt?  @map("plant_id")
-  eligible             Boolean  @default(false)
-  windowSeconds        BigInt   @map("window_seconds")
-  downtimeSeconds      BigInt   @default(0) @map("downtime_seconds")
-  autoRecoveryClosures Int      @default(0) @map("auto_recovery_closures")
-  seRepairedClosures   Int      @default(0) @map("se_repaired_closures")
+  deviceId                 String   @map("device_id")
+  month                    DateTime @db.Date
+  zoneId                   BigInt?  @map("zone_id")
+  companyId                BigInt?  @map("company_id")
+  plantId                  BigInt?  @map("plant_id")
+  eligible                 Boolean  @default(false)
+  windowSeconds            BigInt   @map("window_seconds")
+  downtimeSeconds          BigInt   @default(0) @map("downtime_seconds")
+  autoRecoveryClosures     Int      @default(0) @map("auto_recovery_closures")
+  seRepairedClosures       Int      @default(0) @map("se_repaired_closures")
   // Issue 44 cycle-level aggregates (attributed to the cycle's open-month) for the Lifetime Downtime Trend.
-  cycleCount               Int    @default(0) @map("cycle_count")
-  repeatFailureCount       Int    @default(0) @map("repeat_failure_count")
-  longestEpisodeSeconds    BigInt @default(0) @map("longest_episode_seconds")
-  recoverSecondsSum        BigInt @default(0) @map("recover_seconds_sum")
-  recoveredCycles          Int    @default(0) @map("recovered_cycles")
-  componentDowntimeSeconds BigInt @default(0) @map("component_downtime_seconds")
-  computedAt           DateTime @map("computed_at") @db.Timestamptz(6)
+  cycleCount               Int      @default(0) @map("cycle_count")
+  repeatFailureCount       Int      @default(0) @map("repeat_failure_count")
+  longestEpisodeSeconds    BigInt   @default(0) @map("longest_episode_seconds")
+  recoverSecondsSum        BigInt   @default(0) @map("recover_seconds_sum")
+  recoveredCycles          Int      @default(0) @map("recovered_cycles")
+  componentDowntimeSeconds BigInt   @default(0) @map("component_downtime_seconds")
+  computedAt               DateTime @map("computed_at") @db.Timestamptz(6)
 
   @@id([deviceId, month])
   @@index([month, zoneId])
@@ -1889,38 +1966,38 @@ model SystemEfficiencySummaryDaily {
   deviceType String?  @map("device_type")
   seId       String?  @map("se_id") @db.Uuid
 
-  failureCyclesOpened       Int @default(0) @map("failure_cycles_opened")
-  ticketsCreated            Int @default(0) @map("tickets_created")
+  failureCyclesOpened        Int @default(0) @map("failure_cycles_opened")
+  ticketsCreated             Int @default(0) @map("tickets_created")
   troubleshootTicketsCreated Int @default(0) @map("troubleshoot_tickets_created")
-  autoAssignments           Int @default(0) @map("auto_assignments")
-  manualAssignments         Int @default(0) @map("manual_assignments")
-  overrides                 Int @default(0) @map("overrides")
-  cyclesResolved            Int @default(0) @map("cycles_resolved")
-  verifiedCycles            Int @default(0) @map("verified_cycles")
-  failedVerifications       Int @default(0) @map("failed_verifications")
-  autoRecoveries            Int @default(0) @map("auto_recoveries")
-  repeatFailures            Int @default(0) @map("repeat_failures")
-  firstTimeFixes            Int @default(0) @map("first_time_fixes")
-  componentPauses           Int @default(0) @map("component_pauses")
-  agedResolutions           Int @default(0) @map("aged_resolutions")
-  slaCompliantResolutions   Int @default(0) @map("sla_compliant_resolutions")
-  autoEscalations           Int @default(0) @map("auto_escalations")
+  autoAssignments            Int @default(0) @map("auto_assignments")
+  manualAssignments          Int @default(0) @map("manual_assignments")
+  overrides                  Int @default(0) @map("overrides")
+  cyclesResolved             Int @default(0) @map("cycles_resolved")
+  verifiedCycles             Int @default(0) @map("verified_cycles")
+  failedVerifications        Int @default(0) @map("failed_verifications")
+  autoRecoveries             Int @default(0) @map("auto_recoveries")
+  repeatFailures             Int @default(0) @map("repeat_failures")
+  firstTimeFixes             Int @default(0) @map("first_time_fixes")
+  componentPauses            Int @default(0) @map("component_pauses")
+  agedResolutions            Int @default(0) @map("aged_resolutions")
+  slaCompliantResolutions    Int @default(0) @map("sla_compliant_resolutions")
+  autoEscalations            Int @default(0) @map("auto_escalations")
 
-  downtimeSecondsSum                BigInt @default(0) @map("downtime_seconds_sum")
-  detectionToTicketSecondsSum       BigInt @default(0) @map("detection_to_ticket_seconds_sum")
-  detectionToTicketCount            Int    @default(0) @map("detection_to_ticket_count")
-  ticketToAssignmentSecondsSum      BigInt @default(0) @map("ticket_to_assignment_seconds_sum")
-  ticketToAssignmentCount           Int    @default(0) @map("ticket_to_assignment_count")
-  assignmentToOnsiteSecondsSum      BigInt @default(0) @map("assignment_to_onsite_seconds_sum")
-  assignmentToOnsiteCount           Int    @default(0) @map("assignment_to_onsite_count")
-  onsiteToSubmissionSecondsSum      BigInt @default(0) @map("onsite_to_submission_seconds_sum")
-  onsiteToSubmissionCount           Int    @default(0) @map("onsite_to_submission_count")
+  downtimeSecondsSum                 BigInt @default(0) @map("downtime_seconds_sum")
+  detectionToTicketSecondsSum        BigInt @default(0) @map("detection_to_ticket_seconds_sum")
+  detectionToTicketCount             Int    @default(0) @map("detection_to_ticket_count")
+  ticketToAssignmentSecondsSum       BigInt @default(0) @map("ticket_to_assignment_seconds_sum")
+  ticketToAssignmentCount            Int    @default(0) @map("ticket_to_assignment_count")
+  assignmentToOnsiteSecondsSum       BigInt @default(0) @map("assignment_to_onsite_seconds_sum")
+  assignmentToOnsiteCount            Int    @default(0) @map("assignment_to_onsite_count")
+  onsiteToSubmissionSecondsSum       BigInt @default(0) @map("onsite_to_submission_seconds_sum")
+  onsiteToSubmissionCount            Int    @default(0) @map("onsite_to_submission_count")
   submissionToVerificationSecondsSum BigInt @default(0) @map("submission_to_verification_seconds_sum")
-  submissionToVerificationCount     Int    @default(0) @map("submission_to_verification_count")
-  warehouseFulfilmentSecondsSum     BigInt @default(0) @map("warehouse_fulfilment_seconds_sum")
-  warehouseFulfilmentCount          Int    @default(0) @map("warehouse_fulfilment_count")
-  recoveryClosureSecondsSum         BigInt @default(0) @map("recovery_closure_seconds_sum")
-  recoveryClosureCount              Int    @default(0) @map("recovery_closure_count")
+  submissionToVerificationCount      Int    @default(0) @map("submission_to_verification_count")
+  warehouseFulfilmentSecondsSum      BigInt @default(0) @map("warehouse_fulfilment_seconds_sum")
+  warehouseFulfilmentCount           Int    @default(0) @map("warehouse_fulfilment_count")
+  recoveryClosureSecondsSum          BigInt @default(0) @map("recovery_closure_seconds_sum")
+  recoveryClosureCount               Int    @default(0) @map("recovery_closure_count")
 
   computedAt DateTime @map("computed_at") @db.Timestamptz(6)
 
