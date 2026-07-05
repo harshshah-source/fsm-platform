@@ -60,6 +60,7 @@ export class SnapshotIngestionWorker {
     let failed = 0;
     let inserted = 0;
     let dataAsOf: Date | null = null;
+    let firstFailedLowerBound: Date | null = null;
 
     for (;;) {
       const chunk = await this.source.readChunk(cursor, chunkSize);
@@ -81,6 +82,7 @@ export class SnapshotIngestionWorker {
           });
         } else {
           failed += 1;
+          if (firstFailedLowerBound === null) firstFailedLowerBound = minDate(chunk.rows);
           await this.prisma.snapshotRunChunk.update({
             where: { id: record.id },
             data: { status: 'FAILED', retryCount: outcome.attempts - 1, error: outcome.error },
@@ -95,10 +97,17 @@ export class SnapshotIngestionWorker {
     const status: SnapshotRunOutcome =
       failed === 0 ? 'SUCCESS' : succeeded === 0 ? 'FAILED' : 'PARTIAL';
 
+    // Two cursors, deliberately asymmetric (review A3): `dataAsOf` is the conservative DISPLAY
+    // watermark (high-water of succeeded chunks; the freshness banner never advances on lost data),
+    // while `resumeCursor` is the optimistic RE-READ floor — on PARTIAL it drops back to the first
+    // failed chunk's lower bound so the next run re-reads that window (`>=` resume in the reader;
+    // the `(device_id, gps_datetime)` ON CONFLICT makes the overlap free).
+    const resumeCursor = status === 'PARTIAL' ? firstFailedLowerBound : dataAsOf;
+
     await this.runs.finishRun(runId, {
       status,
       dataAsOf: status === 'FAILED' ? null : dataAsOf,
-      cursor: dataAsOf ? dataAsOf.toISOString() : null,
+      cursor: resumeCursor ? resumeCursor.toISOString() : null,
     });
 
     return { runId, status, chunks: chunkNo, succeeded, failed, inserted };
@@ -130,4 +139,13 @@ const maxDate = (current: Date | null, rows: readonly SourceSnapshotRow[]): Date
     if (max === null || r.gpsDatetime > max) max = r.gpsDatetime;
   }
   return max as Date;
+};
+
+/** Lower bound of a chunk's window — the PARTIAL resume floor. Chunks are only recorded non-empty. */
+const minDate = (rows: readonly SourceSnapshotRow[]): Date => {
+  let min: Date | null = null;
+  for (const r of rows) {
+    if (min === null || r.gpsDatetime < min) min = r.gpsDatetime;
+  }
+  return min as Date;
 };

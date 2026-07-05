@@ -10,7 +10,7 @@ Branch: `feat/autoplant-integration`. One slice = one PR-sized commit; `main` st
 |---|---|---|---|---|
 | 1 | MySQL fail-fast timeouts (A4) | 🔵 committed `7bfad51` | `7bfad51` | 5 new · 825/830 suite |
 | 2 | Stale-run reaper, both run tables (A2) | ✅ done | — | 6 new · 831/836 suite |
-| 3 | PARTIAL-cursor lower-bound fix (A3) | ⬜ not started | — | — |
+| 3 | PARTIAL-cursor lower-bound fix (A3) | ✅ done | — | 4 new · 835/840 suite |
 | 4 | Itemised master-sync skip accounting (A5) | ⬜ not started | — | — |
 | 5 | Reconciliation counts in health (A6) | ⬜ not started | — | — |
 | 6 | Overlap-safe telemetry tick | ⬜ not started | — | — |
@@ -111,6 +111,34 @@ skipped / 0 failed** · `tsc --noEmit` clean.
 
 ---
 
-## Slice 3+ — not started
-See the issue file §5 for slices 3–7. Order: A3 PARTIAL-cursor → A5 skips → A6 reconciliation →
-overlap-safe tick → A1 scheduler.
+## Slice 3 — PARTIAL-cursor lower-bound fix (review A3)
+
+**Design.** `snapshot_runs.cursor` gets explicit dual semantics in `SnapshotIngestionWorker.run()`:
+`dataAsOf` stays the conservative DISPLAY watermark (high-water of succeeded chunks; banner never
+advances on lost data); the persisted resume cursor becomes, on PARTIAL only, the **first failed
+chunk's `min(gpsDatetime)`** so the next run re-reads that window (`>=` resume in
+`AutoPlantSourceReader`; `(device_id, gps_datetime)` ON CONFLICT absorbs the overlap). SUCCESS
+(cursor = dataAsOf) and FAILED (both null) unchanged.
+
+### Cycle log
+- **Cycle 1 (tracer).** RED: PARTIAL run persisted cursor `T(2)` (succeeded high-water) instead of
+  failed chunk's `T(1)`. GREEN: track `firstFailedLowerBound` (new `minDate` helper); finish with
+  `resumeCursor = PARTIAL ? firstFailedLowerBound : dataAsOf`. Asserted dataAsOf stays `T(2)`.
+- **Cycle 2.** SUCCESS pinned: cursor === dataAsOf high-water (regression, new explicit assertion).
+- **Cycle 3.** FAILED pinned: null dataAsOf AND null cursor.
+- **Cycle 4 (e2e).** Two-run sequence with a resume-aware reader mirroring the real `>=` resume:
+  run 1 PARTIAL (middle window lost) → run 2 re-reads `>= T(1)`, inserts exactly the lost ping
+  (`inserted === 1`, overlap deduped), every source row present exactly once.
+- **REFACTOR.** Cursor-semantics naming folded into GREEN (`resumeCursor` local + A3 comment block).
+
+**Result.** `test/snapshot-partial-cursor.e2e-spec.ts` 4/4 green · full backend suite **835 passed /
+5 skipped / 0 failed** · `tsc --noEmit` clean.
+
+**Files touched:** `src/ingestion/snapshot-ingestion.worker.ts`,
+`test/snapshot-partial-cursor.e2e-spec.ts` (new).
+
+---
+
+## Slice 4+ — not started
+See the issue file §5 for slices 4–7. Order: A5 skips → A6 reconciliation → overlap-safe tick →
+A1 scheduler.
