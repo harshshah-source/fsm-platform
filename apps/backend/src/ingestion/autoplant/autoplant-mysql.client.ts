@@ -1,5 +1,5 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
-import mysql, { type Pool, type RowDataPacket } from 'mysql2/promise';
+import mysql, { type Pool, type PoolOptions, type RowDataPacket } from 'mysql2/promise';
 
 /**
  * Read-only connection to the AutoPlant production MySQL DB (reachable over VPN) — the Snapshot
@@ -54,6 +54,69 @@ export function readAutoPlantMysqlConfig(env: NodeJS.ProcessEnv = process.env): 
 
 const READ_ONLY_PREFIXES = ['SELECT', 'SHOW', 'DESCRIBE', 'DESC', 'EXPLAIN'] as const;
 
+/** Fail-fast defaults (Issue 97 / review A4). A packet-blackholing VPN must surface as a bounded
+ *  rejection, not an indefinitely-pending read that pins the run RUNNING. Both env-overridable. */
+const DEFAULT_QUERY_TIMEOUT_MS = 30_000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+
+/**
+ * Per-statement timeout budget. Kept OUT of `AutoPlantMysqlConfig` on purpose: config nullability
+ * signals "credentials present" (drives the mock/real DI swap), whereas the timeout is always known —
+ * even to decide how long to wait before giving up on an unconfigured/hung read.
+ */
+export function readQueryTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.AUTOPLANT_QUERY_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_QUERY_TIMEOUT_MS;
+}
+
+/** TCP connect budget for the pool (mysql2 `connectTimeout`). */
+export function readConnectTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.AUTOPLANT_CONNECT_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_CONNECT_TIMEOUT_MS;
+}
+
+/** Pure builder for the mysql2 pool options — testable without opening a pool. */
+export function buildPoolOptions(
+  cfg: AutoPlantMysqlConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): PoolOptions {
+  return {
+    host: cfg.host,
+    port: cfg.port,
+    user: cfg.user,
+    password: cfg.password,
+    // Default schema = ap_widgets (tb_vehiclemaster); ap_masters queries are schema-qualified.
+    database: cfg.dbWidgets,
+    ssl: cfg.ssl ? {} : undefined,
+    connectionLimit: 4,
+    waitForConnections: true,
+    dateStrings: true,
+    // Fail-fast on a dead/half-open VPN rather than blocking on connection acquisition.
+    connectTimeout: readConnectTimeoutMs(env),
+  };
+}
+
+/**
+ * Reject `work` if it doesn't settle within `ms` — the per-statement fail-fast wrapper. On timeout it
+ * rejects with a clear error (the pending `work` is abandoned; the pool connection is reclaimed by
+ * mysql2). A non-positive `ms` disables the wrapper (returns `work` unchanged).
+ */
+export async function withQueryTimeout<T>(work: Promise<T>, ms: number, sql: string): Promise<T> {
+  if (!(ms > 0)) return work;
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`AutoPlant query timed out after ${ms}ms: "${sql.slice(0, 48)}…"`)),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 @Injectable()
 export class AutoPlantMysqlClient implements OnModuleDestroy {
   private readonly logger = new Logger(AutoPlantMysqlClient.name);
@@ -78,24 +141,27 @@ export class AutoPlantMysqlClient implements OnModuleDestroy {
       `Opening AutoPlant MySQL pool ${cfg.user}@${cfg.host}:${cfg.port} ` +
         `(default=${cfg.dbWidgets}, masters=${cfg.dbMasters}, ssl=${cfg.ssl})`,
     );
-    this.pool = mysql.createPool({
-      host: cfg.host,
-      port: cfg.port,
-      user: cfg.user,
-      password: cfg.password,
-      // Default schema = ap_widgets (tb_vehiclemaster); ap_masters queries are schema-qualified.
-      database: cfg.dbWidgets,
-      ssl: cfg.ssl ? {} : undefined,
-      connectionLimit: 4,
-      waitForConnections: true,
-      dateStrings: true,
-    });
+    this.pool = mysql.createPool(buildPoolOptions(cfg));
     return this.pool;
   }
 
   /**
+   * The raw pool call. Extracted as a `protected` seam so tests can simulate a hung/failed driver
+   * (a VPN half-failure) without a real MySQL connection. Production code should call `query()`, which
+   * wraps this with the read-only guard and the fail-fast timeout.
+   */
+  protected async execute<T extends RowDataPacket = RowDataPacket>(
+    sql: string,
+    params: readonly unknown[],
+  ): Promise<T[]> {
+    const [rows] = await this.getPool().query<T[]>(sql, params as unknown[]);
+    return rows;
+  }
+
+  /**
    * Run a read-only query. A defensive guard rejects anything that is not a plain read — this seam
-   * must never mutate the production source, regardless of what the account is granted.
+   * must never mutate the production source, regardless of what the account is granted. The read is
+   * bounded by a per-statement timeout (review A4) so a dead VPN fails fast instead of hanging.
    */
   async query<T extends RowDataPacket = RowDataPacket>(
     sql: string,
@@ -105,8 +171,7 @@ export class AutoPlantMysqlClient implements OnModuleDestroy {
     if (!READ_ONLY_PREFIXES.includes(head as (typeof READ_ONLY_PREFIXES)[number])) {
       throw new Error(`Refusing non-read query at the read-only AutoPlant seam: "${sql.slice(0, 48)}…"`);
     }
-    const [rows] = await this.getPool().query<T[]>(sql, params as unknown[]);
-    return rows;
+    return withQueryTimeout(this.execute<T>(sql, params), readQueryTimeoutMs(), sql);
   }
 
   /** Connectivity probe: confirms the pool connects and the source table is readable. */
