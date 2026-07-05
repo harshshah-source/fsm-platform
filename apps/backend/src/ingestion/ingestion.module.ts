@@ -2,7 +2,12 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
+import { DeviceStateModule } from '../device-state/device-state.module';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  AutoPlantMasterSource,
+  type AutoPlantMasterSourceDeps,
+} from './autoplant/autoplant-master-source';
 import { AutoPlantMysqlClient, readAutoPlantMysqlConfig } from './autoplant/autoplant-mysql.client';
 import {
   AutoPlantSourceReader,
@@ -10,12 +15,30 @@ import {
 } from './autoplant/autoplant-source-reader';
 import { AutoPlantHealthService } from './autoplant/health.service';
 import { IntegrationHealthController } from './autoplant/integration-health.controller';
+import { IntegrationSyncController } from './autoplant/integration-sync.controller';
+import { IntegrationSyncService } from './autoplant/integration-sync.service';
+import { MappingTableZoneResolver } from './autoplant/mapping-table-zone-resolver';
 import { MasterSyncRunService } from './autoplant/master-sync-run.service';
+import {
+  MASTER_SYNC_SCOPE,
+  MASTER_SYNC_SOURCE,
+  MasterSyncService,
+  type MasterSyncSource,
+  PLANT_ZONE_RESOLVER,
+} from './autoplant/master-sync.service';
 import { SnapshotIngestionService } from './snapshot-ingestion.service';
 import { SnapshotIngestionWorker } from './snapshot-ingestion.worker';
 import { SnapshotQueryService } from './snapshot-query.service';
 import { SnapshotRunService } from './snapshot-run.service';
 import { InMemorySourceReader, SOURCE_READER, type SourceReader } from './source-reader';
+
+/** Empty master source — bound when AutoPlant is unconfigured so DI resolves and a stray sync no-ops. */
+const EMPTY_MASTER_SOURCE: MasterSyncSource = {
+  readCompanies: async () => [],
+  readTransporters: async () => [],
+  readPlants: async () => [],
+  readVehicleMasters: async () => [],
+};
 
 /**
  * Snapshot ingestion (Issue 04). Composes the run lifecycle, idempotent chunk writer, query side,
@@ -30,23 +53,57 @@ import { InMemorySourceReader, SOURCE_READER, type SourceReader } from './source
   // AuthModule (→ TokenService) + the guards are imported/provided locally so IntegrationHealthController's
   // @UseGuards(AuthGuard, RoleGuard) resolves inside this module — the app-level controllers (SnapshotsController
   // et al.) stay in AppModule; this one is self-contained to avoid touching the concurrently-edited AppModule.
-  imports: [AuthModule],
-  controllers: [IntegrationHealthController],
+  imports: [AuthModule, DeviceStateModule],
+  controllers: [IntegrationHealthController, IntegrationSyncController],
   providers: [
     AuthGuard,
     RoleGuard,
     SnapshotRunService,
     SnapshotIngestionService,
     SnapshotQueryService,
-    // Master-sync run bookkeeping (Phase 4). Decision-free + self-contained; the MasterSyncService
-    // itself is NOT registered — its scope/zone/source ports are business-/VPN-gated (Phase 7 wiring).
     MasterSyncRunService,
-    // AutoPlant integration health surface — the client doubles as the connectivity probe.
+    // ── Master synchroniser wiring (Step 2) — now that the R6 zone map is data-driven (the
+    //    MappingTableZoneResolver defers nothing; pending plants land in UNZONED), MasterSyncService is
+    //    registered with its three ports bound: the paginated AutoPlant source, the mapping-table zone
+    //    resolver, and the ACTIVE-plant scope. Source-side scope (ACTIVE plants / DEPLOYED vehicles) +
+    //    ≤90-row pagination respect the DBA < 100/query cap.
+    MasterSyncService,
+    IntegrationSyncService,
+    { provide: MASTER_SYNC_SCOPE, useValue: { plantStatuses: ['ACTIVE'] } },
+    {
+      provide: PLANT_ZONE_RESOLVER,
+      useFactory: (prisma: PrismaService) => new MappingTableZoneResolver(prisma),
+      inject: [PrismaService],
+    },
+    {
+      // Real paginated ap_masters source when configured; an empty no-op source otherwise (so DI
+      // resolves and the unconfigured dev/test/CI env boots — the controller guards with 503).
+      provide: MASTER_SYNC_SOURCE,
+      useFactory: (client: AutoPlantMysqlClient): MasterSyncSource => {
+        const cfg = readAutoPlantMysqlConfig();
+        if (cfg === null) return EMPTY_MASTER_SOURCE;
+        return new AutoPlantMasterSource({
+          query: ((sql, params) => client.query(sql, params)) as AutoPlantMasterSourceDeps['query'],
+          mastersSchema: cfg.dbMasters,
+          plantStatuses: ['ACTIVE'],
+          deploymentStatuses: ['DEPLOYED'],
+        });
+      },
+      inject: [AutoPlantMysqlClient],
+    },
+    // AutoPlant integration health surface — the client doubles as the connectivity probe, and the
+    // real master source doubles as the reconciliation counts dep (Issue 97 Slice 5): its COUNT(*)
+    // reads reuse the sync's own filter fragments. Unconfigured env binds the empty source → counts
+    // stay null → health reports reconciled: null (degraded), never crashing.
     {
       provide: AutoPlantHealthService,
-      useFactory: (prisma: PrismaService, client: AutoPlantMysqlClient) =>
-        new AutoPlantHealthService(prisma, client),
-      inject: [PrismaService, AutoPlantMysqlClient],
+      useFactory: (prisma: PrismaService, client: AutoPlantMysqlClient, source: MasterSyncSource) =>
+        new AutoPlantHealthService(
+          prisma,
+          client,
+          source instanceof AutoPlantMasterSource ? source : null,
+        ),
+      inject: [PrismaService, AutoPlantMysqlClient, MASTER_SYNC_SOURCE],
     },
     // Connection seam to the read-only AutoPlant MySQL source. Bound now so the app can reach and
     // read AutoPlant; the real SourceReader (JSON mapping + normalization) still swaps in behind
@@ -84,6 +141,8 @@ import { InMemorySourceReader, SOURCE_READER, type SourceReader } from './source
     SnapshotIngestionWorker,
     AutoPlantMysqlClient,
     MasterSyncRunService,
+    MasterSyncService,
+    IntegrationSyncService,
     AutoPlantHealthService,
   ],
 })

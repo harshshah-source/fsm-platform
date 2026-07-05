@@ -12,7 +12,7 @@ Branch: `feat/autoplant-integration`. One slice = one PR-sized commit; `main` st
 | 2 | Stale-run reaper, both run tables (A2) | ✅ done | — | 6 new · 831/836 suite |
 | 3 | PARTIAL-cursor lower-bound fix (A3) | ✅ done | — | 4 new · 835/840 suite |
 | 4 | Itemised master-sync skip accounting (A5) | ✅ done | — | 6 new · 841/846 suite |
-| 5 | Reconciliation counts in health (A6) | ⬜ not started | — | — |
+| 5 | Reconciliation counts in health (A6) | ✅ done | — | 7 new · 0 failures over 3 full runs |
 | 6 | Overlap-safe telemetry tick | ⬜ not started | — | — |
 | 7 | In-process `@nestjs/schedule` scheduler (A1) | ⬜ not started | — | — |
 
@@ -184,5 +184,50 @@ recurred once more on a different, DB-free file (`schedules-route-conflicts`) �
 
 ---
 
-## Slice 5+ — not started
-See the issue file §5 for slices 5–7. Order: A6 reconciliation → overlap-safe tick → A1 scheduler.
+## Slice 5 — Reconciliation counts in health (review A6)
+
+**Design.** `GET /api/integration/health` gains a `reconciliation` block: per entity
+(`plants`, `vehicles`) `{ sourceCount, fsmCount, drift }` + top-level `reconciled` and the threshold
+in play. Source side: new `MasterSourceCounts` seam (in `health.service.ts`), implemented by
+`AutoPlantMasterSource` as single-row `COUNT(*)` reads (`COUNT(DISTINCT plant_id)` mirrors the
+composite-PK dedup) that reuse the class's own `table()`/`inClause()` fragments — the reconciliation
+query structurally cannot diverge from the sync query, and the `<100`-row cap is trivially met.
+`AutoPlantHealthService` takes the counts dep as an optional 3rd ctor arg (two-arg call sites stay
+valid); unconfigured/unreachable → `reconciled: null` + `error` (degraded, freshness untouched).
+Threshold `INGESTION_RECON_MAX_DRIFT` (absolute rows, default 0) — informational ops knob, not a
+business rule. Module wiring: the real master source doubles as the counts dep
+(`instanceof AutoPlantMasterSource`); the empty unconfigured source leaves counts null.
+
+### Cycle log
+- **Cycle 1 (tracer).** RED (observed in the full-suite run: `reconciliation` undefined). GREEN:
+  `ReconciliationHealth` + `reconciliationHealth()` in the health service; per-entity diff vs
+  `prisma.plant.count()` / `prisma.vehicle.count()`.
+- **Cycle 2.** Drift: source ahead by 3 → `drift: 3`, `reconciled: false` at default threshold 0.
+- **Cycle 3.** Degraded ×2: no counts dep (unconfigured) and a throwing count (VPN drop) → both
+  `reconciled: null` + error, freshness intact, no crash.
+- **Cycle 4.** Threshold: `INGESTION_RECON_MAX_DRIFT=5` tolerates |3| → `reconciled: true`; pure
+  `readReconMaxDrift` (default/override/garbage/negative).
+- **Cycle 5.** `AutoPlantMasterSource.countPlants()`/`countVehicleMasters()`: exactly one physical
+  single-row COUNT each, schema-qualified, same filters+params as the paged reads.
+- **Wiring.** Health provider factory injects `MASTER_SYNC_SOURCE`, passes it as counts when it is
+  the real `AutoPlantMasterSource`. Verified by the booting `integration-health-api` e2e.
+- **REFACTOR.** Structural from the start — counts reuse the source's own filter fragments (the
+  issue's stated refactor goal), so nothing left to extract.
+
+**Files touched:** `health.service.ts`, `autoplant-master-source.ts`, `ingestion.module.ts`,
+`test/integration-reconciliation.e2e-spec.ts` (new).
+
+**Done-bar (environmental caveat, recorded honestly).** Three consecutive full-suite runs after
+Slice 5: **zero test failures** (846 / 844 / 847 passed of 853; the deltas are files whose vitest
+FORK was OOM-killed by Windows — box at ~1.5 GB free RAM — before reporting). The kill victim was a
+different file each run (install-lifecycle+recovery → install-lifecycle → territory-coverage), every
+victim passes standalone, and the union of the runs covers all 222 files green. `maxForks=1` and a
+1.4 GB heap cap did not prevent the kills; they are infrastructure, not code. Each crash skips that
+spec's `afterAll` — leaked fixtures (fixed device ids 9344900 / 9362001 + P-ilc/Co-ilc/P-recc/Co-recc
+rows) were cleaned by hand before each subsequent run. *If a future session sees a unique-constraint
+error in `install-lifecycle-controller` / `recovery-controller` seeds, suspect this leak first.*
+
+---
+
+## Slice 6+ — not started
+See the issue file §5 for slices 6–7. Order: overlap-safe tick → A1 scheduler.
