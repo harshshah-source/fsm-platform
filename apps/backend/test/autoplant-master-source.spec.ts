@@ -56,11 +56,13 @@ describe('Phase 4 — AutoPlantMasterSource', () => {
     expect(sql).toMatch(/zone_id|zone_name|region_id|plant_state|plant_district/);
   });
 
-  it('resolves a vehicle company via its plant (JOIN mst_plant, p.company_id) — mst_vehicle.company_id is unreliable', async () => {
+  it('resolves a vehicle company via a GROUP-BY-plant_id subquery (dedup) — mst_vehicle.company_id is unreliable + composite plant PK', async () => {
     await source.readVehicleMasters();
     const sql = lastSql();
     expect(sql).toContain('`ap_masters`.`mst_vehicle`');
-    expect(sql).toMatch(/LEFT JOIN\s+`ap_masters`\.`mst_plant`/i);
+    // Dedup subquery, not a raw join — the composite (plant_id, plant_code) PK would otherwise fan out.
+    expect(sql).toMatch(/LEFT JOIN\s*\(SELECT\s+plant_id,\s*MIN\(company_id\)/i);
+    expect(sql).toMatch(/GROUP BY plant_id\)\s*p/i);
     expect(sql).toMatch(/p\.company_id\s+AS\s+company_id/i);
     expect(sql).toMatch(/v\.deployment_status|v\.transporter_id|v\.device_id/i);
   });
