@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from '../auth/auth.module';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -14,6 +15,7 @@ import {
   type AutoPlantSourceReaderDeps,
 } from './autoplant/autoplant-source-reader';
 import { AutoPlantHealthService } from './autoplant/health.service';
+import { IntegrationSchedulerService } from './autoplant/integration-scheduler.service';
 import { IntegrationHealthController } from './autoplant/integration-health.controller';
 import { IntegrationSyncController } from './autoplant/integration-sync.controller';
 import { IntegrationSyncService } from './autoplant/integration-sync.service';
@@ -53,7 +55,9 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
   // AuthModule (→ TokenService) + the guards are imported/provided locally so IntegrationHealthController's
   // @UseGuards(AuthGuard, RoleGuard) resolves inside this module — the app-level controllers (SnapshotsController
   // et al.) stay in AppModule; this one is self-contained to avoid touching the concurrently-edited AppModule.
-  imports: [AuthModule, DeviceStateModule],
+  // ScheduleModule lives here (not AppModule) for the same self-containment reason as the guards —
+  // the ingestion scheduler is this module's only cron user, and AppModule stays untouched.
+  imports: [AuthModule, DeviceStateModule, ScheduleModule.forRoot()],
   controllers: [IntegrationHealthController, IntegrationSyncController],
   providers: [
     AuthGuard,
@@ -104,6 +108,15 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
           source instanceof AutoPlantMasterSource ? source : null,
         ),
       inject: [PrismaService, AutoPlantMysqlClient, MASTER_SYNC_SOURCE],
+    },
+    // In-process ingestion scheduler (Issue 97 Slice 7 / review A1). Env-gated OFF by default and
+    // dormant when AutoPlant is unconfigured — the client doubles as the isConfigured() gate — so
+    // dev/test/CI boot exactly as before while a configured+enabled runtime self-runs the pipeline.
+    {
+      provide: IntegrationSchedulerService,
+      useFactory: (sync: IntegrationSyncService, client: AutoPlantMysqlClient) =>
+        new IntegrationSchedulerService(sync, client),
+      inject: [IntegrationSyncService, AutoPlantMysqlClient],
     },
     // Connection seam to the read-only AutoPlant MySQL source. Bound now so the app can reach and
     // read AutoPlant; the real SourceReader (JSON mapping + normalization) still swaps in behind

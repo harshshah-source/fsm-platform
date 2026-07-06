@@ -14,7 +14,7 @@ Branch: `feat/autoplant-integration`. One slice = one PR-sized commit; `main` st
 | 4 | Itemised master-sync skip accounting (A5) | ✅ done | — | 6 new · 841/846 suite |
 | 5 | Reconciliation counts in health (A6) | ✅ done | — | 7 new · 0 failures over 3 full runs |
 | 6 | Overlap-safe telemetry tick | ✅ done | — | 3 new · 851/856 suite (clean run) |
-| 7 | In-process `@nestjs/schedule` scheduler (A1) | ⬜ not started | — | — |
+| 7 | In-process `@nestjs/schedule` scheduler (A1) | ✅ done | — | 9 new · 856/865 suite, 0 failures |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done (tests + tsc + build green) · 🔵 merged
 
@@ -255,6 +255,51 @@ environmental caveat) · `tsc --noEmit` clean.
 
 ---
 
-## Slice 7 — not started
-In-process `@nestjs/schedule` scheduler (review A1): two env-gated cron handlers (masters daily,
-telemetry short-interval via `ingestTelemetry`), dormant when disabled or AutoPlant unconfigured.
+## Slice 7 — In-process `@nestjs/schedule` scheduler (review A1)
+
+**Design.** New dep `@nestjs/schedule@^4.1.2` (Nest-10 major; AC1 — still no Redis/BullMQ).
+`IntegrationSchedulerService` with two named `@Cron` handlers — `ingestion-masters`
+(`INGESTION_MASTERS_CRON`, default `0 2 * * *`) → `syncMastersTick()` (new overlap-safe wrapper on
+`IntegrationSyncService`, reusing Slice-6's `skipOnOverlap`); `ingestion-telemetry`
+(`INGESTION_TELEMETRY_CRON`, default `*/30 * * * *`) → `ingestTelemetry()`. Config centralised in
+`readIngestionSchedulerConfig()` (the issue's REFACTOR, done up front): enabled ⇔
+`INGESTION_SCHEDULER_ENABLED === 'true'` (default OFF). The enabled/configured gate re-checks every
+tick (`SchedulerSourceGate` — satisfied by `AutoPlantMysqlClient`); cron expressions resolve from
+env once at module load. A tick NEVER throws out of the cron context: dormant → DISABLED/
+UNCONFIGURED, overlap → RUN_IN_PROGRESS (logged skip), anything else → ERROR (logged).
+**Wiring deviation (documented):** `ScheduleModule.forRoot()` lives in `IngestionModule`, not
+`app.module.ts` as the issue sketched — same self-containment precedent as the module's guards
+(AppModule is concurrently edited; the scheduler is this module's only cron user).
+
+### Cycle log
+- **Cycle 1 (tracer).** RED: module missing. GREEN: scheduler service + config reader +
+  `syncMastersTick()`; telemetry tick dispatches to `ingestTelemetry` → `{ ran: true }`.
+- **Cycle 2.** Masters tick dispatches to `syncMastersTick` (never raw `syncMasters`); dormant flag
+  OFF → `DISABLED`, no dispatch; unconfigured → `UNCONFIGURED`, no dispatch.
+- **Cycle 3.** Overlap: both handlers report `{ ran: false, reason: 'RUN_IN_PROGRESS' }` without
+  throwing; failing tick (VPN death / source explosion) → `ERROR`, logged, no throw.
+- **Cycle 4.** `syncMastersTick` swallows the masters guard's 409 through the real
+  `IntegrationSyncService` (shared `skipOnOverlap` — uniform overlap safety, the Slice-6 promise).
+- **Cycle 5.** Pure config reader (OFF default, env overrides, literal-'true' gate) + registration:
+  a real `ScheduleModule.forRoot()` boot registers both named cron jobs.
+- **Wiring.** `IngestionModule`: `ScheduleModule.forRoot()` import + scheduler provider (client as
+  gate). AppModule-booting e2es (`integration-sync-api`, `integration-health-api`) stay green —
+  unconfigured env boots with the scheduler dormant (AC3). Knobs documented in `.env.example`.
+
+**Files touched:** `integration-scheduler.service.ts` (new), `integration-sync.service.ts`
+(`syncMastersTick`), `ingestion.module.ts`, `.env.example`, `package.json`/lockfile
+(`@nestjs/schedule`), `test/integration-scheduler.e2e-spec.ts` (new).
+
+**Result.** 9/9 green · full suite **856 passed / 5 skipped / 0 failed** (one env worker-kill on
+`org-zones.e2e-spec` — green standalone, same OOM pattern as recorded under Slices 4–5) · `tsc`
+clean · AC1 verified: `@nestjs/schedule` is the only new runtime dep, no Redis/BullMQ/ioredis.
+
+---
+
+## Issue 97 — ALL 7 SLICES DONE ✅ (2026-07-06)
+
+Ingestion is now continuous (env-gated scheduler), recoverable (reaper + fail-fast timeouts),
+loss-free at the PARTIAL edge (resume-cursor lower bound), and provably complete (itemised skips +
+reconciliation in `/health`). Remaining before enabling in prod: ops flips
+`INGESTION_SCHEDULER_ENABLED=true` after zone ratification (B8); the acting half stays gated on B7.
+Runtime verification against the live VPN source (issue §7) still requires external access — HITL.

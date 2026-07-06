@@ -82,6 +82,17 @@ export class IntegrationSyncService {
   }
 
   /**
+   * The scheduled masters entry (Issue 97 Slice 7): `syncMasters()` behind the same overlap-swallow
+   * as the telemetry tick, so an overlapping daily tick degrades to a skip. The HTTP trigger keeps
+   * calling `syncMasters()` directly and propagating its 409 verbatim.
+   */
+  async syncMastersTick(): Promise<TickSkipped | { skipped: false; master: PipelineSummary['master'] }> {
+    const outcome = await this.skipOnOverlap(() => this.syncMasters());
+    if (outcome.skipped) return outcome;
+    return { skipped: false, master: outcome.value };
+  }
+
+  /**
    * Convert the in-flight guards' 409 into a skip result — shared by every SCHEDULED path (the
    * Slice-7 masters handler reuses this around `syncMasters()`), while the HTTP triggers keep
    * propagating the 409 verbatim to their callers.
