@@ -13,7 +13,7 @@ Branch: `feat/autoplant-integration`. One slice = one PR-sized commit; `main` st
 | 3 | PARTIAL-cursor lower-bound fix (A3) | ✅ done | — | 4 new · 835/840 suite |
 | 4 | Itemised master-sync skip accounting (A5) | ✅ done | — | 6 new · 841/846 suite |
 | 5 | Reconciliation counts in health (A6) | ✅ done | — | 7 new · 0 failures over 3 full runs |
-| 6 | Overlap-safe telemetry tick | ⬜ not started | — | — |
+| 6 | Overlap-safe telemetry tick | ✅ done | — | 3 new · 851/856 suite (clean run) |
 | 7 | In-process `@nestjs/schedule` scheduler (A1) | ⬜ not started | — | — |
 
 Legend: ⬜ not started · 🟡 in progress · ✅ done (tests + tsc + build green) · 🔵 merged
@@ -229,5 +229,32 @@ error in `install-lifecycle-controller` / `recovery-controller` seeds, suspect t
 
 ---
 
-## Slice 6+ — not started
-See the issue file §5 for slices 6–7. Order: overlap-safe tick → A1 scheduler.
+## Slice 6 — Overlap-safe telemetry tick
+
+**Design.** `IntegrationSyncService.ingestTelemetry({ chunkSize=90 })` — snapshot ingest +
+device-state recompute, NO master sync. Returns a discriminated `TelemetryTickResult`:
+`{ skipped: false, snapshot, deviceState }` or `{ skipped: true, reason: 'RUN_IN_PROGRESS' }`.
+The 409-swallow lives in a shared private `skipOnOverlap(work)` helper — the Slice-7 masters cron
+handler reuses it around `syncMasters()`, while the HTTP triggers keep propagating 409 verbatim.
+Only the guards' `RUN_IN_PROGRESS` ConflictException is swallowed; any other failure propagates.
+
+### Cycle log
+- **Cycle 1 (tracer).** RED: `ingestTelemetry` not a function. GREEN: method + `skipOnOverlap` +
+  `TelemetryTickResult`. Asserted: snapshot SUCCESS, recompute called once, master sync NEVER called.
+- **Cycle 2.** Overlap: seeded fresh RUNNING snapshot run → `{ skipped: true, reason:
+  'RUN_IN_PROGRESS' }`, recompute NOT called (no half-work), in-flight row untouched.
+- **Cycle 3.** Non-overlap failure (`source exploded`) propagates — only RUN_IN_PROGRESS is a skip.
+- **REFACTOR.** Built in — the swallow is already the shared helper the issue asked to extract.
+
+**Files touched:** `integration-sync.service.ts`, `test/telemetry-tick.e2e-spec.ts` (new).
+
+**Result.** 3/3 green · full backend suite **851 passed / 5 skipped / 0 failed — fully clean run,
+all 223 files accounted** (the overnight attempt's one hook-timeout was the starved machine, spec
+green standalone; the morning rerun was clean, which also retroactively clears Slice 5's
+environmental caveat) · `tsc --noEmit` clean.
+
+---
+
+## Slice 7 — not started
+In-process `@nestjs/schedule` scheduler (review A1): two env-gated cron handlers (masters daily,
+telemetry short-interval via `ingestTelemetry`), dormant when disabled or AutoPlant unconfigured.
