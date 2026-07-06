@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MasterSyncRunService, type EntityStat, type MasterSyncOutcome } from './master-sync-run.service';
 import {
@@ -51,6 +52,21 @@ export interface MasterSyncResult {
 }
 
 const emptyStat = (): EntityStat => ({ inserted: 0, updated: 0, skipped: 0 });
+
+/**
+ * How many per-row upserts are grouped into one batched `$transaction` round trip (write side only —
+ * the DBA ≤90-row cap governs *reads from AutoPlant*, not writes to FSM Postgres). Collapses the
+ * per-row round-trip storm (a `findUnique` + `upsert` each, ~2 per source row over ~54k vehicles +
+ * ~54k devices) into a handful of batched transactions. The pure mapping plans are unchanged, so the
+ * structural anti-drift guarantee (FSM-owned columns excluded from every `update`) is preserved.
+ */
+const UPSERT_BATCH_SIZE = 500;
+
+const chunk = <T>(arr: readonly T[], size: number): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
 
 /**
  * Cap on `master_sync_rejects` rows written per run (review A5). The itemisation exists to answer
@@ -131,11 +147,12 @@ export class MasterSyncService {
     };
 
     try {
-      // 1. Plants — the scope anchor. In-scope = status allowed ∧ zone-resolvable (R6). Plants carry no
-      //    company FK in FSM, so they upsert first; each in-scope plant's (NOT NULL) company_id is
-      //    collected so the companies it references get created on demand.
+      // 1. Plants — the scope anchor. In-scope = status allowed ∧ zone-resolvable (R6). Zone resolution
+      //    stays per-plant (business logic, R6); the WRITES are batched. Each in-scope plant's (NOT NULL)
+      //    company_id is collected so the companies it references get created on demand.
       const plantIdBySource = new Map<string, bigint>();
       const neededCompanyIds = new Set<string>();
+      const plantPlans: ReturnType<typeof mapPlant>[] = [];
       for (const p of await this.source.readPlants()) {
         if (!plantInScope(p, scope)) {
           skip('plants', String(p.plant_id), 'OUT_OF_SCOPE_STATUS'); // e.g. INACTIVE
@@ -146,116 +163,125 @@ export class MasterSyncService {
           skip('plants', String(p.plant_id), 'ZONE_UNRESOLVED'); // deferred, never force-zoned (R6)
           continue;
         }
-        const plan = mapPlant(p, { zoneId: zone.zoneId, districtId: zone.districtId });
-        const existed = await this.prisma.plant.findUnique({
-          where: plan.where,
-          select: { plantId: true },
-        });
-        const row = await this.prisma.plant.upsert({
-          where: plan.where,
-          create: plan.create,
-          update: plan.update,
-          select: { plantId: true },
-        });
-        plantIdBySource.set(plan.where.sourcePlantId.toString(), row.plantId);
+        plantPlans.push(mapPlant(p, { zoneId: zone.zoneId, districtId: zone.districtId }));
         const companyKey = toBigIntOrNull(p.company_id);
         if (companyKey != null) neededCompanyIds.add(companyKey.toString());
-        existed ? stats.plants.updated++ : stats.plants.inserted++;
       }
+      const existingPlants = await this.existingKeys(
+        () => this.prisma.plant.findMany({ where: { sourcePlantId: { not: null } }, select: { sourcePlantId: true } }),
+        (r) => r.sourcePlantId!.toString(),
+      );
+      const plantRows = await this.batchUpsert(plantPlans, (pl) =>
+        this.prisma.plant.upsert({ where: pl.where, create: pl.create, update: pl.update, select: { plantId: true } }),
+      );
+      plantPlans.forEach((pl, i) => {
+        const key = pl.where.sourcePlantId.toString();
+        plantIdBySource.set(key, plantRows[i].plantId);
+        existingPlants.has(key) ? stats.plants.updated++ : stats.plants.inserted++;
+      });
 
       // 2. Companies — DERIVED: upsert only those an in-scope plant references. No allow-list, and
       //    mst_company.company_type is never consulted (a Transporter-typed plant owner is still an FSM
       //    customer; an unreferenced/INACTIVE-only company is inert and skipped).
       const companyIdBySource = new Map<string, bigint>();
+      const companyPlans: ReturnType<typeof mapCompany>[] = [];
       for (const c of await this.source.readCompanies()) {
         const key = BigInt(String(c.company_id).trim()).toString();
         if (!neededCompanyIds.has(key)) {
           skip('companies', key, 'NO_INSCOPE_PLANT'); // inert company — nothing in scope names it
           continue;
         }
-        const plan = mapCompany(c, this.companyDefaults);
-        const existed = await this.prisma.company.findUnique({
-          where: plan.where,
-          select: { companyId: true },
-        });
-        const row = await this.prisma.company.upsert({
-          where: plan.where,
-          create: plan.create,
-          update: plan.update,
-          select: { companyId: true },
-        });
-        companyIdBySource.set(plan.where.sourceCompanyId.toString(), row.companyId);
-        existed ? stats.companies.updated++ : stats.companies.inserted++;
+        companyPlans.push(mapCompany(c, this.companyDefaults));
       }
+      const existingCompanies = await this.existingKeys(
+        () => this.prisma.company.findMany({ where: { sourceCompanyId: { not: null } }, select: { sourceCompanyId: true } }),
+        (r) => r.sourceCompanyId!.toString(),
+      );
+      const companyRows = await this.batchUpsert(companyPlans, (pl) =>
+        this.prisma.company.upsert({ where: pl.where, create: pl.create, update: pl.update, select: { companyId: true } }),
+      );
+      companyPlans.forEach((pl, i) => {
+        const key = pl.where.sourceCompanyId.toString();
+        companyIdBySource.set(key, companyRows[i].companyId);
+        existingCompanies.has(key) ? stats.companies.updated++ : stats.companies.inserted++;
+      });
 
       // 3. Transporters — best-effort company FK, keyed by source_transporter_id.
       const transporterIdBySource = new Map<string, bigint>();
-      for (const t of await this.source.readTransporters()) {
-        const companyId = companyIdBySource.get(String(toBigIntOrNull(t.company_id))) ?? null;
-        const plan = mapTransporter(t, { companyId });
-        const existed = await this.prisma.transporter.findUnique({
-          where: plan.where,
+      const transporterPlans = (await this.source.readTransporters()).map((t) =>
+        mapTransporter(t, { companyId: companyIdBySource.get(String(toBigIntOrNull(t.company_id))) ?? null }),
+      );
+      const existingTransporters = await this.existingKeys(
+        () =>
+          this.prisma.transporter.findMany({
+            where: { sourceTransporterId: { not: null } },
+            select: { sourceTransporterId: true },
+          }),
+        (r) => r.sourceTransporterId!.toString(),
+      );
+      const transporterRows = await this.batchUpsert(transporterPlans, (pl) =>
+        this.prisma.transporter.upsert({
+          where: pl.where,
+          create: pl.create,
+          update: pl.update,
           select: { transporterId: true },
-        });
-        const row = await this.prisma.transporter.upsert({
-          where: plan.where,
-          create: plan.create,
-          update: plan.update,
-          select: { transporterId: true },
-        });
-        transporterIdBySource.set(plan.where.sourceTransporterId.toString(), row.transporterId);
-        existed ? stats.transporters.updated++ : stats.transporters.inserted++;
-      }
+        }),
+      );
+      transporterPlans.forEach((pl, i) => {
+        const key = pl.where.sourceTransporterId.toString();
+        transporterIdBySource.set(key, transporterRows[i].transporterId);
+        existingTransporters.has(key) ? stats.transporters.updated++ : stats.transporters.inserted++;
+      });
 
-      // 4/5. Vehicles + devices (both from the tb_vehiclemaster master columns).
+      // 4. Vehicles (from the tb_vehiclemaster master columns) — skip any whose plant/company is unsynced.
       const vehicleMasters = await this.source.readVehicleMasters();
       const vehicleIdByNo = new Map<string, bigint>();
+      const vehiclePlans: ReturnType<typeof mapVehicle>[] = [];
       for (const v of vehicleMasters) {
         const plantId = plantIdBySource.get(String(toBigIntOrNull(v.plant_id)));
         const companyId = companyIdBySource.get(String(toBigIntOrNull(v.company_id)));
         if (plantId == null || companyId == null) {
-          // Vehicle hangs off an unsynced (out-of-scope/deferred) plant or company.
-          skip(
-            'vehicles',
-            v.vehicle_no.trim(),
-            plantId == null ? 'PLANT_NOT_SYNCED' : 'COMPANY_NOT_SYNCED',
-          );
+          skip('vehicles', v.vehicle_no.trim(), plantId == null ? 'PLANT_NOT_SYNCED' : 'COMPANY_NOT_SYNCED');
           continue;
         }
         const transporterId = transporterIdBySource.get(String(toBigIntOrNull(v.transporter_id))) ?? null;
-        const plan = mapVehicle(v, { plantId, companyId, transporterId });
-        const existed = await this.prisma.vehicle.findUnique({
-          where: plan.where,
-          select: { vehicleId: true },
-        });
-        const row = await this.prisma.vehicle.upsert({
-          where: plan.where,
-          create: plan.create,
-          update: plan.update,
-          select: { vehicleId: true },
-        });
-        vehicleIdByNo.set(v.vehicle_no.trim(), row.vehicleId);
-        existed ? stats.vehicles.updated++ : stats.vehicles.inserted++;
+        vehiclePlans.push(mapVehicle(v, { plantId, companyId, transporterId }));
       }
+      const existingVehicles = await this.existingKeys(
+        () => this.prisma.vehicle.findMany({ select: { vehicleNo: true } }),
+        (r) => r.vehicleNo,
+      );
+      const vehicleRows = await this.batchUpsert(vehiclePlans, (pl) =>
+        this.prisma.vehicle.upsert({ where: pl.where, create: pl.create, update: pl.update, select: { vehicleId: true } }),
+      );
+      vehiclePlans.forEach((pl, i) => {
+        vehicleIdByNo.set(pl.where.vehicleNo, vehicleRows[i].vehicleId);
+        existingVehicles.has(pl.where.vehicleNo) ? stats.vehicles.updated++ : stats.vehicles.inserted++;
+      });
 
+      // 5. Devices — mirrored only when their vehicle synced this run (never orphan a fitment onto a null
+      //    vehicle because the plant/company was out of scope).
+      const devicePlans: NonNullable<ReturnType<typeof mapDevice>>[] = [];
       for (const v of vehicleMasters) {
-        // A device is mirrored only when its vehicle synced this run — never orphan it onto a null
-        // vehicle because the plant/company was out of scope (which would also wipe its existing fitment).
         const currentVehicleId = vehicleIdByNo.get(v.vehicle_no.trim());
         const plan = currentVehicleId == null ? null : mapDevice(v, { currentVehicleId });
         if (!plan) {
-          // Itemise by device id when the row carries one; a deviceless row falls back to its vehicle.
           const deviceKey = String(v.device_id ?? '').trim() || v.vehicle_no.trim();
           skip('devices', deviceKey, currentVehicleId == null ? 'VEHICLE_NOT_SYNCED' : 'NO_FITTED_DEVICE');
           continue;
         }
-        const existed = await this.prisma.device.findUnique({
-          where: plan.where,
-          select: { deviceId: true },
-        });
-        await this.prisma.device.upsert({ where: plan.where, create: plan.create, update: plan.update });
-        existed ? stats.devices.updated++ : stats.devices.inserted++;
+        devicePlans.push(plan);
       }
+      const existingDevices = await this.existingKeys(
+        () => this.prisma.device.findMany({ select: { deviceId: true } }),
+        (r) => r.deviceId,
+      );
+      await this.batchUpsert(devicePlans, (pl) =>
+        this.prisma.device.upsert({ where: pl.where, create: pl.create, update: pl.update, select: { deviceId: true } }),
+      );
+      devicePlans.forEach((pl) => {
+        existingDevices.has(pl.where.deviceId) ? stats.devices.updated++ : stats.devices.inserted++;
+      });
 
       await flushRejects();
       await this.runService.finishRun(runId, { status: 'SUCCESS', entityStats: stats });
@@ -268,5 +294,28 @@ export class MasterSyncService {
       this.logger.error(`Master sync ${runId} FAILED: ${message}`);
       throw e;
     }
+  }
+
+  /**
+   * Preload the set of already-mirrored natural keys for an entity in ONE query, so inserted-vs-updated
+   * can be classified in memory — replacing the per-row `findUnique` that ran before every upsert. Loads
+   * all rows for the (fleet-bounded) mirror table rather than an `IN (…)` over tens of thousands of ids,
+   * which both avoids the Postgres bind-parameter ceiling and is a single sequential scan.
+   */
+  private async existingKeys<T>(load: () => Promise<T[]>, keyOf: (row: T) => string): Promise<Set<string>> {
+    return new Set((await load()).map(keyOf));
+  }
+
+  /**
+   * Upsert `plans` in batched `$transaction` groups, returning the results index-aligned with `plans`
+   * (so callers can wire generated ids into their source→id maps). Each group commits as one round trip.
+   */
+  private async batchUpsert<P, R>(plans: P[], toOp: (plan: P) => Prisma.PrismaPromise<R>): Promise<R[]> {
+    const results: R[] = [];
+    for (const group of chunk(plans, UPSERT_BATCH_SIZE)) {
+      const settled = (await this.prisma.$transaction(group.map(toOp))) as R[];
+      results.push(...settled);
+    }
+    return results;
   }
 }
