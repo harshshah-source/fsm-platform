@@ -5,6 +5,7 @@ import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { DeviceStateModule } from '../device-state/device-state.module';
 import { PrismaService } from '../prisma/prisma.service';
+import { SettingsModule } from '../settings/settings.module';
 import {
   AutoPlantMasterSource,
   type AutoPlantMasterSourceDeps,
@@ -28,6 +29,7 @@ import {
   type MasterSyncSource,
   PLANT_ZONE_RESOLVER,
 } from './autoplant/master-sync.service';
+import { PartitionMaintenanceService } from './partition-maintenance.service';
 import { SnapshotIngestionService } from './snapshot-ingestion.service';
 import { SnapshotIngestionWorker } from './snapshot-ingestion.worker';
 import { SnapshotQueryService } from './snapshot-query.service';
@@ -57,7 +59,7 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
   // et al.) stay in AppModule; this one is self-contained to avoid touching the concurrently-edited AppModule.
   // ScheduleModule lives here (not AppModule) for the same self-containment reason as the guards —
   // the ingestion scheduler is this module's only cron user, and AppModule stays untouched.
-  imports: [AuthModule, DeviceStateModule, ScheduleModule.forRoot()],
+  imports: [AuthModule, DeviceStateModule, SettingsModule, ScheduleModule.forRoot()],
   controllers: [IntegrationHealthController, IntegrationSyncController],
   providers: [
     AuthGuard,
@@ -65,6 +67,7 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
     SnapshotRunService,
     SnapshotIngestionService,
     SnapshotQueryService,
+    PartitionMaintenanceService,
     MasterSyncRunService,
     // ── Master synchroniser wiring (Step 2) — now that the R6 zone map is data-driven (the
     //    MappingTableZoneResolver defers nothing; pending plants land in UNZONED), MasterSyncService is
@@ -152,6 +155,7 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
     SnapshotIngestionService,
     SnapshotQueryService,
     SnapshotIngestionWorker,
+    PartitionMaintenanceService,
     AutoPlantMysqlClient,
     MasterSyncRunService,
     MasterSyncService,

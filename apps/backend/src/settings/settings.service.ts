@@ -30,6 +30,11 @@ export const SETTINGS_DEFAULTS: Record<string, { value: unknown; description: st
     value: 1.25,
     description: 'Recommender score boost for additional same-Plant tickets (Plant Cluster Multiplier, ADR-0017).',
   },
+  telemetry_retention_days: {
+    value: 7,
+    description:
+      'Days of raw_device_snapshots telemetry retained; older daily partitions are dropped by partition maintenance. Ops-tunable.',
+  },
 };
 
 @Injectable()
