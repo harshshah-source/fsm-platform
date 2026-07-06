@@ -1,5 +1,6 @@
 import {
   AutoPlantSourceReader,
+  encodeColdCursor,
   encodeCursor,
   utcIsoToSourceWallClock,
 } from '../src/ingestion/autoplant/autoplant-source-reader';
@@ -47,7 +48,10 @@ describe('Phase 3 — utcIsoToSourceWallClock', () => {
 });
 
 describe('Phase 3 — AutoPlantSourceReader', () => {
-  it('backfills (cursor=null, no prior run): no keyset predicate, ordered keyset, device ids preserved', async () => {
+  it('cold scan (cursor=null, no prior run): pages by the stable device_id key, no keyset predicate', async () => {
+    // A cold/first sync must page by the immutable device_id — NOT by latest_gps_datetime, which the
+    // live fleet mutates forward mid-scan (re-pinged devices would sort back to the front and be
+    // re-read forever). device_id order guarantees exactly one row per device and deterministic finish.
     const q = fakeQuery([vm('0869925073271551', '2026-07-02 05:57:47'), vm('AP03TC0959', '2026-07-02 05:58:00')]);
     const chunk = await reader(q).readChunk(null, 1000);
 
@@ -55,8 +59,10 @@ describe('Phase 3 — AutoPlantSourceReader', () => {
     expect(sql).toMatch(/FROM tb_vehiclemaster/i);
     expect(sql).toMatch(/latest_gps_datetime IS NOT NULL/i);
     expect(sql).toMatch(/device_id IS NOT NULL/i);
-    expect(sql).toMatch(/ORDER BY latest_gps_datetime, device_id/i);
-    expect(sql).not.toMatch(/latest_gps_datetime >/); // no keyset/watermark bound on a cold backfill
+    expect(sql).toMatch(/ORDER BY device_id/i);
+    expect(sql).not.toMatch(/ORDER BY latest_gps_datetime/i); // NOT the mutating column
+    expect(sql).not.toMatch(/latest_gps_datetime >/); // no timestamp keyset/watermark on a cold scan
+    expect(sql).not.toMatch(/device_id > /); // first page carries no continuation bound
     expect(chunk.rows.map((r) => r.deviceId)).toEqual(['0869925073271551', 'AP03TC0959']);
     // 05:57:47 IST → 00:27:47 UTC.
     expect(chunk.rows[0].gpsDatetime.toISOString()).toBe('2026-07-02T00:27:47.000Z');
@@ -64,9 +70,26 @@ describe('Phase 3 — AutoPlantSourceReader', () => {
     expect(chunk.nextCursor).toBeNull();
   });
 
-  it('returns a composite keyset nextCursor when the chunk is full', async () => {
+  it('cold scan emits a device-keyset nextCursor when the chunk is full', async () => {
     const q = fakeQuery([vm('D1', '2026-07-02 05:57:00'), vm('D2', '2026-07-02 05:58:00')]);
     const chunk = await reader(q).readChunk(null, 2); // full chunk (2 == chunkSize)
+    expect(chunk.nextCursor).toBe(encodeColdCursor('D2'));
+  });
+
+  it('cold scan continues from a device-keyset cursor with a device_id > ? bound', async () => {
+    const q = fakeQuery([vm('D3', '2026-07-02 05:59:00')]);
+    await reader(q).readChunk(encodeColdCursor('D2'), 1000);
+
+    const { sql, params } = q.calls[0];
+    expect(sql).toMatch(/ORDER BY device_id/i);
+    expect(sql).toMatch(/device_id > \?/);
+    expect(params).toEqual(['D2']);
+  });
+
+  it('incremental scan emits a composite keyset nextCursor when the chunk is full', async () => {
+    const q = fakeQuery([vm('D1', '2026-07-02 05:57:00'), vm('D2', '2026-07-02 05:58:00')]);
+    // A composite input cursor puts the reader in incremental (watermark-keyset) mode.
+    const chunk = await reader(q).readChunk(encodeCursor('2026-07-02 05:56:00', 'D0'), 2);
     expect(chunk.nextCursor).toBe(encodeCursor('2026-07-02 05:58:00', 'D2'));
   });
 
