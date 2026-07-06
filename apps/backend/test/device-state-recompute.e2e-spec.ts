@@ -1,17 +1,18 @@
 import { AuditService } from '../src/audit/audit.service';
 import { DeviceStateService } from '../src/device-state/device-state.service';
+import { classifySlaBucket } from '../src/device-state/sla-bucket';
+import { SnapshotIngestionService } from '../src/ingestion/snapshot-ingestion.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { SettingsService } from '../src/settings/settings.service';
 
 /**
- * Issue 05, slice 3 — DeviceStateService upserts `device_states` from the latest snapshot (AC#2).
+ * Issue 05 slice 3 / R4-B — DeviceStateService derives `device_states` set-based (AC#2).
  *
- * For each device it reads the latest `raw_device_snapshots` ping, derives
- * `inactivity_hours = now − latest_gps_datetime` (clamped ≥0), sets `is_inactive` against the
- * configurable 24h threshold, stamps the stored `sla_bucket` via the pure classifier, and
- * denormalises vehicle/plant/company off the device's current fitment. One upserted row per device.
- *
- * Test assets live in a 9_05x namespace and are torn down per file against the persistent local DB.
+ * Post-R4, `latest_gps_datetime` is maintained at INGEST (`SnapshotIngestionService.ingestChunk`), so
+ * this test seeds through that real path, then `recompute` derives — clamped `inactivity_hours`,
+ * `is_inactive` vs the configurable 24h threshold, the stored `sla_bucket` (SQL CASE kept in lockstep
+ * with the TS classifier), eligibility, and the denormalised plant/company/vehicle — with no telemetry
+ * scan. Test assets live in a 9_05x namespace and are torn down per file against the persistent local DB.
  */
 const INACTIVE_DEV = String(9_051_001n);
 const ACTIVE_DEV = String(9_051_002n);
@@ -54,14 +55,17 @@ describe('Issue 05 slice 3 — DeviceStateService.recompute', () => {
     for (const deviceId of [INACTIVE_DEV, ACTIVE_DEV]) {
       await prisma.device.create({ data: { deviceId, currentVehicleId: vehicleId } });
     }
-    // INACTIVE: last ping 30h ago → CRITICAL (24–48h), is_inactive.
-    await prisma.rawDeviceSnapshot.create({
-      data: { runId, deviceId: INACTIVE_DEV, gpsDatetime: hoursAgo(30) },
-    });
-    // ACTIVE: last ping 1h ago → no bucket, not inactive.
-    await prisma.rawDeviceSnapshot.create({
-      data: { runId, deviceId: ACTIVE_DEV, gpsDatetime: hoursAgo(1) },
-    });
+    // Seed latest_gps_datetime the production way — ingest maintains it, recompute derives from it.
+    // INACTIVE: last ping 30h ago → CRITICAL (24–48h), is_inactive. ACTIVE: 1h ago → no bucket.
+    const ingest = new SnapshotIngestionService(prisma);
+    await ingest.ingestChunk(
+      runId,
+      [
+        { deviceId: INACTIVE_DEV, gpsDatetime: hoursAgo(30), lat: 12.97, lon: 77.59 },
+        { deviceId: ACTIVE_DEV, gpsDatetime: hoursAgo(1), lat: 12.97, lon: 77.59 },
+      ],
+      NOW,
+    );
   });
 
   afterAll(async () => {
@@ -105,5 +109,39 @@ describe('Issue 05 slice 3 — DeviceStateService.recompute', () => {
 
     const count = await prisma.deviceState.count({ where: { deviceId: INACTIVE_DEV } });
     expect(count).toBe(1);
+  });
+
+  it('the SQL sla_bucket CASE matches classifySlaBucket across every band boundary', async () => {
+    // Sample each band and its just-below-boundary neighbour so any drift between the SQL CASE and the
+    // TS classifier surfaces. 3h → ACTIVE(null); 4/8/12/24/48/72/120/168 land on band edges.
+    const hours = [3, 4, 7.9, 8, 11.9, 12, 23.9, 24, 47.9, 48, 71.9, 72, 119.9, 120, 167.9, 168, 240];
+    const ids = hours.map((h) => `9_051_9${String(Math.round(h * 10)).padStart(4, '0')}`);
+    try {
+      await prisma.device.createMany({
+        data: ids.map((deviceId) => ({ deviceId })),
+        skipDuplicates: true,
+      });
+      const parityRun = await prisma.snapshotRun.create({ data: { status: 'SUCCESS' } });
+      const ingest = new SnapshotIngestionService(prisma);
+      await ingest.ingestChunk(
+        parityRun.runId,
+        hours.map((h, i) => ({ deviceId: ids[i], gpsDatetime: hoursAgo(h), lat: 1, lon: 1 })),
+        NOW,
+      );
+
+      await service.recompute(NOW);
+
+      const states = await prisma.deviceState.findMany({ where: { deviceId: { in: ids } } });
+      const byId = new Map(states.map((s) => [s.deviceId, s.slaBucket]));
+      for (let i = 0; i < hours.length; i++) {
+        expect(byId.get(ids[i]) ?? null).toBe(classifySlaBucket(hours[i]));
+      }
+
+      await prisma.deviceState.deleteMany({ where: { deviceId: { in: ids } } });
+      await prisma.rawDeviceSnapshot.deleteMany({ where: { runId: parityRun.runId } });
+      await prisma.snapshotRun.deleteMany({ where: { runId: parityRun.runId } });
+    } finally {
+      await prisma.device.deleteMany({ where: { deviceId: { in: ids } } });
+    }
   });
 });

@@ -1,27 +1,32 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
-import { isEligibleForUptime } from './eligibility';
-import { classifySlaBucket } from './sla-bucket';
+import { DEFAULT_PGI_WINDOW_DAYS } from './eligibility';
+import { slaBucketCaseSql } from './sla-bucket';
 
-const MS_PER_HOUR = 3_600_000;
 const DEFAULT_INACTIVITY_THRESHOLD_HOURS = 24;
 
-/** Non-Op states that exclude a device from the eligible set (invariant I13 active states). */
-const ACTIVE_NONOP_STATES = ['CONFIRMED', 'ACTIVE'] as const;
-
 /**
- * DeviceStateService — derives the current `device_states` row for every device from its latest
- * `raw_device_snapshots` ping (schema D5 / LLD DeviceStateService). One upsert per device:
+ * DeviceStateService — derives every `device_states` row from time + reference data (schema D5).
  *
- *  - `inactivity_hours = now − latest_gps_datetime`, clamped ≥0 (clock skew → 0, never negative).
- *  - `is_inactive` against the configurable `inactivity_threshold_hours` setting (canonical 24h).
- *  - `sla_bucket` is the STORED output of the pure classifier — null for the 0–4h ACTIVE band.
- *  - vehicle / plant / company / transporter denormalised off the device's current fitment so the
- *    queue and dashboards never join on the hot path.
+ * `latest_gps_datetime` is maintained incrementally at INGEST (R4-A: `SnapshotIngestionService`), so
+ * this recompute no longer folds the entire (ever-growing, partitioned) telemetry table — the load-the-
+ * world `groupBy` + per-device upsert loop is replaced by two set-based statements (R4-B). It still runs
+ * on a schedule (the telemetry tick) because the derived fields are functions of *wall-clock time*: a
+ * device that has gone silent must keep advancing WARNING→CRITICAL→SEVERE with no new telemetry arriving,
+ * so ingest-driven updates alone can never age a silent device.
  *
- * Eligibility (`eligible_for_uptime`) and `has_open_failure_cycle` are owned by later slices and
- * left at their column defaults here.
+ *  1. Ensure a row exists for every device (never-pinged devices included) — one INSERT … ON CONFLICT.
+ *  2. Derive, in one UPDATE:
+ *     - `inactivity_hours = now − latest_gps_datetime`, clamped ≥0 (clock skew → 0).
+ *     - `is_inactive` against the configurable `inactivity_threshold_hours` setting (canonical 24h).
+ *     - `sla_bucket` via {@link slaBucketCaseSql} — generated from the SAME `SLA_BANDS` as the TS
+ *       classifier, so the SQL and TS bucket boundaries cannot drift. NULL for the 0–4h ACTIVE band.
+ *     - `eligible_for_uptime` = active PGI within the window AND no CONFIRMED/ACTIVE Non-Op marking.
+ *     - vehicle / plant / company / transporter denormalised off the device's current fitment.
+ *
+ * `has_open_failure_cycle` is owned by ticket creation and is deliberately left untouched here.
  */
 @Injectable()
 export class DeviceStateService {
@@ -30,70 +35,55 @@ export class DeviceStateService {
     private readonly settings: SettingsService,
   ) {}
 
-  /** Recompute and upsert `device_states` for all known devices. `now` is injectable for tests. */
+  /** Recompute `device_states` for all known devices (set-based; no telemetry scan). `now` injectable. */
   async recompute(now: Date = new Date()): Promise<{ upserted: number }> {
     const threshold =
       (await this.settings.get<number>('inactivity_threshold_hours')) ??
       DEFAULT_INACTIVITY_THRESHOLD_HOURS;
 
-    // Latest ping per device across the (partitioned) telemetry table.
-    const latest = await this.prisma.rawDeviceSnapshot.groupBy({
-      by: ['deviceId'],
-      _max: { gpsDatetime: true },
-    });
-    const latestByDevice = new Map(latest.map((r) => [r.deviceId, r._max.gpsDatetime]));
+    // 1. Guarantee one row per device (never-pinged devices get a row with a null latest ping).
+    await this.prisma.$executeRaw(Prisma.sql`
+      INSERT INTO device_states (device_id, computed_at)
+      SELECT d.device_id, ${now} FROM devices d
+      ON CONFLICT (device_id) DO NOTHING`);
 
-    // Eligibility inputs: latest PGI per device, and the set of devices under an active Non-Op marking.
-    const latestPgi = await this.prisma.pgiHistory.groupBy({
-      by: ['deviceId'],
-      _max: { pgiDate: true },
-    });
-    const latestPgiByDevice = new Map(latestPgi.map((r) => [r.deviceId, r._max.pgiDate]));
-
-    const nonOp = await this.prisma.nonOperationalMarking.findMany({
-      where: { state: { in: [...ACTIVE_NONOP_STATES] } },
-      select: { deviceId: true },
-    });
-    const nonOpDevices = new Set(nonOp.map((r) => r.deviceId));
-
-    const devices = await this.prisma.device.findMany({ include: { currentVehicle: true } });
-
-    let upserted = 0;
-    for (const device of devices) {
-      const latestGps = latestByDevice.get(device.deviceId) ?? null;
-      const inactivityHours =
-        latestGps === null
-          ? null
-          : Math.max(0, (now.getTime() - latestGps.getTime()) / MS_PER_HOUR);
-      const isInactive = inactivityHours !== null && inactivityHours >= threshold;
-      const slaBucket = inactivityHours === null ? null : classifySlaBucket(inactivityHours);
-      const eligibleForUptime = isEligibleForUptime({
-        latestPgiDate: latestPgiByDevice.get(device.deviceId) ?? null,
-        hasActiveNonOp: nonOpDevices.has(device.deviceId),
-        now,
-      });
-      const v = device.currentVehicle;
-
-      const derived = {
-        latestGpsDatetime: latestGps,
-        isInactive,
-        inactivityHours,
-        slaBucket,
-        eligibleForUptime,
-        vehicleId: v?.vehicleId ?? null,
-        plantId: v?.plantId ?? null,
-        companyId: v?.companyId ?? null,
-        transporterId: v?.transporterId ?? null,
-        computedAt: now,
-      };
-
-      await this.prisma.deviceState.upsert({
-        where: { deviceId: device.deviceId },
-        create: { deviceId: device.deviceId, ...derived },
-        update: derived,
-      });
-      upserted++;
-    }
+    // 2. Derive every field from latest_gps_datetime (maintained at ingest) + reference data, in one
+    //    pass. The `derived` CTE computes clamped inactivity hours once; the SLA-bucket CASE is projected
+    //    from SLA_BANDS so it stays in lockstep with classifySlaBucket.
+    const bucketCase = Prisma.raw(slaBucketCaseSql('dr.hours'));
+    const upserted = await this.prisma.$executeRaw(Prisma.sql`
+      WITH derived AS (
+        SELECT ds.device_id,
+          CASE WHEN ds.latest_gps_datetime IS NULL THEN NULL
+               ELSE GREATEST(0, EXTRACT(EPOCH FROM (${now}::timestamptz - ds.latest_gps_datetime)) / 3600.0)
+          END AS hours
+        FROM device_states ds
+      )
+      UPDATE device_states ds SET
+        inactivity_hours = dr.hours,
+        is_inactive = (dr.hours IS NOT NULL AND dr.hours >= ${threshold}),
+        sla_bucket = ${bucketCase},
+        eligible_for_uptime = (
+          EXISTS (
+            SELECT 1 FROM pgi_history p
+             WHERE p.device_id = ds.device_id
+               AND ${now}::timestamptz - (p.pgi_date::timestamp AT TIME ZONE 'UTC')
+                     <= make_interval(days => ${DEFAULT_PGI_WINDOW_DAYS})
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM non_operational_markings n
+             WHERE n.device_id = ds.device_id AND n.state::text IN ('CONFIRMED', 'ACTIVE')
+          )
+        ),
+        vehicle_id = v.vehicle_id,
+        plant_id = v.plant_id,
+        company_id = v.company_id,
+        transporter_id = v.transporter_id,
+        computed_at = ${now}
+      FROM derived dr
+      JOIN devices d ON d.device_id = dr.device_id
+      LEFT JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id
+      WHERE ds.device_id = dr.device_id`);
 
     return { upserted };
   }
