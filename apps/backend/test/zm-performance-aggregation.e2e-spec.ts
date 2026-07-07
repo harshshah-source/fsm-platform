@@ -81,8 +81,12 @@ describe('Issue 43 slice 1 — ZmPerformanceAggregationService.computeMonth', ()
   }
 
   async function autoBatch(createdAt: Date): Promise<void> {
+    // dateFrom = the batch's own day (not the month start): one ACTIVE plan per SE per zone per DAY is
+    // enforced by `work_schedules_one_active_per_se_zone_day` (Issue 100), so the two batches this test
+    // needs must sit on distinct days. The zone denominator counts plant_batch_assignments by
+    // created_at, not schedule.date_from, so the count is unchanged.
     const sched = await prisma.workSchedule.create({
-      data: { seId, zoneId: zoneA, dateFrom: MAY, dateTo: MAY, status: 'ACTIVE', source: 'SYSTEM_GENERATED', createdAt },
+      data: { seId, zoneId: zoneA, dateFrom: createdAt, dateTo: createdAt, status: 'ACTIVE', source: 'SYSTEM_GENERATED', createdAt },
     });
     scheduleIds.push(sched.scheduleId);
     const b = await prisma.plantBatchAssignment.create({

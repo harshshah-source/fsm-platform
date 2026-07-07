@@ -1,4 +1,4 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   DAY_PLAN_NOTIFIER,
@@ -28,6 +28,7 @@ export interface DispatchSummary {
  */
 @Injectable()
 export class BatchAssignmentService {
+  private readonly logger = new Logger(BatchAssignmentService.name);
   private readonly notifier: DayPlanNotifier;
 
   constructor(
@@ -40,81 +41,123 @@ export class BatchAssignmentService {
   async dispatchForZone(zoneId: bigint, opts: DispatchOptions): Promise<DispatchSummary> {
     const now = opts.now ?? new Date();
 
-    // SUGGESTED recommendations in this zone with a chosen SE, in canonical processing order.
-    const recs = await this.prisma.recommendation.findMany({
-      where: { status: 'SUGGESTED', seId: { not: null }, ticket: { plant: { zoneId } } },
-      select: { ticketId: true, seId: true, ticket: { select: { plantId: true } } },
-      orderBy: { processingRank: 'asc' },
-    });
+    // Notifier events are collected inside the tx and fired only AFTER commit — a rolled-back plan must
+    // never announce "Day Plan is live", and the notification I/O has no place inside a DB transaction.
+    const notifications: Parameters<DayPlanNotifier['dayPlanDispatched']>[0][] = [];
 
-    // se_id → plant_id → ticket_ids (insertion order = canonical order).
-    const bySe = new Map<string, Map<bigint, string[]>>();
-    for (const r of recs) {
-      const seId = r.seId!;
-      const plantId = r.ticket.plantId;
-      const byPlant = bySe.get(seId) ?? new Map<bigint, string[]>();
-      const tickets = byPlant.get(plantId) ?? [];
-      tickets.push(r.ticketId);
-      byPlant.set(plantId, tickets);
-      bySe.set(seId, byPlant);
-    }
+    const skipped: DispatchSummary = { schedules: 0, batches: 0, tickets: 0 };
 
-    let schedules = 0;
-    let batches = 0;
-    let tickets = 0;
-
-    for (const [seId, byPlant] of bySe) {
-      const schedule = await this.prisma.workSchedule.create({
-        data: {
-          seId,
-          zoneId,
-          dateFrom: opts.dateFrom,
-          dateTo: opts.dateTo,
-          status: 'ACTIVE',
-          source: 'SYSTEM_GENERATED',
-          dispatchedAt: now,
-        },
-      });
-      schedules++;
-
-      let stopSequence = 0;
-      let scheduleTickets = 0;
-      for (const [plantId, ticketIds] of this.orderPlantStops(byPlant)) {
-        stopSequence++;
-        const batch = await this.prisma.plantBatchAssignment.create({
-          data: { scheduleId: schedule.scheduleId, plantId, seId, status: 'AUTO_ASSIGNED', stopSequence },
-        });
-        batches++;
-
-        let sortOrder = 0;
-        for (const ticketId of ticketIds) {
-          sortOrder++;
-          await this.prisma.batchAssignmentTicket.create({
-            data: { batchId: batch.batchId, ticketId, sortOrder },
-          });
-          // Committed work leaves the Shared Pool (Issue 12): the dispatched ticket is now a Formal
-          // Assignment, not pickable secondary work (schema D6, LLD shared-pool partial index).
-          await this.prisma.ticket.update({
-            where: { ticketId },
-            data: { assignmentState: 'FORMALLY_ASSIGNED' },
-          });
-          tickets++;
-          scheduleTickets++;
-        }
+    let summary: DispatchSummary | null;
+    try {
+      summary = await this.prisma.$transaction(async (tx) => {
+      // Per-zone advisory lock (Issue 100) — the primary serializer: two concurrent dispatches of the
+      // same zone can't both proceed, so one ticket is never suggested-then-dispatched to two SEs. The
+      // partial-unique indexes are the durable cross-connection backstop if this is ever bypassed. Same
+      // txn-scoped idiom as SnapshotRunService/MasterSyncRunService (a non-blocking `try` lock).
+      const locked = await tx.$queryRaw<{ locked: boolean }[]>`
+        SELECT pg_try_advisory_xact_lock(hashtext(${'dispatch_zone_' + zoneId.toString()})) AS locked`;
+      if (!locked[0]?.locked) {
+        this.logger.log(`dispatch for zone ${zoneId} skipped — another dispatch holds the lock`);
+        return null;
       }
 
-      // "Day Plan is live" — fires regardless of channel availability (AC#4); the seam swaps to the
-      // Issue 03 notification spine without changing this dispatch contract.
-      await this.notifier.dayPlanDispatched({
-        seId,
-        scheduleId: schedule.scheduleId,
-        zoneId,
-        stops: stopSequence,
-        tickets: scheduleTickets,
+      // SUGGESTED recommendations in this zone with a chosen SE, in canonical processing order.
+      const recs = await tx.recommendation.findMany({
+        where: { status: 'SUGGESTED', seId: { not: null }, ticket: { plant: { zoneId } } },
+        select: { recommendationId: true, ticketId: true, seId: true, ticket: { select: { plantId: true } } },
+        orderBy: { processingRank: 'asc' },
       });
+
+      // se_id → plant_id → ticket_ids (insertion order = canonical order).
+      const bySe = new Map<string, Map<bigint, string[]>>();
+      for (const r of recs) {
+        const seId = r.seId!;
+        const plantId = r.ticket.plantId;
+        const byPlant = bySe.get(seId) ?? new Map<bigint, string[]>();
+        const ticketList = byPlant.get(plantId) ?? [];
+        ticketList.push(r.ticketId);
+        byPlant.set(plantId, ticketList);
+        bySe.set(seId, byPlant);
+      }
+
+      let schedules = 0;
+      let batches = 0;
+      let tickets = 0;
+
+      for (const [seId, byPlant] of bySe) {
+        const schedule = await tx.workSchedule.create({
+          data: {
+            seId,
+            zoneId,
+            dateFrom: opts.dateFrom,
+            dateTo: opts.dateTo,
+            status: 'ACTIVE',
+            source: 'SYSTEM_GENERATED',
+            dispatchedAt: now,
+          },
+        });
+        schedules++;
+
+        let stopSequence = 0;
+        let scheduleTickets = 0;
+        for (const [plantId, ticketIds] of this.orderPlantStops(byPlant)) {
+          stopSequence++;
+          const batch = await tx.plantBatchAssignment.create({
+            data: { scheduleId: schedule.scheduleId, plantId, seId, status: 'AUTO_ASSIGNED', stopSequence },
+          });
+          batches++;
+
+          let sortOrder = 0;
+          for (const ticketId of ticketIds) {
+            sortOrder++;
+            await tx.batchAssignmentTicket.create({
+              data: { batchId: batch.batchId, ticketId, sortOrder },
+            });
+            // Committed work leaves the Shared Pool (Issue 12): the dispatched ticket is now a Formal
+            // Assignment, not pickable secondary work (schema D6, LLD shared-pool partial index).
+            await tx.ticket.update({
+              where: { ticketId },
+              data: { assignmentState: 'FORMALLY_ASSIGNED' },
+            });
+            tickets++;
+            scheduleTickets++;
+          }
+        }
+
+        notifications.push({ seId, scheduleId: schedule.scheduleId, zoneId, stops: stopSequence, tickets: scheduleTickets });
+      }
+
+      // Consume the dispatched recommendations (Issue 100): flip SUGGESTED → DISPATCHED so a re-invoke
+      // (retry, double-click, second instance) no longer re-reads and re-dispatches the same set.
+      if (recs.length) {
+        await tx.recommendation.updateMany({
+          where: { recommendationId: { in: recs.map((r) => r.recommendationId) } },
+          data: { status: 'DISPATCHED' },
+        });
+      }
+
+      return { schedules, batches, tickets };
+      });
+    } catch (e) {
+      // Uniqueness backstop lost the race (Issue 100 AC#4): another dispatch already placed this work.
+      // The designed outcome is a clean no-op, not a raw 500. Any other error propagates.
+      if ((e as { code?: string }).code === 'P2002') {
+        this.logger.warn(`dispatch for zone ${zoneId} lost a uniqueness race — treated as a no-op`);
+        return skipped;
+      }
+      throw e;
     }
 
-    return { schedules, batches, tickets };
+    // Lock was held by a concurrent dispatch — nothing was written, nothing to announce.
+    if (summary === null) return skipped;
+
+    // "Day Plan is live" — fires after commit, regardless of channel availability (Issue 11 AC#4); the
+    // seam swaps to the Issue 03 notification spine without changing this dispatch contract.
+    for (const event of notifications) {
+      await this.notifier.dayPlanDispatched(event);
+    }
+
+    return summary;
   }
 
   /**
