@@ -48,6 +48,7 @@ import { SettingsController } from './settings/settings.controller';
 import { SettingsModule } from './settings/settings.module';
 import { RecommenderModule } from './recommender/recommender.module';
 import { SchedulingModule } from './scheduling/scheduling.module';
+import { BusinessSweepSchedulerModule } from './scheduling/business-sweep-scheduler.module';
 import { SchedulesController } from './scheduling/schedules.controller';
 import { BatchesController } from './scheduling/batches.controller';
 import { IntradayUpdatesController } from './scheduling/intraday-updates.controller';
@@ -85,6 +86,7 @@ import { ZonesController } from './zones/zones.controller';
     DevicesModule,
     RecommenderModule,
     SchedulingModule,
+    BusinessSweepSchedulerModule,
     IntradayModule,
     CrossZoneModule,
     SharedPoolModule,
