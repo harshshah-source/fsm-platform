@@ -6,12 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../src/auth/AuthProvider';
 import { ToastProvider } from '../src/components/data/Toast';
 import { DashboardHome } from '../src/pages/dashboard/DashboardHome';
+import { emitIngestionComplete } from '../src/pages/dashboard/ingestionEvents';
+import { RunIngestionButton } from '../src/pages/dashboard/RunIngestionButton';
 
 /**
  * OH dashboard wiring for the manual ingestion trigger: a completed run must refetch the KPI data
- * sources (zone-overview / action-required) and the KPI cards must show the fresh figures. Motion is
- * snapped here (reduced-motion) so the assertions read the settled real values; the roll behaviour
- * itself is covered in rolling-number.test.tsx.
+ * sources (zone-overview / action-required) and the KPI cards must show the fresh figures. The trigger
+ * now lives in the top bar and broadcasts on completion (see ingestionEvents); this renders the button
+ * alongside the dashboard so the same decoupled bridge is exercised. Motion is snapped here
+ * (reduced-motion) so the assertions read the settled real values.
  */
 const opsHead: SessionView = { user_id: 'oh1', role: 'OPERATIONS_HEAD', zone_id: null, acted_as_role: null };
 
@@ -64,6 +67,7 @@ function renderHome() {
     <AuthProvider initialSession={opsHead}>
       <MemoryRouter>
         <ToastProvider>
+          <RunIngestionButton onSuccess={emitIngestionComplete} />
           <DashboardHome />
         </ToastProvider>
       </MemoryRouter>

@@ -38,10 +38,11 @@ const NOW_ANCHOR_OFFSET_MS = 60_000;
 /** Fallback only — used when a dataset has no parseable ping at all (Book8 anchor − 1 min). */
 const FALLBACK_MAX_PING_MS = Date.UTC(2026, 3, 26, 7, 29, 0);
 
-/** Canonical zones (CONTEXT.md: NORTH / SOUTH / EAST / WEST). Zone is NOT in the CSV, so plant→zone
- *  is a deterministic synthetic partition (plant code mod 4) chosen to exercise zone-scoped and
- *  cross-zone workflows. */
-export const ZONE_NAMES = ['EAST', 'NORTH', 'SOUTH', 'WEST'] as const;
+/** Canonical zones in org-seed's Title-Case spelling — zones.name is unique case-INSENSITIVELY
+ *  (migration 20260707120000), so the fixture must reuse the seeded rows, not mint UPPERCASE
+ *  variants. Zone is NOT in the CSV, so plant→zone is a deterministic synthetic partition
+ *  (plant code mod 4) chosen to exercise zone-scoped and cross-zone workflows. */
+export const ZONE_NAMES = ['East', 'North', 'South', 'West'] as const;
 export type ZoneName = (typeof ZONE_NAMES)[number];
 
 const PLANT_SENTINEL_CODE = '9999'; // CSV plant_id 0/blank → sentinel, mirrors the existing fixture.

@@ -14,6 +14,8 @@ export interface TicketRow {
   companyTier: string;
   assignmentState: string;
   slaBucket: string | null;
+  /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
+  latestGpsDatetime: string | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
   /** Issue 23 — latest Component Request status + the SLA-pause timestamp for the WAITING_COMPONENT flag. */
@@ -66,5 +68,29 @@ export function apiTicketsList(filters: TicketFilters = {}): Promise<TicketRow[]
 
 export const apiTicketDetail = (id: string) =>
   get<TicketDetail>(`/tickets/${encodeURIComponent(id)}`);
+
+/** One persisted SE troubleshoot-form submission (Issue 70 read; FE-09 Forms tab). */
+export interface TicketForm {
+  submissionId: string;
+  submissionType: string;
+  seId: string;
+  clientSubmissionId: string;
+  rootCauseCategory: string;
+  rootCauseSubcategory: string | null;
+  rootCauseNotes: string | null;
+  actionTakenCategory: string | null;
+  actionTakenNotes: string | null;
+  diagnosisNotes: string | null;
+  componentUnavailable: boolean;
+  componentUnavailableItem: string | null;
+  photoRefs: string[];
+  presenceSource: string;
+  seGpsLat: number | null;
+  seGpsLon: number | null;
+  submittedAt: string;
+}
+
+export const apiTicketForms = (id: string) =>
+  get<{ ticketId: string; forms: TicketForm[] }>(`/tickets/${encodeURIComponent(id)}/forms`);
 
 export const apiTicketsByPlant = (plantId: string) => apiTicketsList({ plantId });

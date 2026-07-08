@@ -57,7 +57,6 @@ beforeEach(() => {
     return json([]);
   });
   vi.stubGlobal('fetch', fetchMock);
-  vi.stubGlobal('prompt', () => 'device lost in transit');
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -65,16 +64,29 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-describe('Recovery manual close from drawer (Issue 37)', () => {
-  it('a manager can manually close an open Recovery Ticket with a reason', async () => {
+describe('Recovery manual close from drawer (Issue 37 · FE-09 Modal)', () => {
+  it('a manager closes an open Recovery Ticket via the reason Modal', async () => {
     renderDrawer();
-    const btn = await screen.findByTestId('recovery-manual-close');
-    fireEvent.click(btn);
+    // The control opens a Modal (FE-09 AC#3 replaces the window.prompt reason leg).
+    fireEvent.click(await screen.findByTestId('recovery-manual-close'));
+    const reason = await screen.findByTestId('recovery-close-reason');
+    fireEvent.change(reason, { target: { value: 'device lost in transit' } });
+    fireEvent.click(screen.getByTestId('recovery-close-confirm'));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining(`/recovery/${TICKET_ID}/manual-close`),
         expect.objectContaining({ method: 'POST' }),
       ),
     );
+  });
+
+  it('does not POST when the reason is empty (mandatory)', async () => {
+    renderDrawer();
+    fireEvent.click(await screen.findByTestId('recovery-manual-close'));
+    await screen.findByTestId('recovery-close-reason');
+    fireEvent.click(screen.getByTestId('recovery-close-confirm'));
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes(`/recovery/${TICKET_ID}/manual-close`)),
+    ).toBe(false);
   });
 });

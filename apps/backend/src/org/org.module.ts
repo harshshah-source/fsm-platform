@@ -10,6 +10,7 @@ import { SeCoverageService } from './se-coverage.service';
 import { SeTerritoryService } from './se-territory.service';
 import { SlaRulesService } from './sla-rules.service';
 import { UsersService } from './users.service';
+import { ZoneMappingService } from './zone-mapping.service';
 import { ZonesService } from './zones.service';
 
 // Operations-Head-owned org/reference data services (zones, plants, users, companies, SE
@@ -27,6 +28,7 @@ const services = [
   SlaRulesService,
   ScoringWeightsService,
   CommonKitService,
+  ZoneMappingService,
 ];
 
 @Module({

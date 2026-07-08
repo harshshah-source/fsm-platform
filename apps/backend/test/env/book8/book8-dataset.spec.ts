@@ -28,7 +28,7 @@ describe.skipIf(!HAS_FILE)('Book8 dataset parser', () => {
   });
 
   it('derives a self-consistent master graph', () => {
-    expect(ds.zones.map((z) => z.name).sort()).toEqual(['EAST', 'NORTH', 'SOUTH', 'WEST']);
+    expect(ds.zones.map((z) => z.name).sort()).toEqual(['East', 'North', 'South', 'West']);
     // 11 real company ids in the CSV + one UNKNOWN bucket for NA/NULL.
     expect(ds.companies.length).toBeGreaterThanOrEqual(11);
     // Company (tier, rank) pairs are all distinct (Company @@unique([tier, rank])).

@@ -8,8 +8,8 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
       <input
         ref={ref}
         className={cn(
-          'h-9 w-full rounded-md border border-line bg-surface-card px-3 text-sm text-ink-strong',
-          'placeholder:text-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40',
+          'h-9 w-full rounded-md border border-line bg-surface-card px-3 text-sm text-ink-strong shadow-sm transition-colors',
+          'placeholder:text-ink-muted hover:border-line-strong focus-visible:border-brand-600 focus-ring',
           'disabled:cursor-not-allowed disabled:opacity-60',
           className,
         )}
@@ -33,10 +33,11 @@ export function Field({
 }) {
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      <label htmlFor={htmlFor} className="text-xs font-medium text-ink-muted">
+      <label htmlFor={htmlFor} className="text-xs font-semibold text-ink-muted">
         {label}
       </label>
       {children}
     </div>
   );
 }
+

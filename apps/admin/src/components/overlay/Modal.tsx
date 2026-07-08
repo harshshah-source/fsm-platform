@@ -33,26 +33,27 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-chrome-900/40" aria-hidden onClick={onClose} />
+      <div className="absolute inset-0 bg-chrome-900/45 backdrop-blur-sm" aria-hidden onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === 'string' ? title : undefined}
         className={cn(
-          'relative z-10 w-full max-w-md rounded-card border border-line bg-surface-card shadow-lg',
+          'relative z-10 w-full max-w-md rounded-card border border-line bg-surface-card shadow-floating',
           className,
         )}
       >
         {title && (
-          <div className="border-b border-line px-4 py-3 text-sm font-semibold text-ink-strong">
+          <div className="border-b border-line bg-surface-raised/70 px-5 py-3.5 text-sm font-semibold tracking-tight text-ink-strong">
             {title}
           </div>
         )}
-        <div className="p-4">{children}</div>
+        <div className="p-5">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-line px-4 py-3">{footer}</div>
+          <div className="flex justify-end gap-2 border-t border-line bg-surface-raised/70 px-5 py-3.5">{footer}</div>
         )}
       </div>
     </div>
   );
 }
+

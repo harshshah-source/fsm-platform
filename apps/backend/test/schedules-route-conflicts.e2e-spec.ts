@@ -4,6 +4,7 @@ import request from 'supertest';
 import { AuthGuard } from '../src/common/guards/auth.guard';
 import { RoleGuard } from '../src/common/guards/role.guard';
 import { DayPlanQueryService } from '../src/scheduling/day-plan-query.service';
+import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
 import { OverrideService } from '../src/scheduling/override.service';
 import { SchedulesController } from '../src/scheduling/schedules.controller';
 import { ZmScheduleQueryService } from '../src/scheduling/zm-schedule-query.service';
@@ -37,6 +38,7 @@ describe('Schedules route matching (e2e)', () => {
         { provide: DayPlanQueryService, useValue: dayPlan },
         { provide: OverrideService, useValue: override },
         { provide: ZmScheduleQueryService, useValue: zm },
+        { provide: DispatchRunService, useValue: { runForActiveZones: vi.fn() } },
       ],
     })
       .overrideGuard(AuthGuard)

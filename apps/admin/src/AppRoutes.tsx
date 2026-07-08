@@ -12,6 +12,8 @@ import { DashboardHome } from './pages/dashboard/DashboardHome';
 import { HelpCenterPage } from './pages/help/HelpCenterPage';
 import { KitchenSink } from './pages/KitchenSink';
 import { LoginPage } from './pages/LoginPage';
+import { CrossZonePage } from './pages/cross-zone/CrossZonePage';
+import { InstallCreatePage } from './pages/install/InstallCreatePage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
 import { NonOperationalQueuePage } from './pages/readiness/NonOperationalQueuePage';
@@ -23,7 +25,11 @@ import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
+import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
+import { RootCauseAnalyticsPage } from './pages/reports/RootCauseAnalyticsPage';
+import { SystemEfficiencyPage } from './pages/reports/SystemEfficiencyPage';
+import { ZmScorecardPage } from './pages/reports/ZmScorecardPage';
 import { TicketDetailDrawer } from './pages/tickets/TicketDetailDrawer';
 import { TicketsPage } from './pages/tickets/TicketsPage';
 import { VerificationReviewPage } from './pages/verification/VerificationReviewPage';
@@ -89,6 +95,42 @@ export function AppRoutes() {
               </RoleRoute>
             }
           />
+          {/* Device Detail (FE-22 / Issue 44/49) — manager roles; Ops-Head deal-type tag in-page. */}
+          <Route
+            path="/reports/device"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <DeviceDetailPage />
+              </RoleRoute>
+            }
+          />
+          {/* Root-Cause Analytics (FE-23 / Issue 41) — manager roles, ZM zone-scoped server-side. */}
+          <Route
+            path="/reports/root-cause"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <RootCauseAnalyticsPage />
+              </RoleRoute>
+            }
+          />
+          {/* System Efficiency (FE-24 / Issue 42) — manager roles, ZM zone-scoped server-side. */}
+          <Route
+            path="/reports/system-efficiency"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <SystemEfficiencyPage />
+              </RoleRoute>
+            }
+          />
+          {/* ZM Performance Scorecard (FE-25 / Issue 43) — Operations Head only. */}
+          <Route
+            path="/reports/zm-scorecard"
+            element={
+              <RoleRoute roles={['OPERATIONS_HEAD']}>
+                <ZmScorecardPage />
+              </RoleRoute>
+            }
+          />
           {/* CSM Backup Share report — Operations Head only (Issue 27 AC#5). */}
           <Route
             path="/reports/csm-approval-share"
@@ -104,6 +146,24 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <LeaveRequestsPage />
+              </RoleRoute>
+            }
+          />
+          {/* Cross-Zone escalations — Auto (Platinum) vs Manual split + decider actions (Issue 78 over #32). */}
+          <Route
+            path="/cross-zone"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <CrossZonePage />
+              </RoleRoute>
+            }
+          />
+          {/* Install Ticket create — single + CSV bulk, creator roles only (Issue 69 over Issue 33). */}
+          <Route
+            path="/install"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <InstallCreatePage />
               </RoleRoute>
             }
           />
@@ -231,16 +291,16 @@ export function AppRoutes() {
               </RoleRoute>
             }
           />
+          {/* Settings — Operations-Head-only config console (reference 26 renders it inside the shell). */}
+          <Route
+            path="/settings"
+            element={
+              <RoleRoute roles={['OPERATIONS_HEAD']}>
+                <SettingsPage />
+              </RoleRoute>
+            }
+          />
         </Route>
-
-        <Route
-          path="/settings"
-          element={
-            <RoleRoute roles={['OPERATIONS_HEAD']}>
-              <SettingsPage />
-            </RoleRoute>
-          }
-        />
       </Routes>
     </>
   );

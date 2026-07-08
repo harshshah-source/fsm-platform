@@ -26,6 +26,8 @@ export interface TicketView {
   companyTier: CompanyTier;
   assignmentState: AssignmentState;
   slaBucket: SlaBucket | null;
+  /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
+  latestGpsDatetime: string | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
   /** Latest Component Request status for the ticket (Issue 23) — null when none was raised. */
@@ -48,6 +50,27 @@ export interface TicketLifecycleEvent {
 
 export interface TicketDetailView extends TicketView {
   lifecycle: TicketLifecycleEvent[];
+}
+
+/** One persisted SE troubleshoot-form submission for a ticket (Issue 16 → Issue 70 read). JSON-safe. */
+export interface TicketFormView {
+  submissionId: string;
+  submissionType: string;
+  seId: string;
+  clientSubmissionId: string;
+  rootCauseCategory: string;
+  rootCauseSubcategory: string | null;
+  rootCauseNotes: string | null;
+  actionTakenCategory: string | null;
+  actionTakenNotes: string | null;
+  diagnosisNotes: string | null;
+  componentUnavailable: boolean;
+  componentUnavailableItem: string | null;
+  photoRefs: string[];
+  presenceSource: string;
+  seGpsLat: number | null;
+  seGpsLon: number | null;
+  submittedAt: string;
 }
 
 export interface TicketScope {
@@ -90,7 +113,8 @@ const SELECT_COLUMNS = Prisma.sql`
   t.failure_cycle_id::text AS "failureCycleId", t.device_id::text AS "deviceId",
   t.vehicle_id::text AS "vehicleId", t.plant_id::text AS "plantId", t.company_id::text AS "companyId",
   t.company_tier::text AS "companyTier", t.assignment_state::text AS "assignmentState",
-  ds.sla_bucket::text AS "slaBucket", t.repeat_failure AS "repeatFailure",
+  ds.sla_bucket::text AS "slaBucket", ds.latest_gps_datetime AS "latestGpsDatetime",
+  t.repeat_failure AS "repeatFailure",
   fc.state::text AS "failureCycleState",
   CASE WHEN fc.state = 'WAITING_COMPONENT' THEN fc.sla_paused_at ELSE NULL END AS "waitingComponentSince",
   (SELECT cr.status::text FROM component_request cr WHERE cr.ticket_id = t.ticket_id
@@ -116,6 +140,7 @@ type RawRow = {
   companyTier: CompanyTier;
   assignmentState: AssignmentState;
   slaBucket: SlaBucket | null;
+  latestGpsDatetime: Date | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
   componentRequestStatus: string | null;
@@ -136,6 +161,7 @@ const toView = (r: RawRow): TicketView => ({
   companyTier: r.companyTier,
   assignmentState: r.assignmentState,
   slaBucket: r.slaBucket,
+  latestGpsDatetime: r.latestGpsDatetime ? r.latestGpsDatetime.toISOString() : null,
   repeatFailure: r.repeatFailure,
   failureCycleState: r.failureCycleState,
   componentRequestStatus: r.componentRequestStatus,
@@ -205,5 +231,40 @@ export class TicketQueryService {
       at: e.at.toISOString(),
     }));
     return { ...toView(rows[0]), lifecycle };
+  }
+
+  /**
+   * The persisted SE troubleshoot-form submissions for a ticket (Issue 70, consumed by the FE-09 Forms
+   * tab). Scope + existence are enforced by reusing {@link getById}: a ticket the caller can't see
+   * (out-of-zone ZM, or unknown id) yields `null` → the controller 404s. Ordered oldest-first so a
+   * WAITING_COMPONENT resubmit reads as a continuation of the original submission.
+   */
+  async formsForTicket(ticketId: string, scope: TicketScope): Promise<TicketFormView[] | null> {
+    const ticket = await this.getById(ticketId, scope);
+    if (!ticket) return null;
+
+    const subs = await this.prisma.troubleshootingSubmission.findMany({
+      where: { ticketId },
+      orderBy: { submittedAt: 'asc' },
+    });
+    return subs.map((s) => ({
+      submissionId: s.submissionId,
+      submissionType: s.submissionType,
+      seId: s.seId,
+      clientSubmissionId: s.clientSubmissionId,
+      rootCauseCategory: s.rootCauseCategory,
+      rootCauseSubcategory: s.rootCauseSubcategory,
+      rootCauseNotes: s.rootCauseNotes,
+      actionTakenCategory: s.actionTakenCategory,
+      actionTakenNotes: s.actionTakenNotes,
+      diagnosisNotes: s.diagnosisNotes,
+      componentUnavailable: s.componentUnavailable,
+      componentUnavailableItem: s.componentUnavailableItem != null ? String(s.componentUnavailableItem) : null,
+      photoRefs: s.photoRefs,
+      presenceSource: s.presenceSource,
+      seGpsLat: s.seGpsLat,
+      seGpsLon: s.seGpsLon,
+      submittedAt: s.submittedAt.toISOString(),
+    }));
   }
 }

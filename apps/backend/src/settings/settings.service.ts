@@ -35,6 +35,11 @@ export const SETTINGS_DEFAULTS: Record<string, { value: unknown; description: st
     description:
       'Days of raw_device_snapshots telemetry retained; older daily partitions are dropped by partition maintenance. Ops-tunable.',
   },
+  eligibility_mode: {
+    value: 'pgi',
+    description:
+      'Uptime/ticket eligibility gate: "pgi" (canonical — active PGI within 15 days) or "all-deployed" (interim proxy while the SAP PGI feed is unbuilt — current fitment on an ACTIVE/DEPLOYED vehicle counts). Non-Op exclusion applies in both modes.',
+  },
 };
 
 @Injectable()

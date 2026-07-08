@@ -1,7 +1,9 @@
 # FE-09 — Ticket Detail Drawer parity + fill stub tabs
 
-Status: blocked (paused 2026-06-26) — Forms tab needs a backend troubleshoot/install-form read endpoint
-Blocked by: #70 (new BE follow-up) for AC#2 Forms tab
+Status: PARTIAL (2026-07-01) — **Forms tab done** (unblocked by #70, now merged: `GET /tickets/:id/forms`).
+Remaining: full `08`/`28` drawer chrome parity + Verification/Assignment-History tab fills + recovery-close
+`Modal` (Modal leg owned by #80). No longer blocked; the rest is a presentation-only follow-up slice.
+Was: blocked (paused 2026-06-26) on the missing backend form read.
 Type: AFK · Frontend · Phase F2
 Effort: M
 

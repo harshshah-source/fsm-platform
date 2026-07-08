@@ -6,6 +6,7 @@ import { RoleGuard } from '../common/guards/role.guard';
 import { DeviceStateModule } from '../device-state/device-state.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsModule } from '../settings/settings.module';
+import { TicketingModule } from '../ticketing/ticketing.module';
 import {
   AutoPlantMasterSource,
   type AutoPlantMasterSourceDeps,
@@ -59,7 +60,9 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
   // et al.) stay in AppModule; this one is self-contained to avoid touching the concurrently-edited AppModule.
   // ScheduleModule lives here (not AppModule) for the same self-containment reason as the guards —
   // the ingestion scheduler is this module's only cron user, and AppModule stays untouched.
-  imports: [AuthModule, DeviceStateModule, SettingsModule, ScheduleModule.forRoot()],
+  // TicketingModule supplies TicketCreationService to IntegrationSyncService (Issue 112 — the
+  // pipeline's fourth stage). No cycle: Ticketing imports only Prisma + Audit.
+  imports: [AuthModule, DeviceStateModule, SettingsModule, TicketingModule, ScheduleModule.forRoot()],
   controllers: [IntegrationHealthController, IntegrationSyncController],
   providers: [
     AuthGuard,
@@ -128,16 +131,15 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
     {
       // Real reader when AutoPlant is configured; mock (unset env ⇒ boots on the in-memory reader) otherwise.
       provide: SOURCE_READER,
-      useFactory: (client: AutoPlantMysqlClient, runs: SnapshotRunService): SourceReader => {
+      useFactory: (client: AutoPlantMysqlClient): SourceReader => {
         if (readAutoPlantMysqlConfig() === null) return new InMemorySourceReader([]);
         const offsetEnv = process.env.AUTOPLANT_SOURCE_UTC_OFFSET_MIN;
         return new AutoPlantSourceReader({
           query: ((sql, params) => client.query(sql, params)) as AutoPlantSourceReaderDeps['query'],
-          loadResumeCursor: () => runs.lastResumeCursor(),
           offsetMinutes: offsetEnv ? Number(offsetEnv) : undefined,
         });
       },
-      inject: [AutoPlantMysqlClient, SnapshotRunService],
+      inject: [AutoPlantMysqlClient],
     },
     {
       provide: SnapshotIngestionWorker,

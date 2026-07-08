@@ -11,13 +11,13 @@ export type BadgeTone =
   | 'brand';
 
 const TONES: Record<BadgeTone, string> = {
-  info: 'bg-info-bg text-info',
-  success: 'bg-success-bg text-success',
-  verified: 'bg-verified-bg text-verified',
-  warning: 'bg-warning-bg text-warning',
-  critical: 'bg-critical-bg text-critical',
-  neutral: 'bg-neutral-bg text-neutral',
-  brand: 'bg-brand-300 text-brand-700',
+  info: 'bg-info-bg text-info ring-info/10',
+  success: 'bg-success-bg text-success ring-success/10',
+  verified: 'bg-verified-bg text-verified ring-verified/10',
+  warning: 'bg-warning-bg text-warning ring-warning/10',
+  critical: 'bg-critical-bg text-critical ring-critical/10',
+  neutral: 'bg-neutral-bg text-neutral ring-neutral/10',
+  brand: 'bg-brand-300 text-brand-700 ring-brand-600/10',
 };
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
@@ -33,7 +33,7 @@ export function Badge({ tone = 'neutral', dot = false, className, children, ...r
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
         TONES[tone],
         className,
       )}
@@ -44,3 +44,4 @@ export function Badge({ tone = 'neutral', dot = false, className, children, ...r
     </span>
   );
 }
+

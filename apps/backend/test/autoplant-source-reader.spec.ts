@@ -1,16 +1,18 @@
 import {
   AutoPlantSourceReader,
-  encodeColdCursor,
-  encodeCursor,
-  utcIsoToSourceWallClock,
+  encodeDeviceCursor,
 } from '../src/ingestion/autoplant/autoplant-source-reader';
 import type { VehicleMasterRow } from '../src/ingestion/autoplant/mapping';
 
 /**
- * Phase 3 — the real `SourceReader` over `tb_vehiclemaster`. Driven against a fake `query` (no MySQL):
- * we assert the keyset SQL/params, the three cursor modes (backfill / intra-run keyset / cross-run
- * watermark), device-id preservation, and exhaustion. Cursor-resume follows R10 (composite
- * `(gps_datetime, device_id)` keyset) with the persisted UTC watermark converted back to source-local.
+ * Phase 3 — the real `SourceReader` over `tb_vehiclemaster`, driven against a fake `query` (no MySQL).
+ *
+ * ONE deterministic scan engine (no cold/incremental split): page by the immutable `device_id`,
+ * `ORDER BY device_id`, keyset `device_id > ?`, and NO `latest_gps_datetime` predicate. This is the
+ * only correct shape against a latest-state table the live fleet mutates forward — scan progress rides
+ * the immutable key, so a device that re-pings (or backdates) mid-scan can never sort back ahead of the
+ * cursor and be re-read, and no telemetry watermark participates in *which* rows are visited. Every
+ * device is visited exactly once per run; `data_as_of` is informational only.
  */
 
 const NOW = new Date('2026-07-02T12:00:00Z');
@@ -37,48 +39,39 @@ function fakeQuery(result: VehicleMasterRow[]) {
   return { fn, calls };
 }
 
-const reader = (q: ReturnType<typeof fakeQuery>, loadResumeCursor: () => Promise<string | null> = async () => null) =>
-  new AutoPlantSourceReader({ query: q.fn, loadResumeCursor, now: () => NOW });
+const reader = (q: ReturnType<typeof fakeQuery>) =>
+  new AutoPlantSourceReader({ query: q.fn, now: () => NOW });
 
-describe('Phase 3 — utcIsoToSourceWallClock', () => {
-  it('shifts a UTC instant into an IST (+330) naive wall-clock string', () => {
-    // 00:27:47Z + 330 min = 05:57:47 IST.
-    expect(utcIsoToSourceWallClock('2026-07-02T00:27:47.000Z', 330)).toBe('2026-07-02 05:57:47');
-  });
-});
-
-describe('Phase 3 — AutoPlantSourceReader', () => {
-  it('cold scan (cursor=null, no prior run): pages by the stable device_id key, no keyset predicate', async () => {
-    // A cold/first sync must page by the immutable device_id — NOT by latest_gps_datetime, which the
-    // live fleet mutates forward mid-scan (re-pinged devices would sort back to the front and be
-    // re-read forever). device_id order guarantees exactly one row per device and deterministic finish.
+describe('Phase 3 — AutoPlantSourceReader (single device-scan engine)', () => {
+  it('first page (cursor=null): pages by device_id, no continuation bound, no telemetry watermark', async () => {
     const q = fakeQuery([vm('0869925073271551', '2026-07-02 05:57:47'), vm('AP03TC0959', '2026-07-02 05:58:00')]);
     const chunk = await reader(q).readChunk(null, 1000);
 
-    const sql = q.calls[0].sql;
+    const { sql, params } = q.calls[0];
     expect(sql).toMatch(/FROM tb_vehiclemaster/i);
     expect(sql).toMatch(/latest_gps_datetime IS NOT NULL/i);
     expect(sql).toMatch(/device_id IS NOT NULL/i);
     expect(sql).toMatch(/ORDER BY device_id/i);
-    expect(sql).not.toMatch(/ORDER BY latest_gps_datetime/i); // NOT the mutating column
-    expect(sql).not.toMatch(/latest_gps_datetime >/); // no timestamp keyset/watermark on a cold scan
+    expect(sql).not.toMatch(/ORDER BY latest_gps_datetime/i); // never the mutating column
     expect(sql).not.toMatch(/device_id > /); // first page carries no continuation bound
+    // device-id preserved verbatim (leading-zero IMEI + alphanumeric vendor id).
     expect(chunk.rows.map((r) => r.deviceId)).toEqual(['0869925073271551', 'AP03TC0959']);
     // 05:57:47 IST → 00:27:47 UTC.
     expect(chunk.rows[0].gpsDatetime.toISOString()).toBe('2026-07-02T00:27:47.000Z');
+    expect(params).toEqual([]);
     // Fewer than chunkSize (2 < 1000) ⇒ exhausted.
     expect(chunk.nextCursor).toBeNull();
   });
 
-  it('cold scan emits a device-keyset nextCursor when the chunk is full', async () => {
+  it('emits a device-keyset nextCursor (the last device_id) when the chunk is full', async () => {
     const q = fakeQuery([vm('D1', '2026-07-02 05:57:00'), vm('D2', '2026-07-02 05:58:00')]);
     const chunk = await reader(q).readChunk(null, 2); // full chunk (2 == chunkSize)
-    expect(chunk.nextCursor).toBe(encodeColdCursor('D2'));
+    expect(chunk.nextCursor).toBe(encodeDeviceCursor('D2'));
   });
 
-  it('cold scan continues from a device-keyset cursor with a device_id > ? bound', async () => {
+  it('continues from a device cursor with a device_id > ? bound, ordered by device_id', async () => {
     const q = fakeQuery([vm('D3', '2026-07-02 05:59:00')]);
-    await reader(q).readChunk(encodeColdCursor('D2'), 1000);
+    await reader(q).readChunk(encodeDeviceCursor('D2'), 1000);
 
     const { sql, params } = q.calls[0];
     expect(sql).toMatch(/ORDER BY device_id/i);
@@ -86,37 +79,27 @@ describe('Phase 3 — AutoPlantSourceReader', () => {
     expect(params).toEqual(['D2']);
   });
 
-  it('incremental scan emits a composite keyset nextCursor when the chunk is full', async () => {
-    const q = fakeQuery([vm('D1', '2026-07-02 05:57:00'), vm('D2', '2026-07-02 05:58:00')]);
-    // A composite input cursor puts the reader in incremental (watermark-keyset) mode.
-    const chunk = await reader(q).readChunk(encodeCursor('2026-07-02 05:56:00', 'D0'), 2);
-    expect(chunk.nextCursor).toBe(encodeCursor('2026-07-02 05:58:00', 'D2'));
+  it('NEVER lets the mutating latest_gps_datetime drive the scan (no ts comparison, no ts param) — on any page', async () => {
+    // The correctness invariant: scan membership/order depends solely on the immutable device_id, so a
+    // device that advances (or backdates) its latest_gps_datetime mid-run cannot be re-read or skipped.
+    const first = fakeQuery([vm('D1', '2026-07-02 05:57:00')]);
+    await reader(first).readChunk(null, 10);
+    const cont = fakeQuery([vm('D9', '2026-07-02 06:10:00')]);
+    await reader(cont).readChunk(encodeDeviceCursor('D8'), 10);
+
+    for (const call of [first.calls[0], cont.calls[0]]) {
+      expect(call.sql).not.toMatch(/latest_gps_datetime\s*(>=|>|<|<=|=)\s*\?/i); // no watermark/keyset on the ts
+      expect(call.params.some((p) => typeof p === 'string' && /\d{4}-\d{2}-\d{2}/.test(p))).toBe(false);
+    }
   });
 
-  it('continues intra-run from a keyset cursor with the R10 composite predicate', async () => {
-    const q = fakeQuery([vm('D3', '2026-07-02 05:59:00')]);
-    await reader(q).readChunk(encodeCursor('2026-07-02 05:58:00', 'D2'), 1000);
-
-    const { sql, params } = q.calls[0];
-    // (ts > ?) OR (ts = ? AND device_id > ?) — the boundary-tie-safe keyset.
-    expect(sql).toMatch(/latest_gps_datetime > \?\s+OR\s+\(latest_gps_datetime = \? AND device_id > \?\)/i);
-    expect(params.slice(0, 3)).toEqual(['2026-07-02 05:58:00', '2026-07-02 05:58:00', 'D2']);
-  });
-
-  it('resumes across runs from the persisted UTC watermark (>= source-local), converted from data_as_of', async () => {
-    const q = fakeQuery([vm('D9', '2026-07-02 06:10:00')]);
-    // Persisted snapshot_runs.cursor = last run's data_as_of (UTC ISO).
-    await reader(q, async () => '2026-07-02T00:27:47.000Z').readChunk(null, 1000);
-
-    const { sql, params } = q.calls[0];
-    expect(sql).toMatch(/latest_gps_datetime >= \?/);
-    expect(params[0]).toBe('2026-07-02 05:57:47'); // 00:27:47Z + 330m
-  });
-
-  it('drops a bogus future-timestamp row from the output', async () => {
+  it('advances the cursor from the last DB row scanned, not the mapped/filtered set', async () => {
+    // A bogus-future row is dropped from output but still counts for exhaustion + cursor advance, so a
+    // dropped tail row never causes a re-read loop. Full chunk (2==limit) ⇒ continue past the last row.
     const q = fakeQuery([vm('DPRESENT', '2026-07-02 05:57:47'), vm('DFUTURE', '2027-01-01 00:00:00')]);
-    const chunk = await reader(q).readChunk(null, 1000);
-    expect(chunk.rows.map((r) => r.deviceId)).toEqual(['DPRESENT']);
+    const chunk = await reader(q).readChunk(null, 2);
+    expect(chunk.rows.map((r) => r.deviceId)).toEqual(['DPRESENT']); // future row dropped
+    expect(chunk.nextCursor).toBe(encodeDeviceCursor('DFUTURE')); // …but cursor rides the real last row
   });
 
   it('signals exhaustion with a null cursor on an empty source', async () => {

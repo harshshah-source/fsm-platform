@@ -4,7 +4,12 @@ import {
 } from '../src/ingestion/snapshot-ingestion.worker';
 import { SnapshotIngestionService } from '../src/ingestion/snapshot-ingestion.service';
 import { SnapshotRunService } from '../src/ingestion/snapshot-run.service';
-import { InMemorySourceReader, type SourceSnapshotRow } from '../src/ingestion/source-reader';
+import {
+  InMemorySourceReader,
+  type SourceChunk,
+  type SourceReader,
+  type SourceSnapshotRow,
+} from '../src/ingestion/source-reader';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -52,6 +57,27 @@ class PoisonWriter implements ChunkWriter {
 class DeadWriter implements ChunkWriter {
   async ingestChunk(): Promise<{ inserted: number }> {
     throw new Error('db down');
+  }
+}
+
+/**
+ * Delivers `goodChunks` normal chunks, then throws on the next read — a source/VPN drop mid-scan.
+ * This is the orphan path that stranded run 456: a read throwing outside the finalize block left the
+ * run RUNNING forever, so recompute never ran and the dashboards went empty.
+ */
+class ReadThrowsMidScan implements SourceReader {
+  private reads = 0;
+  constructor(
+    private readonly rows: readonly SourceSnapshotRow[],
+    private readonly goodChunks: number,
+  ) {}
+  async readChunk(cursor: string | null, chunkSize: number): Promise<SourceChunk> {
+    if (this.reads >= this.goodChunks) throw new Error('source read failed mid-scan (VPN drop)');
+    const start = cursor === null ? 0 : Number(cursor);
+    const slice = this.rows.slice(start, start + chunkSize);
+    this.reads += 1;
+    // Always signal more to come so the worker issues another read — which throws.
+    return { rows: [...slice], nextCursor: String(start + slice.length) };
   }
 }
 
@@ -162,6 +188,40 @@ describe('Issue 04 slice 5 — SnapshotIngestionWorker', () => {
     expect(result.inserted).toBe(0);
 
     const run = await prisma.snapshotRun.findUnique({ where: { runId: result.runId } });
+    expect(run?.dataAsOf).toBeNull();
+  });
+
+  it('finalizes PARTIAL (never orphans RUNNING) when a read throws after some chunks landed', async () => {
+    // One chunk ingests, then the second read throws — the run must terminate, not hang RUNNING.
+    const source = new ReadThrowsMidScan([row(DEV(41), 0), row(DEV(42), 1)], 1);
+
+    const result = await makeWorker(realWriter, source).run({ chunkSize: 1, retryDelayMs: 0 });
+    created.push(result.runId);
+
+    expect(result.status).toBe('PARTIAL');
+    expect(result.succeeded).toBe(1);
+
+    const run = await prisma.snapshotRun.findUnique({ where: { runId: result.runId } });
+    expect(run?.status).toBe('PARTIAL');
+    expect(run?.finishedAt).not.toBeNull();
+    // Display watermark advanced only to the ingested high-water; resume cursor lets the next run
+    // re-read forward from there (idempotent), so no ping is silently skipped.
+    expect(run?.dataAsOf?.toISOString()).toBe(new Date(Date.UTC(2026, 5, 19, 8, 0, 0)).toISOString());
+    expect(run?.cursor).toBe(new Date(Date.UTC(2026, 5, 19, 8, 0, 0)).toISOString());
+  });
+
+  it('finalizes FAILED with null data_as_of when the very first read throws', async () => {
+    const source = new ReadThrowsMidScan([row(DEV(51), 0)], 0);
+
+    const result = await makeWorker(realWriter, source).run({ chunkSize: 1, retryDelayMs: 0 });
+    created.push(result.runId);
+
+    expect(result.status).toBe('FAILED');
+    expect(result.succeeded).toBe(0);
+
+    const run = await prisma.snapshotRun.findUnique({ where: { runId: result.runId } });
+    expect(run?.status).toBe('FAILED');
+    expect(run?.finishedAt).not.toBeNull();
     expect(run?.dataAsOf).toBeNull();
   });
 

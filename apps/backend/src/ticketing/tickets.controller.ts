@@ -18,6 +18,7 @@ import { AutoRecoveryService } from './auto-recovery.service';
 import {
   TicketQueryService,
   type TicketDetailView,
+  type TicketFormView,
   type TicketView,
 } from './ticket-query.service';
 
@@ -71,6 +72,19 @@ export class TicketsController {
     const ticket = await this.query.getById(id, { role: user.role, zoneId: user.zone_id });
     if (!ticket) throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     return ticket;
+  }
+
+  /** Per-ticket SE troubleshoot-form submissions (Issue 70; consumed by the FE-09 Forms tab). Manager
+   *  read, zone-scoped like the detail read; 404 for an unknown / out-of-zone ticket. */
+  @Get(':id/forms')
+  @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
+  async forms(
+    @CurrentUser() user: AccessTokenClaims,
+    @Param('id') id: string,
+  ): Promise<{ ticketId: string; forms: TicketFormView[] }> {
+    const forms = await this.query.formsForTicket(id, { role: user.role, zoneId: user.zone_id });
+    if (forms === null) throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
+    return { ticketId: id, forms };
   }
 
   /** ZM/CSM/OpsHead manually marks an open Troubleshoot ticket CLOSED_AUTO_RECOVERY (Issue 08 AC#3). */

@@ -16,6 +16,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { DayPlanQueryService, type DayPlanView } from './day-plan-query.service';
+import { DispatchRunService, type DispatchRunSummary } from './dispatch-run.service';
 import { OverrideService, type AssignOutcome } from './override.service';
 import {
   ZmScheduleQueryService,
@@ -40,7 +41,19 @@ export class SchedulesController {
     private readonly dayPlan: DayPlanQueryService,
     private readonly zm: ZmScheduleQueryService,
     private readonly override: OverrideService,
+    private readonly dispatchRun: DispatchRunService,
   ) {}
+
+  /**
+   * Issue 113 — manual override for the daily Recommender → Day-Plan dispatch run: force a run now
+   * without waiting for the cron. Reuses the exact `runForActiveZones` path the scheduler tick drives.
+   */
+  @Post('dispatch-run')
+  @HttpCode(200)
+  @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
+  dispatchRunNow(): Promise<DispatchRunSummary> {
+    return this.dispatchRun.runForActiveZones();
+  }
 
   @Get('me')
   @Roles('SERVICE_ENGINEER')

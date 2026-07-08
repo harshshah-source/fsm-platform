@@ -52,7 +52,15 @@ export function LoginPage() {
   };
 
   return (
-    <div className="grid min-h-screen bg-chrome-900 text-white lg:grid-cols-2">
+    <div
+      className="grid min-h-screen bg-chrome-900 text-white lg:grid-cols-2"
+      style={{
+        // Faint blueprint grid over the dark chrome, matching the 00-login reference backdrop.
+        backgroundImage:
+          'linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)',
+        backgroundSize: '48px 48px',
+      }}
+    >
       {/* Left — brand + marketing + KPI tiles (hidden on small screens) */}
       <div className="relative hidden flex-col justify-between p-12 lg:flex">
         <div>
@@ -156,7 +164,7 @@ export function LoginPage() {
             </Button>
           </form>
 
-          <ul className="mt-6 space-y-2 text-xs text-chrome-text">
+          <ul className="mt-6 space-y-2 border-t border-chrome-700 pt-6 text-xs text-chrome-text">
             {FEATURES.map((f) => (
               <li key={f} className="flex items-center gap-2">
                 <IconCheck className="h-3.5 w-3.5 text-success" /> {f}

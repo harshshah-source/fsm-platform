@@ -1,0 +1,4 @@
+# Harness output — only the human-approved baseline/ is committed.
+current/
+diff/
+report.md

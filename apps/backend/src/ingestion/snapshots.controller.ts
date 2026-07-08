@@ -49,7 +49,9 @@ export class SnapshotsController {
   @HttpCode(200)
   @Roles('OPERATIONS_HEAD')
   async run(): Promise<{ runId: string; status: string }> {
-    const result = await this.worker.run();
+    // Bound the page size under the AutoPlant DBA cap (< 100 rows/query); overridable via env.
+    const chunkSize = Math.max(1, Math.min(99, Number(process.env.AUTOPLANT_SNAPSHOT_CHUNK_SIZE) || 90));
+    const result = await this.worker.run({ chunkSize });
     return { runId: result.runId.toString(), status: result.status };
   }
 }

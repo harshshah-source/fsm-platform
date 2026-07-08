@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
-import { DEFAULT_PGI_WINDOW_DAYS } from './eligibility';
+import { DEFAULT_PGI_WINDOW_DAYS, parseEligibilityMode } from './eligibility';
 import { slaBucketCaseSql } from './sla-bucket';
 
 const DEFAULT_INACTIVITY_THRESHOLD_HOURS = 24;
@@ -23,7 +23,9 @@ const DEFAULT_INACTIVITY_THRESHOLD_HOURS = 24;
  *     - `is_inactive` against the configurable `inactivity_threshold_hours` setting (canonical 24h).
  *     - `sla_bucket` via {@link slaBucketCaseSql} — generated from the SAME `SLA_BANDS` as the TS
  *       classifier, so the SQL and TS bucket boundaries cannot drift. NULL for the 0–4h ACTIVE band.
- *     - `eligible_for_uptime` = active PGI within the window AND no CONFIRMED/ACTIVE Non-Op marking.
+ *     - `eligible_for_uptime` per the `eligibility_mode` setting (Issue 112): `pgi` = active PGI
+ *       within the window; `all-deployed` = interim proxy off the vehicle deployment-status mirror.
+ *       A CONFIRMED/ACTIVE Non-Op marking excludes the device in both modes.
  *     - vehicle / plant / company / transporter denormalised off the device's current fitment.
  *
  * `has_open_failure_cycle` is owned by ticket creation and is deliberately left untouched here.
@@ -40,6 +42,7 @@ export class DeviceStateService {
     const threshold =
       (await this.settings.get<number>('inactivity_threshold_hours')) ??
       DEFAULT_INACTIVITY_THRESHOLD_HOURS;
+    const eligibilityMode = parseEligibilityMode(await this.settings.get('eligibility_mode'));
 
     // 1. Guarantee one row per device (never-pinged devices get a row with a null latest ping).
     await this.prisma.$executeRaw(Prisma.sql`
@@ -51,6 +54,18 @@ export class DeviceStateService {
     //    pass. The `derived` CTE computes clamped inactivity hours once; the SLA-bucket CASE is projected
     //    from SLA_BANDS so it stays in lockstep with classifySlaBucket.
     const bucketCase = Prisma.raw(slaBucketCaseSql('dr.hours'));
+    // Eligibility base per `eligibility_mode` (Issue 112 / review B7); the Non-Op exclusion below
+    // applies in both modes. `all-deployed` reads the vehicle deployment-status mirror off the
+    // already-joined current fitment — COALESCE so no fitment / null status is ineligible, not NULL.
+    const eligibilityBase =
+      eligibilityMode === 'all-deployed'
+        ? Prisma.sql`COALESCE(v.status IN ('ACTIVE', 'DEPLOYED'), false)`
+        : Prisma.sql`EXISTS (
+            SELECT 1 FROM pgi_history p
+             WHERE p.device_id = ds.device_id
+               AND ${now}::timestamptz - (p.pgi_date::timestamp AT TIME ZONE 'UTC')
+                     <= make_interval(days => ${DEFAULT_PGI_WINDOW_DAYS})
+          )`;
     const upserted = await this.prisma.$executeRaw(Prisma.sql`
       WITH derived AS (
         SELECT ds.device_id,
@@ -64,12 +79,7 @@ export class DeviceStateService {
         is_inactive = (dr.hours IS NOT NULL AND dr.hours >= ${threshold}),
         sla_bucket = ${bucketCase},
         eligible_for_uptime = (
-          EXISTS (
-            SELECT 1 FROM pgi_history p
-             WHERE p.device_id = ds.device_id
-               AND ${now}::timestamptz - (p.pgi_date::timestamp AT TIME ZONE 'UTC')
-                     <= make_interval(days => ${DEFAULT_PGI_WINDOW_DAYS})
-          )
+          ${eligibilityBase}
           AND NOT EXISTS (
             SELECT 1 FROM non_operational_markings n
              WHERE n.device_id = ds.device_id AND n.state::text IN ('CONFIRMED', 'ACTIVE')

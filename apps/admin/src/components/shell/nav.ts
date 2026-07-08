@@ -69,6 +69,7 @@ export function buildNav(role: string): NavGroup[] {
   ];
   if (isManager) {
     operations.push(
+      { label: 'Create Install', to: '/install', icon: IconTruck },
       { label: 'Schedules', to: '/schedules', icon: IconCalendar },
       { label: 'Intra-day Queue', to: '/intraday', icon: IconClock },
       { label: 'SE Activity', to: '/engineers', icon: IconActivity },
@@ -76,6 +77,7 @@ export function buildNav(role: string): NavGroup[] {
       { label: 'Verification Review', to: '/verification', icon: IconShield },
       { label: 'Readiness & Vehicle', to: '/readiness/vehicle-unavailability', icon: IconTruck },
       { label: 'Non-Operational', to: '/readiness/non-operational', icon: IconAlert },
+      { label: 'Cross-Zone', to: '/cross-zone', icon: IconShare },
       { label: 'Recovery Decisions', to: '/readiness/recovery-decisions', icon: IconRotate },
       { label: 'Leave Requests', to: '/leave-requests', icon: IconClipboard },
       { label: 'Expense Vouchers', to: '/vouchers', icon: IconClipboard },
@@ -95,10 +97,14 @@ export function buildNav(role: string): NavGroup[] {
   }
 
   if (isManager) {
-    groups.push({
-      heading: 'Analytics',
-      items: [{ label: 'Reports', to: '/reports', icon: IconGrid }],
-    });
+    const analytics: NavLink[] = [
+      { label: 'Reports', to: '/reports', icon: IconGrid },
+      { label: 'Device Detail', to: '/reports/device', icon: IconTicket },
+      { label: 'Root Cause Analytics', to: '/reports/root-cause', icon: IconActivity },
+      { label: 'System Efficiency', to: '/reports/system-efficiency', icon: IconActivity },
+    ];
+    if (isOpsHead) analytics.push({ label: 'ZM Scorecard', to: '/reports/zm-scorecard', icon: IconShield });
+    groups.push({ heading: 'Analytics', items: analytics });
   }
 
   if (isOpsHead) {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { CriticalQueueGroup } from '../../api/dashboard';
 import { apiAssignTicket, type ZoneEngineer } from '../../api/schedules';
-import { SLABadge, TierBadge } from '../../components/domain';
+import { DurationBadge, TierBadge } from '../../components/domain';
 import { FilterSelect } from '../../components/data';
 import { Badge, Button } from '../../components/ui';
 
@@ -63,7 +63,7 @@ export function CriticalQueue({
                     className="flex items-center justify-between gap-2 rounded-md bg-surface-sunken/60 px-3 py-1.5 text-sm"
                   >
                     <span className="font-medium text-ink-strong">Device {t.deviceId}</span>
-                    <SLABadge bucket={t.slaBucket} />
+                    <DurationBadge bucket={t.slaBucket} latestGpsDatetime={t.latestGpsDatetime} />
                   </li>
                 ))}
               </ul>

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { InventoryService } from './inventory.service';
 import { ShadowUseService } from './shadow-use.service';
+import { WarehouseStockService } from './warehouse-stock.service';
 
 /**
  * Inventory — Van Stock + Common Kit + the Component-Blocked Queue (Issue 21, schema D12). Reads van
@@ -11,7 +12,7 @@ import { ShadowUseService } from './shadow-use.service';
  */
 @Module({
   imports: [PrismaModule],
-  providers: [InventoryService, ShadowUseService],
-  exports: [InventoryService, ShadowUseService],
+  providers: [InventoryService, ShadowUseService, WarehouseStockService],
+  exports: [InventoryService, ShadowUseService, WarehouseStockService],
 })
 export class InventoryModule {}

@@ -20,8 +20,8 @@ const groups: CriticalQueueGroup[] = [
     clusterSize: 2,
     suggestedSes: [],
     tickets: [
-      { ticketId: 't1', deviceId: '900', slaBucket: 'CRITICAL', status: 'OPEN' },
-      { ticketId: 't2', deviceId: '901', slaBucket: 'HIGH_CRITICAL', status: 'OPEN' },
+      { ticketId: 't1', deviceId: '900', slaBucket: 'CRITICAL', latestGpsDatetime: null, status: 'OPEN' },
+      { ticketId: 't2', deviceId: '901', slaBucket: 'HIGH_CRITICAL', latestGpsDatetime: null, status: 'OPEN' },
     ],
   },
 ];

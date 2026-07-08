@@ -10,7 +10,7 @@ import { InlineBadges } from '../src/pages/tickets/ticketBadges';
  */
 const base: TicketRow = {
   ticketId: 't1', workType: 'TROUBLESHOOT', status: 'OPEN', deviceId: '1', plantId: '1', companyId: '1',
-  companyTier: 'GOLD', assignmentState: 'UNASSIGNED', slaBucket: 'CRITICAL', repeatFailure: false,
+  companyTier: 'GOLD', assignmentState: 'UNASSIGNED', slaBucket: 'CRITICAL', latestGpsDatetime: null, repeatFailure: false,
   failureCycleState: 'WAITING_COMPONENT', createdAt: '2026-06-20T00:00:00Z',
   componentRequestStatus: 'SHIPPED', waitingComponentSince: new Date(Date.now() - 3 * 86_400_000).toISOString(),
 };

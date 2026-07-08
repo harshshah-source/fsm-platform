@@ -1,14 +1,8 @@
 import type { ZoneOverviewRow } from '../../api/dashboard';
 import { DataTable, type Column } from '../../components/data';
 import { SLABadge } from '../../components/domain';
-import { SLA_BUCKETS, type SlaBucket } from '../../lib/slaBucket';
-
-/** Buckets at or above CRITICAL severity — the "Critical+" scorecard column. */
-const CRITICAL_PLUS: SlaBucket[] = ['CRITICAL', 'HIGH_CRITICAL', 'SEVERE', 'VERY_SEVERE', 'LONG_PENDING'];
-
-function criticalPlus(byBucket: Record<string, number>): number {
-  return CRITICAL_PLUS.reduce((s, b) => s + (byBucket[b] ?? 0), 0);
-}
+import { criticalPlusCount, SLA_BUCKETS, type SlaBucket } from '../../lib/slaBucket';
+import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
 
 /** Worst (most-severe non-zero) bucket in a zone — `SLA_BUCKETS` is in descending severity order. */
 function worstBucket(byBucket: Record<string, number>): SlaBucket | null {
@@ -32,9 +26,13 @@ export function ScorecardTable({ rows }: { rows: ZoneOverviewRow[] }) {
     },
     {
       key: 'total',
-      header: 'Inactive',
+      header: 'Inactive / Total',
       align: 'right',
-      render: (r) => <span className="tabular-nums">{r.totalInactive}</span>,
+      render: (r) => (
+        <span data-testid="scorecard-inactive-total" className="tabular-nums">
+          {formatInactiveOfTotal(r.totalInactive, r.totalDevices)}
+        </span>
+      ),
       sortable: true,
       sortValue: (r) => r.totalInactive,
     },
@@ -42,9 +40,13 @@ export function ScorecardTable({ rows }: { rows: ZoneOverviewRow[] }) {
       key: 'critical',
       header: 'Critical+',
       align: 'right',
-      render: (r) => <span className="tabular-nums font-semibold text-critical">{criticalPlus(r.byBucket)}</span>,
+      render: (r) => (
+        <span data-testid="scorecard-critical-plus" className="tabular-nums font-semibold text-critical">
+          {criticalPlusCount(r.byBucket)}
+        </span>
+      ),
       sortable: true,
-      sortValue: (r) => criticalPlus(r.byBucket),
+      sortValue: (r) => criticalPlusCount(r.byBucket),
     },
     {
       key: 'worst',

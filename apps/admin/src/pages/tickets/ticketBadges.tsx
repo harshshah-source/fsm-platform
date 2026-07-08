@@ -1,12 +1,20 @@
 import type { TicketRow } from '../../api/tickets';
-import { SLABadge } from '../../components/domain/badges';
+import { DurationBadge } from '../../components/domain/badges';
 
 /**
- * Colour-coded SLA bucket badge (AC#2/#5). Now a thin wrapper over the shared `SLABadge` (FE-04),
- * which keeps the `data-testid="bucket-<BUCKET>"` contract. Null bucket (ACTIVE) renders nothing.
+ * Per-device inactivity badge (AC#2/#5 · Issue 3). Wraps the shared {@link DurationBadge}: same
+ * severity colour + `data-testid="bucket-<BUCKET>"` contract, but the text is the actual elapsed
+ * inactive duration since the device's last GPS ping (falls back to the bucket label when the ticket
+ * carries no timestamp). Null bucket (ACTIVE) renders nothing.
  */
-export function BucketBadge({ bucket }: { bucket: string | null }) {
-  return <SLABadge bucket={bucket} />;
+export function BucketBadge({
+  bucket,
+  latestGpsDatetime,
+}: {
+  bucket: string | null;
+  latestGpsDatetime?: string | null;
+}) {
+  return <DurationBadge bucket={bucket} latestGpsDatetime={latestGpsDatetime} />;
 }
 
 /**

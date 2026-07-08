@@ -1,9 +1,25 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiRunPipeline, RunPipelineError, type PipelineSummary } from '../../api/integration';
 import { useAuth } from '../../auth/AuthProvider';
 import { useToastOptional } from '../../components/data';
 import { Modal } from '../../components/overlay/Modal';
 import { Button } from '../../components/ui';
+
+// Whimsical, ever-changing status verbs (à la the CLI's "cooking / sautéing / levitating…") cycled while
+// a run is in flight, so the operator sees the pipeline is alive during the 3–4 minute VPN round-trip.
+// The visible word is decorative only — an sr-only "Running ingestion…" carries the real status for AT.
+const COOKING_WORDS = [
+  'Ingesting',
+  'Syncing',
+  'Simmering',
+  'Sautéing',
+  'Percolating',
+  'Crunching',
+  'Reticulating',
+  'Marinating',
+  'Levitating',
+  'Brewing',
+] as const;
 
 /** The int-formatted summary line the success toast shows the operator. */
 function SummaryToast({ summary }: { summary: PipelineSummary }) {
@@ -32,7 +48,18 @@ export function RunIngestionButton({ onSuccess }: { onSuccess: () => void | Prom
   const toast = useToastOptional();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [running, setRunning] = useState(false);
+  const [wordIdx, setWordIdx] = useState(0);
   const runningRef = useRef(false);
+
+  // Cycle the status verb only while a run is in flight; reset to the first word when it finishes.
+  useEffect(() => {
+    if (!running) {
+      setWordIdx(0);
+      return;
+    }
+    const id = setInterval(() => setWordIdx((i) => (i + 1) % COOKING_WORDS.length), 1400);
+    return () => clearInterval(id);
+  }, [running]);
 
   // Match the backend guard exactly — do not widen access.
   if (session?.role !== 'OPERATIONS_HEAD') return null;
@@ -65,13 +92,28 @@ export function RunIngestionButton({ onSuccess }: { onSuccess: () => void | Prom
       <Button
         type="button"
         size="sm"
-        variant="secondary"
+        variant={running ? 'danger' : 'secondary'}
         data-testid="run-ingestion-btn"
+        aria-live="polite"
         loading={running}
         disabled={running}
+        className={
+          running
+            ? 'ingest-live h-10 border-critical font-semibold text-critical'
+            : 'h-10'
+        }
         onClick={() => setConfirmOpen(true)}
       >
-        {running ? 'Running ingestion…' : 'Run Ingestion Now'}
+        {running ? (
+          <span className="inline-flex items-center">
+            <span className="sr-only">Running ingestion…</span>
+            <span key={wordIdx} aria-hidden className="ingest-word">
+              {COOKING_WORDS[wordIdx]}…
+            </span>
+          </span>
+        ) : (
+          'Run Ingestion Now'
+        )}
       </Button>
 
       <Modal

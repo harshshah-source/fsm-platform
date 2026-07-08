@@ -56,7 +56,7 @@ export function Sidebar({ role }: { role: string }) {
         data-collapsed={collapsed}
         data-mobile-open={mobileOpen}
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col bg-chrome-900 text-chrome-text shadow-xl',
+          'fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col bg-chrome-900 text-chrome-text shadow-floating',
           'transition-[transform,width] duration-300 ease-in-out',
           'lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:translate-x-0 lg:shadow-none',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
@@ -75,7 +75,7 @@ export function Sidebar({ role }: { role: string }) {
             onClick={toggleCollapsed}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-expanded={!collapsed}
-            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface-card text-ink-strong transition-colors hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40 lg:flex"
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface-card text-ink-strong transition-colors hover:bg-surface-sunken focus-ring lg:flex"
           >
             <IconMenu className="h-[18px] w-[18px]" />
           </button>
@@ -86,7 +86,7 @@ export function Sidebar({ role }: { role: string }) {
             type="button"
             onClick={closeMobile}
             aria-label="Close menu"
-            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface-card text-ink-strong transition-colors hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40 lg:hidden"
+            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface-card text-ink-strong transition-colors hover:bg-surface-sunken focus-ring lg:hidden"
           >
             <IconClose className="h-[18px] w-[18px]" />
           </button>
@@ -123,10 +123,10 @@ export function Sidebar({ role }: { role: string }) {
                         onFocus={showTip(item.label)}
                         onBlur={hideTip}
                         className={cn(
-                          'flex items-center gap-2.5 rounded-r-md border-l-2 px-2 py-1.5 text-[13px] transition-colors',
+                          'flex items-center gap-2.5 rounded-md border-l-2 px-2 py-1.5 text-[13px] transition-colors focus-ring',
                           collapsed && 'lg:justify-center lg:gap-0 lg:px-0',
                           active
-                            ? 'border-brand-600 bg-chrome-700 text-white'
+                            ? 'border-brand-600 bg-chrome-700 text-white shadow-sm'
                             : 'border-transparent text-chrome-text hover:bg-chrome-800 hover:text-white',
                         )}
                       >
@@ -167,3 +167,4 @@ export function Sidebar({ role }: { role: string }) {
     </>
   );
 }
+

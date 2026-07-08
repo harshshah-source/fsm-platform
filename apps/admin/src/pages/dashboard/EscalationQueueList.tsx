@@ -1,11 +1,12 @@
 import type { CriticalQueueGroup } from '../../api/dashboard';
-import { SLABadge, TierBadge } from '../../components/domain';
+import { DurationBadge, TierBadge } from '../../components/domain';
 import { SLA_BUCKETS, type SlaBucket } from '../../lib/slaBucket';
 
 interface EscalationItem {
   ticketId: string;
   deviceId: string;
   slaBucket: string;
+  latestGpsDatetime: string | null;
   companyName: string;
   companyTier: string;
   plantName: string;
@@ -23,6 +24,7 @@ function toItems(groups: CriticalQueueGroup[]): EscalationItem[] {
         ticketId: t.ticketId,
         deviceId: t.deviceId,
         slaBucket: t.slaBucket,
+        latestGpsDatetime: t.latestGpsDatetime,
         companyName: g.companyName,
         companyTier: g.companyTier,
         plantName: g.plantName,
@@ -71,7 +73,7 @@ export function EscalationQueueList({ groups }: { groups: CriticalQueueGroup[] }
                   {it.companyName} · {it.plantName}
                 </div>
               </div>
-              <SLABadge bucket={it.slaBucket} />
+              <DurationBadge bucket={it.slaBucket} latestGpsDatetime={it.latestGpsDatetime} />
             </li>
           ))}
         </ul>

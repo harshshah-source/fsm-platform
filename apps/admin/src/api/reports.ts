@@ -93,3 +93,83 @@ export const apiSoftInactiveTrend = (params: { days?: number } = {}) => {
   const qs = q.toString();
   return get<SoftInactiveTrend>(`/reports/soft-inactive-trend${qs ? `?${qs}` : ''}`);
 };
+
+// ---- Root Cause Analytics (Issue 41, FE-23) ------------------------------------
+
+export interface RootCauseSlice {
+  category: string;
+  count: number;
+  pct: number; // share of total submissions, 0–100
+}
+export interface RootCauseReport {
+  fromMonth: string;
+  toMonth: string;
+  totalSubmissions: number;
+  filters: { zoneId: number | null; companyId: number | null; plantId: number | null; deviceType: string | null; seId: string | null };
+  distribution: RootCauseSlice[];
+}
+export const apiRootCause = () => get<RootCauseReport>('/reports/root-cause');
+
+// ---- System Efficiency (Issue 42, FE-24) ---------------------------------------
+
+export interface EfficiencyMetrics {
+  failureCyclesOpened: number;
+  ticketsCreated: number;
+  troubleshootTicketsCreated: number;
+  autoAssignments: number;
+  manualAssignments: number;
+  overrides: number;
+  autoAssignmentRatePct: number;
+  manualAssignmentRatePct: number;
+  overrideRatePct: number;
+  cyclesResolved: number;
+  verifiedCycles: number;
+  failedVerifications: number;
+  autoRecoveries: number;
+  repeatFailures: number;
+  firstTimeFixes: number;
+  componentPauses: number;
+  agedResolutions: number;
+  autoEscalations: number;
+  repeatFailureRatePct: number;
+  firstTimeFixRatePct: number;
+  failedVerificationRatePct: number;
+  autoRecoveryRatePct: number;
+}
+export interface SystemEfficiencyReport {
+  from: string;
+  to: string;
+  filters: { zoneId: number | null; companyId: number | null; plantId: number | null; deviceType: string | null; seId: string | null };
+  fleet: EfficiencyMetrics;
+  byZone: (EfficiencyMetrics & { zoneId: string | null; zoneName: string | null })[];
+}
+export const apiSystemEfficiency = () => get<SystemEfficiencyReport>('/reports/efficiency');
+
+// ---- ZM Performance Scorecard (Issue 43, FE-25, Operations-Head only) -----------
+
+export interface ZmScorecardRow {
+  zmId: string;
+  zmName: string;
+  zoneId: number;
+  zoneName: string;
+  overrides: number;
+  removals: number;
+  deferrals: number;
+  reorders: number;
+  swaps: number;
+  reassignments: number;
+  splitBatches: number;
+  overrideAfterOnsite: number;
+  manualAssignments: number;
+  autoAssigned: number;
+  overrideRatePct: number;
+  zoneSlaCompliancePct: number;
+}
+export interface ZmScorecardReport {
+  fromMonth: string;
+  toMonth: string;
+  zoneId: number | null;
+  rows: ZmScorecardRow[];
+  trend: unknown[];
+}
+export const apiZmScorecard = () => get<ZmScorecardReport>('/reports/zm-scorecard');

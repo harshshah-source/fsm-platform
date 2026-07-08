@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useAuth } from '../../auth/AuthProvider';
 import { DateRangeChips, PageHeader } from '../../components/data';
-import { Badge, Button } from '../../components/ui';
+import { Badge } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import {
   AccessMatrixGrid,
@@ -43,12 +43,12 @@ const TABS: Tab[] = [
  * Route-level Operations-Head gating is unchanged (`AppRoutes`).
  */
 export function SettingsPage() {
-  const { session, logout } = useAuth();
+  const { session } = useAuth();
   const [active, setActive] = useState(TABS[0].id);
   const current = TABS.find((t) => t.id === active) ?? TABS[0];
 
   return (
-    <div className="min-h-screen p-6">
+    <div>
       <PageHeader
         title="Settings"
         subtitle="Operations-Head configuration console — zones, plants, users, companies, coverage, SLA, and scoring."
@@ -56,9 +56,6 @@ export function SettingsPage() {
           <>
             <DateRangeChips />
             {session?.role && <Badge tone="neutral">{session.role}</Badge>}
-            <Button variant="secondary" size="sm" onClick={logout}>
-              Log out
-            </Button>
           </>
         }
       />

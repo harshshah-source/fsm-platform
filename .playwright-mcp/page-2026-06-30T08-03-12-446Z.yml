@@ -1,0 +1,61 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - generic [ref=e7]: A
+        - generic [ref=e8]:
+          - generic [ref=e9]: Autoplant
+          - generic [ref=e10]: Fleet Operations Platform
+      - heading "Manage Fleet Operations Faster." [level=1] [ref=e11]
+      - paragraph [ref=e12]: Monitor tickets, track SLA compliance, manage field engineers, and maintain complete fleet visibility from a unified platform.
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: Active Tickets
+        - generic [ref=e16]: "248"
+      - generic [ref=e17]:
+        - generic [ref=e18]: SLA Compliance
+        - generic [ref=e19]: 96.2%
+      - generic [ref=e20]:
+        - generic [ref=e21]: Fleet Online
+        - generic [ref=e22]: 14,238
+      - generic [ref=e23]:
+        - generic [ref=e24]: Engineers Active
+        - generic [ref=e25]: "84"
+  - generic [ref=e27]:
+    - heading "Welcome Back" [level=2] [ref=e28]
+    - paragraph [ref=e29]: Sign in to continue to Autoplant Platform.
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - generic [ref=e32]: Email Address
+        - generic [ref=e33]:
+          - img
+          - textbox "Email Address" [ref=e34]:
+            - /placeholder: zone.head@autoplant.in
+      - generic [ref=e35]:
+        - generic [ref=e36]: Password
+        - generic [ref=e37]:
+          - img
+          - textbox "Password" [ref=e38]
+          - button "Show" [ref=e39]:
+            - img [ref=e40]
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - checkbox "Remember me" [ref=e45]
+          - text: Remember me
+        - link "Forgot Password?" [ref=e46] [cursor=pointer]:
+          - /url: "#"
+      - button "Sign In" [ref=e47]
+    - list [ref=e48]:
+      - listitem [ref=e49]:
+        - img [ref=e50]
+        - text: Real-time Ticket Tracking
+      - listitem [ref=e52]:
+        - img [ref=e53]
+        - text: SLA Monitoring
+      - listitem [ref=e55]:
+        - img [ref=e56]
+        - text: Fleet Visibility
+      - listitem [ref=e58]:
+        - img [ref=e59]
+        - text: Engineer Management
+    - paragraph [ref=e61]: Autoplant Platform v2.0 • Secure Enterprise Access

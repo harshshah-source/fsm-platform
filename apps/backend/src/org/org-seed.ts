@@ -1,4 +1,8 @@
 import { $Enums, type PrismaClient } from '../generated/prisma/client';
+import {
+  normalizeZoneKey,
+  ZONE_MAPPING_SOURCE_FIELD,
+} from '../ingestion/autoplant/mapping-table-zone-resolver';
 
 /**
  * Canonical reference/org seed for downstream slices (Issue 02 AC#7). Idempotent: every row is
@@ -8,7 +12,22 @@ import { $Enums, type PrismaClient } from '../generated/prisma/client';
  * to Postgres, so this seeds reference data, not credentials.
  */
 
-const SEED_ZONES = ['North', 'South'];
+// Operational zones (FSM-owned partition, ADR-0018 one ZM per zone). UNZONED is the holding zone the
+// R6 translation layer lands pending/ambiguous AutoPlant plants in until an admin maps their raw value.
+const SEED_ZONES = ['North', 'South', 'East', 'West', 'UNZONED'];
+
+// Canonical zone_name crosswalk (R6). Production evidence (2026-07, ap_masters.mst_plant.zone_name):
+// ~98.7% of plants carry one of these four families — "West Zone"/"West"/"WEST" alone cover ~97% —
+// so pre-mapping the normalized keys lets a fresh install zone the master with zero admin work.
+// Deliberately NOT seeded: "Central" (business decision pending), NA/blank (`__blank__` → UNZONED),
+// and junk — those stay on the PENDING discovery queue. Seeding is create-only: a reseed never
+// clobbers an Ops remap/IGNORE on an existing row.
+const SEED_ZONE_MAPPINGS: { raw: string; zone: string }[] = [
+  { raw: 'West Zone', zone: 'West' }, // dominant production spelling of the family
+  { raw: 'North', zone: 'North' },
+  { raw: 'South', zone: 'South' },
+  { raw: 'East', zone: 'East' },
+];
 
 const SEED_COMPANIES: { name: string; tier: $Enums.CompanyTier; rank: string }[] = [
   { name: 'Acme Logistics', tier: 'PLATINUM', rank: 'A' },
@@ -77,6 +96,7 @@ const SEED_GEOGRAPHY: { state: string; regions: { name: string; districts: strin
 
 export interface OrgSeedSummary {
   zones: number;
+  zoneMappings: number;
   plants: number;
   companies: number;
   slaRules: number;
@@ -87,9 +107,39 @@ export interface OrgSeedSummary {
 }
 
 export async function seedOrgReferenceData(prisma: PrismaClient): Promise<OrgSeedSummary> {
+  const zoneIdByName = new Map<string, bigint>();
   for (const name of SEED_ZONES) {
-    await prisma.zone.upsert({ where: { name }, create: { name }, update: {} });
+    const zone = await prisma.zone.upsert({ where: { name }, create: { name }, update: {} });
+    zoneIdByName.set(name, zone.zoneId);
   }
+
+  // Canonical zone_name → zone crosswalk rows (MAPPED). The seed only ever decides where no admin
+  // decision exists: it creates absent rows as MAPPED and promotes PENDING (undecided, sync-discovered)
+  // rows, but never touches a MAPPED (remapped) or IGNORED row — an Ops decision survives every reseed.
+  for (const m of SEED_ZONE_MAPPINGS) {
+    const key = normalizeZoneKey(m.raw);
+    await prisma.zoneMapping.upsert({
+      where: {
+        sourceField_sourceValueKey: {
+          sourceField: ZONE_MAPPING_SOURCE_FIELD,
+          sourceValueKey: key,
+        },
+      },
+      create: {
+        sourceField: ZONE_MAPPING_SOURCE_FIELD,
+        sourceValueKey: key,
+        sourceValueRaw: m.raw,
+        fsmZoneId: zoneIdByName.get(m.zone)!,
+        status: 'MAPPED',
+      },
+      update: {},
+    });
+    await prisma.zoneMapping.updateMany({
+      where: { sourceField: ZONE_MAPPING_SOURCE_FIELD, sourceValueKey: key, status: 'PENDING' },
+      data: { fsmZoneId: zoneIdByName.get(m.zone)!, status: 'MAPPED' },
+    });
+  }
+
   const north = await prisma.zone.findUniqueOrThrow({ where: { name: 'North' } });
 
   // Plant name is not unique, so guard by (name, zone) before creating.
@@ -153,6 +203,14 @@ export async function seedOrgReferenceData(prisma: PrismaClient): Promise<OrgSee
     });
   }
 
+  // `component_master.component_id` is BIGSERIAL, but the kit rows above are inserted with EXPLICIT
+  // ids (1–4) — which does NOT advance the sequence. On a fresh database the next auto-generated id
+  // would collide with a seeded one (unique-constraint error). Advance the sequence past the seeded
+  // rows so callers that create a component_master without an id (the app, tests) get a free id.
+  await prisma.$executeRawUnsafe(
+    `SELECT setval(pg_get_serial_sequence('component_master', 'component_id'), (SELECT COALESCE(MAX(component_id), 1) FROM component_master))`,
+  );
+
   // Geography: regions keyed by unique name, districts by (name, state); both upserted idempotently.
   let regionCount = 0;
   let districtCount = 0;
@@ -175,8 +233,15 @@ export async function seedOrgReferenceData(prisma: PrismaClient): Promise<OrgSee
     }
   }
 
+  // The `plant_eligible_floating_se` materialized view is created WITH NO DATA (Issue 09 migration),
+  // so a brand-new database has an UNPOPULATED matview and any `SELECT` against it raises Postgres
+  // 55000 ("has not been populated"). One plain (non-concurrent) refresh populates it — 0 rows is a
+  // valid populated state — after which readers work and `REFRESH ... CONCURRENTLY` becomes allowed.
+  await prisma.$executeRawUnsafe('REFRESH MATERIALIZED VIEW "plant_eligible_floating_se"');
+
   return {
     zones: SEED_ZONES.length,
+    zoneMappings: SEED_ZONE_MAPPINGS.length,
     plants: 1,
     companies: SEED_COMPANIES.length,
     slaRules: SEED_SLA_RULES.length,

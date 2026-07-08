@@ -39,7 +39,16 @@ function stubFetch() {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      const body = url.includes(`/tickets/${TICKET_ID}`) ? detail : [];
+      // No verification run for this fixture ticket → the endpoint 404s (NO_VERIFICATION_RUN).
+      if (url.includes(`/tickets/${TICKET_ID}/verification`)) {
+        return new Response(JSON.stringify({ code: 'NO_VERIFICATION_RUN' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      let body: unknown = [];
+      if (url.includes(`/tickets/${TICKET_ID}/forms`)) body = { ticketId: TICKET_ID, forms: [] };
+      else if (url.includes(`/tickets/${TICKET_ID}`)) body = detail;
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -79,9 +88,12 @@ describe('Ticket Detail Drawer (Issue 07 AC#4/#5)', () => {
     await userEvent.click(within(drawer).getByRole('tab', { name: 'Lifecycle' }));
     expect(within(drawer).getByText('OPEN')).toBeInTheDocument();
 
-    // A not-yet-built tab is a graceful stub.
+    // Every tab now renders real data (no stubs). Forms + Verification show empty states here.
     await userEvent.click(within(drawer).getByRole('tab', { name: 'Forms' }));
-    expect(within(drawer).getByText(/coming soon/i)).toBeInTheDocument();
+    expect(await within(drawer).findByText(/no troubleshoot forms/i)).toBeInTheDocument();
+
+    await userEvent.click(within(drawer).getByRole('tab', { name: 'Verification' }));
+    expect(await within(drawer).findByText(/no verification run/i)).toBeInTheDocument();
   });
 
   it('keeps the list visible behind the drawer', async () => {

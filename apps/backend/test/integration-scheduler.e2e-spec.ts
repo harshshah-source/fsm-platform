@@ -100,6 +100,7 @@ describe('Issue 97 Slice 7 — IntegrationSchedulerService', () => {
       conflicted as unknown as MasterSyncService,
       {} as SnapshotIngestionWorker,
       {} as DeviceStateService,
+      {} as import('../src/ticketing/ticket-creation.service').TicketCreationService,
     );
 
     expect(await service.syncMastersTick()).toEqual({ skipped: true, reason: 'RUN_IN_PROGRESS' });

@@ -12,6 +12,20 @@
 const MS_PER_DAY = 86_400_000;
 const DEFAULT_PGI_WINDOW_DAYS = 15;
 
+/**
+ * How `eligible_for_uptime` is derived (`eligibility_mode` system setting, Issue 112 / review B7):
+ *  - `pgi` — the canonical CONTEXT.md gate: active PGI within the window. Default.
+ *  - `all-deployed` — declared interim proxy while the SAP PGI feed is unbuilt (R2): the device's
+ *    current vehicle fitment carries deployment status ACTIVE/DEPLOYED. PGI is not consulted.
+ * The Non-Op exclusion applies in BOTH modes.
+ */
+export type EligibilityMode = 'pgi' | 'all-deployed';
+
+/** Junk or unset setting values fall back to `pgi` — the gate never silently widens. */
+export function parseEligibilityMode(value: unknown): EligibilityMode {
+  return value === 'all-deployed' ? 'all-deployed' : 'pgi';
+}
+
 export function isEligibleForUptime(params: {
   latestPgiDate: Date | null;
   hasActiveNonOp: boolean;

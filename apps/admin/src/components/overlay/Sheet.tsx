@@ -37,31 +37,32 @@ export function Sheet({
 
   return (
     <div className="fixed inset-0 z-40">
-      <div className="absolute inset-0 bg-chrome-900/40" aria-hidden onClick={onClose} />
+      <div className="absolute inset-0 bg-chrome-900/45 backdrop-blur-sm" aria-hidden onClick={onClose} />
       <aside
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel ?? (typeof title === 'string' ? title : undefined)}
         className={cn(
-          'absolute inset-y-0 flex flex-col bg-surface-card shadow-lg',
+          'absolute inset-y-0 flex flex-col border-line bg-surface-card shadow-floating',
           side === 'right' ? 'right-0' : 'left-0',
           widthClass,
         )}
       >
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <h3 className="text-base font-semibold text-ink-strong">{title}</h3>
+        <div className="flex items-center justify-between border-b border-line bg-surface-raised/70 px-5 py-3.5">
+          <h3 className="text-base font-semibold tracking-tight text-ink-strong">{title}</h3>
           <button
             type="button"
             aria-label="Close"
             onClick={onClose}
-            className="rounded-md p-1 text-ink-muted hover:bg-surface-sunken hover:text-ink-strong"
+            className="rounded-md p-1 text-ink-muted hover:bg-surface-sunken hover:text-ink-strong focus-ring"
           >
             ✕
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">{children}</div>
-        {footer && <div className="border-t border-line p-4">{footer}</div>}
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+        {footer && <div className="border-t border-line bg-surface-raised/70 p-5">{footer}</div>}
       </aside>
     </div>
   );
 }
+

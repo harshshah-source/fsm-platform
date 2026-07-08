@@ -3,7 +3,10 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthProvider';
 import { apiComponentRequestsByTicket, type ComponentRequestRow } from '../../api/componentRequests';
 import { apiManualCloseRecovery } from '../../api/recovery';
-import { apiTicketDetail, type TicketDetail } from '../../api/tickets';
+import { apiTicketDetail, apiTicketForms, type TicketDetail, type TicketForm } from '../../api/tickets';
+import { apiTicketVerification, type TicketVerification } from '../../api/verification';
+import { Button } from '../../components/ui';
+import { Modal } from '../../components/overlay/Modal';
 import { BucketBadge, InlineBadges } from './ticketBadges';
 
 const RECOVERY_TERMINAL = new Set(['CLOSED', 'FAILED_RECOVERY']);
@@ -11,12 +14,7 @@ const RECOVERY_TERMINAL = new Set(['CLOSED', 'FAILED_RECOVERY']);
 type TabId = 'Overview' | 'Lifecycle' | 'Forms' | 'Verification' | 'Components' | 'Assignment History';
 const TABS: TabId[] = ['Overview', 'Lifecycle', 'Forms', 'Verification', 'Components', 'Assignment History'];
 
-// Tabs whose data lands in later slices/issues; rendered as graceful stubs for now.
-const STUB_TABS: Record<string, string> = {
-  Forms: 'Troubleshooting / Install forms appear here once submitted (Issue 16).',
-  Verification: 'GPS verification runs and outcome appear here (Issue 18/19).',
-  'Assignment History': 'Assignment and override history appears here (Issue 11/13).',
-};
+// Every tab now renders real data; no stub tabs remain.
 
 const CR_STATUS_CLASS: Record<string, string> = {
   REQUESTED: 'bg-amber-100 text-amber-800',
@@ -43,6 +41,11 @@ export function TicketDetailDrawer() {
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [components, setComponents] = useState<ComponentRequestRow[] | null>(null);
+  const [forms, setForms] = useState<TicketForm[] | null>(null);
+  // Verification state: null = not loaded; { run } once fetched (run null = no verification run yet).
+  const [verification, setVerification] = useState<{ run: TicketVerification | null } | null>(null);
+  const [recoveryCloseOpen, setRecoveryCloseOpen] = useState(false);
+  const [recoveryReason, setRecoveryReason] = useState('');
   // The Verification Review page (Issue 19) deep-links to a specific tab via `?tab=Verification`.
   const initialTab = searchParams.get('tab');
   const [tab, setTab] = useState<TabId>(
@@ -71,6 +74,34 @@ export function TicketDetailDrawer() {
       alive = false;
     };
   }, [ticketId, tab, components]);
+
+  // Lazy-load the ticket's SE troubleshoot-form submissions when the Forms tab is opened (Issue 70).
+  useEffect(() => {
+    if (!ticketId || tab !== 'Forms' || forms !== null) return;
+    let alive = true;
+    apiTicketForms(ticketId)
+      .then((res) => alive && setForms(res.forms))
+      .catch(() => alive && setForms([]));
+    return () => {
+      alive = false;
+    };
+  }, [ticketId, tab, forms]);
+
+  // Lazy-load the ticket's latest verification run when the Verification tab is opened (Issue 18).
+  useEffect(() => {
+    if (!ticketId || tab !== 'Verification' || verification !== null) return;
+    let alive = true;
+    apiTicketVerification(ticketId)
+      .then((run) => alive && setVerification({ run }))
+      .catch(() => alive && setVerification({ run: null }));
+    return () => {
+      alive = false;
+    };
+  }, [ticketId, tab, verification]);
+
+  // Assignment History is derived from the already-loaded lifecycle: the human-actor transitions
+  // (reassign / override / manual actions carry an actorRole), distinct from system state changes.
+  const assignmentEvents = (ticket?.lifecycle ?? []).filter((e) => e.actorRole !== null);
 
   return (
     <aside
@@ -126,9 +157,9 @@ export function TicketDetailDrawer() {
               <dd>{ticket.plantId}</dd>
               <dt className="text-slate-500">Company tier</dt>
               <dd>{ticket.companyTier}</dd>
-              <dt className="text-slate-500">Bucket</dt>
+              <dt className="text-slate-500">Inactive for</dt>
               <dd>
-                <BucketBadge bucket={ticket.slaBucket} />
+                <BucketBadge bucket={ticket.slaBucket} latestGpsDatetime={ticket.latestGpsDatetime} />
               </dd>
               <dt className="text-slate-500">Flags</dt>
               <dd>
@@ -146,16 +177,7 @@ export function TicketDetailDrawer() {
               <button
                 type="button"
                 data-testid="recovery-manual-close"
-                onClick={async () => {
-                  const reason = window.prompt('Manually close this Recovery Ticket — reason (mandatory):');
-                  if (!reason?.trim() || !ticketId) return;
-                  try {
-                    await apiManualCloseRecovery(ticketId, reason.trim());
-                    navigate('/tickets');
-                  } catch {
-                    setError('Manual close failed');
-                  }
-                }}
+                onClick={() => setRecoveryCloseOpen(true)}
                 className="mt-4 rounded border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50"
               >
                 Manually close Recovery Ticket
@@ -218,11 +240,127 @@ export function TicketDetailDrawer() {
             </div>
           )}
 
-          {tab in STUB_TABS && (
-            <p className="text-sm italic text-slate-400">{STUB_TABS[tab]} (coming soon)</p>
+          {tab === 'Forms' && (
+            <div className="flex flex-col gap-3 text-sm">
+              {forms === null && <p className="text-slate-500">Loading…</p>}
+              {forms !== null && forms.length === 0 && (
+                <p className="text-slate-400">No troubleshoot forms submitted on this ticket yet.</p>
+              )}
+              {forms?.map((f) => (
+                <div key={f.submissionId} data-testid={`form-${f.submissionId}`} className="rounded border p-2">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="font-medium">{f.rootCauseCategory}</span>
+                    <span className="text-xs text-slate-400">{new Date(f.submittedAt).toLocaleString()}</span>
+                  </div>
+                  {f.rootCauseSubcategory && (
+                    <div className="text-xs text-slate-600">Subcategory: {f.rootCauseSubcategory}</div>
+                  )}
+                  {f.actionTakenCategory && (
+                    <div className="text-xs text-slate-600">Action: {f.actionTakenCategory}</div>
+                  )}
+                  {f.diagnosisNotes && <div className="mt-1 text-xs text-slate-700">{f.diagnosisNotes}</div>}
+                  {f.componentUnavailable && (
+                    <div className="mt-1 text-xs text-amber-700">Component unavailable at submission</div>
+                  )}
+                  <div className="mt-1 text-xs text-slate-400">by {f.seId}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'Verification' && (
+            <div data-testid="verification-panel" className="flex flex-col gap-2 text-sm">
+              {verification === null && <p className="text-slate-500">Loading…</p>}
+              {verification?.run === null && verification !== null && (
+                <p className="text-slate-400">No verification run for this ticket yet.</p>
+              )}
+              {verification?.run && (
+                <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
+                  <dt className="text-slate-500">Outcome</dt>
+                  <dd className="font-medium">{verification.run.badge}</dd>
+                  <dt className="text-slate-500">Phase</dt>
+                  <dd>{verification.run.phase}</dd>
+                  <dt className="text-slate-500">Pings received</dt>
+                  <dd>{verification.run.pingsReceivedCount}</dd>
+                  {verification.run.fraudFlag && (
+                    <>
+                      <dt className="text-slate-500">Fraud flag</dt>
+                      <dd className="text-rose-700">
+                        Yes
+                        {verification.run.firstPingDistanceMeters != null
+                          ? ` · Δ${verification.run.firstPingDistanceMeters}m`
+                          : ''}
+                      </dd>
+                    </>
+                  )}
+                </dl>
+              )}
+            </div>
+          )}
+
+          {tab === 'Assignment History' && (
+            <div data-testid="assignment-history-panel" className="flex flex-col gap-2 text-sm">
+              {assignmentEvents.length === 0 && (
+                <p className="text-slate-400">No assignment or override actions recorded.</p>
+              )}
+              {assignmentEvents.map((e, i) => (
+                <div key={i} className="border-l-2 border-slate-200 pl-2">
+                  <div className="font-medium">{e.reasonCode ?? e.toState}</div>
+                  <div className="text-xs text-slate-500">
+                    {e.actorRole ?? 'system'}
+                    {e.actedAsRole ? ` (acting ${e.actedAsRole})` : ''} · {new Date(e.at).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
+
+      {/* FE-09 AC#3 — the recovery manual-close reason capture is a Modal (was window.prompt). */}
+      <Modal
+        open={recoveryCloseOpen}
+        onClose={() => setRecoveryCloseOpen(false)}
+        title="Manually close Recovery Ticket"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setRecoveryCloseOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              data-testid="recovery-close-confirm"
+              disabled={!recoveryReason.trim()}
+              onClick={async () => {
+                if (!recoveryReason.trim() || !ticketId) return;
+                try {
+                  await apiManualCloseRecovery(ticketId, recoveryReason.trim());
+                  setRecoveryCloseOpen(false);
+                  navigate('/tickets');
+                } catch {
+                  setError('Manual close failed');
+                  setRecoveryCloseOpen(false);
+                }
+              }}
+            >
+              Close ticket
+            </Button>
+          </>
+        }
+      >
+        <label htmlFor="recovery-close-reason" className="mb-1 block text-xs font-medium text-ink-muted">
+          Reason (mandatory)
+        </label>
+        <textarea
+          id="recovery-close-reason"
+          data-testid="recovery-close-reason"
+          value={recoveryReason}
+          onChange={(e) => setRecoveryReason(e.target.value)}
+          className="min-h-[5rem] w-full rounded-md border border-line bg-surface-card px-3 py-2 text-sm text-ink-strong"
+          placeholder="Why is this Recovery Ticket being closed manually?"
+        />
+      </Modal>
     </aside>
   );
 }

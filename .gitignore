@@ -10,6 +10,7 @@ packages/shared/dist/
 apps/mobile/.expo/
 package-lock.json
 
+
 .env
 .env.*
 !.env.example

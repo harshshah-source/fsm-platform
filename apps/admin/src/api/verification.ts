@@ -64,6 +64,25 @@ export async function apiEscalateVerification(ticketId: string, reason: string):
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
 }
 
+/** One ticket's latest verification run (Issue 18 `GET /tickets/:id/verification`; FE-09 Verification tab). */
+export interface TicketVerification {
+  ticketId: string;
+  phase: string;
+  pingsReceivedCount: number;
+  outcome: string | null;
+  fraudFlag: boolean;
+  firstPingDistanceMeters: number | null;
+  badge: string;
+}
+
+/** Returns the run, or `null` when the backend reports no run yet (404 NO_VERIFICATION_RUN). */
+export async function apiTicketVerification(ticketId: string): Promise<TicketVerification | null> {
+  const res = await fetch(`${BASE_URL}/tickets/${encodeURIComponent(ticketId)}/verification`, { headers: authHeaders() });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as TicketVerification;
+}
+
 export async function apiMarkAutoRecovery(ticketId: string): Promise<void> {
   const res = await fetch(`${BASE_URL}/verification/${encodeURIComponent(ticketId)}/mark-auto-recovery`, {
     method: 'POST',

@@ -17,6 +17,8 @@ export interface ZoneOverviewRow {
   zoneId: string;
   zoneName: string;
   totalInactive: number;
+  /** All devices (active + inactive) in the zone — denominator for `inactive / total` (Issue 2). */
+  totalDevices: number;
   byBucket: Record<string, number>;
   trendPctVsPrevDay: number | null;
 }
@@ -29,6 +31,8 @@ export interface CompanyPlantRow {
   plantId: string;
   plantName: string;
   totalInactive: number;
+  /** All devices (active + inactive) at this plant — denominator for `inactive / total` (Issue 2). */
+  totalDevices: number;
   byBucket: Record<string, number>;
 }
 
@@ -36,6 +40,8 @@ export interface CriticalQueueTicket {
   ticketId: string;
   deviceId: string;
   slaBucket: string;
+  /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. */
+  latestGpsDatetime: string | null;
   status: string;
 }
 

@@ -74,8 +74,9 @@ dataset (`datasetNow` = one minute after that file's latest ping; for Book8 that
 
 - **device identity** — the real 15-digit `device_id` is used. Rows whose id is scientific-notation
   collapsed (~3,148) or duplicated (~9) are **skipped and reported**, never minted/guessed.
-- **zone** (not in CSV) — `ZONE_NAMES[plant_code % 4]` → EAST/NORTH/SOUTH/WEST. Synthetic partition
-  to exercise zone-scoping and cross-zone workflows.
+- **zone** (not in CSV) — `ZONE_NAMES[plant_code % 4]` → East/North/South/West (org-seed's
+  Title-Case rows; zones.name is unique case-insensitively). Synthetic partition to exercise
+  zone-scoping and cross-zone workflows.
 - **company tier/rank** (not in CSV) — sorted CSV company ids → cycling PLATINUM/GOLD/SILVER with
   distinct ranks A.. (satisfies `Company @@unique([tier, rank])`).
 - **deal_type** — even device_id → RECURRING, odd → ONE_TIME (exercises Recovery eligibility).

@@ -83,7 +83,6 @@ async function main(): Promise<void> {
       const snapRuns = new SnapshotRunService(prisma);
       const reader = new AutoPlantSourceReader({
         query,
-        loadResumeCursor: () => snapRuns.lastResumeCursor(),
         offsetMinutes: process.env.AUTOPLANT_SOURCE_UTC_OFFSET_MIN
           ? Number(process.env.AUTOPLANT_SOURCE_UTC_OFFSET_MIN)
           : undefined,

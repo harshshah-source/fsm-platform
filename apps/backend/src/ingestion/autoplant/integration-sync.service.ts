@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { DeviceStateService } from '../../device-state/device-state.service';
+import { TicketCreationService } from '../../ticketing/ticket-creation.service';
 import { SnapshotIngestionWorker } from '../snapshot-ingestion.worker';
 import { MasterSyncService } from './master-sync.service';
 
@@ -7,6 +8,7 @@ export interface PipelineSummary {
   master: { runId: string; status: string; stats: Record<string, unknown> };
   snapshot: { runId: string; status: string; chunks: number; inserted: number };
   deviceState: { upserted: number };
+  tickets: { created: number };
 }
 
 /** A scheduled tick that found a run already in flight — a normal outcome, not an error. */
@@ -17,7 +19,12 @@ export interface TickSkipped {
 
 export type TelemetryTickResult =
   | TickSkipped
-  | { skipped: false; snapshot: PipelineSummary['snapshot']; deviceState: PipelineSummary['deviceState'] };
+  | {
+      skipped: false;
+      snapshot: PipelineSummary['snapshot'];
+      deviceState: PipelineSummary['deviceState'];
+      tickets: PipelineSummary['tickets'];
+    };
 
 /** The 409 both run guards throw (`{ code: 'RUN_IN_PROGRESS' }`) — anything else must propagate. */
 const isRunInProgress = (e: unknown): boolean =>
@@ -30,11 +37,12 @@ const isRunInProgress = (e: unknown): boolean =>
  *
  *   master-sync (org graph, paginated ≤ 90/query)  →  snapshot ingest (telemetry, chunked ≤ 90)
  *     →  device-state recompute (inactivity / sla_bucket / eligibility, denormalised plant/company)
+ *     →  ticket creation (newly inactive + eligible + no open cycle → Failure Cycle + Ticket)
  *
- * Each stage already owns its own single-in-flight guard + idempotency, so a re-run is safe. Ticket
- * creation is intentionally NOT chained here (Stage B — it gates on eligibility, and the zone/company
- * inactivity dashboards read `device_states` directly without it). This is a manual trigger; the cron
- * cadence (Phase 7 scheduler, `@nestjs/schedule` vs BullMQ) stays an architecture-HITL decision.
+ * Each stage owns its own single-in-flight guard and/or idempotency, so a re-run is safe — ticket
+ * creation included (the `has_open_failure_cycle` filter + invariant I1 partial-unique make replays
+ * and overlaps no-ops). Ticket creation was chained by Issue 112 (review A8); whether it selects any
+ * candidates is governed by the `eligibility_mode` setting (review B7), not by this orchestrator.
  */
 @Injectable()
 export class IntegrationSyncService {
@@ -44,6 +52,7 @@ export class IntegrationSyncService {
     private readonly masterSync: MasterSyncService,
     private readonly snapshotWorker: SnapshotIngestionWorker,
     private readonly deviceState: DeviceStateService,
+    private readonly ticketCreation: TicketCreationService,
   ) {}
 
   /** Master-sync only — refresh the org graph and re-feed the pending zone-mapping queue, no telemetry. */
@@ -68,6 +77,8 @@ export class IntegrationSyncService {
     this.logger.log(`telemetry tick: snapshot ${snap.runId} ${snap.status} (${snap.inserted} pings)`);
     const deviceState = await this.deviceState.recompute();
     this.logger.log(`telemetry tick: device-state recompute upserted ${deviceState.upserted}`);
+    const tickets = await this.ticketCreation.createForInactiveEligible();
+    this.logger.log(`telemetry tick: ticket-create created ${tickets.created}`);
 
     return {
       skipped: false,
@@ -78,6 +89,7 @@ export class IntegrationSyncService {
         inserted: snap.inserted,
       },
       deviceState,
+      tickets,
     };
   }
 
@@ -117,6 +129,8 @@ export class IntegrationSyncService {
     this.logger.log(`snapshot ${snap.runId} ${snap.status} (${snap.inserted} pings)`);
     const deviceState = await this.deviceState.recompute();
     this.logger.log(`device-state recompute upserted ${deviceState.upserted}`);
+    const tickets = await this.ticketCreation.createForInactiveEligible();
+    this.logger.log(`ticket-create created ${tickets.created}`);
 
     return {
       master,
@@ -127,6 +141,7 @@ export class IntegrationSyncService {
         inserted: snap.inserted,
       },
       deviceState,
+      tickets,
     };
   }
 }

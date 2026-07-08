@@ -7,6 +7,7 @@ import { SnapshotIngestionWorker } from '../src/ingestion/snapshot-ingestion.wor
 import { SnapshotRunService } from '../src/ingestion/snapshot-run.service';
 import { InMemorySourceReader } from '../src/ingestion/source-reader';
 import { PrismaService } from '../src/prisma/prisma.service';
+import type { TicketCreationService } from '../src/ticketing/ticket-creation.service';
 
 /**
  * Issue 97 Slice 6 — overlap-safe telemetry tick. The scheduler (Slice 7) needs a short-cadence
@@ -22,12 +23,14 @@ describe('Issue 97 Slice 6 — IntegrationSyncService.ingestTelemetry', () => {
 
   const masterSync = { sync: vi.fn() };
   const deviceState = { recompute: vi.fn(async () => ({ upserted: 7 })) };
+  const ticketCreation = { createForInactiveEligible: vi.fn(async () => ({ created: 0 })) };
 
   const makeService = (): IntegrationSyncService =>
     new IntegrationSyncService(
       masterSync as unknown as MasterSyncService,
       new SnapshotIngestionWorker(runs, new SnapshotIngestionService(prisma), new InMemorySourceReader([]), prisma),
       deviceState as unknown as DeviceStateService,
+      ticketCreation as unknown as TicketCreationService,
     );
 
   beforeAll(async () => {
@@ -72,6 +75,7 @@ describe('Issue 97 Slice 6 — IntegrationSyncService.ingestTelemetry', () => {
 
     expect(result).toEqual({ skipped: true, reason: 'RUN_IN_PROGRESS' });
     expect(deviceState.recompute).not.toHaveBeenCalled(); // a skipped tick does no half-work
+    expect(ticketCreation.createForInactiveEligible).not.toHaveBeenCalled();
     const untouched = await prisma.snapshotRun.findUnique({ where: { runId: inFlight.runId } });
     expect(untouched?.status).toBe('RUNNING'); // the in-flight run is left alone
   });
@@ -85,6 +89,7 @@ describe('Issue 97 Slice 6 — IntegrationSyncService.ingestTelemetry', () => {
         },
       } as unknown as SnapshotIngestionWorker,
       deviceState as unknown as DeviceStateService,
+      ticketCreation as unknown as TicketCreationService,
     );
 
     await expect(service.ingestTelemetry()).rejects.toThrow('source exploded');

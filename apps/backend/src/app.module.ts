@@ -15,6 +15,7 @@ import { IngestionModule } from './ingestion/ingestion.module';
 import { SnapshotsController } from './ingestion/snapshots.controller';
 import { InventoryModule } from './inventory/inventory.module';
 import { ComponentBlockedController, MeInventoryController } from './inventory/inventory.controller';
+import { WarehouseStockController } from './inventory/warehouse-stock.controller';
 import { ShadowUseController } from './inventory/shadow-use.controller';
 import { ComponentRequestModule } from './component-request/component-request.module';
 import { WarehouseRequestsController } from './component-request/warehouse.controller';
@@ -42,6 +43,7 @@ import { GeographyController } from './org/geography.controller';
 import { SeTerritoryAdminController } from './org/se-territory.controller';
 import { SlaRulesAdminController } from './org/sla-rules.controller';
 import { UsersAdminController } from './org/users.controller';
+import { ZoneMappingAdminController } from './org/zone-mapping.controller';
 import { ZonesAdminController } from './org/zones.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { SettingsController } from './settings/settings.controller';
@@ -107,6 +109,7 @@ import { ZonesController } from './zones/zones.controller';
     SettingsController,
     ZonesController,
     ZonesAdminController,
+    ZoneMappingAdminController,
     PlantsAdminController,
     UsersAdminController,
     CompaniesAdminController,
@@ -137,6 +140,7 @@ import { ZonesController } from './zones/zones.controller';
     VerificationController,
     ComponentBlockedController,
     MeInventoryController,
+    WarehouseStockController,
     ShadowUseController,
     WarehouseRequestsController,
     ComponentRequestController,

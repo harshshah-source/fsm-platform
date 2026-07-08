@@ -17,6 +17,7 @@ const rows: CompanyPlantRow[] = [
     plantId: '7',
     plantName: 'Yard-1',
     totalInactive: 2,
+    totalDevices: 25,
     byBucket: { CRITICAL: 2 },
   },
 ];

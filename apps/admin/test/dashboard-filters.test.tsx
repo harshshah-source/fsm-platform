@@ -11,13 +11,13 @@ import { ZoneOverviewTable } from '../src/pages/dashboard/ZoneOverviewTable';
  * are scoped to the table so the filter <option> labels (which echo the same names) don't collide.
  */
 const zoneRows: ZoneOverviewRow[] = [
-  { zoneId: '1', zoneName: 'NORTH', totalInactive: 3, byBucket: { CRITICAL: 3 }, trendPctVsPrevDay: null },
-  { zoneId: '2', zoneName: 'SOUTH', totalInactive: 2, byBucket: { WARNING: 2 }, trendPctVsPrevDay: null },
+  { zoneId: '1', zoneName: 'NORTH', totalInactive: 3, totalDevices: 10, byBucket: { CRITICAL: 3 }, trendPctVsPrevDay: null },
+  { zoneId: '2', zoneName: 'SOUTH', totalInactive: 2, totalDevices: 8, byBucket: { WARNING: 2 }, trendPctVsPrevDay: null },
 ];
 
 const cpRows: CompanyPlantRow[] = [
-  { companyId: '1', companyName: 'Acme', companyTier: 'PLATINUM', zoneId: '1', plantId: '7', plantName: 'Yard-1', totalInactive: 1, byBucket: { CRITICAL: 1 } },
-  { companyId: '2', companyName: 'Globex', companyTier: 'SILVER', zoneId: '1', plantId: '8', plantName: 'Yard-2', totalInactive: 1, byBucket: { WARNING: 1 } },
+  { companyId: '1', companyName: 'Acme', companyTier: 'PLATINUM', zoneId: '1', plantId: '7', plantName: 'Yard-1', totalInactive: 1, totalDevices: 20, byBucket: { CRITICAL: 1 } },
+  { companyId: '2', companyName: 'Globex', companyTier: 'SILVER', zoneId: '1', plantId: '8', plantName: 'Yard-2', totalInactive: 1, totalDevices: 15, byBucket: { WARNING: 1 } },
 ];
 
 afterEach(() => {

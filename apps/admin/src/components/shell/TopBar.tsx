@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthProvider';
+import { emitIngestionComplete } from '../../pages/dashboard/ingestionEvents';
+import { RunIngestionButton } from '../../pages/dashboard/RunIngestionButton';
 import { Button } from '../ui/Button';
 import { IconBell, IconMenu, IconPlus, IconSearch } from '../ui/icons';
 import { useSidebar } from './SidebarContext';
@@ -64,12 +66,12 @@ export function TopBar() {
   ).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-surface-card px-4 shadow-sm lg:gap-4 lg:px-6">
+    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-surface-card/95 px-4 shadow-sm backdrop-blur lg:gap-4 lg:px-6">
       <button
         type="button"
         onClick={openMobile}
         aria-label="Open menu"
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line text-ink-strong transition-colors hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40 lg:hidden"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line text-ink-strong transition-colors hover:bg-surface-sunken focus-ring lg:hidden"
       >
         <IconMenu className="h-[18px] w-[18px]" />
       </button>
@@ -79,7 +81,7 @@ export function TopBar() {
         <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-caps">
           FSM Command Console
         </span>
-        <span className="text-[15px] font-semibold leading-tight text-ink-strong">
+        <span className="text-[15px] font-semibold leading-tight tracking-tight text-ink-strong">
           {titleFor(pathname)}
         </span>
       </div>
@@ -89,11 +91,15 @@ export function TopBar() {
         <input
           aria-label="Search"
           placeholder="Search ticket, vehicle, plant, device…"
-          className="h-10 w-full rounded-lg border border-line bg-surface-app pl-10 pr-3 text-sm text-ink-strong transition-colors placeholder:text-ink-muted hover:border-line-strong hover:bg-surface-card focus-visible:border-brand-600 focus-visible:bg-surface-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
+          className="h-10 w-full rounded-md border border-line bg-surface-app pl-10 pr-3 text-sm text-ink-strong shadow-sm transition-colors placeholder:text-ink-muted hover:border-line-strong hover:bg-surface-card focus-visible:border-brand-600 focus-ring"
         />
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {/* Operations-Head manual ingestion trigger — self-gates to OPERATIONS_HEAD (renders null for
+            everyone else). On a completed run it broadcasts so the OH dashboard rolls its KPIs. */}
+        <RunIngestionButton onSuccess={emitIngestionComplete} />
+
         <Button size="sm" className="h-10 gap-1.5 px-4 shadow-sm" onClick={() => navigate('/')}>
           <IconPlus className="h-4 w-4" /> Assign SE
         </Button>
@@ -109,7 +115,7 @@ export function TopBar() {
               value={zoneInput}
               onChange={(e) => setZoneInput(e.target.value)}
               placeholder="zone"
-              className="h-10 w-16 rounded-md border border-line bg-surface-card px-2.5 text-sm text-ink-strong transition-colors placeholder:text-ink-muted hover:border-line-strong focus-visible:border-brand-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/30"
+              className="h-10 w-16 rounded-md border border-line bg-surface-card px-2.5 text-sm text-ink-strong shadow-sm transition-colors placeholder:text-ink-muted hover:border-line-strong focus-visible:border-brand-600 focus-ring"
             />
             <Button type="button" size="sm" variant="secondary" className="h-10" onClick={enterActing}>
               Go
@@ -122,13 +128,13 @@ export function TopBar() {
         <button
           type="button"
           aria-label="Notifications"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-strong focus-ring"
         >
           <IconBell className="h-[18px] w-[18px]" />
         </button>
 
         {/* Profile section — initials avatar (brand-tinted) + identity, grouped as a distinct card. */}
-        <div className="flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface-card py-1 pl-1.5 pr-1.5 sm:pr-3">
+        <div className="flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface-raised py-1 pl-1.5 pr-1.5 shadow-sm sm:pr-3">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-[11px] font-bold text-brand-700">
             {initials}
           </span>
@@ -145,3 +151,4 @@ export function TopBar() {
     </header>
   );
 }
+

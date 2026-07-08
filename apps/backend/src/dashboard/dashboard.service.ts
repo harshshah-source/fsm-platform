@@ -6,6 +6,8 @@ export interface ZoneOverviewRow {
   zoneId: string;
   zoneName: string;
   totalInactive: number;
+  /** All devices (active + inactive) whose plant is in this zone — the denominator for `inactive / total`. */
+  totalDevices: number;
   /** Count of inactive devices per SLA bucket. ACTIVE devices (null bucket) never appear. */
   byBucket: Record<string, number>;
   /** Trend % vs previous day — null until the daily-history table lands (Issue 40). */
@@ -20,6 +22,8 @@ export interface CompanyPlantRow {
   plantId: string;
   plantName: string;
   totalInactive: number;
+  /** All devices (active + inactive) at this plant for this company — the denominator for `inactive / total`. */
+  totalDevices: number;
   byBucket: Record<string, number>;
 }
 
@@ -27,6 +31,8 @@ export interface CriticalQueueTicket {
   ticketId: string;
   deviceId: string;
   slaBucket: string;
+  /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. */
+  latestGpsDatetime: string | null;
   status: string;
 }
 
@@ -127,6 +133,17 @@ export class DashboardService {
       GROUP BY z.zone_id, z.name, ds.sla_bucket
       ORDER BY z.zone_id`);
 
+    // Total devices (active + inactive) per zone — the `inactive / total` denominator (Issue 2). Same
+    // zone scope as the inactive aggregation; only zones already surfaced (≥1 inactive device) read it.
+    const totals = await this.prisma.$queryRaw<{ zoneId: string; total: number }[]>(Prisma.sql`
+      SELECT z.zone_id::text AS "zoneId", COUNT(*)::int AS "total"
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      WHERE true ${zoneFilter}
+      GROUP BY z.zone_id`);
+    const totalByZone = new Map(totals.map((t) => [t.zoneId, t.total]));
+
     const byZone = new Map<string, ZoneOverviewRow>();
     for (const r of grouped) {
       let row = byZone.get(r.zoneId);
@@ -135,6 +152,7 @@ export class DashboardService {
           zoneId: r.zoneId,
           zoneName: r.zoneName,
           totalInactive: 0,
+          totalDevices: totalByZone.get(r.zoneId) ?? 0,
           byBucket: {},
           trendPctVsPrevDay: null,
         };
@@ -172,6 +190,18 @@ export class DashboardService {
       GROUP BY c.company_id, c.name, c.company_tier, z.zone_id, p.plant_id, p.name, ds.sla_bucket
       ORDER BY c.company_tier, c.name, p.name`);
 
+    // Total devices (active + inactive) per company×plant — the `inactive / total` denominator (Issue 2).
+    // Reuses the exact same scope filters (`extra`) as the inactive aggregation above.
+    const totals = await this.prisma.$queryRaw<{ companyId: string; plantId: string; total: number }[]>(Prisma.sql`
+      SELECT c.company_id::text AS "companyId", p.plant_id::text AS "plantId", COUNT(*)::int AS "total"
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      JOIN company_master c ON c.company_id = ds.company_id
+      WHERE true ${extra}
+      GROUP BY c.company_id, p.plant_id`);
+    const totalByKey = new Map(totals.map((t) => [`${t.companyId}:${t.plantId}`, t.total]));
+
     const byKey = new Map<string, CompanyPlantRow>();
     for (const r of grouped) {
       const key = `${r.companyId}:${r.plantId}`;
@@ -185,6 +215,7 @@ export class DashboardService {
           plantId: r.plantId,
           plantName: r.plantName,
           totalInactive: 0,
+          totalDevices: totalByKey.get(key) ?? 0,
           byBucket: {},
         };
         byKey.set(key, row);
@@ -206,6 +237,7 @@ export class DashboardService {
         deviceId: string;
         status: string;
         slaBucket: string;
+        latestGpsDatetime: Date | null;
         companyId: string;
         companyName: string;
         companyTier: string;
@@ -216,6 +248,7 @@ export class DashboardService {
     >(Prisma.sql`
       SELECT t.ticket_id::text AS "ticketId", t.device_id::text AS "deviceId",
              t.status::text AS "status", ds.sla_bucket::text AS "slaBucket",
+             ds.latest_gps_datetime AS "latestGpsDatetime",
              c.company_id::text AS "companyId", c.name AS "companyName",
              c.company_tier::text AS "companyTier", z.zone_id::text AS "zoneId",
              p.plant_id::text AS "plantId", p.name AS "plantName"
@@ -250,6 +283,7 @@ export class DashboardService {
         ticketId: r.ticketId,
         deviceId: r.deviceId,
         slaBucket: r.slaBucket,
+        latestGpsDatetime: r.latestGpsDatetime ? r.latestGpsDatetime.toISOString() : null,
         status: r.status,
       });
       group.clusterSize = group.tickets.length;

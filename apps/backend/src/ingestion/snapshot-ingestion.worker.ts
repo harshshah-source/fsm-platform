@@ -61,48 +61,71 @@ export class SnapshotIngestionWorker {
     let inserted = 0;
     let dataAsOf: Date | null = null;
     let firstFailedLowerBound: Date | null = null;
+    // A source read (not a chunk write) throwing mid-scan — e.g. the AutoPlant VPN dropping. This is
+    // the path that orphaned run 456: the throw escaped `run()` before `finishRun`, so the run hung
+    // RUNNING forever and device-state recompute never ran → empty dashboards. We now catch it, stop
+    // draining, and fall through to finalize the run so it can never be left RUNNING.
+    let readError: string | null = null;
 
-    for (;;) {
-      const chunk = await this.source.readChunk(cursor, chunkSize);
+    try {
+      for (;;) {
+        const chunk = await this.source.readChunk(cursor, chunkSize);
 
-      if (chunk.rows.length > 0) {
-        chunkNo += 1;
-        const record = await this.prisma.snapshotRunChunk.create({
-          data: { runId, chunkNo, status: 'PENDING' },
-        });
-        const outcome = await this.processChunk(runId, chunk.rows, maxAttempts, retryDelayMs);
-
-        if (outcome.ok) {
-          succeeded += 1;
-          inserted += outcome.inserted;
-          dataAsOf = maxDate(dataAsOf, chunk.rows);
-          await this.prisma.snapshotRunChunk.update({
-            where: { id: record.id },
-            data: { status: 'SUCCESS', retryCount: outcome.attempts - 1 },
+        if (chunk.rows.length > 0) {
+          chunkNo += 1;
+          const record = await this.prisma.snapshotRunChunk.create({
+            data: { runId, chunkNo, status: 'PENDING' },
           });
-        } else {
-          failed += 1;
-          if (firstFailedLowerBound === null) firstFailedLowerBound = minDate(chunk.rows);
-          await this.prisma.snapshotRunChunk.update({
-            where: { id: record.id },
-            data: { status: 'FAILED', retryCount: outcome.attempts - 1, error: outcome.error },
-          });
+          const outcome = await this.processChunk(runId, chunk.rows, maxAttempts, retryDelayMs);
+
+          if (outcome.ok) {
+            succeeded += 1;
+            inserted += outcome.inserted;
+            dataAsOf = maxDate(dataAsOf, chunk.rows);
+            await this.prisma.snapshotRunChunk.update({
+              where: { id: record.id },
+              data: { status: 'SUCCESS', retryCount: outcome.attempts - 1 },
+            });
+          } else {
+            failed += 1;
+            if (firstFailedLowerBound === null) firstFailedLowerBound = minDate(chunk.rows);
+            await this.prisma.snapshotRunChunk.update({
+              where: { id: record.id },
+              data: { status: 'FAILED', retryCount: outcome.attempts - 1, error: outcome.error },
+            });
+          }
         }
-      }
 
-      cursor = chunk.nextCursor;
-      if (cursor === null) break;
+        cursor = chunk.nextCursor;
+        if (cursor === null) break;
+      }
+    } catch (e) {
+      readError = e instanceof Error ? e.message : String(e);
     }
 
+    // A mid-scan read failure can never finalize SUCCESS (data past the failure point was never read):
+    // PARTIAL if any chunk landed so the display watermark holds and the next run resumes forward,
+    // else FAILED. Absent a read error, the normal all/none/mixed rule applies.
     const status: SnapshotRunOutcome =
-      failed === 0 ? 'SUCCESS' : succeeded === 0 ? 'FAILED' : 'PARTIAL';
+      readError !== null
+        ? succeeded === 0
+          ? 'FAILED'
+          : 'PARTIAL'
+        : failed === 0
+          ? 'SUCCESS'
+          : succeeded === 0
+            ? 'FAILED'
+            : 'PARTIAL';
 
     // Two cursors, deliberately asymmetric (review A3): `dataAsOf` is the conservative DISPLAY
     // watermark (high-water of succeeded chunks; the freshness banner never advances on lost data),
     // while `resumeCursor` is the optimistic RE-READ floor — on PARTIAL it drops back to the first
     // failed chunk's lower bound so the next run re-reads that window (`>=` resume in the reader;
     // the `(device_id, gps_datetime)` ON CONFLICT makes the overlap free).
-    const resumeCursor = status === 'PARTIAL' ? firstFailedLowerBound : dataAsOf;
+    // On a write-failure PARTIAL, drop back to the first failed chunk's lower bound to re-read it.
+    // On a read-failure PARTIAL there is no failed chunk (`firstFailedLowerBound` is null), so resume
+    // from the ingested high-water — the next run reads forward from where the source read died.
+    const resumeCursor = status === 'PARTIAL' ? (firstFailedLowerBound ?? dataAsOf) : dataAsOf;
 
     await this.runs.finishRun(runId, {
       status,

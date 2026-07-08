@@ -51,8 +51,11 @@ Replace the synthetic org seed with a `MasterSyncService` that upserts FSM maste
 - [x] Real `AutoPlantMasterSource implements MasterSyncSource` over `ap_masters` — schema-qualified reads,
       `mst_vehicle LEFT JOIN mst_plant` for the authoritative company; 5 unit tests. (Chunked / delta reads
       per §5.7 remain a later optimisation.)
-- [ ] Concrete `PlantZoneResolver` (R6 map) + the `plants.zone_id` nullable migration + `UNZONED` +
-      Ops-Head exception queue. **Blocked by R6.**
+- [~] `PlantZoneResolver` **scaffold built** — `state-zone-map.ts` (PROVISIONAL map + `deriveZone` with
+      `zone_name` conflict cross-check) + `StateMapZoneResolver` (defers on junk/unseeded state, fires an
+      exception-queue hook); 14 unit tests. Proposal doc: `docs/autoplant/R6-zone-map-proposal.md`.
+      **Still gated:** Ops-Head ratification (zone set + Chhattisgarh/MP/UP/Rajasthan), the breaking
+      `plants.zone_id → nullable` migration + `UNZONED` holding zone + exception-queue read (~16 ripples).
 - [ ] Wire `MasterSyncService` into a Nest module: bind `MASTER_SYNC_SOURCE` to `AutoPlantMasterSource`
       (`new AutoPlantMasterSource({ query: client.query, mastersSchema: cfg.dbMasters })`, config-guarded like
       `SOURCE_READER`), `MASTER_SYNC_SCOPE` from config once R14 lands, `PLANT_ZONE_RESOLVER` once R6 lands.
