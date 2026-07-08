@@ -4,7 +4,8 @@ import { DataTable, FilterBar, FilterSelect, type Column } from '../../component
 import { Button } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import { downloadCsv, toCsv } from '../../lib/csv';
-import { BUCKET_CLASS, BUCKET_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_LABEL_RANGE, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
 
 /**
  * Zone Overview table (Issue 06 AC#2/#5 · FE-06). One row per zone: total inactive + per-SLA-bucket
@@ -29,10 +30,11 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
   );
 
   const exportCsv = () => {
-    const headers = ['Zone', 'Total inactive', ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b]), 'Trend %'];
+    const headers = ['Zone', 'Total inactive', 'Total devices', ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b]), 'Trend %'];
     const body = visible.map((r) => [
       r.zoneName,
       r.totalInactive,
+      r.totalDevices,
       ...SLA_BUCKETS.map((b) => r.byBucket[b] ?? 0),
       r.trendPctVsPrevDay ?? '',
     ]);
@@ -47,13 +49,25 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
     },
     {
       key: 'total',
-      header: 'Total',
+      header: 'Inactive / Total',
       align: 'right',
-      render: (r) => <span className="tabular-nums">{r.totalInactive}</span>,
+      render: (r) => (
+        <span data-testid="zone-inactive-total" className="tabular-nums">
+          {formatInactiveOfTotal(r.totalInactive, r.totalDevices)}
+        </span>
+      ),
     },
     ...SLA_BUCKETS.map<Column<ZoneOverviewRow>>((b) => ({
       key: b,
-      header: BUCKET_LABEL[b],
+      // Column #2 — the bucket header carries its real inactivity range beneath the label (shared mapping).
+      header: (
+        <span className="flex flex-col items-end leading-tight">
+          <span>{BUCKET_LABEL[b]}</span>
+          <span className="text-[10px] font-normal normal-case tracking-normal text-ink-muted tabular-nums">
+            {BUCKET_RANGE_LABEL[b]}
+          </span>
+        </span>
+      ),
       align: 'right',
       render: (r) => {
         const count = r.byBucket[b] ?? 0;
@@ -112,7 +126,7 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
             <option value="">All buckets</option>
             {SLA_BUCKETS.map((b) => (
               <option key={b} value={b}>
-                {BUCKET_LABEL[b]}
+                {BUCKET_LABEL_RANGE[b]}
               </option>
             ))}
           </FilterSelect>

@@ -1,6 +1,8 @@
 // SLA bucket presentation (CONTEXT "SLA Bucket"). Severity order descending; ACTIVE is never a
 // bucket (the backend excludes null buckets), so it never appears in any dashboard column.
 
+import { SLA_BANDS } from '@fsm/shared';
+
 export const SLA_BUCKETS = [
   'LONG_PENDING',
   'VERY_SEVERE',
@@ -14,6 +16,33 @@ export const SLA_BUCKETS = [
 
 export type SlaBucket = (typeof SLA_BUCKETS)[number];
 
+/**
+ * "Critical+" — buckets at or above CRITICAL severity. THE single source of this definition for the
+ * whole admin app (KPI cards, the Zone Performance Scorecard, any critical-load surface). It must stay
+ * identical everywhere, so no screen may re-declare its own list (Issue 1).
+ */
+export const CRITICAL_PLUS_BUCKETS: SlaBucket[] = [
+  'CRITICAL',
+  'HIGH_CRITICAL',
+  'SEVERE',
+  'VERY_SEVERE',
+  'LONG_PENDING',
+];
+
+/** Count of critical+ **devices** in one entity's per-bucket distribution. */
+export function criticalPlusCount(byBucket: Record<string, number>): number {
+  return CRITICAL_PLUS_BUCKETS.reduce((sum, b) => sum + (byBucket[b] ?? 0), 0);
+}
+
+/**
+ * Sum of critical+ devices across zones — the canonical "Critical+ Devices" KPI. Derived from the same
+ * `zone-overview` byBucket data the scorecard renders, so the KPI always equals the scorecard column
+ * sum (Issue 1: A + B + C + D = X by construction).
+ */
+export function sumCriticalPlusDevices(zones: ReadonlyArray<{ byBucket: Record<string, number> }>): number {
+  return zones.reduce((sum, z) => sum + criticalPlusCount(z.byBucket), 0);
+}
+
 export const BUCKET_LABEL: Record<SlaBucket, string> = {
   LONG_PENDING: 'Long Pending',
   VERY_SEVERE: 'Very Severe',
@@ -24,6 +53,47 @@ export const BUCKET_LABEL: Record<SlaBucket, string> = {
   EARLY_RISK: 'Early Risk',
   WARNING: 'Warning',
 };
+
+/**
+ * Human inactivity-range label per bucket (e.g. `4–8h`, `24–48h`, `3–5d`, `7d+`), DERIVED from the
+ * shared `SLA_BANDS` boundaries — the exact same array the backend classifier uses to bucket a device.
+ * Because the ranges are computed here rather than hardcoded, the Settings SLA legend, dashboard cards,
+ * overview tables and the device table can never drift from how devices are actually classified;
+ * changing a threshold in `@fsm/shared` updates them all at once. Sub-3-day bands read in hours, 3-day+
+ * bands in days; the top band (LONG_PENDING) is open-ended (`7d+`). THE single source for these strings
+ * (Change #2 — no page may hardcode its own SLA range text).
+ */
+export const BUCKET_RANGE_LABEL: Record<SlaBucket, string> = buildBucketRangeLabels();
+
+/**
+ * Combined `Label (range)` descriptor per bucket, e.g. `Critical (24–48h)` — the canonical bucket
+ * label everywhere the taxonomy itself is shown (dashboard cards, SLA distribution, overview-column
+ * headers, bucket filters, the device-table SLA column). Composed from the same `BUCKET_LABEL` +
+ * `BUCKET_RANGE_LABEL` pair, so label and range never drift apart.
+ */
+export const BUCKET_LABEL_RANGE: Record<SlaBucket, string> = Object.fromEntries(
+  SLA_BUCKETS.map((b) => [b, `${BUCKET_LABEL[b]} (${BUCKET_RANGE_LABEL[b]})`]),
+) as Record<SlaBucket, string>;
+
+function buildBucketRangeLabels(): Record<SlaBucket, string> {
+  const labels = {} as Record<SlaBucket, string>;
+  // SLA_BANDS is ordered highest-band-first as [closedLowerBoundHours, bucket]; a band's open upper
+  // bound is the lower bound of the band directly above it (∞ for the top band).
+  SLA_BANDS.forEach(([lowerBound, bucket], i) => {
+    const upperBound = i === 0 ? Infinity : SLA_BANDS[i - 1][0];
+    labels[bucket as SlaBucket] = formatBucketRange(lowerBound, upperBound);
+  });
+  return labels;
+}
+
+// Compact range text. Bands whose lower bound is ≥ 3 days read in days (`3–5d`, `7d+`); shorter bands
+// read in hours (`4–8h` … `48–72h`), matching the operator-facing severity table.
+function formatBucketRange(lowerHours: number, upperHours: number): string {
+  const unit: 'h' | 'd' = lowerHours >= 72 ? 'd' : 'h';
+  const toUnit = (h: number) => (unit === 'd' ? h / 24 : h);
+  if (!Number.isFinite(upperHours)) return `${toUnit(lowerHours)}${unit}+`;
+  return `${toUnit(lowerHours)}–${toUnit(upperHours)}${unit}`;
+}
 
 /**
  * Concrete hex per bucket for chart surfaces that need colour strings rather than Tailwind classes

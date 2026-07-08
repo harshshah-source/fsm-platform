@@ -1,15 +1,27 @@
 import type { ReactNode } from 'react';
 import { cn } from '../../lib/cn';
-import { BUCKET_CLASS, BUCKET_LABEL, type SlaBucket } from '../../lib/slaBucket';
+import { formatInactiveDuration } from '../../lib/inactiveDuration';
+import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_LABEL_RANGE, type SlaBucket } from '../../lib/slaBucket';
 import { Badge, type BadgeTone } from '../ui/Badge';
 
 /**
  * Colour-coded SLA bucket pill. Single source of colour/label is `lib/slaBucket`. Keeps the historical
- * `data-testid="bucket-<BUCKET>"` so existing ticket tests stay green. Null bucket (ACTIVE) renders nothing.
+ * `data-testid="bucket-<BUCKET>"` so existing ticket tests stay green. Null bucket (ACTIVE) renders
+ * nothing. Pass `showRange` where the taxonomy itself is on display (the device-table SLA column) to
+ * render `Label (range)` — e.g. `Critical (24–48h)` — from the shared mapping (Change #2).
  */
-export function SLABadge({ bucket, className }: { bucket: string | null; className?: string }) {
+export function SLABadge({
+  bucket,
+  showRange = false,
+  className,
+}: {
+  bucket: string | null;
+  showRange?: boolean;
+  className?: string;
+}) {
   if (!bucket) return null;
   const b = bucket as SlaBucket;
+  const label = (showRange ? BUCKET_LABEL_RANGE[b] : BUCKET_LABEL[b]) ?? bucket;
   return (
     <span
       data-testid={`bucket-${bucket}`}
@@ -19,7 +31,41 @@ export function SLABadge({ bucket, className }: { bucket: string | null; classNa
         className,
       )}
     >
-      {BUCKET_LABEL[b] ?? bucket}
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Per-device inactivity badge (Issue 3). Same severity colour + `data-testid="bucket-<BUCKET>"` hook as
+ * {@link SLABadge}, but the visible text is the ACTUAL elapsed time since the device's last GPS ping
+ * (e.g. `4d 6h`) instead of the severity word. Falls back to the bucket label only when no timestamp is
+ * available. Null bucket (ACTIVE) renders nothing. Use this on single-device rows/cards; aggregate
+ * per-bucket distribution columns keep the count/label.
+ */
+export function DurationBadge({
+  bucket,
+  latestGpsDatetime,
+  className,
+}: {
+  bucket: string | null;
+  latestGpsDatetime: string | null | undefined;
+  className?: string;
+}) {
+  if (!bucket) return null;
+  const b = bucket as SlaBucket;
+  const duration = formatInactiveDuration(latestGpsDatetime);
+  return (
+    <span
+      data-testid={`bucket-${bucket}`}
+      title={BUCKET_LABEL[b] ?? bucket}
+      className={cn(
+        'inline-block rounded-full px-2 py-0.5 text-xs font-medium tabular-nums',
+        BUCKET_CLASS[b] ?? 'bg-neutral-bg text-neutral',
+        className,
+      )}
+    >
+      {duration ?? BUCKET_LABEL[b] ?? bucket}
     </span>
   );
 }

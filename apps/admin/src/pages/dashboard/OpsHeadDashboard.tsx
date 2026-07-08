@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DateRangeChips, MetricStrip, PageHeader, RollingNumber, type Metric } from '../../components/data';
 import { DistributionBar, type DistSegment } from '../../components/charts';
 import { Badge } from '../../components/ui';
-import { BUCKET_HEX, BUCKET_LABEL, SLA_BUCKETS, sumCriticalPlusDevices } from '../../lib/slaBucket';
+import { BUCKET_HEX, BUCKET_LABEL_RANGE, SLA_BUCKETS, sumCriticalPlusDevices } from '../../lib/slaBucket';
 import { CompanyPlantTable } from './CompanyPlantTable';
-import { RunIngestionButton } from './RunIngestionButton';
+import { onIngestionComplete } from './ingestionEvents';
 import { ScorecardTable } from './ScorecardTable';
 import type { DashboardData } from './ZmDashboard';
 
@@ -26,6 +26,10 @@ export function OpsHeadDashboard({ zones, companyPlants, actions, error, onDataR
     await onDataRefetch();
     setLastRunAt(Date.now());
   }, [onDataRefetch]);
+
+  // The "Run Ingestion Now" trigger now lives in the top bar; it broadcasts on completion. Refetch the
+  // KPI sources and bump the roll trigger whenever a manual run finishes.
+  useEffect(() => onIngestionComplete(() => void handleRunSuccess()), [handleRunSuccess]);
 
   const kpis: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
@@ -55,7 +59,7 @@ export function OpsHeadDashboard({ zones, companyPlants, actions, error, onDataR
   const segments: DistSegment[] = useMemo(
     () =>
       SLA_BUCKETS.map((b) => ({
-        label: BUCKET_LABEL[b],
+        label: BUCKET_LABEL_RANGE[b],
         value: zones.reduce((s, z) => s + (z.byBucket[b] ?? 0), 0),
         color: BUCKET_HEX[b],
       })),
@@ -72,7 +76,6 @@ export function OpsHeadDashboard({ zones, companyPlants, actions, error, onDataR
             <Badge tone="success" dot>
               Snapshot Healthy
             </Badge>
-            <RunIngestionButton onSuccess={handleRunSuccess} />
             <DateRangeChips />
           </>
         }

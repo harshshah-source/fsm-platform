@@ -178,6 +178,22 @@ describe('Settings — Operations Head only (AC#1)', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument();
   });
 
+  it('shows each SLA bucket alongside its inactivity range derived from the shared thresholds', async () => {
+    renderAt('/settings', opsHead);
+    await userEvent.click(await screen.findByRole('tab', { name: /sla rules/i }));
+
+    // Business terminology is preserved (names, not replaced by ranges)…
+    expect(await screen.findByText('Warning')).toBeInTheDocument();
+    expect(screen.getByText('Long Pending')).toBeInTheDocument();
+    // …and each bucket now displays the configured range, derived from @fsm/shared SLA_BANDS.
+    expect(screen.getByText('4–8h')).toBeInTheDocument(); // WARNING [4,8)
+    expect(screen.getByText('8–12h')).toBeInTheDocument(); // EARLY_RISK [8,12)
+    expect(screen.getByText('12–24h')).toBeInTheDocument(); // RISK [12,24)
+    expect(screen.getByText('24–48h')).toBeInTheDocument(); // CRITICAL [24,48)
+    expect(screen.getByText('3–5d')).toBeInTheDocument(); // SEVERE [72,120)
+    expect(screen.getByText('7d+')).toBeInTheDocument(); // LONG_PENDING [168,∞)
+  });
+
   it('blocks a non-Operations-Head role from the Settings route', () => {
     renderAt('/settings', zm);
     expect(screen.queryByRole('heading', { name: /settings/i })).not.toBeInTheDocument();

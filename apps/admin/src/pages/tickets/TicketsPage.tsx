@@ -10,7 +10,7 @@ import {
   type Column,
 } from '../../components/data';
 import { AgeChip, StatusPill, TierBadge } from '../../components/domain';
-import { BUCKET_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
 import { BucketBadge, InlineBadges } from './ticketBadges';
 
 const WORK_TYPES = ['TROUBLESHOOT', 'INSTALL', 'RECOVERY'];
@@ -99,8 +99,8 @@ export function TicketsPage() {
     },
     {
       key: 'bucket',
-      header: 'SLA',
-      render: (t) => <BucketBadge bucket={t.slaBucket} />,
+      header: 'Inactive',
+      render: (t) => <BucketBadge bucket={t.slaBucket} latestGpsDatetime={t.latestGpsDatetime} />,
     },
     {
       key: 'age',
@@ -144,7 +144,7 @@ export function TicketsPage() {
           <FilterSelect aria-label="SLA bucket" onChange={set('bucket')}>
             <option value="">All buckets</option>
             {SLA_BUCKETS.map((b) => (
-              <option key={b} value={b}>{BUCKET_LABEL[b]}</option>
+              <option key={b} value={b}>{BUCKET_LABEL_RANGE[b]}</option>
             ))}
           </FilterSelect>
           <FilterSelect aria-label="Assignment state" onChange={set('assignmentState')}>

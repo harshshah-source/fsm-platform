@@ -1,12 +1,13 @@
 import { Fragment, useMemo, useState } from 'react';
 import type { CompanyPlantRow } from '../../api/dashboard';
 import { FilterBar, FilterSelect } from '../../components/data';
-import { TierBadge } from '../../components/domain';
+import { DurationBadge, TierBadge } from '../../components/domain';
 import { Button } from '../../components/ui';
 import { apiTicketsByPlant, type TicketRow } from '../../api/tickets';
 import { cn } from '../../lib/cn';
 import { downloadCsv, toCsv } from '../../lib/csv';
-import { BUCKET_CLASS, BUCKET_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
 
 interface CompanyGroup {
   companyId: string;
@@ -62,12 +63,13 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
   };
 
   const exportCsv = () => {
-    const headers = ['Company', 'Tier', 'Plant', 'Total inactive', ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b])];
+    const headers = ['Company', 'Tier', 'Plant', 'Total inactive', 'Total devices', ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b])];
     const body = rows.map((r) => [
       r.companyName,
       r.companyTier,
       r.plantName,
       r.totalInactive,
+      r.totalDevices,
       ...SLA_BUCKETS.map((b) => r.byBucket[b] ?? 0),
     ]);
     downloadCsv('company-plant-overview.csv', toCsv(headers, body));
@@ -109,10 +111,16 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
             <thead>
               <tr className="border-b border-line bg-surface-sunken/60">
                 <th className={th}>Plant</th>
-                <th className={cn(th, 'text-right')}>Total</th>
+                <th className={cn(th, 'text-right')}>Inactive / Total</th>
                 {SLA_BUCKETS.map((b) => (
                   <th key={b} className={cn(th, 'text-right')}>
-                    {BUCKET_LABEL[b]}
+                    {/* Column #2 — bucket label with its real inactivity range beneath (shared mapping). */}
+                    <span className="flex flex-col items-end leading-tight">
+                      <span>{BUCKET_LABEL[b]}</span>
+                      <span className="text-[10px] font-normal normal-case tracking-normal text-ink-muted tabular-nums">
+                        {BUCKET_RANGE_LABEL[b]}
+                      </span>
+                    </span>
                   </th>
                 ))}
                 <th className={cn(th, 'text-right')}>Devices</th>
@@ -131,7 +139,12 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
                     <Fragment key={p.plantId}>
                       <tr className="border-b border-line last:border-b-0">
                         <td className="px-4 py-2.5 pl-8 text-ink">{p.plantName}</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums text-ink">{p.totalInactive}</td>
+                        <td
+                          data-testid="plant-inactive-total"
+                          className="px-4 py-2.5 text-right tabular-nums text-ink"
+                        >
+                          {formatInactiveOfTotal(p.totalInactive, p.totalDevices)}
+                        </td>
                         {SLA_BUCKETS.map((b) => {
                           const count = p.byBucket[b] ?? 0;
                           return (
@@ -167,8 +180,10 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
                             ) : (
                               <ul className="flex flex-col gap-1">
                                 {(devices[p.plantId] ?? []).map((d) => (
-                                  <li key={d.ticketId} className="text-ink">
-                                    Device {d.deviceId} — {d.slaBucket ?? '—'} ({d.status})
+                                  <li key={d.ticketId} className="flex items-center gap-1.5 text-ink">
+                                    Device {d.deviceId} —{' '}
+                                    <DurationBadge bucket={d.slaBucket} latestGpsDatetime={d.latestGpsDatetime} /> (
+                                    {d.status})
                                   </li>
                                 ))}
                               </ul>

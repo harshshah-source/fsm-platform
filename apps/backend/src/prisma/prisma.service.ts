@@ -11,7 +11,18 @@ import { PrismaClient } from '../generated/prisma/client';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor() {
-    super({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }) });
+    super({
+      adapter: new PrismaPg({
+        connectionString: process.env.DATABASE_URL,
+        // ADR-0025 (timestamptz-UTC): pin the *session* TimeZone to UTC regardless of the Postgres
+        // server default. A 2026-07-07 prod audit found the server on Asia/Calcutta; timestamptz
+        // interval arithmetic (`now - latest_gps_datetime`) is TZ-independent, so this does not change
+        // any inactivity/SLA maths — but it keeps every timestamptz→text render and any `::timestamp`
+        // cast honest, so the connection can never reintroduce the IST offset the app deliberately
+        // normalizes away at ingest. `options` is passed as the pg startup `-c timezone=UTC` parameter.
+        options: '-c timezone=UTC',
+      }),
+    });
   }
 
   async onModuleInit(): Promise<void> {
