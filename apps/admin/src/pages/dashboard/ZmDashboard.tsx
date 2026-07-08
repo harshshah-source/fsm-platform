@@ -8,6 +8,7 @@ import type {
 import type { ZoneEngineer } from '../../api/schedules';
 import { DateRangeChips, MetricStrip, PageHeader, type Metric } from '../../components/data';
 import { Badge } from '../../components/ui';
+import { sumCriticalPlusDevices } from '../../lib/slaBucket';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { CriticalQueue } from './CriticalQueue';
@@ -21,6 +22,8 @@ export interface DashboardData {
   engineers: ZoneEngineer[];
   error: string | null;
   onAssigned: () => void;
+  /** Refetch the KPI data sources (zone-overview / action-required). Resolves once state is updated. */
+  onDataRefetch: () => Promise<void>;
 }
 
 /**
@@ -40,7 +43,9 @@ export function ZmDashboard({
   // KPI strip derived from already-loaded data (no new endpoint). Uptime is gated on BE-39/40.
   const metrics: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
-    const criticalCount = critical.reduce((s, g) => s + g.tickets.length, 0);
+    // Device-based Critical+ (zone-overview source) — consistent with the Ops-Head KPI and the
+    // scorecard everywhere (Issue 1), not the open-ticket count.
+    const criticalPlusDevices = sumCriticalPlusDevices(zones);
     const liveSources = actions.filter((a) => a.available && a.count > 0);
     const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
     return [
@@ -52,10 +57,11 @@ export function ZmDashboard({
         tone: 'warning',
       },
       {
-        label: 'Critical+ Tickets',
-        value: criticalCount,
-        hint: `${critical.length} plant cluster${critical.length === 1 ? '' : 's'}`,
+        label: 'Critical+ Devices',
+        value: criticalPlusDevices,
+        hint: 'at or above CRITICAL',
         tone: 'critical',
+        testId: 'kpi-critical-plus',
       },
       {
         label: 'Action Required',
@@ -64,7 +70,7 @@ export function ZmDashboard({
         tone: 'info',
       },
     ];
-  }, [zones, critical, actions]);
+  }, [zones, actions]);
 
   return (
     <div>

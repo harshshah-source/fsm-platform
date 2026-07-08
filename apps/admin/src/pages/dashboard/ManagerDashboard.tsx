@@ -67,6 +67,21 @@ export function ManagerDashboard() {
       .catch(() => undefined);
   }, []);
 
+  // Full KPI-source reload — used by the OH manual ingestion trigger so the stat cards roll to fresh
+  // values when a run completes. Resolves once the new data is applied to state.
+  const reload = useCallback(async () => {
+    const [a, z, cp, cq] = await Promise.all([
+      apiActionRequired(),
+      apiZoneOverview(),
+      apiCompanyPlantOverview(),
+      apiCriticalQueue(),
+    ]);
+    setActions(a);
+    setZones(z);
+    setCompanyPlants(cp);
+    setCritical(cq);
+  }, []);
+
   const data: DashboardData = {
     zones,
     companyPlants,
@@ -75,6 +90,7 @@ export function ManagerDashboard() {
     engineers,
     error,
     onAssigned: refreshCritical,
+    onDataRefetch: reload,
   };
 
   // Acting as ZM in a zone collapses every role to the Zone Operations view (reference 02).

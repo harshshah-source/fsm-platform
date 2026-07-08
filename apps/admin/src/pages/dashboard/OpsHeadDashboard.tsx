@@ -1,9 +1,10 @@
-import { useMemo } from 'react';
-import { DateRangeChips, MetricStrip, PageHeader, type Metric } from '../../components/data';
+import { useCallback, useMemo, useState } from 'react';
+import { DateRangeChips, MetricStrip, PageHeader, RollingNumber, type Metric } from '../../components/data';
 import { DistributionBar, type DistSegment } from '../../components/charts';
 import { Badge } from '../../components/ui';
-import { BUCKET_HEX, BUCKET_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { BUCKET_HEX, BUCKET_LABEL, SLA_BUCKETS, sumCriticalPlusDevices } from '../../lib/slaBucket';
 import { CompanyPlantTable } from './CompanyPlantTable';
+import { RunIngestionButton } from './RunIngestionButton';
 import { ScorecardTable } from './ScorecardTable';
 import type { DashboardData } from './ZmDashboard';
 
@@ -16,19 +17,31 @@ import type { DashboardData } from './ZmDashboard';
  * source until the System Efficiency report (BE-42, surfaced by FE-24). Its cards render the reference
  * chrome with "—" placeholders rather than fabricated figures.
  */
-export function OpsHeadDashboard({ zones, companyPlants, critical, actions, error }: DashboardData) {
+export function OpsHeadDashboard({ zones, companyPlants, actions, error, onDataRefetch }: DashboardData) {
+  // Bumped when a manual ingestion run completes AND its data refetch has resolved — the roll trigger
+  // for the KPI odometers (keyed on completion, not on a value diff).
+  const [lastRunAt, setLastRunAt] = useState<number | null>(null);
+
+  const handleRunSuccess = useCallback(async () => {
+    await onDataRefetch();
+    setLastRunAt(Date.now());
+  }, [onDataRefetch]);
+
   const kpis: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
-    const criticalCount = critical.reduce((s, g) => s + g.tickets.length, 0);
+    // Device-based Critical+ (same zone-overview source as the scorecard) — equals the scorecard
+    // Critical+ column sum by construction, never the open-ticket count (Issue 1).
+    const criticalPlusDevices = sumCriticalPlusDevices(zones);
     const liveSources = actions.filter((a) => a.available && a.count > 0);
     const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
+    const roll = (value: number) => <RollingNumber value={value} runToken={lastRunAt} />;
     return [
       { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
-      { label: 'Inactive Devices', value: inactive, hint: `${zones.length} zones`, tone: 'warning' },
-      { label: 'Critical+ Tickets', value: criticalCount, hint: 'pan-India', tone: 'critical' },
-      { label: 'Action Required', value: actionTotal, hint: `${liveSources.length} live sources`, tone: 'info' },
+      { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
+      { label: 'Critical+ Devices', value: roll(criticalPlusDevices), hint: 'pan-India', tone: 'critical', testId: 'kpi-critical-plus' },
+      { label: 'Action Required', value: roll(actionTotal), hint: `${liveSources.length} live sources`, tone: 'info' },
     ];
-  }, [zones, critical, actions]);
+  }, [zones, actions, lastRunAt]);
 
   // Auto-Dispatch efficiency — gated on BE-42 / FE-24; reference chrome, no fabricated values.
   const efficiency: Metric[] = [
@@ -59,6 +72,7 @@ export function OpsHeadDashboard({ zones, companyPlants, critical, actions, erro
             <Badge tone="success" dot>
               Snapshot Healthy
             </Badge>
+            <RunIngestionButton onSuccess={handleRunSuccess} />
             <DateRangeChips />
           </>
         }
