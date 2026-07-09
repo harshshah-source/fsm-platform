@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { transitionOrConflict } from '../common/transition-or-conflict';
 import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { Prisma } from '../generated/prisma/client';
 import { type SlaBucket } from '../generated/prisma/enums';
@@ -114,8 +115,18 @@ export class IntradayInsertionService {
         skipped++;
         continue;
       }
-      await this.offer(ticket, candidate, zoneId, now);
-      offered++;
+      try {
+        await this.offer(ticket, candidate, zoneId, now);
+        offered++;
+      } catch (e) {
+        // One-live-offer-per-ticket partial unique (Issue 101): a concurrent sweep already opened the
+        // live offer for this ticket — a clean skip, not a duplicate PENDING row.
+        if ((e as { code?: string }).code === 'P2002') {
+          skipped++;
+          continue;
+        }
+        throw e;
+      }
     }
     return { offered, skipped };
   }
@@ -138,6 +149,33 @@ export class IntradayInsertionService {
     if (ins.status !== 'PENDING_ACCEPTANCE') return { result: 'NOT_PENDING', status: ins.status };
     if (ins.offeredSeId !== seId) return { result: 'NOT_OFFERED' };
 
+    // Atomic claim (Issue 101): flip PENDING_ACCEPTANCE → ACCEPTED guarded by our own offer. This is the
+    // serialization point against a concurrent 10-min timeout / decline reroute — exactly one of
+    // {accept, reroute} updates the row, the other sees 0 rows. Without it both can "win", committing the
+    // ticket to a timed-out SE A while SE B holds a live offer (both told the CRITICAL ticket is theirs).
+    const claim = await transitionOrConflict(
+      this.prisma.intradayInsertion,
+      { insertionId, status: 'PENDING_ACCEPTANCE', offeredSeId: seId },
+      { status: 'ACCEPTED', respondedAt: now, whatsappSentAt: now },
+    );
+    if (!claim.won) {
+      // Lost the race to a concurrent reroute/accept. Re-read to answer accurately (idempotent if the
+      // winner was this same SE via a retried tap).
+      const fresh = await this.prisma.intradayInsertion.findUnique({ where: { insertionId } });
+      if (fresh?.status === 'ACCEPTED' && fresh.offeredSeId === seId) {
+        return {
+          result: 'OK',
+          insertionId: String(fresh.insertionId),
+          scheduleId: String(fresh.assignedScheduleId),
+          batchId: String(fresh.assignedBatchId),
+          ticketId: fresh.ticketId,
+          seId,
+        };
+      }
+      return { result: 'NOT_PENDING', status: fresh?.status ?? ins.status };
+    }
+
+    // We own the insertion. Commit the Formal Assignment at the top of the Day Plan.
     const ticket = await this.prisma.ticket.findUniqueOrThrow({
       where: { ticketId: ins.ticketId },
       include: { plant: true },
@@ -146,16 +184,19 @@ export class IntradayInsertionService {
     const actor: ActorContext = { userId: seId, role: 'SERVICE_ENGINEER' };
     const assigned = await this.override.assignTicket(ins.ticketId, seId, scope, actor, now, 'CRITICAL_ASSIGN', true);
     if (assigned.result !== 'OK') {
-      // Ticket was closed/assigned out from under the offer — treat as no longer actionable.
+      // Ticket was closed/assigned out between our claim and this commit. Release the claim (guarded, so a
+      // writer that already moved it on again is untouched) so the timeout sweep can re-offer it.
+      await transitionOrConflict(
+        this.prisma.intradayInsertion,
+        { insertionId, status: 'ACCEPTED', offeredSeId: seId },
+        { status: 'PENDING_ACCEPTANCE', respondedAt: null, whatsappSentAt: null },
+      );
       return { result: 'NOT_PENDING', status: ins.status };
     }
 
     await this.prisma.intradayInsertion.update({
       where: { insertionId },
       data: {
-        status: 'ACCEPTED',
-        respondedAt: now,
-        whatsappSentAt: now,
         assignedScheduleId: BigInt(assigned.scheduleId),
         assignedBatchId: BigInt(assigned.batchId),
       },
@@ -213,6 +254,11 @@ export class IntradayInsertionService {
     if (ins.offeredSeId !== seId) return { result: 'NOT_OFFERED' };
 
     const rerouted = await this.reroute(ins, 'DECLINED', now, reasonCode);
+    if (rerouted.status === 'NOOP') {
+      // A concurrent Accept won the insertion out from under this decline — no longer actionable.
+      const fresh = await this.prisma.intradayInsertion.findUnique({ where: { insertionId } });
+      return { result: 'NOT_PENDING', status: fresh?.status ?? ins.status };
+    }
     return { result: 'OK', status: rerouted.status, nextSeId: rerouted.nextSeId };
   }
 
@@ -230,7 +276,8 @@ export class IntradayInsertionService {
     for (const ins of due) {
       const r = await this.reroute(ins, 'TIMED_OUT', now);
       if (r.status === 'ESCALATION_REQUIRED') escalated++;
-      else rerouted++;
+      else if (r.status === 'PENDING_ACCEPTANCE') rerouted++;
+      // NOOP: a concurrent Accept won this insertion between the query and the reroute — nothing to do.
     }
     return { timedOut: due.length, rerouted, escalated };
   }
@@ -364,7 +411,7 @@ export class IntradayInsertionService {
     outcome: 'TIMED_OUT' | 'DECLINED',
     now: Date,
     reasonCode?: string,
-  ): Promise<{ status: 'PENDING_ACCEPTANCE' | 'ESCALATION_REQUIRED'; nextSeId: string | null }> {
+  ): Promise<{ status: 'PENDING_ACCEPTANCE' | 'ESCALATION_REQUIRED' | 'NOOP'; nextSeId: string | null }> {
     const ticket = await this.prisma.ticket.findUniqueOrThrow({ where: { ticketId: ins.ticketId }, include: { plant: true } });
     const chain: RetryAttempt[] = ((ins.retryChain as unknown as RetryAttempt[]) ?? []).slice();
     chain.push({
@@ -380,30 +427,42 @@ export class IntradayInsertionService {
     const next = available.find((id) => !triedSeIds.has(id)) ?? null;
     const exhausted = ins.retryCount >= MAX_RETRIES || next === null;
 
-    if (outcome === 'TIMED_OUT') await this.notifyGhostAssignment(ins.offeredSeId, ins.ticketId, next, now);
+    // Atomic claim (Issue 101): only reroute if the insertion is STILL the exact PENDING offer we read
+    // (same status + offered SE + retry count). A concurrent Accept flips it to ACCEPTED first, so our
+    // guarded update hits 0 rows and we NO-OP — never re-offering, escalating, or ghost-notifying a ticket
+    // the SE already accepted. The side effects fire only AFTER the claim is won.
+    const guard = {
+      insertionId: ins.insertionId,
+      status: 'PENDING_ACCEPTANCE' as const,
+      offeredSeId: ins.offeredSeId,
+      retryCount: ins.retryCount,
+    };
 
     if (exhausted || next === null) {
-      await this.prisma.intradayInsertion.update({
-        where: { insertionId: ins.insertionId },
-        data: { status: 'ESCALATION_REQUIRED', respondedAt: now, declineReasonCode: reasonCode ?? null, retryChain: chain as unknown as Prisma.InputJsonValue },
+      const claim = await transitionOrConflict(this.prisma.intradayInsertion, guard, {
+        status: 'ESCALATION_REQUIRED',
+        respondedAt: now,
+        declineReasonCode: reasonCode ?? null,
+        retryChain: chain as unknown as Prisma.InputJsonValue,
       });
+      if (!claim.won) return { status: 'NOOP', nextSeId: null };
+      if (outcome === 'TIMED_OUT') await this.notifyGhostAssignment(ins.offeredSeId, ins.ticketId, null, now);
       await this.escalateToZm(ins.zoneId, ins.ticketId, ins.insertionId);
       return { status: 'ESCALATION_REQUIRED', nextSeId: null };
     }
 
-    await this.prisma.intradayInsertion.update({
-      where: { insertionId: ins.insertionId },
-      data: {
-        status: 'PENDING_ACCEPTANCE',
-        offeredSeId: next,
-        offeredAt: now,
-        acceptanceDeadline: this.deadline(now),
-        respondedAt: null,
-        declineReasonCode: null,
-        retryCount: ins.retryCount + 1,
-        retryChain: chain as unknown as Prisma.InputJsonValue,
-      },
+    const claim = await transitionOrConflict(this.prisma.intradayInsertion, guard, {
+      status: 'PENDING_ACCEPTANCE',
+      offeredSeId: next,
+      offeredAt: now,
+      acceptanceDeadline: this.deadline(now),
+      respondedAt: null,
+      declineReasonCode: null,
+      retryCount: ins.retryCount + 1,
+      retryChain: chain as unknown as Prisma.InputJsonValue,
     });
+    if (!claim.won) return { status: 'NOOP', nextSeId: null };
+    if (outcome === 'TIMED_OUT') await this.notifyGhostAssignment(ins.offeredSeId, ins.ticketId, next, now);
     await this.pushOffer(ins.insertionId, ins.ticketId, next);
     return { status: 'PENDING_ACCEPTANCE', nextSeId: next };
   }
