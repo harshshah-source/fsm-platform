@@ -138,6 +138,27 @@ the rows the stage consumes; "Paused" = an audited ops toggle deliberately left 
 **Root blockers, ranked:** (1) engineers/coverage data — a *tested* seed script would unblock the pending
 decision without taking it; (2) B7 eligibility decision; (3) the two ops toggles. All code seams exist.
 
+### Activation checklist (env/ops enable order — do NOT flip casually)
+
+The schedulers are OFF by default. When activating for real (a deliberate ops step, post zone
+ratification), enable in this order and mind the couplings:
+
+1. **`eligibility_mode`** (audited `system_settings`, OH-owned) — `pgi` (canonical) requires a live SAP
+   PGI feed; until then the interim `all-deployed` proxy makes current-fitment-on-ACTIVE devices eligible.
+   Harmless to set while schedulers are OFF (it only bites on the next pipeline recompute).
+2. **`INGESTION_SCHEDULER_ENABLED=true`** — turns the pipeline self-running (masters daily + telemetry
+   every 30 min). **MUST be enabled together with `PARTITION_MAINTENANCE_ENABLED=true`** — without it,
+   after the 3-day partition create-ahead runway new pings silently fall into the DEFAULT partition and
+   retention never runs (handoff §4 item 5 / `docs/HANDOFF-autoplant-ingestion-2026-07-07.md`). Treat the
+   two as one switch. Also set `INGESTION_STALE_RUN_MIN` above the telemetry cadence (reaper safety).
+3. **`BUSINESS_SWEEPS_ENABLED=true`** — turns on dispatch (`business-dispatch` cron) + the 10 field-loop
+   sweeps (verification / intraday-timeout / cross-zone / install-verification / …). Needs SE + coverage
+   data present (else every ticket is UNASSIGNABLE) — SEs are admin-entered via `/engineers/manage`.
+
+Manual HTTP triggers (`POST /api/integration/run-pipeline`, `POST /api/schedules/dispatch-run`, the
+per-sweep triggers) drive the exact same code paths **without** enabling any cron — use them for watched
+runs while the flags stay OFF.
+
 ## Follow-ups (deep review)
 - 45 — Plants Admin UI → 02  *(done — Plants tab (zone-picker create + list) + SE-Coverage plant picker; closes Issue 02 AC#2)*
 - 46 — Company Update API + UI → 02  *(done — PATCH /org/companies/:id (Ops-Head, audited) + editable admin Companies rows; closes Issue 02 AC#3)*
