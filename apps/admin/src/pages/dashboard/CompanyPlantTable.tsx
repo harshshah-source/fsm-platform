@@ -1,8 +1,9 @@
 import { Fragment, useMemo, useState } from 'react';
 import type { CompanyPlantRow } from '../../api/dashboard';
-import { FilterBar, FilterSelect } from '../../components/data';
-import { DurationBadge, TierBadge } from '../../components/domain';
+import { EmptyState, FilterBar, FilterSelect, Skeleton } from '../../components/data';
+import { DurationBadge, StatusPill, TierBadge } from '../../components/domain';
 import { Button } from '../../components/ui';
+import { IconEye, IconEyeOff, IconTruck } from '../../components/ui/icons';
 import { apiTicketsByPlant, type TicketRow } from '../../api/tickets';
 import { cn } from '../../lib/cn';
 import { downloadCsv, toCsv } from '../../lib/csv';
@@ -49,6 +50,7 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
   );
   const [openPlant, setOpenPlant] = useState<string | null>(null);
   const [devices, setDevices] = useState<Record<string, TicketRow[]>>({});
+  const [loadingPlant, setLoadingPlant] = useState<string | null>(null);
 
   const togglePlant = async (plantId: string) => {
     if (openPlant === plantId) {
@@ -57,8 +59,13 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
     }
     setOpenPlant(plantId);
     if (!devices[plantId]) {
-      const loaded = await apiTicketsByPlant(plantId);
-      setDevices((prev) => ({ ...prev, [plantId]: loaded }));
+      setLoadingPlant(plantId);
+      try {
+        const loaded = await apiTicketsByPlant(plantId);
+        setDevices((prev) => ({ ...prev, [plantId]: loaded }));
+      } finally {
+        setLoadingPlant((p) => (p === plantId ? null : p));
+      }
     }
   };
 
@@ -168,26 +175,75 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
                             onClick={() => togglePlant(p.plantId)}
                             aria-expanded={openPlant === p.plantId}
                           >
-                            View devices
+                            {openPlant === p.plantId ? (
+                              <IconEyeOff className="h-4 w-4" />
+                            ) : (
+                              <IconEye className="h-4 w-4" />
+                            )}
+                            {openPlant === p.plantId ? 'Hide devices' : 'View devices'}
                           </Button>
                         </td>
                       </tr>
                       {openPlant === p.plantId && (
                         <tr>
-                          <td colSpan={COLSPAN} className="bg-surface-sunken/40 px-8 py-3 text-xs">
-                            {(devices[p.plantId] ?? []).length === 0 ? (
-                              <span className="text-ink-muted">No open device tickets at this plant.</span>
-                            ) : (
-                              <ul className="flex flex-col gap-1">
-                                {(devices[p.plantId] ?? []).map((d) => (
-                                  <li key={d.ticketId} className="flex items-center gap-1.5 text-ink">
-                                    Device {d.deviceId} —{' '}
-                                    <DurationBadge bucket={d.slaBucket} latestGpsDatetime={d.latestGpsDatetime} /> (
-                                    {d.status})
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
+                          <td colSpan={COLSPAN} className="bg-surface-sunken/40 p-0">
+                            <div className="px-6 py-4 sm:px-8">
+                              <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
+                                <div className="flex items-center justify-between gap-2 border-b border-line bg-surface-raised px-4 py-2.5">
+                                  <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
+                                    Open device tickets — {p.plantName}
+                                  </span>
+                                  {!loadingPlant && (
+                                    <span className="text-xs tabular-nums text-ink-muted">
+                                      {(devices[p.plantId] ?? []).length}
+                                    </span>
+                                  )}
+                                </div>
+                                {loadingPlant === p.plantId ? (
+                                  <ul>
+                                    {Array.from({ length: 3 }).map((_, i) => (
+                                      <li
+                                        key={`sk-${i}`}
+                                        className="flex items-center justify-between gap-3 border-b border-line/70 px-4 py-2.5 last:border-b-0"
+                                      >
+                                        <Skeleton className="h-4 w-28" />
+                                        <Skeleton className="h-5 w-20" />
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (devices[p.plantId] ?? []).length === 0 ? (
+                                  <EmptyState
+                                    icon={<IconTruck />}
+                                    message="No open device tickets at this plant."
+                                  />
+                                ) : (
+                                  <ul>
+                                    {(devices[p.plantId] ?? []).map((d) => (
+                                      <li
+                                        key={d.ticketId}
+                                        className="flex items-center justify-between gap-3 border-b border-line/70 px-4 py-2.5 text-sm transition-colors last:border-b-0 hover:bg-surface-sunken/50"
+                                      >
+                                        <span className="flex min-w-0 items-baseline gap-1.5">
+                                          <span className="text-[11px] font-medium uppercase tracking-wide text-ink-caps">
+                                            Device
+                                          </span>
+                                          <span className="font-mono tabular-nums text-ink-strong">
+                                            {d.deviceId}
+                                          </span>
+                                        </span>
+                                        <span className="flex shrink-0 items-center gap-2">
+                                          <DurationBadge
+                                            bucket={d.slaBucket}
+                                            latestGpsDatetime={d.latestGpsDatetime}
+                                          />
+                                          <StatusPill status={d.status} />
+                                        </span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </div>
                           </td>
                         </tr>
                       )}
