@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { apiTicketsList, type TicketFilters, type TicketRow } from '../../api/tickets';
 import {
   DataTable,
+  EmptyState,
   FilterBar,
   FilterSelect,
   PageHeader,
@@ -10,6 +11,8 @@ import {
   type Column,
 } from '../../components/data';
 import { AgeChip, StatusPill, TierBadge } from '../../components/domain';
+import { Button } from '../../components/ui';
+import { IconTicket } from '../../components/ui/icons';
 import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
 import { BucketBadge, InlineBadges } from './ticketBadges';
 
@@ -41,7 +44,7 @@ export function TicketsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let alive = true;
     setLoading(true);
     apiTicketsList(filters)
@@ -57,9 +60,13 @@ export function TicketsPage() {
     };
   }, [filters]);
 
+  useEffect(() => load(), [load]);
+
   const set =
     (key: keyof TicketFilters) => (e: React.ChangeEvent<HTMLSelectElement | HTMLInputElement>) =>
       setFilters((f) => ({ ...f, [key]: e.target.value || undefined }));
+
+  const hasFilters = Object.values(filters).some(Boolean);
 
   const columns: Column<TicketRow>[] = [
     {
@@ -121,33 +128,39 @@ export function TicketsPage() {
         <PageHeader
           title="Ticket Operations"
           subtitle="Every open and recently-closed ticket in your zone, sorted by SLA urgency."
+          actions={
+            hasFilters ? (
+              <Button variant="ghost" size="sm" onClick={() => setFilters({})}>
+                Clear filters
+              </Button>
+            ) : undefined
+          }
         />
-        {error && (
-          <p role="alert" className="mb-2 text-sm text-critical">
-            {error}
-          </p>
-        )}
 
         <FilterBar>
-          <FilterSelect aria-label="Work type" onChange={set('workType')}>
+          <FilterSelect aria-label="Work type" value={filters.workType ?? ''} onChange={set('workType')}>
             <option value="">All work types</option>
             {WORK_TYPES.map((w) => (
               <option key={w} value={w}>{w}</option>
             ))}
           </FilterSelect>
-          <FilterSelect aria-label="Status" onChange={set('status')}>
+          <FilterSelect aria-label="Status" value={filters.status ?? ''} onChange={set('status')}>
             <option value="">All statuses</option>
             {STATUSES.map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
           </FilterSelect>
-          <FilterSelect aria-label="SLA bucket" onChange={set('bucket')}>
+          <FilterSelect aria-label="SLA bucket" value={filters.bucket ?? ''} onChange={set('bucket')}>
             <option value="">All buckets</option>
             {SLA_BUCKETS.map((b) => (
               <option key={b} value={b}>{BUCKET_LABEL_RANGE[b]}</option>
             ))}
           </FilterSelect>
-          <FilterSelect aria-label="Assignment state" onChange={set('assignmentState')}>
+          <FilterSelect
+            aria-label="Assignment state"
+            value={filters.assignmentState ?? ''}
+            onChange={set('assignmentState')}
+          >
             <option value="">All assignment states</option>
             {ASSIGNMENT_STATES.map((a) => (
               <option key={a} value={a}>{a}</option>
@@ -156,12 +169,14 @@ export function TicketsPage() {
           <SearchInput
             aria-label="Company ID"
             placeholder="Company ID"
+            value={filters.companyId ?? ''}
             onChange={set('companyId')}
             className="w-36"
           />
           <SearchInput
             aria-label="Plant ID"
             placeholder="Plant ID"
+            value={filters.plantId ?? ''}
             onChange={set('plantId')}
             className="w-32"
           />
@@ -173,8 +188,27 @@ export function TicketsPage() {
           columns={columns}
           rows={rows}
           loading={loading}
+          error={error}
+          onRetry={load}
+          stickyHeader
           onRowClick={(t) => navigate(`/tickets/${t.ticketId}`)}
-          empty="No tickets match these filters."
+          empty={
+            <EmptyState
+              icon={<IconTicket />}
+              message={
+                hasFilters
+                  ? 'No tickets match these filters.'
+                  : 'No open or recently-closed tickets in your zone.'
+              }
+              action={
+                hasFilters ? (
+                  <Button variant="secondary" size="sm" onClick={() => setFilters({})}>
+                    Clear filters
+                  </Button>
+                ) : undefined
+              }
+            />
+          }
         />
       </div>
       {/* Detail Drawer renders here (nested route /tickets/:ticketId) over the list. */}
