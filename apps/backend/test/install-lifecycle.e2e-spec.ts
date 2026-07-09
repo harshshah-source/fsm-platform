@@ -31,6 +31,10 @@ describe('Issue 34 — InstallLifecycleService transitions', () => {
   let deviceSeq = 9_340_000n;
   const createdTicketIds: string[] = [];
 
+  /** In-zone manager scope (Issue 102) — the ZM's home zone matches the fixture zone. */
+  const zmScope = () => ({ role: 'ZONAL_MANAGER', zoneId: Number(zoneId), userId: zmActor.userId });
+  const seScope = () => ({ role: 'SERVICE_ENGINEER', zoneId: Number(zoneId), userId: seActor.userId });
+
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
@@ -80,7 +84,7 @@ describe('Issue 34 — InstallLifecycleService transitions', () => {
 
   it('a manager schedules a REQUESTED install to an SE → SCHEDULED + assignedSe + event', async () => {
     const { ticketId } = await makeTicket('REQUESTED', null);
-    const out = await service.scheduleInstall(ticketId, seId, zmActor);
+    const out = await service.scheduleInstall(ticketId, seId, zmActor, zmScope());
     expect(out.result).toBe('OK');
     const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
     expect(t.status).toBe('SCHEDULED');
@@ -91,16 +95,16 @@ describe('Issue 34 — InstallLifecycleService transitions', () => {
 
   it('forbids a non-manager from scheduling', async () => {
     const { ticketId } = await makeTicket('REQUESTED', null);
-    expect((await service.scheduleInstall(ticketId, seId, seActor)).result).toBe('FORBIDDEN');
+    expect((await service.scheduleInstall(ticketId, seId, seActor, seScope())).result).toBe('FORBIDDEN');
   });
 
   it('rejects scheduling a non-REQUESTED ticket (wrong state)', async () => {
     const { ticketId } = await makeTicket('ON_SITE', seId);
-    expect((await service.scheduleInstall(ticketId, seId, zmActor)).result).toBe('WRONG_STATE');
+    expect((await service.scheduleInstall(ticketId, seId, zmActor, zmScope())).result).toBe('WRONG_STATE');
   });
 
   it('returns NOT_FOUND for an unknown ticket', async () => {
-    expect((await service.scheduleInstall(randomUUID(), seId, zmActor)).result).toBe('NOT_FOUND');
+    expect((await service.scheduleInstall(randomUUID(), seId, zmActor, zmScope())).result).toBe('NOT_FOUND');
   });
 
   // ---- on-site: SCHEDULED → ON_SITE ----

@@ -168,12 +168,19 @@ export class InstallController {
   @Roles(...SCHEDULER_ROLES)
   async schedule(
     @Param('ticketId') ticketId: string,
+    @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
     @Body() body: ScheduleBody,
   ): Promise<InstallViewDto> {
     const seId = (body.seId ?? '').trim();
     if (!seId) throw new BadRequestException({ code: 'MISSING_REQUIRED_FIELD', field: 'seId' });
-    return unwrap(await this.lifecycle.scheduleInstall(ticketId, seId, actor));
+    return unwrap(
+      await this.lifecycle.scheduleInstall(ticketId, seId, actor, {
+        role: user.role,
+        zoneId: user.zone_id,
+        userId: user.user_id,
+      }),
+    );
   }
 
   /** Assigned SE arrives at the fitment site: SCHEDULED → ON_SITE. */
@@ -205,8 +212,15 @@ export class InstallController {
   /** Read an Install Ticket's lifecycle + fitment serials — the Warehouse Manager verifies usage (AC#5). */
   @Get(':ticketId')
   @Roles(...INSTALL_READER_ROLES)
-  async getOne(@Param('ticketId') ticketId: string): Promise<InstallViewDto> {
-    const view = await this.lifecycle.getInstallView(ticketId);
+  async getOne(
+    @Param('ticketId') ticketId: string,
+    @CurrentUser() user: AccessTokenClaims,
+  ): Promise<InstallViewDto> {
+    const view = await this.lifecycle.getInstallView(ticketId, {
+      role: user.role,
+      zoneId: user.zone_id,
+      userId: user.user_id,
+    });
     if (!view) throw new NotFoundException({ code: 'NOT_FOUND' });
     return toDto(view);
   }

@@ -11,6 +11,18 @@ type TicketStatus = $Enums.TicketStatus;
 const MANAGER_ROLES = new Set(['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']);
 
 /**
+ * The caller's real zone authority for install scoping (Issue 102 / audit HIGH #9) — REAL role + home
+ * zone + id, exactly the `{ role: user.role, zoneId: user.zone_id }` the create/CSV path already scopes
+ * with. A ZONAL_MANAGER is clamped to their home zone; CENTRAL_SERVICE_MANAGER / OPERATIONS_HEAD (and the
+ * WAREHOUSE_MANAGER reader) keep cross-zone reach; an SE reads only its own assigned ticket.
+ */
+export interface InstallScope {
+  role: string;
+  zoneId: number | null;
+  userId: string;
+}
+
+/**
  * How long after ACTIVATED the install auto-verification waits for the first valid ping before
  * declaring FAILED_ACTIVATION. 24 h mirrors the troubleshoot verification window (Issue 18); a late
  * ping still verifies (a real device that came up late is a successful install).
@@ -80,11 +92,14 @@ export class InstallLifecycleService {
     this.notifier = notifier ?? new LoggingInstallNotifier();
   }
 
-  /** Manager dispatch: REQUESTED → SCHEDULED, assigning the SE (manager roles). */
-  async scheduleInstall(ticketId: string, seId: string, actor: RequestActor): Promise<InstallOutcome> {
+  /** Manager dispatch: REQUESTED → SCHEDULED, assigning the SE (manager roles, own-zone for a ZM). */
+  async scheduleInstall(ticketId: string, seId: string, actor: RequestActor, scope: InstallScope): Promise<InstallOutcome> {
     if (!MANAGER_ROLES.has(actor.role)) return { result: 'FORBIDDEN' };
     const ticket = await this.load(ticketId);
     if (!ticket) return { result: 'NOT_FOUND' };
+    // Zone clamp (Issue 102): a ZM cannot dispatch SEs onto an install ticket in another zone. Checked
+    // before the state read so an out-of-zone ZM can't probe a ticket's status via WRONG_STATE.
+    if (!this.zoneAllows(scope, await this.ticketZoneId(ticketId))) return { result: 'FORBIDDEN' };
     if (ticket.status !== 'REQUESTED') return { result: 'WRONG_STATE' };
     return this.transition(ticket, 'SCHEDULED', actor, 'INSTALL_SCHEDULED', { assignedSeId: seId });
   }
@@ -202,11 +217,40 @@ export class InstallLifecycleService {
     });
   }
 
-  /** Read an Install Ticket's lifecycle + fitment serials (AC#5 WM visibility). Null if not an install. */
-  async getInstallView(ticketId: string): Promise<InstallView | null> {
-    const t = await this.prisma.ticket.findUnique({ where: { ticketId } });
+  /**
+   * Read an Install Ticket's lifecycle + fitment serials (AC#5 WM visibility), zone/own-ticket scoped
+   * (Issue 102 AC#2). A ZM sees only its zone; an SE only its own assigned ticket; WM / CSM / OH keep the
+   * cross-zone read. Out of scope → null (the controller 404s) so serials — and a ticket's very existence
+   * — never leak across a zone boundary. Null too if the ticket is not an install.
+   */
+  async getInstallView(ticketId: string, scope: InstallScope): Promise<InstallView | null> {
+    const t = await this.prisma.ticket.findUnique({
+      where: { ticketId },
+      include: { plant: { select: { zoneId: true } } },
+    });
     if (!t || t.workType !== 'INSTALL') return null;
+    if (!this.zoneAllows(scope, t.plant?.zoneId ?? null)) return null;
+    if (scope.role === 'SERVICE_ENGINEER' && t.assignedSeId !== scope.userId) return null;
     return toView(t);
+  }
+
+  /** The install ticket's operational zone (via plant → zone), or null if unresolved / not found. */
+  private async ticketZoneId(ticketId: string): Promise<bigint | null> {
+    const t = await this.prisma.ticket.findUnique({
+      where: { ticketId },
+      select: { plant: { select: { zoneId: true } } },
+    });
+    return t?.plant?.zoneId ?? null;
+  }
+
+  /**
+   * Whether `scope` may act on / read an install ticket in `ticketZoneId`. A ZONAL_MANAGER is clamped to
+   * their home zone; every other role (CSM/OH cross-zone authority, WM reader) passes — the SE own-ticket
+   * rule is applied separately by the read path.
+   */
+  private zoneAllows(scope: InstallScope, ticketZoneId: bigint | null): boolean {
+    if (scope.role !== 'ZONAL_MANAGER') return true;
+    return scope.zoneId != null && ticketZoneId != null && BigInt(scope.zoneId) === ticketZoneId;
   }
 
   private async load(ticketId: string): Promise<TicketRow | null> {
