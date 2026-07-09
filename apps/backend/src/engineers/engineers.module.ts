@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
+import { AuditModule } from '../audit/audit.module';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaModule } from '../prisma/prisma.module';
+import { EngineerAdminService } from './engineer-admin.service';
 import { EngineersQueryService } from './engineers-query.service';
 import { LeaveRequestService } from './leave-request.service';
 import { SeAvailabilityService } from './se-availability.service';
@@ -11,8 +13,8 @@ import { SeAvailabilityService } from './se-availability.service';
  * consume it. Controllers follow this repo's convention of living in AppModule's `controllers` array.
  */
 @Module({
-  imports: [PrismaModule],
-  providers: [SeAvailabilityService, EngineersQueryService, InventoryService, LeaveRequestService],
-  exports: [SeAvailabilityService, EngineersQueryService, LeaveRequestService],
+  imports: [PrismaModule, AuditModule],
+  providers: [SeAvailabilityService, EngineersQueryService, InventoryService, LeaveRequestService, EngineerAdminService],
+  exports: [SeAvailabilityService, EngineersQueryService, LeaveRequestService, EngineerAdminService],
 })
 export class EngineersModule {}

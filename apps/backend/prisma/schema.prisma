@@ -108,6 +108,9 @@ model EngineerMaster {
   coverageType                 CoverageType @map("coverage_type")
   zoneId                       BigInt       @map("zone_id")
   dailyCapacity                Int          @map("daily_capacity")
+  // Admin-entered SE contact address (Phase 4 SE Management). Optional free text — SE identity + contact
+  // (name/phone/email) live on `users`; this is the one SE-profile contact field not needed for RBAC.
+  address                      String?      @map("address")
   shiftStart                   DateTime?    @map("shift_start") @db.Time(6)
   shiftEnd                     DateTime?    @map("shift_end") @db.Time(6)
   preferredNotificationChannel String?      @map("preferred_notification_channel")
