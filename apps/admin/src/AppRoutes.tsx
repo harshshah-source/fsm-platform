@@ -19,6 +19,7 @@ import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabili
 import { NonOperationalQueuePage } from './pages/readiness/NonOperationalQueuePage';
 import { RecoveryDecisionQueuePage } from './pages/readiness/RecoveryDecisionQueuePage';
 import { SeManagementPage } from './pages/engineers/SeManagementPage';
+import { SeManagementDirectoryPage } from './pages/engineers/SeManagementDirectoryPage';
 import { LeaveRequestsPage } from './pages/engineers/LeaveRequestsPage';
 import { IntradayQueuePage } from './pages/schedules/IntradayQueuePage';
 import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
@@ -83,6 +84,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <SeManagementPage />
+              </RoleRoute>
+            }
+          />
+          {/* SE Management directory — admin-entered SE CRUD + coverage, manager roles (Phase 4). */}
+          <Route
+            path="/engineers/manage"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <SeManagementDirectoryPage />
               </RoleRoute>
             }
           />

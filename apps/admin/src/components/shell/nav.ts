@@ -73,6 +73,7 @@ export function buildNav(role: string): NavGroup[] {
       { label: 'Schedules', to: '/schedules', icon: IconCalendar },
       { label: 'Intra-day Queue', to: '/intraday', icon: IconClock },
       { label: 'SE Activity', to: '/engineers', icon: IconActivity },
+      { label: 'Manage SEs', to: '/engineers/manage', icon: IconShield },
       { label: 'SE Planner', to: '/engineers/planner', icon: IconRoute },
       { label: 'Verification Review', to: '/verification', icon: IconShield },
       { label: 'Readiness & Vehicle', to: '/readiness/vehicle-unavailability', icon: IconTruck },
