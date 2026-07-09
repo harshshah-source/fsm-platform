@@ -1,14 +1,21 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LoginError } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
 import { Button } from '../components/ui/Button';
 import { IconCheck, IconEye, IconEyeOff, IconLock, IconMail } from '../components/ui/icons';
 
+/** Login failure `code` → operator message. 401 = wrong credentials; anything else = backend unreachable. */
+const LOGIN_MESSAGE: Record<string, string> = {
+  INVALID_CREDENTIALS: 'Invalid email or password',
+  SERVICE_UNAVAILABLE: 'Service unavailable — please try again in a moment',
+};
+
 // Dark inputs are styled inline (the login is the one dark-on-dark surface) rather than via the shared
 // light `Input` primitive, so the dark classes win without a class-merge dependency.
 const darkInput =
-  'h-9 w-full rounded-md border border-chrome-700 bg-chrome-900/60 text-sm text-white ' +
-  'placeholder:text-chrome-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40';
+  'h-10 w-full rounded-md border border-white/10 bg-chrome-900/70 text-sm text-white shadow-sm ' +
+  'placeholder:text-chrome-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-luxury-300/45';
 
 // KPI tiles + feature list are static marketing chrome from the reference (00-login).
 const STATS = [
@@ -29,7 +36,7 @@ const FEATURES = [
  * KPI tiles on the left, the sign-in card on the right. The `useAuth().login` flow is unchanged.
  */
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, sessionExpired, clearSessionExpired } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,12 +47,15 @@ export function LoginPage() {
   const onSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
     setError(null);
+    clearSessionExpired();
     setSubmitting(true);
     try {
       await login(email, password);
       navigate('/', { replace: true });
-    } catch {
-      setError('Invalid email or password');
+    } catch (err) {
+      // 401 = invalid credentials; network/5xx = service unavailable (Issue 109 — honest errors).
+      const code = err instanceof LoginError ? err.code : 'INVALID_CREDENTIALS';
+      setError(LOGIN_MESSAGE[code] ?? LOGIN_MESSAGE.INVALID_CREDENTIALS);
     } finally {
       setSubmitting(false);
     }
@@ -53,19 +63,19 @@ export function LoginPage() {
 
   return (
     <div
-      className="grid min-h-screen bg-chrome-900 text-white lg:grid-cols-2"
+      className="grid min-h-screen bg-chrome-900 text-white lg:grid-cols-[1.05fr_0.95fr]"
       style={{
         // Faint blueprint grid over the dark chrome, matching the 00-login reference backdrop.
         backgroundImage:
-          'linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)',
+          'radial-gradient(circle at 18% 12%, rgba(234,209,154,0.16), transparent 28rem), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)',
         backgroundSize: '48px 48px',
       }}
     >
       {/* Left — brand + marketing + KPI tiles (hidden on small screens) */}
-      <div className="relative hidden flex-col justify-between p-12 lg:flex">
+      <div className="relative hidden flex-col justify-between overflow-hidden p-12 lg:flex">
         <div>
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-lg font-bold">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-b from-brand-600 to-brand-700 text-lg font-bold shadow-lg shadow-brand-700/25">
               A
             </span>
             <div>
@@ -74,10 +84,10 @@ export function LoginPage() {
             </div>
           </div>
 
-          <h1 className="mt-16 max-w-md text-4xl font-bold leading-tight">
+          <h1 className="mt-16 max-w-lg text-5xl font-semibold leading-[1.05]">
             Manage Fleet Operations <span className="text-brand-600">Faster.</span>
           </h1>
-          <p className="mt-4 max-w-sm text-sm text-chrome-text">
+          <p className="mt-5 max-w-md text-base leading-7 text-chrome-text">
             Monitor tickets, track SLA compliance, manage field engineers, and maintain complete fleet
             visibility from a unified platform.
           </p>
@@ -85,7 +95,7 @@ export function LoginPage() {
 
         <div className="grid max-w-md grid-cols-2 gap-4">
           {STATS.map((s) => (
-            <div key={s.label} className="rounded-card border border-chrome-700 bg-chrome-800/60 p-4">
+            <div key={s.label} className="rounded-card border border-white/10 bg-white/5 p-4 shadow-card backdrop-blur">
               <div className="text-xs text-chrome-muted">{s.label}</div>
               <div className="mt-1 text-2xl font-bold">{s.value}</div>
             </div>
@@ -95,13 +105,19 @@ export function LoginPage() {
 
       {/* Right — sign-in card */}
       <div className="flex items-center justify-center p-6">
-        <div className="w-full max-w-sm rounded-card border border-chrome-700 bg-chrome-800/60 p-8">
-          <h2 className="text-2xl font-semibold">Welcome Back</h2>
+        <div className="w-full max-w-sm rounded-card border border-white/10 bg-chrome-800/75 p-8 shadow-floating backdrop-blur-xl">
+          <h2 className="text-2xl font-semibold tracking-tight">Welcome Back</h2>
           <p className="mt-1 text-sm text-chrome-muted">Sign in to continue to Autoplant Platform.</p>
+
+          {sessionExpired && (
+            <p role="status" className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              Your session expired. Please sign in again.
+            </p>
+          )}
 
           <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="email" className="text-xs font-medium text-chrome-text">
+              <label htmlFor="email" className="text-[0.7rem] font-semibold uppercase tracking-wide text-chrome-text">
                 Email Address
               </label>
               <div className="relative">
@@ -119,7 +135,7 @@ export function LoginPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="password" className="text-xs font-medium text-chrome-text">
+              <label htmlFor="password" className="text-[0.7rem] font-semibold uppercase tracking-wide text-chrome-text">
                 Password
               </label>
               <div className="relative">
@@ -148,7 +164,7 @@ export function LoginPage() {
               <label className="flex items-center gap-2 text-chrome-text">
                 <input type="checkbox" className="h-3.5 w-3.5 rounded border-chrome-700" /> Remember me
               </label>
-              <a href="#" className="font-medium text-brand-600 hover:underline">
+              <a href="#" className="font-semibold text-luxury-300 hover:text-white hover:underline">
                 Forgot Password?
               </a>
             </div>
@@ -164,10 +180,10 @@ export function LoginPage() {
             </Button>
           </form>
 
-          <ul className="mt-6 space-y-2 border-t border-chrome-700 pt-6 text-xs text-chrome-text">
+          <ul className="mt-6 space-y-2 border-t border-white/10 pt-6 text-xs text-chrome-text">
             {FEATURES.map((f) => (
               <li key={f} className="flex items-center gap-2">
-                <IconCheck className="h-3.5 w-3.5 text-success" /> {f}
+                <IconCheck className="h-3.5 w-3.5 text-luxury-300" /> {f}
               </li>
             ))}
           </ul>

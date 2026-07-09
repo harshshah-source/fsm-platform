@@ -1,12 +1,18 @@
 import type { SessionView } from '@fsm/shared';
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { apiLogin, apiMe } from '../api/client';
+import { apiRefresh, setOnSessionExpired } from '../api/http';
+import { clearTokens, getAccessToken, setTokens } from '../api/tokens';
 
-const TOKEN_KEY = 'fsm.accessToken';
 const ACTING_ZONE_KEY = 'fsm.actingZone';
 
 interface AuthContextValue {
   session: SessionView | null;
+  /** True while a stored token is being rehydrated via `/me` on mount — gate the shell, don't bounce. */
+  loading: boolean;
+  /** Set when a session ended because it could not be refreshed — LoginPage renders a "session expired" notice. */
+  sessionExpired: boolean;
+  clearSessionExpired: () => void;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   /** The zone a CSM / Operations Head is currently acting in as ZM (backup cascade, Issue 27); null = not acting. */
@@ -23,6 +29,16 @@ function readActingZone(): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+/** Decode a JWT's `exp` (seconds since epoch) without verifying — for proactive-refresh scheduling only. */
+function decodeExpMs(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1] ?? '')) as { exp?: number };
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({
   children,
   initialSession = null,
@@ -32,16 +48,85 @@ export function AuthProvider({
   initialSession?: SessionView | null;
 }) {
   const [session, setSession] = useState<SessionView | null>(initialSession);
+  // Loading only when we must rehydrate a stored token (no seeded session + a token present).
+  const [loading, setLoading] = useState<boolean>(initialSession == null && getAccessToken() != null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [actingZone, setActingZoneState] = useState<number | null>(readActingZone);
+  const proactiveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Schedule a refresh ~1 min before the access token expires (reactive 401 refresh is the backstop). */
+  const scheduleProactiveRefresh = (accessToken: string): void => {
+    if (proactiveTimer.current) clearTimeout(proactiveTimer.current);
+    const expMs = decodeExpMs(accessToken);
+    if (expMs == null) return;
+    const delay = expMs - Date.now() - 60_000;
+    if (delay <= 0) return;
+    proactiveTimer.current = setTimeout(() => {
+      void apiRefresh().then((token) => {
+        if (token) scheduleProactiveRefresh(token);
+      });
+    }, delay);
+  };
+
+  // The session ended and could not be refreshed (revoked / rotation reuse / expired refresh token).
+  useEffect(() => {
+    setOnSessionExpired(() => {
+      if (proactiveTimer.current) clearTimeout(proactiveTimer.current);
+      clearTokens();
+      sessionStorage.removeItem(ACTING_ZONE_KEY);
+      setActingZoneState(null);
+      setSession(null);
+      setSessionExpired(true);
+    });
+  }, []);
+
+  // Rehydrate a stored session on reload — a loading gate, never a login bounce.
+  useEffect(() => {
+    if (initialSession != null) return;
+    const token = getAccessToken();
+    if (!token) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const me = await apiMe(token);
+        if (!cancelled) {
+          setSession(me);
+          scheduleProactiveRefresh(getAccessToken() ?? token);
+        }
+      } catch {
+        // Access token no longer valid — try the rotating refresh once before giving up.
+        const refreshed = await apiRefresh();
+        if (cancelled) return;
+        if (refreshed) {
+          try {
+            setSession(await apiMe(refreshed));
+            scheduleProactiveRefresh(refreshed);
+          } catch {
+            clearTokens();
+          }
+        } else {
+          clearTokens(); // invalid/expired token → land on login cleanly (no notice; this is a reload)
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const login = async (email: string, password: string): Promise<void> => {
-    const { accessToken } = await apiLogin({ email, password });
-    sessionStorage.setItem(TOKEN_KEY, accessToken);
+    const { accessToken, refreshToken } = await apiLogin({ email, password });
+    setTokens(accessToken, refreshToken);
     setSession(await apiMe(accessToken));
+    setSessionExpired(false);
+    scheduleProactiveRefresh(accessToken);
   };
 
   const logout = (): void => {
-    sessionStorage.removeItem(TOKEN_KEY);
+    if (proactiveTimer.current) clearTimeout(proactiveTimer.current);
+    clearTokens();
     sessionStorage.removeItem(ACTING_ZONE_KEY);
     setActingZoneState(null);
     setSession(null);
@@ -54,7 +139,18 @@ export function AuthProvider({
   };
 
   return (
-    <AuthContext.Provider value={{ session, login, logout, actingZone, setActingZone }}>
+    <AuthContext.Provider
+      value={{
+        session,
+        loading,
+        sessionExpired,
+        clearSessionExpired: () => setSessionExpired(false),
+        login,
+        logout,
+        actingZone,
+        setActingZone,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
