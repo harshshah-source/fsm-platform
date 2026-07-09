@@ -1,5 +1,10 @@
 # 102 — Install-lifecycle zone scoping (close cross-zone privilege escalation)
-Status: ready-for-agent
+Status: done (2026-07-09, commit `f48108f`, TDD) — `InstallScope` (real role + home zone + id) threaded
+from `@CurrentUser()` into `scheduleInstall` (ZM out-of-zone → FORBIDDEN, checked before the state read)
+and `getInstallView` (ZM clamped to home zone; SE own-assigned-ticket only; WM/CSM/OH cross-zone serial
+read preserved, AC#5); `markOnSite`/`markFitted` already deny a ZM via the assigned-SE guard. New
+`install-lifecycle-zone-scope.e2e` (in/out-of-zone schedule, CSM/OH cross-zone, ZM/SE read clamp, WM/CSM/OH
+serial read) + existing install specs updated; 30 install tests green, tsc clean, no HTTP-e2e regression.
 Type: AFK
 
 > Source: `docs/audits/2026-07-03-backend-production-readiness-audit.md` — HIGH #9. Verified

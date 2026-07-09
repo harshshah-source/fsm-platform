@@ -1,5 +1,15 @@
 # 101 — Write-safety: `transitionOrConflict` helper + guarded state transitions across state machines
-Status: ready-for-agent
+Status: partial (2026-07-09, commit `9940534`, TDD) — AC#1 landed: the shared `transitionOrConflict`
+primitive (`src/common/transition-or-conflict.ts`, guarded `updateMany` + count → `{won}`), unit-tested.
+Applied to the **intraday accept-vs-timeout** site (the first race that fires once dispatch runs
+unattended): `accept` claims PENDING_ACCEPTANCE→ACCEPTED guarded by its own offer before assigning;
+`reroute` (timeout/decline) claims on status+offeredSeId+retryCount and NO-OPs on loss; migration
+`20260709120000` adds the one-live-offer-per-ticket partial unique (`fireForZone` treats P2002 as a skip).
+Concurrency e2e proves exactly one winner + no double assignment.
+**Still open** (this issue stays partial): troubleshoot-submission vs auto-recovery, two-SE double-submit +
+van-stock `qty { decrement }` + `CHECK (qty >= 0)` + shadow-use `clientSubmissionId` persistence, non-op
+dual-confirm, overlapping verification sweeps, `component-request.confirmResubmit`, and the lower-blast
+members — each adopts the now-existing helper.
 Type: AFK
 
 > Source: `docs/audits/2026-07-03-backend-production-readiness-audit.md` — CRITICAL #3 (+ the
