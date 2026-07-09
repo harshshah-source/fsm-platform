@@ -54,8 +54,8 @@ export interface SeManagementRow {
   coverageType: string;
   dailyCapacity: number;
   isActive: boolean;
-  /** Mapped plants (SE→plant coverage). */
-  plants: { id: number; name: string }[];
+  /** Mapped plants (SE→plant coverage); `coverageId` is the se_coverage row id (for removal). */
+  plants: { id: number; name: string; coverageId: number }[];
   /** SE→company mapping is not modeled (Plant carries no company FK); always empty — the UI renders "—". */
   companies: { id: number; name: string }[];
 }
@@ -333,7 +333,7 @@ function toRow(e: EngineerWithRels): SeManagementRow {
     coverageType: e.coverageType,
     dailyCapacity: e.dailyCapacity,
     isActive: e.isActive,
-    plants: e.coverage.map((c) => ({ id: Number(c.plantId), name: c.plant.name })),
+    plants: e.coverage.map((c) => ({ id: Number(c.plantId), name: c.plant.name, coverageId: Number(c.id) })),
     companies: [],
   };
 }

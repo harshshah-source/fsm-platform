@@ -165,9 +165,16 @@ describe('Phase 4 — EngineerAdminService (SE Management CRUD + recommender int
     await reject(svc.addCoverage(se.seId, Number(plantB), 'DEDICATED', ohScope, actor), 'CROSS_ZONE_COVERAGE_FORBIDDEN');
     await reject(svc.addCoverage(se.seId, Number(plantA), 'FLOATING', ohScope, actor), 'FLOATING_USES_TERRITORY');
 
-    // The mapping shows up on the directory row.
+    // The mapping shows up on the directory row, carrying the se_coverage row id for removal.
     const row = (await svc.list(ohScope)).find((r) => r.seId === se.seId);
     expect(row?.plants.map((p) => p.id)).toContain(Number(plantA));
+    const mapped = row!.plants.find((p) => p.id === Number(plantA))!;
+    expect(mapped.coverageId).toBe(cov.id);
+
+    // Remove it by the exposed coverageId → gone from the row.
+    await svc.removeCoverage(se.seId, mapped.coverageId, ohScope, actor);
+    const after = (await svc.list(ohScope)).find((r) => r.seId === se.seId);
+    expect(after?.plants).toHaveLength(0);
   });
 
   it('a ZM cannot add coverage to an out-of-zone SE (NOT_FOUND)', async () => {

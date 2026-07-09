@@ -9,6 +9,8 @@ const TOKEN_KEY = 'fsm.accessToken';
 export interface MappedPlant {
   id: number;
   name: string;
+  /** se_coverage row id — present on directory rows so the UI can remove the mapping. */
+  coverageId?: number;
 }
 
 export interface SeDirectoryRow {

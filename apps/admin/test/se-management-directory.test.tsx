@@ -31,7 +31,7 @@ const DIR_ROW = {
   coverageType: 'DEDICATED',
   dailyCapacity: 10,
   isActive: true,
-  plants: [{ id: 5, name: 'Pune Depot' }],
+  plants: [{ id: 5, name: 'Pune Depot', coverageId: 77 }],
   companies: [],
 };
 
@@ -125,6 +125,21 @@ describe('SE Management directory (Phase 4)', () => {
       expect(body).toContain('"name":"Ravi K"');
       expect(body).toContain('"zoneId":1');
     });
+  });
+
+  it('removes a mapped plant via its coverage id from the edit panel', async () => {
+    let deleted: string | null = null;
+    stubReads((u, opts) => {
+      if (u.includes('/engineers/se-1/coverage/77') && (opts?.method ?? 'GET') === 'DELETE') {
+        deleted = u;
+        return json({ id: 77 });
+      }
+      return undefined;
+    });
+    renderPage(OH);
+    await userEvent.click(await screen.findByText('Asha Rao')); // select the row → open the edit panel
+    await userEvent.click(await screen.findByRole('button', { name: /remove pune depot/i }));
+    await waitFor(() => expect(deleted).toContain('/engineers/se-1/coverage/77'));
   });
 
   it('maps a backend validation code to an inline message', async () => {

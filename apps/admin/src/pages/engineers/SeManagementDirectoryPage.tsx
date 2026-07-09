@@ -12,6 +12,7 @@ import {
   addSeCoverage,
   createSe,
   listSeDirectory,
+  removeSeCoverage,
   setSeActive,
   updateSe,
 } from '../../api/engineersAdmin';
@@ -180,6 +181,17 @@ export function SeManagementDirectoryPage() {
   };
   const setE = (key: keyof typeof edit) => (value: string) => setEdit((s) => ({ ...s, [key]: value }));
 
+  const dropCoverage = async (coverageId: number) => {
+    if (!selected) return;
+    setPanelError(null);
+    try {
+      await removeSeCoverage(selected.seId, coverageId);
+      load();
+    } catch (err) {
+      setPanelError(messageFor(codeOf(err)));
+    }
+  };
+
   const columns: Column<SeDirectoryRow>[] = [
     {
       key: 'name',
@@ -344,7 +356,19 @@ export function SeManagementDirectoryPage() {
               {selected.plants.length === 0 && <div className="text-ink-muted">No mapped plants</div>}
               <ul className="text-ink">
                 {selected.plants.map((p) => (
-                  <li key={p.id}>{p.name}</li>
+                  <li key={p.id} className="flex items-center justify-between gap-2">
+                    <span>{p.name}</span>
+                    {p.coverageId != null && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${p.name}`}
+                        onClick={() => void dropCoverage(p.coverageId!)}
+                        className="text-xs text-critical hover:underline"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </li>
                 ))}
               </ul>
               <div className="mt-2 flex flex-col gap-2">
