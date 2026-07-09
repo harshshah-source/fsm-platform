@@ -1,5 +1,12 @@
 # 109 — Admin session lifecycle: token refresh, 401 handling, session restore on reload
-Status: ready-for-agent
+Status: done (2026-07-09, TDD) — rotating refresh token persisted (`api/tokens.ts`); central 401 policy
+(`api/http.ts` `makeAuthFetch` installed over `window.fetch` once — single-flight rotating refresh →
+retry-once → on failure clear + expiry hook; covers all 26 api modules untouched); mount rehydration via
+`/me` behind a loading gate in `AuthProvider` + `ProtectedRoute` (no login bounce; proactive refresh ~1 min
+before JWT exp); honest login errors (`LoginError` 401=INVALID_CREDENTIALS / network·5xx=SERVICE_UNAVAILABLE)
++ "session expired" notice on `LoginPage`. 9 vitest (expiry→refresh→retry, rotation reuse→logout, error
+mapping, rehydration, expiry notice); full admin suite 211 green, tsc + build clean. httpOnly-cookie upgrade
+remains #91's.
 Type: AFK
 
 > Source: 2026-07-07 independent re-audit (new finding — frontend; no prior issue owns it).
