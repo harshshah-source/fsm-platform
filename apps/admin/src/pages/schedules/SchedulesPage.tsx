@@ -1,9 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiListSchedules, type ScheduleRow } from '../../api/schedules';
-import { DataTable, MetricStrip, PageHeader, type Column, type Metric } from '../../components/data';
+import {
+  DataTable,
+  EmptyState,
+  MetricStrip,
+  PageHeader,
+  type Column,
+  type Metric,
+} from '../../components/data';
 import { Badge } from '../../components/ui';
 import type { BadgeTone } from '../../components/ui/Badge';
+import { IconCalendar } from '../../components/ui/icons';
 
 /**
  * ZM Batch-Schedule list (Issue 13b AC#1 · FE-12 parity, reference 12). One row per SE Work Schedule with
@@ -26,9 +34,10 @@ export function SchedulesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let alive = true;
     setLoading(true);
+    setError(null);
     apiListSchedules()
       .then((r) => alive && setRows(r))
       .catch(() => alive && setError('Failed to load schedules'))
@@ -37,6 +46,8 @@ export function SchedulesPage() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => load(), [load]);
 
   const metrics: Metric[] = useMemo(() => {
     const overridden = rows.filter((r) => r.status === 'OVERRIDDEN').length;
@@ -82,11 +93,6 @@ export function SchedulesPage() {
         title="Batch Schedule"
         subtitle="Auto-assigned SE day plans — monitoring only. Batches dispatch automatically; no approval gate."
       />
-      {error && (
-        <p role="alert" className="mb-4 text-sm text-critical">
-          {error}
-        </p>
-      )}
       <MetricStrip metrics={metrics} />
       <DataTable
         ariaLabel="Batch Schedules"
@@ -94,8 +100,16 @@ export function SchedulesPage() {
         columns={columns}
         rows={rows}
         loading={loading}
+        error={error}
+        onRetry={load}
+        stickyHeader
         onRowClick={(r) => navigate(`/schedules/${r.seId}`)}
-        empty="No schedules in scope."
+        empty={
+          <EmptyState
+            icon={<IconCalendar />}
+            message="No SE day plans in scope yet. Auto-assigned batches will appear here as they dispatch."
+          />
+        }
       />
     </div>
   );
