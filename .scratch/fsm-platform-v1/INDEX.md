@@ -39,7 +39,7 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 - 06 — Zone Dashboard Home → 05  *(done)*
 - 07 — Ticket List & Detail Drawer → 05  *(done)*
 - 08 — Auto-recovery + repeat-failure detection → 05  *(done)*
-- 97 — AutoPlant ingestion pipeline: continuous, recoverable, unattended operation → 04, 05, 96  *(ready-for-agent — completes the **ingestion half** per the 2026-07-05 engineering review (Part III §A1–A6). One issue, 7 mergeable TDD slices: MySQL fail-fast timeouts (A4) · shared stale-run reaper for both run tables (A2) · PARTIAL-cursor lower-bound fix (A3) · itemised master-sync skip accounting + `master_sync_rejects` (A5) · source-vs-FSM reconciliation in `/integration/health` (A6) · overlap-safe telemetry tick · in-process `@nestjs/schedule` scheduler (A1, arch pre-decided by review). New dep: `@nestjs/schedule` only — no Redis/BullMQ. Read-only + `<100`-row cap + idempotency preserved. **Acting half (ticket creation → recommender → dispatch) explicitly out of scope** — gated on the eligibility decision (review B7, empty `pgi_history`).)*
+- 97 — AutoPlant ingestion pipeline: continuous, recoverable, unattended operation → 04, 05, 96  *(**done (code) / ready-for-human (runtime)** — all 7 TDD slices landed & committed per the 2026-07-05 engineering review (Part III §A1–A6): MySQL fail-fast timeouts (A4) · shared stale-run reaper for both run tables (A2, committed `3c6b460`) · PARTIAL-cursor lower-bound fix + worker read-error fall-through to `finishRun` (A3, `snapshot-ingestion.worker.ts:70-104,130`) · itemised master-sync skip accounting + `master_sync_rejects` (A5) · source-vs-FSM reconciliation in `/integration/health` (A6) · overlap-safe telemetry tick · in-process `@nestjs/schedule` scheduler (A1, `integration-scheduler.service.ts` + `ScheduleModule.forRoot()`). Status board: [`97-PROGRESS.md`](./issues/97-PROGRESS.md) line 299 ("ALL 7 SLICES DONE ✅ 2026-07-06"); [`97-HANDOFF.md`](./issues/97-HANDOFF.md) is stale (marked superseded 2026-07-09). New dep: `@nestjs/schedule` only — no Redis/BullMQ. **Remaining is not code:** ops flips `INGESTION_SCHEDULER_ENABLED=true` after zone ratification (B8); live-VPN runtime verification (§7) needs external access (HITL). **Acting half (ticket creation → recommender → dispatch) explicitly out of scope** — gated on the eligibility decision (review B7, empty `pgi_history`).)*
 
 ## P2 — Recommender & scheduling
 - 09 — Coverage / territory config + MVs → 02  *(done)*
@@ -87,8 +87,10 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 Hardening slices derived from `docs/audits/2026-07-03-backend-production-readiness-audit.md`, filed
 2026-07-07 after verifying each finding against the current `feat/autoplant-integration` code (the
 audit predates commits R3/R4-A/R4-B + the in-process scheduler, so already-resolved findings — #1
-scheduler, #6 set-based recompute + raw-snapshot partitioning — were **not** re-filed; #4 reaper /
-#8 in-memory auth remain owned by **#97** / **#91**). All backend/test-only, `ready-for-agent`.
+scheduler, #6 set-based recompute + raw-snapshot partitioning — were **not** re-filed; audit #4 reaper
+is now **resolved** — shipped as #97 Slice 2, committed `3c6b460` (`stale-run.ts` + `reapStaleRuns()` in
+`snapshot-run.service.ts:43`); #8 in-memory auth remains owned by **#91**). All backend/test-only,
+`ready-for-agent`.
 
 - 98 — Boot & ops hardening: fail-fast env validation + remove fallback JWT secret + `enableShutdownHooks` + `/api/health` + global exception filter/pino/correlation-id → *(audit #5 residual, #7)*
 - 99 — Global `APP_GUARD` (`@Public()` opt-out) + `ValidationPipe` + body/CSV limits + route-guard sweep → *(audit #10)*
@@ -118,6 +120,23 @@ behind 98–107 still open, and four **new** findings:
 > **Flagged, not filed** (per 2026-07-07 triage):
 > (b) **Transactional notification outbox** (audit medium) → owned as added scope on **#76**, landing
 > with the first real channel adapter, not a separate issue.
+
+### Funnel status (verified against the tree 2026-07-09)
+
+The end-to-end funnel is **code-complete and wired**; activation is blocked by data + two paused ops
+switches, **not** by missing code. "Code" = mechanism present & tested; "Data" = the dev/prod DB lacks
+the rows the stage consumes; "Paused" = an audited ops toggle deliberately left OFF.
+
+| Stage | Owner issue | Code status | What blocks activation |
+|---|---|---|---|
+| Ingest (masters → snapshots → `device_states`) | #96, #97 | ✅ done & committed (`97-PROGRESS.md:299`) | **Paused** — `INGESTION_SCHEDULER_ENABLED=true` after zone ratification (B8); live-VPN verify = HITL (external access). Data present (`device_states` 18,528) |
+| Ticket creation (inactive+eligible → OPEN ticket) | #112 | ✅ done (`integration-sync.service.ts:78→80`, `:130→132`) | **Paused (business)** — `eligibility_mode='pgi'` over empty `pgi_history` (B7) → 0 eligible → 0 ticket-candidates today. Interim `all-deployed` proxy exists but is an ops/business decision |
+| Recommender (score + hard filters → SUGGESTED) | #10, #72, #75 | ✅ done (`recommender.service.ts`) | **Data** — 0 `engineer_master` / 0 `se_coverage` / empty `plant_eligible_floating_se` → every ticket UNASSIGNABLE. Gated on the pending engineers-seed decision |
+| Dispatch (SUGGESTED → Day Plan, transactional/idempotent) | #100, #113 | ✅ done (`batch-assignment.service.ts:52`, `dispatch-run.service.ts`, cron `dispatch-scheduler.service.ts:50`) | **Paused** — shares `BUSINESS_SWEEPS_ENABLED` (default OFF). Also **Data** — 0 candidates upstream |
+| Field loop (intraday / verification / install sweeps) | #29/#30, #18/#19, #34, #108 | ✅ done — 10 sweeps registered (`business-sweep-scheduler.service.ts:143-191`) | **Paused** — `BUSINESS_SWEEPS_ENABLED` (default OFF). **Code hardening open:** #101 (guarded transitions), #102 (install zone scope), #103 (hot-FK indexes) |
+
+**Root blockers, ranked:** (1) engineers/coverage data — a *tested* seed script would unblock the pending
+decision without taking it; (2) B7 eligibility decision; (3) the two ops toggles. All code seams exist.
 
 ## Follow-ups (deep review)
 - 45 — Plants Admin UI → 02  *(done — Plants tab (zone-picker create + list) + SE-Coverage plant picker; closes Issue 02 AC#2)*

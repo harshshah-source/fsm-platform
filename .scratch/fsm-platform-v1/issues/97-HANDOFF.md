@@ -1,5 +1,15 @@
 # Issue 97 — Session Handoff (2026-07-05)
 
+> ⚠️ **SUPERSEDED / STALE (reconciled 2026-07-09).** This handoff describes Slice 2 as
+> "IN PROGRESS, PAUSED, uncommitted" and Slices 3–7 as not started. That is no longer true.
+> **All 7 slices are DONE and committed** — see [`97-PROGRESS.md`](./97-PROGRESS.md) line 299
+> ("ALL 7 SLICES DONE ✅ 2026-07-06"). Evidence in the tree: the reaper (Slice 2) is committed
+> `3c6b460`; the worker read-error / PARTIAL-cursor path (Slice 3) is live at
+> `apps/backend/src/ingestion/snapshot-ingestion.worker.ts:70-104,130`; the `@nestjs/schedule`
+> scheduler (Slice 7) is `integration-scheduler.service.ts` + `ScheduleModule.forRoot()` in
+> `ingestion.module.ts:65`. The "Do this first / Finish Slice 2 / Then Slices 3–7" sections below are
+> **historical only — do not action them.** Read `97-PROGRESS.md` for current status.
+
 **Task:** Implement Issue 97 (complete the AutoPlant ingestion pipeline) via `/tdd`, one slice per
 commit. Branch: `feat/autoplant-integration`. Backend at `apps/backend`.
 

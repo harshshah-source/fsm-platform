@@ -1,6 +1,10 @@
 # 97 — AutoPlant ingestion pipeline: continuous, recoverable, unattended operation
 
-Status: ready-for-agent
+Status: done (code) / ready-for-human (runtime) — all 7 TDD slices landed & committed (`97-PROGRESS.md`
+line 299, "ALL 7 SLICES DONE ✅ 2026-07-06"; reaper committed `3c6b460`; read-error/PARTIAL-cursor path
+in `snapshot-ingestion.worker.ts:70-104,130`). Remaining is NOT code: (a) ops flips
+`INGESTION_SCHEDULER_ENABLED=true` after zone ratification (B8); (b) runtime verification against the live
+VPN source (§7) needs external access — HITL. The acting half stays gated on B7 (§11).
 Type: engineering (tracer-bullet; one architecture-HITL point pre-decided by the 2026-07-05 review)
 Depends on: 04 (snapshot path), 05 (device-state), 96 (master-sync core). Related: 65 (readiness seam).
 Authority: [`docs/architecture/backend-engineering-review-2026-07-05.md`](../../../docs/architecture/backend-engineering-review-2026-07-05.md)
