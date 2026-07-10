@@ -655,4 +655,117 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 
 ---
 
-*(Sections 6–8 follow.)*
+## 6. ACTIVATION & OPERATIONS STATE
+
+### 6.1 Settings (`system_settings`, OH-owned, audited)
+
+| Key | Default / effect | Current live value |
+|---|---|---|
+| `eligibility_mode` | `pgi` (canonical — requires PGI feed, i.e. 0 eligible today) \| `all-deployed` (interim proxy: vehicle status ∈ ACTIVE/DEPLOYED). Applied at next recompute; harmless to set while schedulers OFF | `[UNVERIFIED — dev DB not queried this session; default is pgi]` |
+| `inactivity_threshold_hours` | 24 (`device-state.service.ts:8`) | `[UNVERIFIED]` |
+| `telemetry_retention_days` | drives partition drops (`partition-maintenance.service.ts:62`) | `[UNVERIFIED]` |
+| soft-inactive `threshold_pct` | 2% default (#40) — DEFICIT/PREVENTIVE switch | `[UNVERIFIED]` |
+
+### 6.2 Env flags (all master switches default OFF; cron strings read once at boot)
+
+| Flag | Effect |
+|---|---|
+| `INGESTION_SCHEDULER_ENABLED=true` | self-running pipeline: masters daily 02:00, telemetry */30 |
+| `PARTITION_MAINTENANCE_ENABLED=true` | **must flip together with the above** — else pings pile into the DEFAULT partition after the 3-day runway and retention never runs |
+| `INGESTION_STALE_RUN_MIN` | reaper threshold — set above telemetry cadence |
+| `BUSINESS_SWEEPS_ENABLED=true` | dispatch cron + 10 field-loop/aggregation sweeps (§3g) |
+| `BUSINESS_SWEEP_*_CRON`, `INGESTION_*_CRON` | per-tick overrides (§3g table) |
+| `AUTOPLANT_*` (MySQL host/creds/schemas, `AUTOPLANT_SOURCE_UTC_OFFSET_MIN`) | unset ⇒ mock/empty sources, app boots fine |
+| `JWT_ACCESS_SECRET` | **falls back to a hardcoded dev value if unset** (#98) |
+| `PORT`, `ADMIN_ORIGIN` | 3000 / `http://localhost:5173` defaults |
+
+### 6.3 What blocks activation — classified
+
+- **Data-blocked**: SE roster + coverage (`engineer_master`/`se_coverage` empty in prod-shaped DBs;
+  admin-enterable via `/engineers/manage`, tested seed exists — commit `0df556a`); zone mappings
+  (83% UNZONED until Ops ratifies, B8); `pgi_history` (needs #116 or the proxy).
+- **Decision-blocked**: B7 eligibility mode (business accepts the `all-deployed` proxy or waits for
+  PGI); B8 zone ratification; credential-column placement for #91 (HITL).
+- **Code-blocked**: nothing in the funnel itself (INDEX funnel table, re-verified §3). Hardening
+  that *should* precede real traffic: #101-rest/#103/#99/#98/#110 (§7).
+- **Access-blocked (HITL)**: live-VPN runtime verification of the scheduler (#97 tail), SAP PGI
+  contract (#116), external notification channel accounts (#76), deployment target (#111).
+
+**Enable order** (INDEX.md:141-160, verified against code): (1) set `eligibility_mode`; (2) flip
+`INGESTION_SCHEDULER_ENABLED` **+** `PARTITION_MAINTENANCE_ENABLED` as one switch + set
+`INGESTION_STALE_RUN_MIN`; (3) flip `BUSINESS_SWEEPS_ENABLED` only once SE/coverage data exists
+(else every ticket → UNASSIGNABLE). Manual HTTP triggers exercise every path with flags OFF.
+
+---
+
+## 7. FORWARD PLAN (corrected priority order)
+
+**Track A — activate the funnel (no code):** A1 zone ratification + mapping entry (B8; unblocks
+UNZONED); A2 enter SE roster + coverage (or run the tested mock seed in dev); A3 B7 decision →
+set `eligibility_mode`; A4 flip the paired ingestion+partition switches; A5 flip business sweeps.
+Risk if skipped: the platform stays a demo. Prereqs: Ops-Head availability only.
+
+**Track B — hardening before real traffic** (order matters):
+1. **#91 auth store** (+ its #109 leftover: httpOnly refresh cookie) — prereq for any exposure;
+   HITL decision on credential placement. Risk: total.
+2. **#98 boot/ops** (fail-fast env incl. JWT secret, health, shutdown hooks, exception filter) —
+   cheap, unblocks #111. 
+3. **#99 global guard + ValidationPipe** — closes the silently-public-endpoint class.
+4. **#110 rate limiting** — with #91/#98, completes the auth surface.
+5. **#101 remaining races** — before `BUSINESS_SWEEPS_ENABLED` + concurrent SEs (§5.5 list is the
+   worklist; the helper + pattern exist).
+6. **#103 hot-FK indexes** — cheap, before ticket volume grows.
+7. **#107 CI** — before any second contributor; the OOM box makes local green unreliable.
+8. **#106 perf** (LIMIT, pool, timeout, cache) → **#104 retention matrix** → **#105 wiring** —
+   medium urgency, pre-scale.
+9. **#111 deployment/runbook** (HITL infra target) + **#115 docs tracking policy** + **#114
+   gitignore fix** — the "survives a disk failure / fresh clone" set.
+
+**Track C — product completion:** #116 PGI feed (HITL, restores canonical eligibility +
+Fleet-Uptime); #93 cross-zone read model; #94 ticket chrome enrichment; #90 report aggregations;
+#79/#80 FE polish; #51 expected-components; #65 vehicle readiness source; #95 warehouse
+replenishment; #74 scorecard causality; #76 notification adapters (HITL accounts).
+
+**Track D — mobile:** #54 foundation (blocks all M-series) → #81–#84 backend deps → #55–#61,
+#63/#64/#66/#68/#71/#77/#85–#89 → #17/#20.
+
+**Issue files needing SCOPE edits** (requirements changed since writing, not just status):
+- `104-…` — raw-snapshot partitioning already shipped (R3); scope shrinks to the four append-only
+  business tables.
+- `91-…` — add the #109 leftover (httpOnly cookie upgrade) explicitly.
+- `76-…` — carries the added transactional-outbox scope (INDEX.md:120-122); reflect in the file.
+- `21-…` — remaining legs are only #51 + mobile; core is long done.
+- `65-…` — AC#6 authority conflict already RESOLVED (2026-06-25, INDEX.md:175); file should stop
+  presenting it as open.
+**Status-only corrections**: the §4.1 table (applied in the finale commit).
+
+---
+
+## 8. GIT / GITHUB STATE — problems, commits, pushes needed
+
+- **Remote**: `origin = github.com/harshshah-source/fsm-platform`. Remote has only `main`,
+  `docs/ui-parity-governance`, `feat/issues-28-31-45-46-49-62`.
+- **`feat/autoplant-integration` (this branch, the live line) has NO remote counterpart** — 49
+  commits ahead of local `main`, existing only on this disk. Together with #115 (docs untracked)
+  and #114 (`data/` untracked), a disk failure loses: the whole AutoPlant integration, the
+  hardening series #100–#113, the admin UI source under `components/data/`, and every doc.
+  **Action: push this branch** (user decision — task rule "no push" respected this session) and
+  resolve #114/#115 so the pushed branch is actually buildable + documented.
+- **`integration/fe-plus-backend` merge line** (INDEX.md:11-19) is also local-only
+  `[UNVERIFIED whether fully merged into this branch — the branch list shows it still exists]`.
+- **Uncommitted working tree** (at session start): admin UI polish (overlay/shell/ui components,
+  `index.css`, dashboard/device/schedule pages + tests), backend `device.service.ts`/
+  `devices.controller.ts`/`zm-schedule-query.service.ts` + e2e specs, CLAUDE.md whitespace noise.
+  Needs an owner to review + commit as its own feature slice — not swept into docs commits.
+- **`apps/admin/tsconfig.tsbuildinfo` is tracked** (build artifact; churns every build) — should
+  be gitignored + `git rm --cached`.
+- **Issue files without files** (§4.2): #51/#53/#79/#80/#95 exist only as INDEX prose.
+- No open GitHub Issues/PR workflow is in use — the tracker is the local markdown backlog by
+  design (CLAUDE.md Issue-tracker section).
+
+---
+
+## Appendix: resume pointer
+
+Sections 1–8 complete as of 2026-07-10. The finale (docs-corrections commit) follows as a separate
+commit: §4.1 status-line fixes, INDEX.md notes, stale-doc banners, CLAUDE.md stack-line fix.
