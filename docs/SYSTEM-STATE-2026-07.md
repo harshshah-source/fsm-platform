@@ -593,4 +593,66 @@ INDEX.md header.)
 
 ---
 
-*(Sections 5–8 follow.)*
+## 5. GAPS, WEAK POINTS, BREAKING POINTS (ranked)
+
+Ranked by blast-radius × likelihood once the funnel activates. Each cites its owner issue; two NEW
+findings from this audit are filed as **#115** and **#116** (stubs in
+`.scratch/fsm-platform-v1/issues/`).
+
+1. **Auth is a dev scaffold** (#91 + #98 + #110). In-memory users/refresh tokens (restart = mass
+   logout, DB users can't log in), hardcoded fallback JWT secret (`token.service.ts:18`), zero rate
+   limiting on scrypt login (CPU-DoS vector, `110-…md` evidence). Blast radius: the whole product;
+   nothing can be exposed beyond a demo network until #91/#98/#110 land.
+2. **No deployment/DR story** (#111) — no Dockerfile/compose/runbook/backup. Compounded by the NEW
+   finding **#115: `.gitignore:21 docs/*` leaves the entire PRD/workflow/audit/UI-reference doc set
+   untracked** — a single-disk loss destroys the requirements + audit record, and a fresh clone
+   can't even follow the documented agent workflow. (Same family as #114 `data/` shadowing the
+   admin UI source, which also still makes the branch tip unbuildable from clone.)
+3. **UNZONED zone-derivation problem** (data, not code): 83% of synced devices land UNZONED
+   (validation audit exec summary; `docs/audits/unzoned-plants-2026-07-07.md`) because the ACTIVE
+   plants FSM syncs mostly lack `zone_name` — the crosswalk mechanism (§3a) is built but starved.
+   Blast radius: ZM dashboards/scoping/dispatch are meaningless for 5/6 of the fleet until Ops maps
+   values or pins plants (zone ratification, B8 gate).
+4. **PGI feed absence** — NEW stub **#116**: `pgi_history` has no writer; `pgi` eligibility mode is
+   permanently 0-candidate and Fleet-Uptime is structurally empty. #112 shipped the mode switch and
+   B7 records the pending decision, but no issue owned building the feed until now.
+5. **#101 remaining races** (partial — only intraday accept-vs-timeout is guarded). Untreated
+   confirmed sites (`101-…md:28-49`): SE-submit vs auto-recovery; two SEs submitting the same
+   ticket (double stock decrement); non-op dual-confirmation stale writes (device can end
+   permanently P2002-skipped); overlapping verification sweeps (double rollback of van stock;
+   `markAutoRecovery` never resolves PRE_VERIFICATION inventory); `confirmResubmit` re-opening
+   VERIFIED cycles; van-stock decrement from stale reads (`Math.max(0, qty-n)`) + missing
+   `clientSubmissionId` persistence on the CONFLICT path (mobile retry double-decrements). Blast
+   radius grows from ~zero (single operator, sweeps off) to real the day `BUSINESS_SWEEPS_ENABLED`
+   flips with concurrent SEs.
+6. **Perf cliffs** (#106): `criticalQueue` unbounded; all-default Prisma/pg pool with no
+   `statement_timeout` (a runaway query hangs a connection); per-request dashboard scans with no
+   cache. Also §3d's per-candidate transaction loop under a mass-outage spike `[INFERRED]`.
+7. **Missing hot-FK indexes/constraints** (#103): `tickets.device_id`/`vehicle_id` unindexed
+   (device-detail + verification lookups will seq-scan as tickets grow), `audit_logs(actor_role,
+   created_at)` missing (ZM-scorecard aggregation pivots on it monthly).
+8. **Module wiring forks** (#105): `recommender.module.ts` re-provides `InventoryService`/
+   `SeAvailabilityService`/`SoftInactiveCountService`; `engineers.module.ts` re-provides
+   `InventoryService`; `recommender.service.ts:71-73` `new`s cross-module services as constructor
+   defaults. Silent duplicate singletons — becomes a correctness bug the day any of them caches.
+9. **No CI** (#107): 920+ backend tests + 211 admin tests run only by hand on one OOM-prone 8GB
+   box (full vitest runs randomly lose a fork worker — memory note); no from-zero-migration test,
+   no concurrency suite, no route-guard sweep. Every "green" claim is a local claim.
+10. **Append-only growth** (#104): `audit_logs`/`ticket_events`/`notifications`/`recommendations`
+    unpartitioned with no retention — slow-burn until they aren't.
+11. **No global guard/validation** (#99): a controller missing `@UseGuards` is silently public; no
+    global `ValidationPipe` or body-size limits (CSV upload path).
+12. **Environment integrity**: container clock drift ~5.5h + DB session `TimeZone=Asia/Calcutta`
+    contradicting ADR-0025 UTC (validation audit finding 3, `:194`); AutoPlant source offset handled
+    only via `AUTOPLANT_SOURCE_UTC_OFFSET_MIN`; health `ageMinutes` is clock-sensitive.
+13. **Cross-zone re-escalate read-model hole** (#93): DENIED AUTO rows invisible to the home ZM —
+    Issue 32's re-escalate AC only notionally met.
+14. **Open funnel-quality gaps**: recommender vehicle-readiness stubbed UNKNOWN (#65) and
+    expected-component leg stubbed pass (#51) — two of five hard filters can never fire (§3e table).
+
+**New issue stubs filed by this audit**: `115-docs-tree-untracked-dr-exposure.md`,
+`116-sap-pgi-feed-seam.md`. Everything else above already has an owner.
+
+---
+
+*(Sections 6–8 follow.)*
