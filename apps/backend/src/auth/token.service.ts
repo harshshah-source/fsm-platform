@@ -15,7 +15,10 @@ export interface AccessTokenClaims {
  */
 @Injectable()
 export class TokenService {
-  private readonly secret = process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me';
+  // Secret comes only from the environment — no fallback to a repo-published constant (#98 leg 2).
+  // Boot validation (validateBootConfig) guarantees it is present + safe before the app starts; this
+  // throw is the defensive backstop for any construction path that skips boot (e.g. a stray import).
+  private readonly secret = requireJwtSecret();
   private readonly accessTtlSec = 15 * 60; // H4: 15-min access token
 
   signAccessToken(claims: AccessTokenClaims): string {
@@ -62,4 +65,13 @@ export class TokenService {
 
 function base64urlEncode(input: string): string {
   return Buffer.from(input, 'utf8').toString('base64url');
+}
+
+/** Reads the HS256 signing secret from the environment, or throws — never a silent fallback (#98). */
+function requireJwtSecret(): string {
+  const secret = process.env.JWT_ACCESS_SECRET;
+  if (!secret) {
+    throw new Error('JWT_ACCESS_SECRET is not set — refusing to sign tokens with a fallback secret.');
+  }
+  return secret;
 }

@@ -20,3 +20,8 @@ for (const key of Object.keys(process.env)) {
 }
 
 process.env.DATABASE_URL = testDatabaseUrl();
+
+// #98: run the suite under a valid boot config — a strong, non-default JWT secret — so TokenService
+// signs with a real secret (the dev fallback was removed) and the env-shape stays valid regardless of
+// what a developer's local `.env` happens to hold.
+process.env.JWT_ACCESS_SECRET = 'test-jwt-access-secret-000000000000000000';
