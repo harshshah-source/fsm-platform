@@ -765,7 +765,11 @@ replenishment; #74 scorecard causality; #76 notification adapters (HITL accounts
 
 ---
 
-## Appendix: resume pointer
+## Appendix: completion record
 
-Sections 1–8 complete as of 2026-07-10. The finale (docs-corrections commit) follows as a separate
-commit: §4.1 status-line fixes, INDEX.md notes, stale-doc banners, CLAUDE.md stack-line fix.
+Sections 1–8 complete 2026-07-10. Finale applied in commit `44a1472`: 13 issue-file status
+corrections + FE-12/FE-16 renumber fixes + INDEX.md (#115/#116 registered, index-only note) +
+CLAUDE.md stack-line fix. Banners added on disk to the gitignored docs (progress tracker, session
+handoff, 2026-07-03 audit, 2026-07-05 review, 2026-07-07 handoff, PRD :294) — versioning them is
+#115's decision. New issue stubs: #115, #116. This document supersedes all prior "current state"
+claims; update it, don't fork it.
