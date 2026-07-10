@@ -60,6 +60,9 @@ function stub(extra?: (url: string, opts?: RequestInit) => Response | undefined)
     const hit = extra?.(u, opts);
     if (hit) return hit;
     if (u.endsWith('/cross-zone')) return json([AUTO, MANUAL]);
+    // The mounted dashboard fans out to several /dashboard/* reads, all array-typed; return [] so the
+    // KPI strip and zone/company/critical tables render during the route-gating assertion (#114 fold-in).
+    if (u.includes('/dashboard/')) return json([]);
     return json({});
   });
   vi.stubGlobal('fetch', fetchMock);

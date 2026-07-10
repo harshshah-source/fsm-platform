@@ -100,3 +100,13 @@ it is a backlog-ownership Strategic HITL event. Record the disposition in the is
 
 This is a **per-issue gate, not a phase switch**: backend-led TDD continues unchanged. The gate only
 prevents an implemented backend slice from shipping with its admin/mobile surface silently dropped.
+
+## Repo hygiene / versioning policy
+
+Decided 2026-07-10 (#115). **The whole `docs/` tree is versioned** — PRD, business workflow, audits,
+architecture docs, ADRs, UI reference imagery, progress/handoff reports, and `SYSTEM-STATE-*.md` — so a
+fresh clone can run the documented process and a disk failure does not lose the requirements/audit
+record. Secrets stay out via the `.env` / `.env.*` rules only; **never** re-introduce a blanket
+`docs/*` ignore. Ignore rules for artifact dirs (`/data/`, `/backups/`) and build caches
+(`*.tsbuildinfo`, `dist/`) must be **anchored** so they cannot shadow a source path that happens to
+share a name (the `data/` → `apps/admin/src/components/data/` incident, #114).

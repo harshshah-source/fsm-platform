@@ -119,13 +119,14 @@ silently public).
 ### 1.5 Branch / working-tree state at time of writing
 
 - Branch `feat/autoplant-integration`; `main` exists but the integration line has **not** been
-  promoted (INDEX.md:19 "Not yet promoted to `main`" — still true `[UNVERIFIED against remote]`).
-- Uncommitted working tree: admin UI visual polish (overlay/shell/ui components, `index.css`),
-  `devices.ts`/`schedules.ts` API clients, `device.service.ts`/`devices.controller.ts`,
-  `zm-schedule-query.service.ts` + their tests, and a CLAUDE.md edit (git status at session start).
-  This document describes the working tree as found.
-- Standing trap: `.gitignore`'s `data/` rule untracks `apps/admin/src/components/data/` — the
-  branch tip cannot build from a fresh clone (issue #114, open).
+  promoted to `main` (INDEX.md:19). ✅ **As of 2026-07-10 the branch is pushed to `origin`** (tip
+  `e5006ae`) — it is no longer disk-only, though still un-promoted to `main`.
+- Uncommitted working tree at session start (admin UI visual polish + `devices.ts`/`schedules.ts` API
+  clients + `device.service.ts`/`devices.controller.ts`/`zm-schedule-query.service.ts` + tests) has
+  since been **committed** as WIP slice `e5006ae` (§8).
+- ✅ **Standing trap resolved**: `.gitignore`'s `data/` rule no longer shadows
+  `apps/admin/src/components/data/` (anchored to `/data/`); the dir is tracked and the branch tip
+  builds from a fresh clone (issue #114, **done**).
 
 ---
 
@@ -743,22 +744,29 @@ replenishment; #74 scorecard causality; #76 notification adapters (HITL accounts
 
 ## 8. GIT / GITHUB STATE — problems, commits, pushes needed
 
-- **Remote**: `origin = github.com/harshshah-source/fsm-platform`. Remote has only `main`,
-  `docs/ui-parity-governance`, `feat/issues-28-31-45-46-49-62`.
-- **`feat/autoplant-integration` (this branch, the live line) has NO remote counterpart** — 49
-  commits ahead of local `main`, existing only on this disk. Together with #115 (docs untracked)
-  and #114 (`data/` untracked), a disk failure loses: the whole AutoPlant integration, the
-  hardening series #100–#113, the admin UI source under `components/data/`, and every doc.
-  **Action: push this branch** (user decision — task rule "no push" respected this session) and
-  resolve #114/#115 so the pushed branch is actually buildable + documented.
+> **UPDATE 2026-07-10 (activation session, Phase 0 — DR closeout).** The disk-failure exposure below is
+> **resolved**: `feat/autoplant-integration` is now **pushed to origin** (tip `e5006ae`, upstream set,
+> 0/0 divergence), with #114 + #115 fixed so the pushed branch is buildable + documented. Sequence:
+> `f5a7f90` (gitignore anchors + docs/data versioned for DR, tsbuildinfo untracked), `e5006ae`
+> (reviewed WIP working-tree slice), then this docs/status commit. The branch tip builds standalone
+> (backend `tsc` clean; admin `tsc -b && vite build` = 962 modules). Original findings kept below for
+> the record; ✅ marks what is now closed.
+
+- **Remote**: `origin = github.com/harshshah-source/fsm-platform`. Remote had only `main`,
+  `docs/ui-parity-governance`, `feat/issues-28-31-45-46-49-62`. ✅ now also
+  `feat/autoplant-integration`.
+- ✅ **`feat/autoplant-integration` now has a remote counterpart** — was 49 (→54 by push time) commits
+  ahead of local `main`, disk-only. The whole AutoPlant integration, the hardening series #100–#113,
+  the admin UI source under `components/data/`, and every doc are now on origin. #114 (`data/`
+  shadowing) and #115 (docs untracked) are **done** — see their issue files + INDEX.
 - **`integration/fe-plus-backend` merge line** (INDEX.md:11-19) is also local-only
   `[UNVERIFIED whether fully merged into this branch — the branch list shows it still exists]`.
-- **Uncommitted working tree** (at session start): admin UI polish (overlay/shell/ui components,
+- ✅ **Uncommitted working tree** (at session start): admin UI polish (overlay/shell/ui components,
   `index.css`, dashboard/device/schedule pages + tests), backend `device.service.ts`/
-  `devices.controller.ts`/`zm-schedule-query.service.ts` + e2e specs, CLAUDE.md whitespace noise.
-  Needs an owner to review + commit as its own feature slice — not swept into docs commits.
-- **`apps/admin/tsconfig.tsbuildinfo` is tracked** (build artifact; churns every build) — should
-  be gitignored + `git rm --cached`.
+  `devices.controller.ts`/`zm-schedule-query.service.ts` + e2e specs. Reviewed and committed as its
+  own WIP-labeled feature slice (`e5006ae`: Device Detail filter/sort/pagination + `filter-options`
+  endpoint + ZM stop badges (Issue 79) + design-system refresh) — not swept into docs commits.
+- ✅ **`apps/admin/tsconfig.tsbuildinfo`** — `git rm --cached` + `*.tsbuildinfo` ignore rule (`f5a7f90`).
 - **Issue files without files** (§4.2): #51/#53/#79/#80/#95 exist only as INDEX prose.
 - No open GitHub Issues/PR workflow is in use — the tracker is the local markdown backlog by
   design (CLAUDE.md Issue-tracker section).

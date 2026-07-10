@@ -1,6 +1,15 @@
 # 114 — `.gitignore` `data/` rule shadows the admin core UI source dir (`apps/admin/src/components/data/`)
-Status: ready-for-agent
+Status: done
 Type: AFK
+
+> **Resolved 2026-07-10** (commit `f5a7f90` repo fix + `e5006ae`-follow-up test fix). `data/` and
+> `backups/` are now anchored to the repo root (`/data/`, `/backups/`); the 4 previously-shadowed
+> `components/data/` files were `git add`-ed (all 9 now in `git ls-files`); `apps/**`/`packages/**`
+> swept clean (the only other ignored source is `apps/admin/visual/current/`, an intentional nested
+> `.gitignore` for transient capture output). Admin `tsc -b && vite build` builds the tip standalone
+> (962 modules). Fold-in cleared by fixing the two route-gating stubs to return `[]` for the
+> array-typed `/dashboard/*` reads (option B) — `cross-zone` + `zm-scorecard` now run 10/10 with **zero**
+> unhandled errors, vs guarding one KPI derivation while sibling tables stayed bare (false robustness).
 
 > Source: 2026-07-08, surfaced while committing the admin "Run Ingestion Now" + rolling-KPI feature.
 > A new file (`components/data/RollingNumber.tsx`) and edits to `components/data/Toast.tsx` /
@@ -72,11 +81,11 @@ top-level artifact/data directory, not a source path that happens to be named `d
 
 ## Acceptance criteria
 
-- [ ] `git check-ignore apps/admin/src/components/data/index.ts` returns nothing (path no longer ignored).
-- [ ] `git ls-files apps/admin/src/components/data/` lists every component source in the dir.
-- [ ] A fresh checkout of the branch installs and builds the admin app with no missing-module errors, and `apps/admin` `tsc`/`vitest` pass — i.e. the tip builds alone (closes the handoff/memory note).
-- [ ] No unanchored ignore pattern matches any tracked-intent source dir under `apps/**` or `packages/**` (verified via `git check-ignore`).
-- [ ] The two `zones.reduce is not a function` unhandled errors no longer appear in the `apps/admin` vitest output; the admin suite stays green.
+- [x] `git check-ignore apps/admin/src/components/data/index.ts` returns nothing (path no longer ignored).
+- [x] `git ls-files apps/admin/src/components/data/` lists every component source in the dir (all 9).
+- [x] A fresh checkout of the branch installs and builds the admin app with no missing-module errors, and `apps/admin` `tsc`/`vitest` pass — i.e. the tip builds alone (closes the handoff/memory note). *Verified: `tsc --noEmit` clean, `tsc -b && vite build` = 962 modules; the DR-critical missing dir is now tracked.*
+- [x] No unanchored ignore pattern matches any tracked-intent source dir under `apps/**` or `packages/**` (verified via `git check-ignore`). *Only match is `apps/admin/visual/current/` — an intentional nested-`.gitignore` capture dir, not source.*
+- [x] The two `zones.reduce is not a function` unhandled errors no longer appear in the `apps/admin` vitest output; the admin suite stays green. *Fixed the two stubs (option B); `cross-zone` + `zm-scorecard` = 10/10, zero errors.*
 
 ## UI surfaces
 n/a (repo tooling + a defensive guard in existing dashboard code; no visual change)

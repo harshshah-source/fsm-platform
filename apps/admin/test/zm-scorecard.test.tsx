@@ -28,7 +28,14 @@ const fetchMock = vi.fn();
 
 beforeEach(() => {
   sessionStorage.setItem('fsm.accessToken', 'tok');
-  fetchMock.mockImplementation(async (url: string) => (String(url).includes('/reports/zm-scorecard') ? json(report) : json({})));
+  fetchMock.mockImplementation(async (url: string) => {
+    const u = String(url);
+    if (u.includes('/reports/zm-scorecard')) return json(report);
+    // The dashboard's /dashboard/* reads are all array-typed; return [] so its tables/KPI strip render
+    // during the scorecard assertion instead of throwing on a non-array payload (#114 fold-in).
+    if (u.includes('/dashboard/')) return json([]);
+    return json({});
+  });
   vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(() => {

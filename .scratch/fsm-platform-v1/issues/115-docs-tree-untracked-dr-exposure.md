@@ -1,6 +1,15 @@
 # 115 — `.gitignore` `docs/*` rule leaves the entire doc set untracked (single-disk DR exposure)
-Status: ready-for-human
+Status: done
 Type: HITL (policy decision — what is versioned vs deliberately kept out)
+
+> **Resolved 2026-07-10** (commit `f5a7f90`), decision taken by the activation session under explicit
+> owner authorization. **Chosen: fix-direction 1 — version the whole `docs/` tree.** The blanket
+> `docs/*` ignore + `!docs/agents/` exception were removed; a fresh clone now contains the PRD, business
+> workflow, all audits, architecture docs, ADRs, UI reference imagery (`docs/ui/**`, ~37 MB), the 49
+> progress/handoff reports, and `SYSTEM-STATE-2026-07.md` — 155 doc files now tracked (was 4). Secrets
+> remain excluded by the unanchored `.env` / `.env.*` rules (matched at any depth; no credentials live
+> under `docs/`). Policy is recorded inline in `.gitignore` (the block replacing `docs/*`) and in
+> `docs/agents/workflow.md` (Repo hygiene note).
 
 > Source: SYSTEM-STATE-2026-07 audit (2026-07-10). Surfaced when committing the system-state
 > document: `git add docs/SYSTEM-STATE-2026-07.md` was rejected by `.gitignore:21 docs/*`.
@@ -31,6 +40,7 @@ does not have — a new machine cannot even run the documented process.
 
 ## Acceptance criteria
 
-- [ ] A fresh clone contains (or a documented backup provides) the PRD, workflow, audits,
-      architecture docs, and UI references.
-- [ ] The chosen policy is recorded in CLAUDE.md or docs/agents/.
+- [x] A fresh clone contains (or a documented backup provides) the PRD, workflow, audits,
+      architecture docs, and UI references. *All now tracked (155 doc files); pushed to origin.*
+- [x] The chosen policy is recorded in CLAUDE.md or docs/agents/. *Recorded in `docs/agents/workflow.md`
+      (Repo hygiene note) + inline in `.gitignore`.*
