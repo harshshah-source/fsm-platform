@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { HealthController } from './health/health.controller';
+import { HealthService } from './health/health.service';
 import { AuditModule } from './audit/audit.module';
 import { AuditTrailController } from './audit/audit-trail.controller';
 import { AuthModule } from './auth/auth.module';
@@ -105,6 +107,7 @@ import { ZonesController } from './zones/zones.controller';
     VouchersModule,
   ],
   controllers: [
+    HealthController,
     MeController,
     SettingsController,
     ZonesController,
@@ -151,6 +154,6 @@ import { ZonesController } from './zones/zones.controller';
     AuditTrailController,
     VouchersController,
   ],
-  providers: [AuthGuard, RoleGuard, ZoneScopeGuard],
+  providers: [AuthGuard, RoleGuard, ZoneScopeGuard, HealthService],
 })
 export class AppModule {}
