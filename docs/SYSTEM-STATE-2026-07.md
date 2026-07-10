@@ -403,6 +403,91 @@ and never throws out of cron context.
 triggers (`POST /api/integration/run-pipeline`, `POST /api/schedules/dispatch-run`, per-sweep
 POSTs) drive identical code paths with no cron.
 
+### 3h. Manual scheduling / override / intraday / cross-zone (ZM & CSM/OH paths)
+
+- **ZM override engine** (#13a, `override.service.ts` header): each action (reassign/split/remove/
+  defer/reorder) commits immediately, flips batch + schedule to OVERRIDDEN with mandatory reason +
+  overrider, audits in-transaction, fires a push. No approval gate. Overriding work an SE is ON_SITE
+  on goes through the conflict seam (`soft-state-conflict.ts`).
+- **Same-day update** (#31, `same-day-update.service.ts` header): ZM add/remove/reorder mid-shift;
+  applies immediately (no SE acceptance); logged `MANUAL_ZM_UPDATE`; the **Intra-day Queue is a view
+  over AuditLog** (2026-06-25 decision — no new model); reuses the #13 override engine.
+- **Intraday CRITICAL insertion** (#29/#30, `intraday-insertion.service.ts`): CRITICAL+ bucket fires
+  `fireForZone` → best AVAILABLE candidate by strict precedence (ping staleness never filters) →
+  `intraday_insertions` PENDING_ACCEPTANCE offer (10-min `ACCEPTANCE_TIMEOUT_MIN`) + push +
+  first-class SE_ACCEPTANCE WhatsApp record. Accept → `assignTicket(insertAtTop)` (top of Day Plan);
+  decline (reason code) or timeout → reroute to next SE, `retry_chain` appended; 3 retries →
+  ESCALATION_REQUIRED + ZM "Manual assignment needed" (`availableSesForManualAssign`/`manualAssign`).
+  **Accept-vs-timeout race guarded** by `transitionOrConflict` + the one-live-offer partial unique
+  (#101 leg, commit `9940534`).
+- **Cross-zone escalation** (#32, `cross-zone-escalation.service.ts`): `sweepAutoEscalations` —
+  Platinum unassigned 1h in CRITICAL+ or 4h OPEN → one AUTO_PLATINUM row to the CSM/OH queue;
+  ZM `flag` for Gold/Silver (manual). Decider approve (target zone + SE → cross-zone assignment) /
+  deny (reason; ticket stays home) / defer (review date); home-ZM `reEscalateToOps` on denied AUTO.
+  Ticket never leaves its home queue. **Read-model gap**: `listForScope` omits DENIED AUTO rows, so
+  the home ZM can't see the row to re-escalate (#93 open).
+
+### 3i. Field loop: troubleshoot → verification → install/recovery/non-op → inventory
+
+- **Troubleshoot submission** (#16, `troubleshoot-submission.service.ts` header): one transaction —
+  Ticket OPEN→VERIFICATION_PENDING, cycle OPEN→SUBMITTED, SE's active soft states resolved, audit +
+  lifecycle event; idempotent on `(se_id, client_submission_id)` (duplicate returns the original,
+  `duplicate=true`). `component_unavailable=true` → auto-raises a `component_request`, cycle →
+  WAITING_COMPONENT, primary SLA pauses (#22).
+- **Verification** (#18, `verification.service.ts` header): re-entrant scan of VERIFICATION_PENDING
+  tickets; Phase 1 = first ping ±500 m of the SE's form GPS (skipped without fraud when
+  `presence_source=NONE`), Phase 2 = continued pinging; terminal outcomes CLOSED /
+  FAILED_VERIFICATION / PARTIAL_RECOVERY transition ticket + cycle, resolve inventory
+  PRE_VERIFICATION → DEDUCTED or ROLLED_BACK (#24), and set `fraud_flag` for the review page (#19).
+  Driven by the #108 5-min sweep (or HTTP).
+- **Install lifecycle** (#33/#34/#102, `install-lifecycle.service.ts` header): manual create (single
+  or all-or-nothing CSV with line-numbered errors) → SCHEDULED → ON_SITE → FITTED (serials + photo)
+  → ACTIVATED → first-valid-ping auto-verification within 24h → CLOSED, else FAILED_ACTIVATION
+  (late ping still closes). Zone scoping (#102, `f48108f`): ZM clamped to home zone, SE own-ticket
+  read, CSM/OH/WM cross-zone.
+- **Non-Op** (#35): dual confirmation (manager + customer tokenised email) → CONFIRMED side-effects:
+  auto-close open tickets `CLOSED_NON_OPERATIONAL`, eligibility exclusion, auto-create RECOVERY
+  ticket for qualifying RECURRING deals; OH 7-day no-response override.
+- **Recovery** (#36/#37): SE collection form (serial + condition) → COLLECTED → WM receipt
+  auto-close (`AUTO_CLOSED_ON_WAREHOUSE_RECEIPT`); unable-to-collect → ZM decision queue; manual
+  closure classified by acting role; stalled-14d Action-Required flag.
+- **Inventory / van stock** (#21/#24/#73, `inventory.service.ts` header): `se_van_stock` read-only
+  to the SE, mutated only via the ledger; common-kit completeness feeds the hard filter;
+  Component-Blocked Queue for kit-incomplete drops; business 409 on already-closed ticket →
+  loser's consumption recorded SHADOW_USE → WM reconciliation; `zone_warehouse_stock` manual WM
+  set/adjust + fulfillment-SLA read.
+
+### 3j. Auth / session / RBAC
+
+**Backend**: HS256 JWT `{user_id, role, zone_id}`, 15-min access (`token.service.ts:19`), 30-day
+single-use rotating refresh with reuse detection (`refresh-token-store.ts:15-32`) — but both stores
+are **in-memory** (`user-store.ts`), so every restart drops all sessions and users; DB-seeded users
+cannot log in (#91). **`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret**
+(`token.service.ts:18`, #98 open). Guard chain AuthGuard → RoleGuard → ZoneScopeGuard applied
+**per-controller** — no global `APP_GUARD` (#99): an endpoint without `@UseGuards` is silently
+public. `ZoneScopeGuard` rejects a ZM targeting another zone via `:zoneId`/`zone_id` param (403
+ZONE_SCOPE_VIOLATION); **deeper zone clamping is service-level and uneven** — e.g. install scope
+was only closed by #102; cross-zone/CSM acting scope threads through `acting-context.ts` +
+`RequestActor` (#47). No rate limiting anywhere (#110): `/auth/login` scrypt is a CPU-DoS vector.
+**Admin FE session** (#109, done): single-flight rotating refresh on 401 with one retry
+(`apps/admin/src/api/http.ts`), reload rehydration via `/me` behind a loading gate, honest login
+errors; tokens in memory/storage (httpOnly-cookie upgrade deferred to #91).
+
+### 3k. Admin FE architecture
+
+React 18 + Vite + React Router (`AppRoutes.tsx`, ~100 route/element entries) behind
+`ProtectedRoute` + `RoleRoute` role gates mirroring backend `@Roles`. Data layer: one thin typed
+client per backend area (`apps/admin/src/api/*.ts`, 29 modules) over the shared `http.ts`
+interceptor — **no react-query/SWR; hand-rolled hooks** (`hooks/index.ts`). Pages compose the
+design-system primitives (`components/data/` DataTable/MetricStrip/PageHeader…, `components/ui`,
+`components/overlay`, chart kit per `DESIGN-SYSTEM.md`). **Selector contract**: FE-series reskins
+preserved test ids/aria-labels; vitest suite (200+ tests) asserts against them.
+**No mock-data remnants found in pages** (`grep -rl "mock" apps/admin/src/pages` = 0 hits) — all
+pages consume real API clients; remaining gated placeholders are *documented omissions* wired to
+missing backend endpoints (#90 work-type mix, #94 ticket chrome, #74 scorecard causality).
+Known FE gaps: `window.prompt` reason legs (#80), Playwright visual baseline (FE-00 partial),
+`components/data/` untracked by git (#114).
+
 ---
 
-*(Sections 3h–k, 4–8 follow.)*
+*(Sections 4–8 follow.)*
