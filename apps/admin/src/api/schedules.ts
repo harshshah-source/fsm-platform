@@ -42,6 +42,13 @@ export interface TicketReasoning {
 export interface ScheduleStopTicket {
   ticketId: string;
   sortOrder: number;
+  // Ungated per-ticket state (Issue 79) — the reference-12 PARTIAL / CRITICAL / tier card badges.
+  // Sourced independently of `reasoning` (which stays gated behind "Why suggested?"): `slaBucket` from
+  // the live device state, `companyTier` denormalised on the ticket, `partialRecovery` from a
+  // PARTIAL_RECOVERY verification outcome.
+  slaBucket: string | null;
+  companyTier: string | null;
+  partialRecovery: boolean;
   reasoning: TicketReasoning | null;
 }
 

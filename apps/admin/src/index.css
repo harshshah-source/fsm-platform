@@ -15,13 +15,13 @@
  * No component may introduce a raw hex or off-scale value — everything routes through these tokens.
  */
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
 
   /* Brand — crimson [00-login, all topbars, mobile headers] */
-  --color-brand-300: #f6d7dc;
-  --color-brand-600: #c8102e;
-  --color-brand-700: #a60d26;
+  --color-brand-300: #f3cbd3;
+  --color-brand-600: #b9102b;
+  --color-brand-700: #8f0f24;
 
   /* AutoPlant wordmark red — the legacy "autoplant Systems" logo lockup
      (docs/ui/desktop/v1-legacy). Sampled #b91c1c; kept distinct from the crimson
@@ -29,27 +29,33 @@
   --color-brand-logo: #b91c1c;
 
   /* Chrome — dark navy [sidebar / topbar logo / footer / login bg] */
-  --color-chrome-900: #0e1422;
-  --color-chrome-800: #161d2e;
-  --color-chrome-700: #222c42;
-  --color-chrome-text: #c7cdda;
-  --color-chrome-muted: #7b8499;
+  --color-chrome-900: #10131b;
+  --color-chrome-800: #171b27;
+  --color-chrome-700: #252a3a;
+  --color-chrome-text: #d9d3c7;
+  --color-chrome-muted: #9c9385;
+
+  /* Luxury accent - used sparingly for premium edges and highlights. */
+  --color-luxury-100: #fbf4e5;
+  --color-luxury-300: #ead19a;
+  --color-luxury-600: #a97926;
+  --color-luxury-700: #7c5719;
 
   /* Surfaces [content area — warm off-white, NOT pure white] */
-  --color-surface-app: #f7f7f5;
-  --color-surface-card: #ffffff;
-  --color-surface-raised: #fbfbfa;
-  --color-surface-sunken: #f0efec;
+  --color-surface-app: #f8f6f1;
+  --color-surface-card: #fffdfa;
+  --color-surface-raised: #fbf8f2;
+  --color-surface-sunken: #f1ece2;
 
   /* Lines */
-  --color-line: #e7e5e1;
-  --color-line-strong: #d6d3ce;
+  --color-line: #e7dfd0;
+  --color-line-strong: #d5c7ae;
 
   /* Ink */
-  --color-ink-strong: #161b26;
-  --color-ink: #374151;
-  --color-ink-muted: #6b7280;
-  --color-ink-caps: #8a93a3;
+  --color-ink-strong: #171a22;
+  --color-ink: #343946;
+  --color-ink-muted: #6f6b63;
+  --color-ink-caps: #908574;
 
   /* Semantic — foreground + tinted background (pills, badges, accents) */
   --color-info: #1d4ed8;
@@ -66,12 +72,14 @@
   --color-neutral-bg: #eeeef0;
 
   /* Radius */
-  --radius-card: 0.625rem;
+  --radius-card: 0.5rem;
 
   /* Elevation */
-  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.06), 0 10px 24px rgb(16 24 40 / 0.04);
-  --shadow-card-hover: 0 6px 16px rgb(16 24 40 / 0.08), 0 18px 40px rgb(16 24 40 / 0.06);
-  --shadow-floating: 0 20px 60px rgb(14 20 34 / 0.2);
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 0.9) inset, 0 1px 2px rgb(31 24 15 / 0.04),
+    0 14px 34px rgb(31 24 15 / 0.06);
+  --shadow-card-hover: 0 1px 0 rgb(255 255 255 / 0.95) inset, 0 8px 20px rgb(31 24 15 / 0.08),
+    0 22px 52px rgb(31 24 15 / 0.08);
+  --shadow-floating: 0 22px 70px rgb(16 19 27 / 0.28);
 }
 
 @layer base {
@@ -81,7 +89,9 @@
     height: 100%;
   }
   body {
-    background-color: var(--color-surface-app);
+    background:
+      radial-gradient(circle at 18% -10%, rgb(234 209 154 / 0.2), transparent 30rem),
+      linear-gradient(180deg, #fbfaf7 0%, var(--color-surface-app) 34rem);
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-feature-settings:
@@ -90,6 +100,7 @@
       "cv04" 1,
       "tnum" 1;
     text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
   ::selection {
     background-color: var(--color-brand-300);
@@ -97,6 +108,47 @@
   }
   * {
     scrollbar-color: var(--color-line-strong) transparent;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+  table {
+    border-color: var(--color-line);
+  }
+  th {
+    color: var(--color-ink-caps);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1rem;
+    text-transform: uppercase;
+  }
+  td {
+    color: var(--color-ink);
+  }
+  tbody tr {
+    transition:
+      background-color 160ms cubic-bezier(0.2, 0, 0, 1),
+      box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
+  }
+  tbody tr:hover {
+    background-color: rgb(251 244 229 / 0.42);
+  }
+  input,
+  select,
+  textarea {
+    accent-color: var(--color-brand-600);
   }
   *::-webkit-scrollbar {
     height: 10px;
@@ -117,6 +169,12 @@
   .enterprise-page {
     max-width: 1480px;
     margin-inline: auto;
+  }
+  .premium-panel {
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.8), rgb(255 253 250 / 0.96)),
+      var(--color-surface-card);
+    box-shadow: var(--shadow-card);
   }
   .soft-divider {
     background-image: linear-gradient(to right, transparent, var(--color-line), transparent);

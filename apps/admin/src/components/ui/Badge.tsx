@@ -33,7 +33,7 @@ export function Badge({ tone = 'neutral', dot = false, className, children, ...r
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset',
+        'inline-flex min-h-6 items-center gap-1 rounded-full px-2.5 py-0.5 text-[0.68rem] font-semibold uppercase tracking-wide ring-1 ring-inset',
         TONES[tone],
         className,
       )}
@@ -44,4 +44,3 @@ export function Badge({ tone = 'neutral', dot = false, className, children, ...r
     </span>
   );
 }
-

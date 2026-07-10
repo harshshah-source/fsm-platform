@@ -26,8 +26,8 @@ import type { BadgeTone } from '../../components/ui/Badge';
  * FE-12 is a presentation-only refactor onto the design tokens + `Button` / `Badge`; every test id
  * (`schedule-stop`, `ticket-row-*`, `schedule-status-*`, `onsite-conflict-banner`), the override-control
  * labels, the mandatory-reason gating, the override commands, and the conflict-confirm flow are all
- * preserved. The per-ticket Recommender reasoning stays gated behind "Why suggested?" (the schedule
- * payload carries no independent ticket-state badges — see FE-12 follow-up #71).
+ * preserved. The per-ticket Recommender *reasoning* stays gated behind "Why suggested?"; the ungated
+ * ticket-state badges (SLA bucket / Company Tier / PARTIAL_RECOVERY) are a separate payload leg (#79).
  */
 const STATUS_TONE: Record<string, BadgeTone> = {
   AUTO_ASSIGNED: 'neutral',
@@ -318,6 +318,7 @@ function TicketRow({
         />
       )}
       <span className="font-medium text-ink-strong">Ticket {ticket.ticketId}</span>
+      <TicketStateBadges ticket={ticket} />
       <WhySuggested ticket={ticket} />
       <Button type="button" size="sm" variant="ghost" onClick={() => setOpen((v) => (v === 'remove' ? null : 'remove'))}>
         Remove
@@ -434,6 +435,45 @@ function SePicker({
         ))}
       </select>
     </label>
+  );
+}
+
+/** SLA-bucket → badge tone: the severe end of the ladder is critical, the risk band is warning. */
+const SLA_TONE: Record<string, BadgeTone> = {
+  CRITICAL: 'critical',
+  HIGH_CRITICAL: 'critical',
+  SEVERE: 'critical',
+  VERY_SEVERE: 'critical',
+  LONG_PENDING: 'critical',
+  RISK: 'warning',
+  EARLY_RISK: 'warning',
+  WARNING: 'warning',
+};
+
+/**
+ * Ungated per-ticket state badges (Issue 79 · reference 12) — SLA bucket, Company Tier, and a
+ * PARTIAL_RECOVERY marker. Always visible: unlike "Why suggested?", these are the un-gated ticket state,
+ * not the Recommender scoring reasoning. Each guarded so the pre-#79 payload (no fields) renders nothing.
+ */
+function TicketStateBadges({ ticket }: { ticket: ScheduleStopTicket }) {
+  return (
+    <span className="flex items-center gap-1">
+      {ticket.slaBucket && (
+        <span data-testid={`ticket-sla-${ticket.ticketId}`}>
+          <Badge tone={SLA_TONE[ticket.slaBucket] ?? 'neutral'}>{ticket.slaBucket}</Badge>
+        </span>
+      )}
+      {ticket.companyTier && (
+        <span data-testid={`ticket-tier-${ticket.ticketId}`}>
+          <Badge tone="brand">{ticket.companyTier}</Badge>
+        </span>
+      )}
+      {ticket.partialRecovery && (
+        <span data-testid={`ticket-partial-${ticket.ticketId}`}>
+          <Badge tone="warning">PARTIAL</Badge>
+        </span>
+      )}
+    </span>
   );
 }
 

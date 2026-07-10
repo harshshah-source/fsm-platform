@@ -56,7 +56,7 @@ export function Sidebar({ role }: { role: string }) {
         data-collapsed={collapsed}
         data-mobile-open={mobileOpen}
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col bg-chrome-900 text-chrome-text shadow-floating',
+          'fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col bg-chrome-900 text-chrome-text shadow-floating ring-1 ring-white/5',
           'transition-[transform,width] duration-300 ease-in-out',
           'lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:translate-x-0 lg:shadow-none',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
@@ -66,7 +66,7 @@ export function Sidebar({ role }: { role: string }) {
         {/* Brand band — white, so the wordmark is colour-identical to the legacy reference. */}
         <div
           className={cn(
-            'flex h-16 shrink-0 items-center gap-3 border-b border-line bg-surface-card px-3',
+            'flex h-[4.25rem] shrink-0 items-center gap-3 border-b border-line bg-surface-card px-3 shadow-sm',
             collapsed && 'lg:justify-center lg:px-2',
           )}
         >
@@ -123,11 +123,11 @@ export function Sidebar({ role }: { role: string }) {
                         onFocus={showTip(item.label)}
                         onBlur={hideTip}
                         className={cn(
-                          'flex items-center gap-2.5 rounded-md border-l-2 px-2 py-1.5 text-[13px] transition-colors focus-ring',
+                          'flex items-center gap-2.5 rounded-md border-l-2 px-2 py-2 text-[13px] font-medium transition-[background-color,border-color,color,box-shadow] focus-ring',
                           collapsed && 'lg:justify-center lg:gap-0 lg:px-0',
                           active
-                            ? 'border-brand-600 bg-chrome-700 text-white shadow-sm'
-                            : 'border-transparent text-chrome-text hover:bg-chrome-800 hover:text-white',
+                            ? 'border-luxury-300 bg-white/10 text-white shadow-sm ring-1 ring-white/5'
+                            : 'border-transparent text-chrome-text hover:bg-white/10 hover:text-white',
                         )}
                       >
                         <Icon className="h-4 w-4 shrink-0" />
@@ -167,4 +167,3 @@ export function Sidebar({ role }: { role: string }) {
     </>
   );
 }
-

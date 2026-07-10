@@ -66,7 +66,7 @@ export function TopBar() {
   ).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-line bg-surface-card/95 px-4 shadow-sm backdrop-blur lg:gap-4 lg:px-6">
+    <header className="sticky top-0 z-20 flex h-[4.25rem] items-center gap-3 border-b border-line bg-surface-card/90 px-4 shadow-card backdrop-blur-xl lg:gap-4 lg:px-6">
       <button
         type="button"
         onClick={openMobile}
@@ -78,10 +78,10 @@ export function TopBar() {
 
       {/* Page identity — muted eyebrow over a prominent current-page title (clear "you are here"). */}
       <div className="hidden shrink-0 flex-col justify-center leading-tight lg:flex">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-caps">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-luxury-700">
           FSM Command Console
         </span>
-        <span className="text-[15px] font-semibold leading-tight tracking-tight text-ink-strong">
+        <span className="text-[15px] font-semibold leading-tight text-ink-strong">
           {titleFor(pathname)}
         </span>
       </div>
@@ -91,7 +91,7 @@ export function TopBar() {
         <input
           aria-label="Search"
           placeholder="Search ticket, vehicle, plant, device…"
-          className="h-10 w-full rounded-md border border-line bg-surface-app pl-10 pr-3 text-sm text-ink-strong shadow-sm transition-colors placeholder:text-ink-muted hover:border-line-strong hover:bg-surface-card focus-visible:border-brand-600 focus-ring"
+          className="h-10 w-full rounded-md border border-line bg-surface-raised/80 pl-10 pr-3 text-sm text-ink-strong shadow-sm transition-[background-color,border-color,box-shadow] placeholder:text-ink-muted hover:border-line-strong hover:bg-surface-card focus-visible:border-brand-600 focus-ring"
         />
       </div>
 
@@ -134,8 +134,8 @@ export function TopBar() {
         </button>
 
         {/* Profile section — initials avatar (brand-tinted) + identity, grouped as a distinct card. */}
-        <div className="flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface-raised py-1 pl-1.5 pr-1.5 shadow-sm sm:pr-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-600/10 text-[11px] font-bold text-brand-700">
+        <div className="flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface-card py-1 pl-1.5 pr-1.5 shadow-card sm:pr-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-luxury-100 text-[11px] font-bold text-luxury-700 ring-1 ring-luxury-300/60">
             {initials}
           </span>
           <div className="hidden leading-tight sm:block">
@@ -151,4 +151,3 @@ export function TopBar() {
     </header>
   );
 }
-

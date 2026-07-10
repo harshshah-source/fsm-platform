@@ -52,7 +52,7 @@ export function DropdownMenu({
         aria-expanded={open}
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center rounded-md text-ink-muted hover:text-ink-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40"
+        className="inline-flex items-center rounded-md text-ink-muted transition-colors hover:text-ink-strong focus-ring"
       >
         {trigger}
       </button>
@@ -60,7 +60,7 @@ export function DropdownMenu({
         <ul
           role="menu"
           className={cn(
-            'absolute z-20 mt-1 min-w-44 rounded-md border border-line bg-surface-card py-1 shadow-md',
+            'absolute z-20 mt-2 min-w-44 rounded-md border border-line bg-surface-card py-1.5 shadow-floating',
             align === 'right' ? 'right-0' : 'left-0',
           )}
         >
@@ -75,7 +75,7 @@ export function DropdownMenu({
                   setOpen(false);
                 }}
                 className={cn(
-                  'flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-surface-sunken disabled:cursor-not-allowed disabled:opacity-50',
+                  'flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-luxury-100/70 disabled:cursor-not-allowed disabled:opacity-50',
                   it.tone === 'danger' ? 'text-critical' : 'text-ink-strong',
                 )}
               >

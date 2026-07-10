@@ -2,21 +2,40 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   apiDeviceCycles,
   apiDeviceDowntimeTrend,
+  apiDeviceFilterOptions,
   apiDeviceList,
   apiSetDealType,
   type DeviceCycle,
   type DeviceDowntimeTrend,
+  type DeviceFilterOptions,
   type DeviceListRow,
+  type DeviceSort,
+  type DeviceStatusFilter,
 } from '../../api/devices';
 import { useAuth } from '../../auth/AuthProvider';
 import { BarChartCard, ChartCard, type BarDatum } from '../../components/charts';
-import { DataTable, EmptyState, PageHeader, type Column } from '../../components/data';
+import { DataTable, EmptyState, FilterBar, FilterSelect, PageHeader, type Column } from '../../components/data';
 import { Button, Field, Input, SectionCard } from '../../components/ui';
 import { SLABadge } from '../../components/domain';
 import { formatInactiveDuration } from '../../lib/inactiveDuration';
+import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
 
 const humanize = (c: string | null) => (c ? c.split('_').map((w) => w[0] + w.slice(1).toLowerCase()).join(' ') : '—');
 const hrs = (n: number) => `${Math.round(n)}h`;
+
+// One page of the device list. The backend hard-caps a page at 200; 100 keeps the table light while
+// still surfacing a meaningful slice, and the pager walks the rest of the (much larger) fleet.
+const PAGE_SIZE = 100;
+const nf = new Intl.NumberFormat('en-IN');
+
+// Sort options, in menu order — labels are operator-facing; the values match the backend whitelist.
+const SORT_OPTIONS: { value: DeviceSort; label: string }[] = [
+  { value: 'LONGEST_INACTIVE', label: 'Oldest — longest inactive' },
+  { value: 'NEWEST_ACTIVITY', label: 'Newest activity' },
+  { value: 'SLA_SEVERITY', label: 'SLA severity' },
+  { value: 'PRIORITY', label: 'Priority (Platinum→Silver)' },
+  { value: 'DEVICE_ID', label: 'Device ID' },
+];
 
 /**
  * FE-22 — Device Detail (ref 22). A searchable device list (the new `/devices` read) over a selected
@@ -29,7 +48,15 @@ export function DeviceDetailPage() {
   const isOpsHead = session?.role === 'OPERATIONS_HEAD';
 
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<DeviceSort>('LONGEST_INACTIVE');
+  const [status, setStatus] = useState<DeviceStatusFilter>('ALL');
+  const [bucket, setBucket] = useState('');
+  const [zoneId, setZoneId] = useState(''); // '' = all; 'UNZONED' or a numeric id string
+  const [companyId, setCompanyId] = useState(''); // '' = all
+  const [options, setOptions] = useState<DeviceFilterOptions>({ zones: [], companies: [], hasUnzoned: false });
   const [rows, setRows] = useState<DeviceListRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0); // 0-indexed
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [cycles, setCycles] = useState<DeviceCycle[] | null>(null);
   const [trend, setTrend] = useState<DeviceDowntimeTrend | null>(null);
@@ -37,11 +64,39 @@ export function DeviceDetailPage() {
   const [showSummary, setShowSummary] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Filter dropdown sources — the zones/companies actually present in the caller's scope. Loaded once.
   useEffect(() => {
-    apiDeviceList(search)
-      .then(setRows)
-      .catch(() => setError('Failed to load devices'));
-  }, [search]);
+    apiDeviceFilterOptions().then(setOptions).catch(() => {});
+  }, []);
+
+  // Any change to the query (search / sort / filters) restarts at page 1 — a stale offset could land
+  // past a now-smaller result set.
+  useEffect(() => {
+    setPage(0);
+  }, [search, sort, status, bucket, zoneId, companyId]);
+
+  useEffect(() => {
+    let live = true;
+    apiDeviceList({
+      search,
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
+      sort,
+      status,
+      bucket: bucket || undefined,
+      zoneId: zoneId === '' ? undefined : zoneId === 'UNZONED' ? 'UNZONED' : Number(zoneId),
+      companyId: companyId === '' ? undefined : Number(companyId),
+    })
+      .then((res) => {
+        if (!live) return;
+        setRows(res.rows);
+        setTotal(res.total);
+      })
+      .catch(() => live && setError('Failed to load devices'));
+    return () => {
+      live = false;
+    };
+  }, [search, page, sort, status, bucket, zoneId, companyId]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -69,6 +124,11 @@ export function DeviceDetailPage() {
       setError('Failed to tag the deal type');
     }
   };
+
+  // Pager geometry — 1-indexed row span for the caption, clamped so an empty page reads "0" cleanly.
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const fromRow = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  const toRow = Math.min(total, page * PAGE_SIZE + rows.length);
 
   const componentHours = useMemo(() => (trend?.monthly ?? []).reduce((s, m) => s + m.componentDowntimeHours, 0), [trend]);
   const currentCycle = useMemo(() => (cycles ?? []).find((c) => c.closedAt === null) ?? (cycles ?? [])[0] ?? null, [cycles]);
@@ -140,7 +200,55 @@ export function DeviceDetailPage() {
         </Field>
       </div>
 
-      <ChartCard title="Devices" className="mb-5">
+      <FilterBar>
+        <FilterSelect aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as DeviceSort)}>
+          {SORT_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              Sort: {o.label}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as DeviceStatusFilter)}>
+          <option value="ALL">All statuses</option>
+          <option value="INACTIVE">Inactive only</option>
+          <option value="ACTIVE">Active only</option>
+        </FilterSelect>
+        <FilterSelect aria-label="SLA bucket" value={bucket} onChange={(e) => setBucket(e.target.value)}>
+          <option value="">All SLA buckets</option>
+          {SLA_BUCKETS.map((b) => (
+            <option key={b} value={b}>
+              {BUCKET_LABEL_RANGE[b]}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect aria-label="Zone" value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
+          <option value="">All zones</option>
+          {options.hasUnzoned && <option value="UNZONED">UNZONED</option>}
+          {options.zones.map((z) => (
+            <option key={z.zoneId} value={z.zoneId}>
+              {z.name}
+            </option>
+          ))}
+        </FilterSelect>
+        <FilterSelect aria-label="Company" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+          <option value="">All companies</option>
+          {options.companies.map((c) => (
+            <option key={c.companyId} value={c.companyId}>
+              {c.name}
+            </option>
+          ))}
+        </FilterSelect>
+      </FilterBar>
+
+      <ChartCard
+        title="Devices"
+        className="mb-5"
+        action={
+          <span data-testid="device-list-count" className="text-xs text-ink-muted tabular-nums">
+            {total === 0 ? 'No devices' : `Showing ${nf.format(fromRow)}–${nf.format(toRow)} of ${nf.format(total)}`}
+          </span>
+        }
+      >
         <DataTable
           columns={listColumns}
           rows={rows}
@@ -150,6 +258,31 @@ export function DeviceDetailPage() {
           onRowClick={select}
           empty={<EmptyState message="No devices for the current scope." />}
         />
+        {total > PAGE_SIZE && (
+          <nav aria-label="Device list pages" className="mt-3 flex items-center justify-between gap-3">
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="device-page-prev"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              ‹ Prev
+            </Button>
+            <span data-testid="device-page-status" className="text-xs text-ink-muted tabular-nums">
+              Page {nf.format(page + 1)} of {nf.format(pageCount)}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              data-testid="device-page-next"
+              disabled={page + 1 >= pageCount}
+              onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+            >
+              Next ›
+            </Button>
+          </nav>
+        )}
       </ChartCard>
 
       {selected && (

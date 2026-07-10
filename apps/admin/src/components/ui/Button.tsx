@@ -6,10 +6,10 @@ export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-brand-600 text-white shadow-sm hover:bg-brand-700 hover:shadow-md',
-  secondary: 'border border-line bg-surface-card text-ink-strong shadow-sm hover:border-line-strong hover:bg-surface-raised',
-  danger: 'border border-critical/30 bg-critical-bg text-critical shadow-sm hover:bg-critical/10',
-  ghost: 'text-ink hover:bg-surface-sunken hover:text-ink-strong',
+  primary: 'bg-gradient-to-b from-brand-600 to-brand-700 text-white shadow-sm shadow-brand-700/20 hover:shadow-md hover:shadow-brand-700/25',
+  secondary: 'border border-line bg-surface-card text-ink-strong shadow-sm hover:border-line-strong hover:bg-surface-raised hover:shadow-card',
+  danger: 'border border-critical/30 bg-critical-bg text-critical shadow-sm hover:bg-critical/10 hover:shadow-card',
+  ghost: 'text-ink hover:bg-luxury-100/70 hover:text-ink-strong',
 };
 
 const SIZES: Record<ButtonSize, string> = {
@@ -34,7 +34,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       ref={ref}
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors',
+        'inline-flex items-center justify-center gap-2 rounded-md font-semibold transition-[background-color,border-color,box-shadow,transform,color]',
         'focus-ring active:translate-y-px',
         'disabled:cursor-not-allowed disabled:opacity-60',
         VARIANTS[variant],
@@ -48,4 +48,3 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     </button>
   );
 });
-

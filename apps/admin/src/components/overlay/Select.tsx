@@ -56,7 +56,7 @@ export function Select({
         aria-expanded={open}
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
-        className="flex h-9 min-w-40 items-center gap-2 rounded-md border border-line bg-surface-card px-3 text-sm text-ink-strong shadow-sm transition-colors hover:border-line-strong focus-ring"
+        className="flex h-10 min-w-40 items-center gap-2 rounded-md border border-line bg-surface-card px-3 text-sm text-ink-strong shadow-sm transition-[background-color,border-color,box-shadow] hover:border-line-strong hover:bg-white focus-ring"
       >
         <span className={cn(!current && 'text-ink-muted')}>{current?.label ?? placeholder}</span>
         <span aria-hidden className="ml-auto text-ink-muted">
@@ -66,7 +66,7 @@ export function Select({
       {open && (
         <ul
           role="listbox"
-          className="absolute z-20 mt-1 max-h-60 min-w-full overflow-auto rounded-md border border-line bg-surface-card py-1 shadow-floating"
+          className="absolute z-20 mt-2 max-h-60 min-w-full overflow-auto rounded-md border border-line bg-surface-card py-1 shadow-floating"
         >
           {options.map((o) => (
             <li
@@ -78,7 +78,7 @@ export function Select({
                 setOpen(false);
               }}
               className={cn(
-                'cursor-pointer px-3 py-1.5 text-sm hover:bg-surface-sunken',
+                'cursor-pointer px-3 py-2 text-sm transition-colors hover:bg-luxury-100/70',
                 o.value === value && 'font-medium text-brand-700',
               )}
             >
@@ -90,4 +90,3 @@ export function Select({
     </div>
   );
 }
-

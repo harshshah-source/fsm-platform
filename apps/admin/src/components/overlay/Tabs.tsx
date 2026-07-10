@@ -47,7 +47,7 @@ export function TabList({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn('flex flex-wrap gap-1 border-b border-line', className)}
+      className={cn('flex flex-wrap gap-1 border-b border-line bg-surface-raised/35 p-1', className)}
     >
       {children}
     </div>
@@ -66,10 +66,10 @@ export function Tab({ value, children }: { value: string; children: ReactNode })
       aria-controls={`${ctx.idBase}-panel-${value}`}
       onClick={() => ctx.setValue(value)}
       className={cn(
-        'px-3 py-1.5 text-sm transition-colors',
+        'rounded-md px-3 py-2 text-sm font-medium transition-[background-color,color,box-shadow]',
         selected
-          ? 'border-b-2 border-brand-600 font-medium text-ink-strong'
-          : 'border-b-2 border-transparent text-ink-muted hover:text-ink-strong',
+          ? 'bg-surface-card text-ink-strong shadow-sm ring-1 ring-line'
+          : 'text-ink-muted hover:bg-luxury-100/70 hover:text-ink-strong',
       )}
     >
       {children}

@@ -32,6 +32,24 @@ export interface TicketReasoning {
   clusterMultiplier: number | null;
 }
 
+/**
+ * Ungated per-ticket state on a schedule stop (Issue 79). Sourced independently of the gated
+ * "Why suggested?" {@link TicketReasoning}: `slaBucket` from the live `device_states`, `companyTier`
+ * denormalised on the ticket, `partialRecovery` from a PARTIAL_RECOVERY verification outcome (Issue 18).
+ * Drives the reference-12 per-ticket PARTIAL / CRITICAL / tier card badges without unhiding the reasoning.
+ */
+export interface UngatedTicketState {
+  slaBucket: string | null;
+  companyTier: string | null;
+  partialRecovery: boolean;
+}
+
+export interface ZmDetailStopTicket extends UngatedTicketState {
+  ticketId: string;
+  sortOrder: number;
+  reasoning: TicketReasoning | null;
+}
+
 export interface ZmDetailStop {
   batchId: string;
   stopSequence: number;
@@ -39,7 +57,7 @@ export interface ZmDetailStop {
   plantName: string;
   status: string;
   deviceCount: number;
-  tickets: { ticketId: string; sortOrder: number; reasoning: TicketReasoning | null }[];
+  tickets: ZmDetailStopTicket[];
 }
 
 export interface ZmScheduleDetail {
@@ -110,6 +128,7 @@ export class ZmScheduleQueryService {
 
     const ticketIds = schedule.batches.flatMap((b) => b.tickets.map((t) => t.ticketId));
     const reasoning = await this.reasoningByTicket(ticketIds);
+    const state = await this.stateByTicket(ticketIds);
 
     const stops: ZmDetailStop[] = schedule.batches.map((b) => ({
       batchId: String(b.batchId),
@@ -121,6 +140,7 @@ export class ZmScheduleQueryService {
       tickets: b.tickets.map((t) => ({
         ticketId: t.ticketId,
         sortOrder: t.sortOrder,
+        ...(state.get(t.ticketId) ?? { slaBucket: null, companyTier: null, partialRecovery: false }),
         reasoning: reasoning.get(t.ticketId) ?? null,
       })),
     }));
@@ -157,6 +177,34 @@ export class ZmScheduleQueryService {
 
   private zoneFilter(scope: ZmScope): { zoneId?: bigint } {
     return scope.role === 'ZONAL_MANAGER' && scope.zoneId != null ? { zoneId: BigInt(scope.zoneId) } : {};
+  }
+
+  /**
+   * Ungated per-ticket badge state (Issue 79) — live `device_states.sla_bucket`, the ticket's
+   * denormalised `company_tier`, and whether any verification run reached PARTIAL_RECOVERY. Deliberately
+   * distinct from {@link reasoningByTicket}: this is the *un*gated source the stop-card badges read
+   * without the ZM expanding "Why suggested?".
+   */
+  private async stateByTicket(ticketIds: string[]): Promise<Map<string, UngatedTicketState>> {
+    if (ticketIds.length === 0) return new Map();
+    const tickets = await this.prisma.ticket.findMany({
+      where: { ticketId: { in: ticketIds } },
+      select: {
+        ticketId: true,
+        companyTier: true,
+        device: { select: { state: { select: { slaBucket: true } } } },
+        verificationRuns: { select: { outcome: true } },
+      },
+    });
+    const map = new Map<string, UngatedTicketState>();
+    for (const t of tickets) {
+      map.set(t.ticketId, {
+        slaBucket: t.device.state?.slaBucket ?? null,
+        companyTier: t.companyTier,
+        partialRecovery: t.verificationRuns.some((v) => v.outcome === 'PARTIAL_RECOVERY'),
+      });
+    }
+    return map;
   }
 
   /** Latest recommendation reasoning per ticket (the "Why suggested?" chip source). */

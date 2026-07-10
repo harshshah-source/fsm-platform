@@ -56,12 +56,15 @@ const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
 const fetchMock = vi.fn();
-function stubDetail() {
+function stubWith(body: unknown) {
   fetchMock.mockImplementation(async (url: string) => {
     if (String(url).includes('/schedules/engineers')) return json([]); // zone-SE picker source
-    return json(detail); // GET detail
+    return json(body); // GET detail
   });
   vi.stubGlobal('fetch', fetchMock);
+}
+function stubDetail() {
+  stubWith(detail);
 }
 
 function renderPage() {
@@ -110,5 +113,56 @@ describe('ZM Schedule detail (Issue 13b AC#2)', () => {
     expect(firstStop.getByText(/PLATINUM/)).toBeInTheDocument();
     expect(firstStop.getByText(/CRITICAL/)).toBeInTheDocument();
     expect(firstStop.getByText(/1\.25/)).toBeInTheDocument();
+  });
+});
+
+describe('Ungated per-ticket state badges (Issue 79)', () => {
+  const detailWithState = {
+    ...detail,
+    stops: [
+      {
+        ...detail.stops[0],
+        tickets: [
+          {
+            ticketId: 'tkt-1',
+            sortOrder: 1,
+            slaBucket: 'CRITICAL',
+            companyTier: 'PLATINUM',
+            partialRecovery: true,
+            reasoning: null,
+          },
+        ],
+      },
+      {
+        ...detail.stops[1],
+        tickets: [
+          {
+            ticketId: 'tkt-2',
+            sortOrder: 1,
+            slaBucket: 'WARNING',
+            companyTier: 'SILVER',
+            partialRecovery: false,
+            reasoning: null,
+          },
+        ],
+      },
+    ],
+  };
+
+  it('renders SLA-bucket, tier and PARTIAL_RECOVERY badges without expanding "Why suggested?"', async () => {
+    stubWith(detailWithState);
+    renderPage();
+
+    // Ungated — visible on load, with no "Why suggested?" interaction.
+    const row1 = within(await screen.findByTestId('ticket-row-tkt-1'));
+    expect(row1.getByTestId('ticket-sla-tkt-1')).toHaveTextContent('CRITICAL');
+    expect(row1.getByTestId('ticket-tier-tkt-1')).toHaveTextContent('PLATINUM');
+    expect(row1.getByTestId('ticket-partial-tkt-1')).toBeInTheDocument();
+
+    // The PARTIAL_RECOVERY badge appears only when the flag is set.
+    const row2 = within(screen.getByTestId('ticket-row-tkt-2'));
+    expect(row2.getByTestId('ticket-sla-tkt-2')).toHaveTextContent('WARNING');
+    expect(row2.getByTestId('ticket-tier-tkt-2')).toHaveTextContent('SILVER');
+    expect(row2.queryByTestId('ticket-partial-tkt-2')).toBeNull();
   });
 });

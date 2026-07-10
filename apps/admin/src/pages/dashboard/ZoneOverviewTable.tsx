@@ -49,7 +49,7 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
     },
     {
       key: 'total',
-      header: 'Inactive / Total',
+      header: 'Inactive / Total Device',
       align: 'right',
       render: (r) => (
         <span data-testid="zone-inactive-total" className="tabular-nums">

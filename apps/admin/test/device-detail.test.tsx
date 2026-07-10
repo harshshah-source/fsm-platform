@@ -39,7 +39,9 @@ function stub(extra?: (url: string, opts?: RequestInit) => Response | undefined)
     if (hit) return hit;
     if (u.includes('/devices/900/cycles')) return json(cycles);
     if (u.includes('/devices/900/downtime-trend')) return json(trend);
-    if (u.includes('/devices')) return json(list);
+    if (u.includes('/devices/filter-options'))
+      return json({ zones: [{ zoneId: 1, name: 'West' }], companies: [{ companyId: 7, name: 'UltraTech' }], hasUnzoned: true });
+    if (u.includes('/devices')) return json({ rows: list, total: list.length });
     return json({});
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -117,5 +119,48 @@ describe('Device Detail (FE-22)', () => {
     await screen.findByTestId('dev-row-900');
     await userEvent.type(screen.getByLabelText(/search devices/i), 'RJ');
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/devices?search=RJ'))).toBe(true));
+  });
+
+  it('sorts and filters via the toolbar — the query params reach the endpoint', async () => {
+    stub();
+    renderPage(OH);
+    await screen.findByTestId('dev-row-900');
+
+    await userEvent.selectOptions(screen.getByLabelText(/sort by/i), 'NEWEST_ACTIVITY');
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('sort=NEWEST_ACTIVITY'))).toBe(true));
+
+    await userEvent.selectOptions(screen.getByLabelText(/^status$/i), 'INACTIVE');
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('status=INACTIVE'))).toBe(true));
+
+    await userEvent.selectOptions(screen.getByLabelText(/sla bucket/i), 'LONG_PENDING');
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('bucket=LONG_PENDING'))).toBe(true));
+
+    // Zone options come from /devices/filter-options; the UNZONED holding set is selectable.
+    await userEvent.selectOptions(screen.getByLabelText(/^zone$/i), 'UNZONED');
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('zoneId=UNZONED'))).toBe(true));
+  });
+
+  it('pages through a fleet larger than one page — shows the count, and Next requests the next offset', async () => {
+    // A page-worth of rows with a total far larger than one page, so the pager renders.
+    const pageRow = (id: number) => ({ ...list[0], deviceId: String(id) });
+    const firstPage = Array.from({ length: 100 }, (_, i) => pageRow(1000 + i));
+    stub((u) => {
+      if (u.includes('/devices') && !u.includes('/devices/')) {
+        return json({ rows: firstPage, total: 4987 });
+      }
+      return undefined;
+    });
+    renderPage(OH);
+
+    // "Showing 1–100 of 4,987" — the fleet is far larger than the visible slice.
+    const count = await screen.findByTestId('device-list-count');
+    expect(count).toHaveTextContent(/1.*100.*4,987/);
+    expect(screen.getByTestId('device-page-status')).toHaveTextContent(/page 1 of 50/i);
+    expect(screen.getByTestId('device-page-prev')).toBeDisabled();
+
+    await userEvent.click(screen.getByTestId('device-page-next'));
+    await vi.waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('offset=100'))).toBe(true),
+    );
   });
 });

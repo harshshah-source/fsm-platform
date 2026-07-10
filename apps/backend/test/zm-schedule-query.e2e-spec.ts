@@ -89,6 +89,12 @@ describe('Issue 13a slice 1 — ZmScheduleQueryService', () => {
     await makeTicket(plantId, 180);
     await makeTicket(plantId, 60);
 
+    // Ungated PARTIAL_RECOVERY state (Issue 79): the older ticket carries a PARTIAL_RECOVERY verification
+    // outcome (Issue 18) — the badge source that is *not* the gated "Why suggested?" reasoning.
+    await prisma.verificationRun.create({
+      data: { ticketId: ticketIds[0], deviceId: deviceIds[0], startedAt: NOW, outcome: 'PARTIAL_RECOVERY' },
+    });
+
     await rec.runForZone(zoneId, { now: NOW });
     await dispatch.dispatchForZone(zoneId, { dateFrom: NOW, dateTo: NOW, now: NOW });
   });
@@ -103,6 +109,7 @@ describe('Issue 13a slice 1 — ZmScheduleQueryService', () => {
     await prisma.plantBatchAssignment.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
     await prisma.workSchedule.deleteMany({ where: { zoneId } });
     await prisma.recommendation.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await prisma.verificationRun.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
@@ -143,5 +150,24 @@ describe('Issue 13a slice 1 — ZmScheduleQueryService', () => {
     expect(reasoning!.deviceBucket).toBe('CRITICAL');
     expect(reasoning!.companyPriorityRank).toBe('B');
     expect(typeof reasoning!.clusterMultiplier).toBe('number');
+  });
+
+  it('carries ungated per-ticket state (slaBucket / companyTier / partialRecovery) on each stop ticket', async () => {
+    const detail = await zm.getScheduleDetail(se, { role: 'ZONAL_MANAGER', zoneId: Number(zoneId) });
+    expect(detail).not.toBeNull();
+    const tickets = detail!.stops[0].tickets;
+
+    // Ungated state — sourced independently of the gated "Why suggested?" reasoning: slaBucket from the
+    // live device_states, companyTier denormalised on the ticket, partialRecovery from a PARTIAL_RECOVERY
+    // verification outcome. These feed the reference-12 per-ticket PARTIAL/CRITICAL/tier card badges.
+    const older = tickets.find((t) => t.ticketId === ticketIds[0]);
+    expect(older).toBeDefined();
+    expect(older!.slaBucket).toBe('CRITICAL');
+    expect(older!.companyTier).toBe('GOLD');
+    expect(older!.partialRecovery).toBe(true);
+
+    const other = tickets.find((t) => t.ticketId === ticketIds[1]);
+    expect(other).toBeDefined();
+    expect(other!.partialRecovery).toBe(false);
   });
 });

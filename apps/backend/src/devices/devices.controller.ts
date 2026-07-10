@@ -14,11 +14,20 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
-import { type DealType } from '../generated/prisma/enums';
+import { type DealType, type SlaBucket } from '../generated/prisma/enums';
 import { DeviceDetailService, type DeviceCycleView, type DeviceDowntimeTrend } from './device-detail.service';
-import { DeviceService, type DeviceListRow, type DeviceView } from './device.service';
+import {
+  DeviceService,
+  type DeviceFilterOptions,
+  type DeviceListPage,
+  type DeviceSort,
+  type DeviceStatusFilter,
+  type DeviceView,
+} from './device.service';
 
 const DEAL_TYPES: readonly DealType[] = ['RECURRING', 'ONE_TIME'];
+const SORTS: readonly DeviceSort[] = ['LONGEST_INACTIVE', 'NEWEST_ACTIVITY', 'SLA_SEVERITY', 'DEVICE_ID', 'PRIORITY'];
+const STATUS_FILTERS: readonly DeviceStatusFilter[] = ['ALL', 'INACTIVE', 'ACTIVE'];
 const READ_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 
 /**
@@ -34,18 +43,44 @@ export class DevicesController {
     private readonly deviceDetail: DeviceDetailService,
   ) {}
 
-  /** Device Detail list (FE-22). Manager read, zone-scoped; optional `search` + `limit`. */
+  /**
+   * Device Detail list (FE-22). Manager read, zone-scoped; optional `search`, `limit`, `offset`, plus
+   * `sort` and the `status` / `bucket` / `zoneId` / `companyId` filters. Returns `{ rows, total }` so the
+   * UI can page through the whole fleet (one page is only the top slice of a much larger set).
+   */
   @Get()
   @Roles(...READ_ROLES)
   list(
     @CurrentUser() user: AccessTokenClaims,
     @Query('search') search?: string,
     @Query('limit') limit?: string,
-  ): Promise<DeviceListRow[]> {
+    @Query('offset') offset?: string,
+    @Query('sort') sort?: string,
+    @Query('status') status?: string,
+    @Query('bucket') bucket?: string,
+    @Query('zoneId') zoneId?: string,
+    @Query('companyId') companyId?: string,
+  ): Promise<DeviceListPage> {
     return this.devices.listDevices(
       { role: user.role, zoneId: user.zone_id },
-      { search, limit: limit === undefined ? undefined : Number(limit) },
+      {
+        search,
+        limit: limit === undefined ? undefined : Number(limit),
+        offset: offset === undefined ? undefined : Number(offset),
+        sort: SORTS.includes(sort as DeviceSort) ? (sort as DeviceSort) : undefined,
+        status: STATUS_FILTERS.includes(status as DeviceStatusFilter) ? (status as DeviceStatusFilter) : undefined,
+        bucket: (bucket as SlaBucket) || undefined,
+        zoneId: zoneId === 'UNZONED' ? 'UNZONED' : zoneId ? Number(zoneId) : undefined,
+        companyId: companyId ? Number(companyId) : undefined,
+      },
     );
+  }
+
+  /** Distinct zones + companies present in the caller's scope — the source for the list's filter dropdowns. */
+  @Get('filter-options')
+  @Roles(...READ_ROLES)
+  filterOptions(@CurrentUser() user: AccessTokenClaims): Promise<DeviceFilterOptions> {
+    return this.devices.filterOptions({ role: user.role, zoneId: user.zone_id });
   }
 
   @Get(':deviceId')

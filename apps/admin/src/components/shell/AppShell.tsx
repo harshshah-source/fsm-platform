@@ -19,7 +19,7 @@ export function AppShell() {
 
   return (
     <SidebarProvider>
-      <div className="flex min-h-screen bg-surface-app">
+      <div className="flex min-h-screen bg-transparent">
         <Sidebar role={session.role} />
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar />
@@ -27,7 +27,7 @@ export function AppShell() {
           {actingZone != null && (
             <div
               role="status"
-              className="flex items-center justify-between bg-warning-bg px-6 py-2 text-sm text-warning"
+              className="flex items-center justify-between border-b border-warning/20 bg-warning-bg/90 px-6 py-2.5 text-sm text-warning shadow-sm"
             >
               <span>
                 Acting as Zonal Manager for Zone {actingZone} (audited as {session.role})
@@ -38,7 +38,7 @@ export function AppShell() {
             </div>
           )}
 
-          <main className="flex-1 p-4 sm:p-6">
+          <main className="flex-1 p-4 sm:p-6 lg:p-8">
             <div className="enterprise-page"><Outlet /></div>
           </main>
           <Footer />
@@ -47,4 +47,3 @@ export function AppShell() {
     </SidebarProvider>
   );
 }
-

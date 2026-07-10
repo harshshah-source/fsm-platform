@@ -78,8 +78,56 @@ export interface DeviceView {
   simId: string | null;
 }
 
-export const apiDeviceList = (search?: string) =>
-  get<DeviceListRow[]>(`/devices${search && search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''}`);
+/** One page of the Device Detail list — the rows for the requested window + the full filtered total. */
+export interface DeviceListPage {
+  rows: DeviceListRow[];
+  total: number;
+}
+
+export type DeviceSort = 'LONGEST_INACTIVE' | 'NEWEST_ACTIVITY' | 'SLA_SEVERITY' | 'DEVICE_ID' | 'PRIORITY';
+export type DeviceStatusFilter = 'ALL' | 'INACTIVE' | 'ACTIVE';
+
+export interface DeviceListParams {
+  search?: string;
+  limit?: number;
+  offset?: number;
+  sort?: DeviceSort;
+  status?: DeviceStatusFilter;
+  bucket?: string;
+  /** Numeric zone id, or the literal `'UNZONED'`. */
+  zoneId?: number | 'UNZONED';
+  companyId?: number;
+}
+
+/** The distinct zones / companies in the caller's scope — sources the filter dropdowns. */
+export interface DeviceFilterOptions {
+  zones: { zoneId: number; name: string }[];
+  companies: { companyId: number; name: string }[];
+  hasUnzoned: boolean;
+}
+
+/** Paged, sorted, filtered device list. `limit`/`offset` drive the pager; `total` is the full filtered count. */
+export async function apiDeviceList(opts: DeviceListParams = {}): Promise<DeviceListPage> {
+  const params = new URLSearchParams();
+  const search = opts.search?.trim();
+  if (search) params.set('search', search);
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.offset) params.set('offset', String(opts.offset));
+  if (opts.sort) params.set('sort', opts.sort);
+  if (opts.status && opts.status !== 'ALL') params.set('status', opts.status);
+  if (opts.bucket) params.set('bucket', opts.bucket);
+  if (opts.zoneId != null) params.set('zoneId', String(opts.zoneId));
+  if (opts.companyId != null) params.set('companyId', String(opts.companyId));
+  const qs = params.toString();
+  const data = await get<DeviceListPage | DeviceListRow[]>(`/devices${qs ? `?${qs}` : ''}`);
+  // Tolerate both shapes: the paged `{ rows, total }` and the legacy bare array (a backend that
+  // predates pagination, or one not yet restarted) — so a shape mismatch never blanks the page.
+  if (Array.isArray(data)) return { rows: data, total: data.length };
+  return { rows: data.rows ?? [], total: data.total ?? 0 };
+}
+
+/** Distinct zones + companies present in the caller's scope, for the filter dropdowns. */
+export const apiDeviceFilterOptions = () => get<DeviceFilterOptions>('/devices/filter-options');
 export const apiDeviceCycles = (id: string) => get<{ deviceId: string; cycles: DeviceCycle[] }>(`/devices/${encodeURIComponent(id)}/cycles`);
 export const apiDeviceDowntimeTrend = (id: string) => get<DeviceDowntimeTrend>(`/devices/${encodeURIComponent(id)}/downtime-trend`);
 
