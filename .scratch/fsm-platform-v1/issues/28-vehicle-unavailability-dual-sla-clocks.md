@@ -1,6 +1,6 @@
 # 28 — Vehicle Unavailability Report + dual SLA clocks + readiness
 
-Status: ready-for-agent
+Status: accepted-core (status corrected 2026-07-10 by SYSTEM-STATE audit — VU report + dual SLA clocks + ZM review page shipped, backend + admin; mobile → #64, readiness source/AC#6 → #65)
 Type: AFK
 
 ## What to build

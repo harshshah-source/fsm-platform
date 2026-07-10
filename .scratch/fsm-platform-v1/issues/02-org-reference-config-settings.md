@@ -1,6 +1,6 @@
 # 02 — Org / reference config + Settings
 
-Status: ready-for-agent
+Status: done (status corrected 2026-07-10 by SYSTEM-STATE audit — org module + Settings shipped; residual ACs were closed by #45/#46/#47, all done)
 Type: AFK
 Progress: ACCEPTED WITH FOLLOW-UP (2026-06-18 deep review). AC complete enough to unblock Issue 04
 (zones/plants/companies tables + idempotent seed exist; Issue 04 only reads reference data). Backend:

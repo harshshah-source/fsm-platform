@@ -1,6 +1,6 @@
 # FE-23 — Root-Cause Analytics
 
-Status: ready-for-agent
+Status: done (2026-07-01; status line corrected 2026-07-10 by SYSTEM-STATE audit — see INDEX.md FE-23 entry)
 Type: AFK · Frontend (backend-paired) · Phase F5
 Effort: M
 

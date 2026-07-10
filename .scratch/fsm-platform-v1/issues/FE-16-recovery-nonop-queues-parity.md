@@ -1,6 +1,6 @@
 # FE-16 — Recovery + Non-Op queues parity
 
-Status: done (window.prompt → Modal upgrade → #72)
+Status: done (window.prompt → Modal upgrade → #80 (renumbered from #72 at the 2026-06-28 integration merge))
 Type: AFK · Frontend · Phase F4
 Effort: M
 
@@ -21,7 +21,7 @@ receipt auto-close, ZM unable-to-collect decision, and Non-Op dual-confirmation 
 - [x] All three queues use the shared recipe; status pills correct per flow
 - [~] Recovery receipt confirm + ZM decision actions via `Modal`; Non-Op dual-confirmation modal preserved
   — Non-Op Mark dual-confirmation modal preserved + re-skinned; receipt/decision actions stay
-  direct/`window.prompt` (see deviation) → `Modal` upgrade filed as #72
+  direct/`window.prompt` (see deviation) → `Modal` upgrade filed as #80 (renumbered from #72)
 - [x] Existing APIs, role gating, and selectors preserved
 
 ## Outcome (done with follow-up — presentation-only, FE-16)
@@ -37,11 +37,11 @@ All three queues on the canonical recipe (`PageHeader` + `MetricCard` + `DataTab
   preserved and re-skinned onto the tokens; `nonop-row-*` / `nonop-confirm-*` / `nonop-override-*` ids
   preserved.
 
-**Deviation → #72:** AC#2 asks for `Modal`-driven receipt-confirm + ZM-decision actions, but all three
+**Deviation → #80 (renumbered from #72):** AC#2 asks for `Modal`-driven receipt-confirm + ZM-decision actions, but all three
 tests assert those actions as a **direct (or `window.prompt`→) POST on click** — introducing a blocking
 confirm/reason `Modal` would change that asserted behaviour and break the locked tests. The Non-Op Mark
 dual-confirmation modal (the one true multi-field modal here) is delivered; the remaining `window.prompt`
-legs (recovery reschedule / close-failed reason; non-op override reason) are filed as #72 to be
+legs (recovery reschedule / close-failed reason; non-op override reason) are filed as #80 (renumbered from #72) to be
 Modal-ized **with** the coordinated test updates. Verified: admin `tsc --noEmit` clean · vitest **98/98**
 · `vite build` OK.
 

@@ -1,6 +1,6 @@
 # 62 — Ticket Detail Components tab: request status + WAITING_COMPONENT pause
 
-Status: ready-for-agent
+Status: done (status corrected 2026-07-10 by SYSTEM-STATE audit — drawer Components tab + /component-requests/by-ticket/:id shipped)
 Type: AFK
 
 ## What to build

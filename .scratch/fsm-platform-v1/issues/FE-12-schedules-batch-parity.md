@@ -1,6 +1,6 @@
 # FE-12 — Schedules + Schedule Detail parity
 
-Status: done (per-ticket badges → #71)
+Status: done (per-ticket badges → #79 (renumbered from #71 at the 2026-06-28 integration merge))
 Type: AFK · Frontend · Phase F3
 Effort: M
 
@@ -20,7 +20,7 @@ the `AUTO-ASSIGNED` framing instead). Override flow preserved.
 ## Acceptance criteria
 
 - [x] Batch board matches `12` (SE list + selected-SE day plan), minus the Approve gate (documented deviation)
-- [~] MetricStrip + per-ticket card badges (tier/bucket/PARTIAL/CRITICAL) — MetricStrip done; per-ticket badges → #71 (no un-gated ticket-state on the payload)
+- [~] MetricStrip + per-ticket card badges (tier/bucket/PARTIAL/CRITICAL) — MetricStrip done; per-ticket badges → #79 (renumbered from #71 at the 2026-06-28 integration merge) (no un-gated ticket-state on the payload)
 - [x] ZM override / reorder actions preserved (existing API + selectors)
 
 ## Outcome (done with follow-up — presentation-only, FE-12)
@@ -37,10 +37,10 @@ the `AUTO-ASSIGNED` framing instead). Override flow preserved.
 **Documented deviation (Decisions §7):** the mockup's "Approve" gate is omitted — `AUTO-ASSIGNED` framing
 is rendered instead.
 
-**Accepted-with-follow-up (#71):** reference 12 shows per-ticket PARTIAL/CRITICAL/tier card badges, but
+**Accepted-with-follow-up (#79, renumbered from #71):** reference 12 shows per-ticket PARTIAL/CRITICAL/tier card badges, but
 `ScheduleStopTicket` carries only `ticketId`/`sortOrder`/`reasoning`, and the reasoning (tier/bucket) is
 gated behind "Why suggested?" and must stay hidden (asserted by `schedule-detail.test.tsx`). Surfacing
-un-gated ticket-state needs a payload enrichment → filed as #71. Everything else ships.
+un-gated ticket-state needs a payload enrichment → filed as #79 (renumbered from #71). Everything else ships.
 
 Verified: admin `tsc --noEmit` clean · vitest **98/98** · `vite build` OK.
 

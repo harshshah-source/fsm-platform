@@ -1,6 +1,6 @@
 # 45 — Plants Admin UI
 
-Status: ready-for-agent
+Status: done (status corrected 2026-07-10 by SYSTEM-STATE audit — Plants tab + SE-Coverage plant picker shipped; closes Issue 02 AC#2)
 Type: AFK
 Origin: Issue 02 deep review (2026-06-18) — closes the AC#2 partial gap.
 

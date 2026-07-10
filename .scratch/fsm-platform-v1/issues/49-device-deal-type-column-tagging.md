@@ -1,6 +1,6 @@
 # 49 — Device `deal_type` column + Operations-Head manual tagging
 
-Status: ready-for-agent
+Status: done (status corrected 2026-07-10 by SYSTEM-STATE audit — Ops-Head audited tag endpoint + device read shipped; admin tag control shipped with FE-22)
 Type: AFK
 Origin: #48 triage (2026-06-21) — chose Option B (dedicated slice before #35) over retrofitting done 04/05.
 

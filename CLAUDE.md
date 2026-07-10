@@ -1,8 +1,10 @@
 # CLAUDE.md
 
 Project context for the FSM GPS Field Service Management platform (greenfield).
-Two products — Admin Web Dashboard (React + TS + Vite) and SE Mobile App (React Native + Expo) —
-over a NestJS modular-monolith backend (Postgres 16 + PostGIS + Prisma, Redis/BullMQ, S3).
+Two products — Admin Web Dashboard (React + TS + Vite) and SE Mobile App (React Native + Expo;
+auth shell only so far) — over a NestJS modular-monolith backend (Postgres 16 + PostGIS + Prisma;
+in-process `@nestjs/schedule` cron — no Redis/BullMQ/S3 in the current stack).
+Current-state source of truth: `docs/SYSTEM-STATE-2026-07.md`.
 
 ## Agent skills
 

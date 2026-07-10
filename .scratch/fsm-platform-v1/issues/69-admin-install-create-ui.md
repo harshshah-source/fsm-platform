@@ -1,6 +1,6 @@
 # 69 — Admin Install-create UI (single form + CSV upload)
 
-Status: ready-for-agent
+Status: done (status corrected 2026-07-10 by SYSTEM-STATE audit — /install route + api/install.ts + InstallCreatePage shipped; 8 vitest green)
 Type: AFK · Frontend
 Origin: Issue 33 parity follow-up (2026-06-26).
 

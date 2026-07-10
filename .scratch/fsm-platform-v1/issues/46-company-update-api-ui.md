@@ -1,6 +1,6 @@
 # 46 — Company Update API + UI
 
-Status: ready-for-agent
+Status: done (status corrected 2026-07-10 by SYSTEM-STATE audit — PATCH /org/companies/:id + editable admin Companies rows shipped; closes Issue 02 AC#3)
 Type: AFK
 Origin: Issue 02 deep review (2026-06-18) — closes the AC#3 "configurable" gap for companies.
 

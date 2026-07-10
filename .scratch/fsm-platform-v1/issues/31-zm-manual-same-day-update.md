@@ -1,6 +1,6 @@
 # 31 — ZM manual same-day update + ON_SITE conflict warning
 
-Status: ready-for-agent
+Status: accepted-core (status corrected 2026-07-10 by SYSTEM-STATE audit — same-day add/remove/reorder + Intra-day Queue shipped, backend + admin; mobile cues → #66)
 Type: AFK
 
 ## What to build
