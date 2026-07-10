@@ -490,4 +490,107 @@ Known FE gaps: `window.prompt` reason legs (#80), Playwright visual baseline (FE
 
 ---
 
-*(Sections 4–8 follow.)*
+## 4. DOCS vs CODE RECONCILIATION
+
+Method: every issue file's `Status:` line was extracted (`grep -H -m1 "^Status:" issues/*.md`,
+138 files) and compared against INDEX.md and against code evidence from §3. INDEX.md (updated
+2026-07-09) proved **accurate on every entry spot-checked** (evidence for #100/#101/#102/#108/
+#112/#113 re-verified this session: `transition-or-conflict.ts` exists and is adopted only by
+intraday; `dispatch-run.service.ts:46 runForActiveZones`; the partial uniques in `20260708120000`/
+`20260709120000`; the cron tables in §3g). **The issue FILES lag the INDEX** — the index was
+updated without touching the files.
+
+### 4.1 Issue files whose `Status:` line is STALE (file says ≠ verified reality)
+
+| Issue file | File claims | Verified status | Correction |
+|---|---|---|---|
+| `02-org-reference-config-settings.md` | ready-for-agent | done in practice — org module + Settings shipped; ACs closed via #45/#46/#47 (all done) | mark done, note AC ownership |
+| `28-vehicle-unavailability-dual-sla-clocks.md` | ready-for-agent | accepted core (INDEX.md:72 — VU report + dual clocks + ZM review, backend+admin; `vehicle-unavailability.service.ts` exists) | mark accepted-core; residual → #64/#65 |
+| `31-zm-manual-same-day-update.md` | ready-for-agent | accepted core (INDEX.md:75; `same-day-update.service.ts` exists) | mark accepted-core; mobile cues → #66 |
+| `45-plants-admin-ui.md` | ready-for-agent | done (INDEX.md:163; `org/plants.controller.ts` + admin Plants tab) | mark done |
+| `46-company-update-api-ui.md` | ready-for-agent | done (INDEX.md:164; `PATCH /org/companies/:id`) | mark done |
+| `49-device-deal-type-column-tagging.md` | ready-for-agent | done (INDEX.md:167; deal-type tag endpoint + FE-22 admin control) | mark done |
+| `62-ticket-detail-components-tab.md` | ready-for-agent | done (INDEX.md:172) | mark done |
+| `69-admin-install-create-ui.md` | ready-for-agent | done (INDEX.md:179; `/install` route + `api/install.ts`) | mark done |
+| `FE-21…FE-25` (5 files) | ready-for-agent | done (INDEX.md:280-284, dated 2026-06-29/07-01; routes + tests exist in `apps/admin/src/pages/reports/`) | mark done |
+| `FE-12-schedules-batch-parity.md` | done, "badges → **#71**" | badges follow-up was **renumbered #79** at the 2026-06-28 integration merge (INDEX.md:189) | fix stale cross-ref |
+| `FE-16-recovery-nonop-queues-parity.md` | done, "Modal upgrade → **#72**" | renumbered **#80** (INDEX.md:190) | fix stale cross-ref |
+
+Consistent (no correction needed): all remaining files match INDEX/code — includes the done set
+(04–16, 18/19, 29/30, 32–44, 47/48, 72/73/75, 100/102/108/109/112/113, FE-01–08/10–20/26), the
+partials (21, 101, FE-00, FE-09), the open backlog (17, 20, 50, 54–61, 63–68, 71, 74, 76, 77,
+81–95 present, 98/99, 103–107, 110/111, 114), and the gated ones (91 needs-triage, 96/97
+ready-for-human tails, 88 needs-info).
+
+### 4.2 Issue numbers with INDEX entries but NO file in `issues/`
+
+`#51, #53, #70, #78, #79, #80, #95` are described in INDEX.md (some at length, e.g. #70 done,
+#78 done-core) but have no `issues/NN-*.md` file. #70/#78 are done so only history is missing;
+**#51, #53, #79, #80, #95 are OPEN work items that exist only as INDEX prose** — they should get
+stub files or be explicitly tracked as index-only. (Correction applied in the finale: noted in
+INDEX.md header.)
+
+### 4.3 Major documents
+
+| Document | Claim vs reality | Verdict |
+|---|---|---|
+| `CLAUDE.md:5` | "…backend (Postgres 16 + PostGIS + Prisma, **Redis/BullMQ, S3**)" — no Redis/BullMQ/S3 dependency exists (`package.json`; #97 note "No Redis/BullMQ") | **wrong** → correct the stack line |
+| `.scratch/fsm-platform-v1/INDEX.md` | funnel table, activation checklist, per-issue notes | **accurate** (spot-checked; last verified 2026-07-09) |
+| `docs/PRD-fsm-admin-dashboard.md:293` | "**Data layer (current): Static mock data** in the admin data directory drives all pages" | **wrong/stale** — all admin pages consume real API clients (§3k); needs a banner note |
+| PRD generally | roles, SLA buckets, page inventory, invariants | accurate as *requirements*; unimplemented rules listed in §4.4 |
+| `docs/workflow/fsm-business-technical-workflow.md` | 2,253-line business workflow; §14 offline queue, §21/22 hints/QR, §24 workers | accurate as spec; **describes subsystems that do not exist yet** (§4.4); its §25 "suggested tables" superseded by the real schema (§2) |
+| `docs/audits/2026-07-03-backend-production-readiness-audit.md` | 13 findings | **partially superseded** — #1 scheduler, #4 reaper, #6 recompute/partitioning, MySQL timeouts RESOLVED since (re-audit + INDEX.md:88-93); rest live as #98–#107 |
+| `docs/audits/2026-07-07-independent-production-readiness-reaudit.md` | re-verified all findings, filed #108–#111 | **accurate** |
+| `docs/audits/2026-07-07-production-validation-audit.md` | live end-to-end run: 438 s pipeline, 0 orphans; 83% UNZONED; auth in-memory; Fleet-Uptime empty (no PGI); session TZ `Asia/Calcutta` | **accurate** — the strongest runtime evidence in the repo |
+| `docs/audits/unzoned-plants-2026-07-07.md` | zone-completeness inversion (ACTIVE plants lack zone_name) | accurate `[spot-checked header only]` |
+| `docs/architecture/autoplant-integration-progress-tracker.md:7` | "Last verified 2026-07-03 · HEAD `b45d00b`" | **stale** — ~40 commits behind; phase marks predate #97 slices 2–7, #100–#113 | 
+| `docs/architecture/autoplant-integration-session-handoff.md` | session handoff from the same era | **stale** — superseded by `docs/HANDOFF-autoplant-ingestion-2026-07-07.md` + `97-PROGRESS.md` |
+| `docs/architecture/backend-engineering-review-2026-07-05.md` | Part III A1–A6 remediation plan | **implemented** — all six landed as #97 slices (INDEX.md:42); mark as executed |
+| `docs/HANDOFF-autoplant-ingestion-2026-07-07.md` | 5 commits, partition/ingestion pairing warning | accurate; its "pending" items partially closed since (#108/#112/#113) — needs a pointer |
+| `.scratch/…/issues/97-HANDOFF.md` | already banner-marked SUPERSEDED 2026-07-09 | accurate (self-corrected) |
+| `docs/progress/*` (49 files) | per-issue TDD reports + dated handoffs | historical records — no correction; do not treat any as current state |
+
+### 4.4 Business rules in PRD/workflow that the code does NOT implement
+
+1. **The SE mobile app in its entirety** (PRD §SE-Mobile screens :479-663; workflow §11–§14):
+   only the auth shell exists (§1.1). Owners: #54–#61, #63–#68, #71, #77, #85–#89.
+2. **Offline-first queue + batched sync** (PRD :309-310 WatermelonDB/SQLite; workflow §14):
+   nothing client- or server-side; server API is #82, client #17.
+3. **QR scanner + Technical Hints** (PRD §SE-QR/§Hints; workflow §21/§22): no code; needs #83
+   (ticket search) + #84 (hints derivation) then #20.
+4. **Push / WhatsApp / SMS / email actual delivery** (PRD :311, workflow §23): recorded in
+   `notification_deliveries` via the gateway seam but **no external adapter sends anything** (#76).
+   The PRD's "WhatsApp shown as sent — first-class" is honored in data (`first_class=true`).
+5. **SAP PGI feed** (PRD Fleet-Uptime eligibility; workflow §7): `pgi_history` has no writer (§2.2);
+   eligibility falls back to the `all-deployed` proxy only if Ops flips the setting (#112 shipped
+   the mechanism, the feed itself has no owner issue — see §5 new stub).
+6. **Media upload** (photos on troubleshoot/voucher/install): `photo_refs` columns exist; no
+   upload/storage API (#81). S3 mentioned only in CLAUDE.md (wrongly).
+7. **Vehicle readiness from AutoPlant LR-Date/Next-Trip** (workflow §9, PRD readiness hints):
+   recommender readiness is stubbed UNKNOWN (§3e); source integration → #65.
+8. **Expected-component hard-filter leg** (workflow §15): stubbed pass (#51).
+9. **Warehouse replenishment / auto-decrement** (workflow §16 inventory lifecycle): warehouse
+   on-hand is manual-set only (#95).
+10. **Outcome-causality ZM scorecard metrics** (PRD §OH-Analytics): #74 — needs a
+    decision→outcome linkage model that doesn't exist.
+11. **EXPECTED_BACK readiness state** (v2 reference): deliberately omitted (FE-14, INDEX.md:269).
+12. **Daily-status source for SE profile** (PRD M8d): still `needs-info` (#88).
+
+### 4.5 Code behaviors the PRD/workflow do NOT describe (doc additions needed)
+
+- The **zone-mapping crosswalk + UNZONED holding zone + per-plant override** machinery (§3a) —
+  the workflow doc still assumes plants arrive zoned.
+- **`eligibility_mode` setting** with the `all-deployed` interim proxy (#112) and its audited flip.
+- The **three ops master switches** + per-sweep cron env matrix (§3g) and the
+  ingestion↔partition-maintenance coupling rule.
+- **Master-sync skip accounting** (`master_sync_rejects`) and `/api/integration/health`
+  source-vs-FSM reconciliation.
+- **Advisory-lock + consume-on-dispatch idempotency** design of batch dispatch (#100).
+- **In-memory auth store** reality (PRD assumes real users; validation audit documents shared
+  password dev store).
+- The **Intra-day Queue = AuditLog view** decision (2026-06-25) — workflow §10 implies a table.
+- **Repeat window = 24h from VERIFIED closure** (ADR-0021) — workflow §8 leaves the window vague.
+
+---
+
+*(Sections 5–8 follow.)*
