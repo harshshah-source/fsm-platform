@@ -662,10 +662,25 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 
 | Key | Default / effect | Current live value |
 |---|---|---|
-| `eligibility_mode` | `pgi` (canonical — requires PGI feed, i.e. 0 eligible today) \| `all-deployed` (interim proxy: vehicle status ∈ ACTIVE/DEPLOYED). Applied at next recompute; harmless to set while schedulers OFF | `[UNVERIFIED — dev DB not queried this session; default is pgi]` |
-| `inactivity_threshold_hours` | 24 (`device-state.service.ts:8`) | `[UNVERIFIED]` |
-| `telemetry_retention_days` | drives partition drops (`partition-maintenance.service.ts:62`) | `[UNVERIFIED]` |
-| soft-inactive `threshold_pct` | 2% default (#40) — DEFICIT/PREVENTIVE switch | `[UNVERIFIED]` |
+| `eligibility_mode` | `pgi` (canonical — requires PGI feed, i.e. 0 eligible today) \| `all-deployed` (interim proxy: vehicle status ∈ ACTIVE/DEPLOYED). Applied at next recompute; harmless to set while schedulers OFF | **`all-deployed`** — set 2026-07-10 via audited `PUT /api/settings/eligibility_mode` (audit id 16, OPERATIONS_HEAD). Effect verified live: 100% of inactive devices (5,505/5,505) are eligible, i.e. all sit on ACTIVE/DEPLOYED vehicles. |
+| `inactivity_threshold_hours` | 24 (`device-state.service.ts:8`) | **24** (verified via `GET /api/settings`) |
+| `telemetry_retention_days` | drives partition drops (`partition-maintenance.service.ts:62`) | **7** (verified via `GET /api/settings`) |
+| soft-inactive `threshold_pct` | 2% default (#40) — DEFICIT/PREVENTIVE switch | not present in `system_settings` registry (defaults to 2% in code) — recommender ran in `DEFICIT` mode for every ticket this session |
+
+> **Live funnel — activated 2026-07-10 (watched, all-manual, schedulers OFF).** First end-to-end run of
+> the whole funnel against the dev DB (19,457 devices). Two watched `run-pipeline` calls → device-state
+> recompute + ticket creation; one `dispatch-run` → recommender + Day-Plan dispatch; ZM override loop +
+> intraday offer/timeout exercised. Scoreboard (single-moment snapshot):
+> **inactive 5,505 → eligible 5,505 (100%, all-deployed) → open tickets 5,947 (1:1 with devices, 0 dupes)
+> → recommended 5,765 → dispatched today 275 (13 SE Day Plans, capacity-bound at 25/SE) →
+> unassignable 5,259** (`NO_ELIGIBLE_SE`; of open tickets, 1,463 have **no SE coverage** — 1,369 of them
+> UNZONED, the B8 gap — and the rest are **capacity-exhausted** in covered plants).
+> Mock SE workforce (dev seed, commit `0df556a`): 13 SEs / 30 coverage rows — North 1 · South 4 · East 1
+> · West 3 · UNZONED 4. **Surprise:** a concurrent actor (or a runtime scheduler override — `.env` has
+> `INGESTION_SCHEDULER_ENABLED=false`) ran the pipeline 4 more times mid-session (snapshot 51–54); it
+> caused no duplication (idempotency held: 0 duplicate tickets) but drifted the totals. Env master
+> switches confirmed OFF the whole session: `INGESTION_SCHEDULER_ENABLED=false`,
+> `PARTITION_MAINTENANCE_ENABLED=false`, `BUSINESS_SWEEPS_ENABLED` unset.
 
 ### 6.2 Env flags (all master switches default OFF; cron strings read once at boot)
 
