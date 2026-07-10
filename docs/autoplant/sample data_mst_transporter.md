@@ -1,0 +1,11 @@
+1	1001		2021-08-24 11:04:41	1	abcd@gmail.com	1234567891	abcd	ACTIVE	Bengaluru				5066				Durga transporter							
+6200	1006		2021-08-24 11:04:43	3017		9116610051	Tarak Logistics LLP	ACTIVE	Tarak Logistics LLP				107039				Tarak Logistics LLP							
+6201	1006		2021-08-24 11:04:43	3017		9694770570	Shree Astoliya Transport Company	ACTIVE	Shree Astoliya Transport Company				112840				Shree Astoliya Transport Company							
+6202	1006		2021-08-24 11:04:44	3017		7023567700	NEW RADHIKA TRANSPORT COMPANY	ACTIVE	NEW RADHIKA TRANSPORT COMPANY				112850				NEW RADHIKA TRANSPORT COMPANY							
+6203	1006		2021-08-24 11:04:42	3017		8769842098	Shree Patel Transport	ACTIVE	Shree Patel Transport				101611				Shree Patel Transport							
+6204	1006		2021-08-24 11:04:45	3020	bmrmpoint@gmail.com	7496980298	BMR MAVEN POINT PRIVATE LIMITED	ACTIVE	BMR MAVEN POINT PRIVATE LIMITED				114287				BMR MAVEN POINT PRIVATE LIMITED							
+6205	1006		2021-08-24 11:04:46	3020	anilbuildtech73@gmail.com	9855462159	Anil Buildtech	ACTIVE	Anil Buildtech				114292				Anil Buildtech							
+6206	1006		2021-08-24 11:04:46	3020	g.k.contractor97@gmail.com	9991091010	Gulshan Kumar Contractor	ACTIVE	Gulshan Kumar Contractor				114293				Gulshan Kumar Contractor							
+6207	1006		2021-08-24 11:04:48	3020	ptcjkl@gmail.com	9992588383	PREET TRANSPORT CO.	ACTIVE	PREET TRANSPORT CO.				114296				PREET TRANSPORT CO.							
+6208	1006		2021-08-24 11:04:48	3020	shreeram466499@gmail.com	8059444552	SHREE RAM BUILDERS	ACTIVE	SHREE RAM BUILDERS				114297				SHREE RAM BUILDERS							
+																								

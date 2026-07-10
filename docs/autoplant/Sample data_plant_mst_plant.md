@@ -1,0 +1,11 @@
+4575							9099999999	GGVL@gmail.com	GGVL			1070	GRPL Roadways	2026-02-18 12:21:16	grpl_roadways_admin									0001			GGVL						6071	Madhya Pradesh												ACTIVE			2215	North	4575	GGVL	0001
+4561							987654432	BG_Infra@gmail.com	BG Infra			1063	BG Infra	2026-02-16 06:19:44	bginfra_impl									0001			Zuari						5834	Maharashtra												ACTIVE			2186	West	4460	Zuari	Zuari
+4536							9883353637	durgapur@ots.co.in	GB_DURGAPUR			1069	GB Transport	2026-02-04 11:47:38	gbtrans_admin									003			DURGAPUR STEEL PLANT		durgapur@ots.co.in	GB_DURGAPUR			6054	West Bengal												ACTIVE	gbtrans_admin	2026-02-10 11:32:47	2211	East	4536	Durgapur	003
+4535							8455077295	rourkela@ots.co.in	GB_ROURKELA			1069	GB Transport	2026-02-04 11:46:17	gbtrans_admin									002			ROURKELA STEEL PLANT		rourkela@ots.co.in	GB_ROURKELA			6051	Odisha												ACTIVE	gbtrans_admin	2026-02-10 11:54:41	2211	East	4535	Rourkela	002
+4534							9234685935	bokaro@ots.co.in	GB_BOKARO			1069	GB Transport	2026-02-04 11:44:43	gbtrans_admin									001			BOKARO STEEL PLANT		bokaro@ots.co.in	GB_BOKARO			6046	Jharkhand												ACTIVE	gbtrans_admin	2026-02-13 12:53:12	2210	North	4534	Bokaro	001
+4468							123456789	test@gmail.com	Rahul Joshi			1065	Gallantt	2025-11-24 13:13:12	gallantt_admin									001			Gallantt Ispat						5888	Uttar Pradesh												ACTIVE	gallantt_admin	2025-11-24 13:33:26	2192	North	4468	Gallantt	001
+4290					india							1014	JSW Cement	2025-06-11 13:09:44										09977			JKPlant_Test						0	NA					india							ACTIVE			0	NA	4290	JKPlant_Test	09977
+4276												1047	DFPCL	2025-06-05 17:43:45	INTEGRATION_SERVICE									002			Home						0													INACTIVE			0		4276	Home	002
+4160					india							1010	UTCL	2025-03-06 12:29:34										 	india		DEPOT_CBT						0						india							INACTIVE			0		4160	DEPOT_CBT	 
+4159					india							1010	UTCL	2025-03-06 12:28:30											india		GINIGERA-GGU						0						india							INACTIVE			0		4159	GINIGERA-GGU	
+																																																					

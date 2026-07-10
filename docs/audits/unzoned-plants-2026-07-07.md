@@ -1,0 +1,255 @@
+# UNZONED Plants with Company Names
+
+Generated 2026-07-07T11:36:28.840Z from the FSM DB (post-pipeline) + AutoPlant `mst_company`.
+
+Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not mirror company names).
+
+| # | Plant (FSM id) | source_plant_id | raw zone | Vehicles | Company(ies) |
+|---|---|---|---|---|---|
+| 1 | KESORAM WORKS (24) | 3127 | (null) | 2195 | Vasavadatta |
+| 2 | RCP-9211 (11) | 3093 | (null) | 1762 | Nuvista |
+| 3 | NCP-9117 (103) | 3532 | (null) | 1446 | Nuvista |
+| 4 | CCP-9115 (100) | 3528 | (null) | 1141 | Nuvista |
+| 5 | SATNA PLANT LINE 2 (19) | 3122 | (null) | 816 | Prism Cement |
+| 6 | SATNA PLANT LINE 1 (18) | 3121 | (null) | 527 | Prism Cement |
+| 7 | RCP-5151 (15) | 3097 | (null) | 470 | Nuvista |
+| 8 | JCP-9105 (121) | 3604 | (null) | 463 | Nuvista |
+| 9 | PCP-5150 (14) | 3096 | (null) | 431 | Nuvista |
+| 10 | HCP-9116 (33) | 3461 | (null) | 409 | Nuvista |
+| 11 | Kadappa (5) | 3038 | (null) | 384 | Vicat Cement |
+| 12 | SCL_Ranavav (2) | 3030 | (null) | 380 | SAURASHTRA CEMENT |
+| 13 | DGFC_Test (178) | 3923 | (null) | 360 | DGFC |
+| 14 | BARPETA ROAD CRS-SCNEL (102) | 3530 | (null) | 341 | STAR CEMENT |
+| 15 | ESL STEEL LTD Steel Unit (139) | 3672 | (null) | 312 | Vedanta - ESL |
+| 16 | JORHAT CPW-SCL-LUMS (7) | 3040 | (null) | 280 | STAR CEMENT |
+| 17 | JCP-9234 (180) | 4167 | (null) | 279 | Nuvista |
+| 18 | PURNEA CPW SCL SGU (9) | 3078 | (null) | 207 | STAR CEMENT |
+| 19 | MCP-9233 (182) | 4169 | (null) | 184 | Nuvista |
+| 20 | SCL_Sidheegram (3) | 3031 | (null) | 179 | SAURASHTRA CEMENT |
+| 21 | ACP-9231 (181) | 4168 | (null) | 178 | Nuvista |
+| 22 | OCP-5152 (12) | 3094 | (null) | 165 | Nuvista |
+| 23 | Kalamboli (4) | 3037 | (null) | 162 | Vicat Cement |
+| 24 | HCIL_IMLAI (147) | 3697 | (null) | 157 | Zuari Cement |
+| 25 | ACP-9106 (25) | 3128 | (null) | 153 | Nuvista |
+| 26 | MCP-9107 (26) | 3129 | (null) | 149 | Nuvista |
+| 27 | HCIL -JHANSI (148) | 3698 | (null) | 148 | Zuari Cement |
+| 28 | SCP-9232 (183) | 4170 | (null) | 148 | Nuvista |
+| 29 | PANDU PORT CPS SCL-GGU (101) | 3529 | (null) | 135 | STAR CEMENT |
+| 30 | KHORDA (151) | 3704 | (null) | 116 | HCCB |
+| 31 | BCP-5153 (13) | 3095 | (null) | 90 | Nuvista |
+| 32 | SCP-9104 (122) | 3605 | (null) | 90 | Nuvista |
+| 33 | AMETHI TOLLING UNIT (23) | 3126 | (null) | 87 | Prism Cement |
+| 34 | BCP-9216 (17) | 3099 | (null) | 79 | Nuvista |
+| 35 | HINDUSTAN COCA-COLA BEVERAGES - SIDDIPET GF (163) | 3726 | (null) | 78 | HCCB |
+| 36 | PCP-9214 (10) | 3092 | (null) | 70 | Nuvista |
+| 37 | OCP-9215 (16) | 3098 | (null) | 69 | Nuvista |
+| 38 | DSTL K1PLANT (104) | 3533 | (null) | 59 | Deepak Fertilizer |
+| 39 | DEVARYAMJAL_GT (161) | 3722 | (null) | 37 | HCCB |
+| 40 | DIC Plant (28) | 3456 | (null) | 32 | Prism Cement |
+| 41 | HIMJAL COPACK (159) | 3720 | (null) | 28 | HCCB |
+| 42 | GOA (154) | 3709 | (null) | 25 | HCCB |
+| 43 | SCNEL SILCHAR CEMENT (128) | 3619 | (null) | 24 | STAR CEMENT |
+| 44 | ATMAKURU (160) | 3721 | (null) | 23 | HCCB |
+| 45 | CHUNAR TOLLING UNIT (20) | 3123 | (null) | 22 | Prism Cement |
+| 46 | J. K. CEMENTS LTD-MUDDAPUR (196) | 4204 | (null) | 21 | Shree Balaji Roadlines |
+| 47 | KALBURGI CEMENT PRIVATE LIMITED-CHATRASHALA(TANDUR) (202) | 4210 | (null) | 20 | Shree Balaji Roadlines |
+| 48 | RUDAULI TOLLING UNIT (22) | 3125 | (null) | 17 | Prism Cement |
+| 49 | ACC CEMENT LIMITED-Chittapur (203) | 4211 | (null) | 16 | Shree Balaji Roadlines |
+| 50 | Kalburgi (6) | 3039 | (null) | 15 | Vicat Cement |
+| 51 | RCP_NVL_HUB (185) | 4189 | (null) | 10 | Nuvista |
+| 52 | URWADE DEPOT - VIRTUAL (155) | 3710 | (null) | 10 | HCCB |
+| 53 | CCP-9236 (176) | 3746 | (null) | 9 | Nuvista |
+| 54 | Coimbatore Plant (8) | 3077 | (null) | 9 | Vicat Cement |
+| 55 | ULTRATECH CEMENT LIMITED-SARALANAGAR SEDAM (197) | 4205 | (null) | 9 | Shree Balaji Roadlines |
+| 56 | BHARATIYAM COPACK (156) | 3716 | (null) | 6 | HCCB |
+| 57 | KUMAR WATER PLANT (172) | 3739 | (null) | 6 | HCCB |
+| 58 | BHARATI CEMENT PRIVATE LIMITED MUMBAI TRANSIENT-SHEDUNG (215) | 4223 | (null) | 5 | Shree Balaji Roadlines |
+| 59 | HCCBPL- NEW COCHIN DEPOT (280) | 4314 | (null) | 5 | HCCB |
+| 60 | KALBURGI CEMENT PRIVATE LIMITED-LONI BULK (200) | 4208 | (null) | 4 | Shree Balaji Roadlines |
+| 61 | KALBURGI CEMENT PRIVATE LIMITED-LONI KALBHOR (270) | 4303 | (null) | 4 | Shree Balaji Roadlines |
+| 62 | TATA STEEL BSL KHOPOLI-khopoli (206) | 4214 | (null) | 3 | Shree Balaji Roadlines |
+| 63 | CBT (134) | 3629 | (null) | 2 | UTCL |
+| 64 | CUTTACK DEPOT(TANGI) (152) | 3705 | (null) | 2 | HCCB |
+| 65 | DALMIA BHARAT CEMENT LTD -CHANDRAPUR (222) | 4230 | (null) | 2 | Shree Balaji Roadlines |
+| 66 | JSW STEEL LIMITED-WADKHAL (195) | 4203 | (null) | 2 | Shree Balaji Roadlines |
+| 67 | P100 - VARUNA (141) | 3678 | (null) | 2 | Varuna_GPS |
+| 68 | POSCO-INDIA STEEL DISTRIBUTION CENTER PVT.LTD-TALEGAON (208) | 4216 | (null) | 2 | Shree Balaji Roadlines |
+| 69 | ULTRATECH CEMENT LIMITED-SEDUNG (216) | 4224 | (null) | 2 | Shree Balaji Roadlines |
+| 70 | 1101 SFD Nagda (49) | 3477 | (null) | 1 | ABG Pulp and Fibre |
+| 71 | EL Office (251) | 4272 | sdf | 1 | DFPCL POC |
+| 72 | GGU (133) | 3628 | (null) | 1 | UTCL |
+| 73 | JSW STEEL LTD-ODISHA (229) | 4237 | (null) | 1 | Shree Balaji Roadlines |
+| 74 |  (745) | 30900 | (null) | 0 | (no vehicles synced) |
+| 75 | 10 GATE BOKARO (465) | 4555 | Central | 0 | (no vehicles synced) |
+| 76 | 1102 Excel Nagda (68) | 3496 | (null) | 0 | (no vehicles synced) |
+| 77 | 1103  Excel Fibre Unit 20TPD (97) | 3525 | (null) | 0 | (no vehicles synced) |
+| 78 | 1201 BIRLA CELLULOSIC (69) | 3497 | (null) | 0 | (no vehicles synced) |
+| 79 | 1293 ABCFRC (129) | 3622 | (null) | 0 | (no vehicles synced) |
+| 80 | 1301 GRASILENE DIVISION (83) | 3511 | (null) | 0 | (no vehicles synced) |
+| 81 | 1601  GCD VILAYAT (81) | 3509 | (null) | 0 | (no vehicles synced) |
+| 82 | 1602  GCD VILAYAT (96) | 3524 | (null) | 0 | (no vehicles synced) |
+| 83 | ANDHRA JOBWORK (297) | 4331 | (null) | 0 | (no vehicles synced) |
+| 84 | ANSHIKA ROADWAYS-Gosalpur (221) | 4229 | (null) | 0 | (no vehicles synced) |
+| 85 | B.K.TRANSPORT-KRISHNAPATNAM (205) | 4213 | (null) | 0 | (no vehicles synced) |
+| 86 | BANGALORE - JOBWORK (288) | 4322 | (null) | 0 | (no vehicles synced) |
+| 87 | BAYVIEW BEVERAGES (VIZAG)PRIVATE LIMITED (177) | 3747 | (null) | 0 | (no vehicles synced) |
+| 88 | C/O GANPATI SUGAR INDUSTRIES (302) | 4336 | (null) | 0 | (no vehicles synced) |
+| 89 | C/O WESTERN FARMFRESH (301) | 4335 | (null) | 0 | (no vehicles synced) |
+| 90 | COIMBATORE DEPOT (165) | 3729 | (null) | 0 | (no vehicles synced) |
+| 91 | DEPOT_GGU (138) | 3652 | (null) | 0 | (no vehicles synced) |
+| 92 | FATUAH TOLLING UNIT (21) | 3124 | (null) | 0 | (no vehicles synced) |
+| 93 | GANGAIKONDAN COPACK (162) | 3724 | (null) | 0 | (no vehicles synced) |
+| 94 | GOA (184) | 4186 | (null) | 0 | (no vehicles synced) |
+| 95 | GODAVARI BIO (292) | 4326 | (null) | 0 | (no vehicles synced) |
+| 96 | GRASILENE DIVISION (99) | 3527 | (null) | 0 | (no vehicles synced) |
+| 97 | GUJARAT PERFORM JOBWORK (296) | 4330 | (null) | 0 | (no vehicles synced) |
+| 98 | HCCB SANAND (GUJ) PLANT (173) | 3740 | (null) | 0 | (no vehicles synced) |
+| 99 | HCCBPL- VIZAG JOBWORK C/O MTL (300) | 4334 | (null) | 0 | (no vehicles synced) |
+| 100 | HCCBPL-BHIWANDI DEPOT (153) | 3707 | (null) | 0 | (no vehicles synced) |
+| 101 | HCCBPL-COCHIN NEW DEPOT (164) | 3728 | (null) | 0 | (no vehicles synced) |
+| 102 | HCCBPL-REDHILLS DEPOT VIRTUAL (168) | 3735 | (null) | 0 | (no vehicles synced) |
+| 103 | HCCBPL - A-STAR LOGISTICS PVT LTD (303) | 4337 | (null) | 0 | (no vehicles synced) |
+| 104 | HCCBPL - ATMAKURU PLANT VIRTUAL (169) | 3736 | (null) | 0 | (no vehicles synced) |
+| 105 | HCCBPL - SENGADU (157) | 3717 | (null) | 0 | (no vehicles synced) |
+| 106 | HCCBPL - VJA DEPOT (166) | 3730 | (null) | 0 | (no vehicles synced) |
+| 107 | HCCBPL C/O ALPLA INDIA PVT LTD SILVASSA (289) | 4323 | (null) | 0 | (no vehicles synced) |
+| 108 | HCCBPL C/O KSH INTEGRATED LOGI (306) | 4340 | (null) | 0 | (no vehicles synced) |
+| 109 | HCCBPL C/O VIJAYANAGAR SUGAR (294) | 4328 | (null) | 0 | (no vehicles synced) |
+| 110 | HCCBPL C/OMTL-NEELMANGLAWH (298) | 4332 | (null) | 0 | (no vehicles synced) |
+| 111 | HCCBPL EPITOME  JOBWORK (299) | 4333 | (null) | 0 | (no vehicles synced) |
+| 112 | HCCBPL SANAND JOB WORK (295) | 4329 | (null) | 0 | (no vehicles synced) |
+| 113 | HCIL_AMMA (142) | 3692 | (null) | 0 | (no vehicles synced) |
+| 114 | HDVX HINDUSTAN COCA-COLA BEVERAGES (170) | 3737 | (null) | 0 | (no vehicles synced) |
+| 115 | HINDUSTAN COCA-COLA BEVERAGES- VIRTUAL DEPOT (175) | 3745 | (null) | 0 | (no vehicles synced) |
+| 116 | HINDUSTAN COCA-COLA BEVERAGES PRIVATE LIMITED (150) | 3703 | (null) | 0 | (no vehicles synced) |
+| 117 | JINDAL STEEL & POWER LTD., BARBIL-Raigarh (228) | 4236 | (null) | 0 | (no vehicles synced) |
+| 118 | JKPlant_Test (261) | 4290 | (null) | 0 | (no vehicles synced) |
+| 119 | Kalamboli (140) | 3674 | (null) | 0 | (no vehicles synced) |
+| 120 | KALBURGI CEMENT PRIVATE LIMITED-Mumbai Terminal (218) | 4226 | (null) | 0 | (no vehicles synced) |
+| 121 | KESORAM INDUSTRIES LIMITED-SEDUNG BULKTPOINT (211) | 4219 | (null) | 0 | (no vehicles synced) |
+| 122 | MAULA ALI DEPOT (167) | 3734 | (null) | 0 | (no vehicles synced) |
+| 123 | MCU (135) | 3632 | (null) | 0 | (no vehicles synced) |
+| 124 | MP BIRLA-MUKUTBAN (220) | 4228 | (null) | 0 | (no vehicles synced) |
+| 125 | MRN CHAMUNDI SUGAR JAMKHANDI (293) | 4327 | (null) | 0 | (no vehicles synced) |
+| 126 | MUNEERABAD DEPOT (171) | 3738 | (null) | 0 | (no vehicles synced) |
+| 127 | NAGDA (430) | 4520 | Central | 0 | (no vehicles synced) |
+| 128 | NALWA STEEL & POWER LTD , RAIGARH-JSPL TRB MINES, TENSA (230) | 4238 | (null) | 0 | (no vehicles synced) |
+| 129 | NATIONAL ENTERPRISES-BARGI  SIHORA JABALPUR (219) | 4227 | (null) | 0 | (no vehicles synced) |
+| 130 | New Delhi (237) | 4257 | (null) | 0 | (no vehicles synced) |
+| 131 | Noida (235) | 4254 | (null) | 0 | (no vehicles synced) |
+| 132 | ORIENT CEMENT-Chittapur (199) | 4207 | (null) | 0 | (no vehicles synced) |
+| 133 | ORIENT CEMENT-LONI KALBHOR_BULK (201) | 4209 | (null) | 0 | (no vehicles synced) |
+| 134 | ORIENT CEMENT LTD-SEDUNG (214) | 4222 | (null) | 0 | (no vehicles synced) |
+| 135 | P.K ROADWAYS- Navi Mumbai (194) | 4202 | (null) | 0 | (no vehicles synced) |
+| 136 | POSCO-INDIA STEEL DISTRIBUTION CENTER PVT.LTD-MANGAON (198) | 4206 | (null) | 0 | (no vehicles synced) |
+| 137 | PRISM JOHNSON LIMITED-SATNA (223) | 4231 | (null) | 0 | (no vehicles synced) |
+| 138 | RCCPL PRIVATE LIMITED -SHEDUNG (217) | 4225 | (null) | 0 | (no vehicles synced) |
+| 139 | RCM (137) | 3636 | (null) | 0 | (no vehicles synced) |
+| 140 | RCM (136) | 3635 | (null) | 0 | (no vehicles synced) |
+| 141 | REDHILLS DEPOT (149) | 3700 | (null) | 0 | (no vehicles synced) |
+| 142 | Shiva Cement Ltd-SUNDERGARH (226) | 4234 | (null) | 0 | (no vehicles synced) |
+| 143 | SHIVASHAKTI SUGARS LTD. (290) | 4324 | (null) | 0 | (no vehicles synced) |
+| 144 | SHREE RENUKA SUGARS MUNOLI (291) | 4325 | (null) | 0 | (no vehicles synced) |
+| 145 | SONAI EATABLES INDIA PRIVATE LTD-INDAPUR (212) | 4220 | (null) | 0 | (no vehicles synced) |
+| 146 | SRIKALAHASTI (158) | 3718 | (null) | 0 | (no vehicles synced) |
+| 147 | StarCement - LUMS (27) | 3187 | (null) | 0 | (no vehicles synced) |
+| 148 | THE INDIA CEMENT LTD-LONI RAKE (204) | 4212 | (null) | 0 | (no vehicles synced) |
+| 149 | THE INDIA CEMENTS LTD (BAG)-Banswara, Rajasthan (227) | 4235 | (null) | 0 | (no vehicles synced) |
+| 150 | TIGER TRANSPORT-NELLORE (210) | 4218 | (null) | 0 | (no vehicles synced) |
+| 151 | ULTRATECH CEMENT LIMITED-BAGWAR (225) | 4233 | (null) | 0 | (no vehicles synced) |
+| 152 | ULTRATECH CEMENT LIMITED-TANDUR (213) | 4221 | (null) | 0 | (no vehicles synced) |
+| 153 | ULTRATECH CEMENT WORKS AWARPUR-AWARPUR (224) | 4232 | (null) | 0 | (no vehicles synced) |
+| 154 | ULTRATECH CEMENT LTD-LONI BAG (209) | 4217 | (null) | 0 | (no vehicles synced) |
+| 155 | VADILAL ENTERPRISES LTD PUNDRA (62) | 3490 | (null) | 0 | (no vehicles synced) |
+| 156 | VADILAL GHAZIABAD (236) | 4255 | (null) | 0 | (no vehicles synced) |
+| 157 | VADILAL INDUSTRIES LTD PUNDHRA (77) | 3505 | (null) | 0 | (no vehicles synced) |
+| 158 | VARAMA SIR INDIA LOGISTIC INFRA STRUCTURE UPASNAGAR (287) | 4321 | (null) | 0 | (no vehicles synced) |
+| 159 | VEL BAREILLY (108) | 3539 | (null) | 0 | (no vehicles synced) |
+| 160 | VEL C and F  HALDWANI 3 (36) | 3464 | (null) | 0 | (no vehicles synced) |
+| 161 | VEL C and F ABU ROAD 2 (84) | 3512 | (null) | 0 | (no vehicles synced) |
+| 162 | VEL C and F AGRA 4 (30) | 3458 | (null) | 0 | (no vehicles synced) |
+| 163 | VEL C and F AJMER 2 (53) | 3481 | (null) | 0 | (no vehicles synced) |
+| 164 | VEL C and F ALLAHABAD (76) | 3504 | (null) | 0 | (no vehicles synced) |
+| 165 | VEL C and F ALWAR 2 (50) | 3478 | (null) | 0 | (no vehicles synced) |
+| 166 | VEL C and F AMBIKAPUR (131) | 3624 | (null) | 0 | (no vehicles synced) |
+| 167 | VEL C and F ASANSOL 2 (31) | 3459 | (null) | 0 | (no vehicles synced) |
+| 168 | VEL C and F AURANGABAD (125) | 3614 | (null) | 0 | (no vehicles synced) |
+| 169 | VEL C and F BANSWARA 2 (40) | 3468 | (null) | 0 | (no vehicles synced) |
+| 170 | VEL C and F BARASAT (132) | 3627 | (null) | 0 | (no vehicles synced) |
+| 171 | VEL C and F BAREILLY (64) | 3492 | (null) | 0 | (no vehicles synced) |
+| 172 | VEL C and F BARGHAR (45) | 3473 | (null) | 0 | (no vehicles synced) |
+| 173 | VEL C and F BARODA 2 (34) | 3462 | (null) | 0 | (no vehicles synced) |
+| 174 | VEL C and F BHARUCH (92) | 3520 | (null) | 0 | (no vehicles synced) |
+| 175 | VEL C and F BHILWARA 2 (66) | 3494 | (null) | 0 | (no vehicles synced) |
+| 176 | VEL C and F BHOPAL 3 (35) | 3463 | (null) | 0 | (no vehicles synced) |
+| 177 | VEL C and F BHUBANESHWAR (112) | 3544 | (null) | 0 | (no vehicles synced) |
+| 178 | VEL C and F BHUJ (116) | 3549 | (null) | 0 | (no vehicles synced) |
+| 179 | VEL C and F BIKANER 3 (119) | 3559 | (null) | 0 | (no vehicles synced) |
+| 180 | VEL C and F BILASPUR (126) | 3615 | (null) | 0 | (no vehicles synced) |
+| 181 | VEL C and F CHAKIA (117) | 3550 | (null) | 0 | (no vehicles synced) |
+| 182 | VEL C and F CHANDIGARH (120) | 3560 | (null) | 0 | (no vehicles synced) |
+| 183 | VEL C and F COOCH BIHAR 2 (29) | 3457 | (null) | 0 | (no vehicles synced) |
+| 184 | VEL C and F DEHRADUN (42) | 3470 | (null) | 0 | (no vehicles synced) |
+| 185 | VEL C and F DELHI 2 (63) | 3491 | (null) | 0 | (no vehicles synced) |
+| 186 | VEL C and F DHANBAD 2 (65) | 3493 | (null) | 0 | (no vehicles synced) |
+| 187 | VEL C and F EAST DELHI 2 (61) | 3489 | (null) | 0 | (no vehicles synced) |
+| 188 | VEL C and F GHAZIABAD3 (71) | 3499 | (null) | 0 | (no vehicles synced) |
+| 189 | VEL C and F GODHARA (78) | 3506 | (null) | 0 | (no vehicles synced) |
+| 190 | VEL C and F GORAKHPUR 2 (32) | 3460 | (null) | 0 | (no vehicles synced) |
+| 191 | VEL C and F GURGAON 2 (89) | 3517 | (null) | 0 | (no vehicles synced) |
+| 192 | VEL C and F GUWAHATI (106) | 3536 | (null) | 0 | (no vehicles synced) |
+| 193 | VEL C and F GWALIOR 2 (127) | 3616 | (null) | 0 | (no vehicles synced) |
+| 194 | VEL C and F HIMMATNAGAR (88) | 3516 | (null) | 0 | (no vehicles synced) |
+| 195 | VEL C and F INDORE (95) | 3523 | (null) | 0 | (no vehicles synced) |
+| 196 | VEL C and F JABALPUR 2 (74) | 3502 | (null) | 0 | (no vehicles synced) |
+| 197 | VEL C and F JAIPUR 3 (70) | 3498 | (null) | 0 | (no vehicles synced) |
+| 198 | VEL C and F JAIPUR 4 (56) | 3484 | (null) | 0 | (no vehicles synced) |
+| 199 | VEL C and F JAMMU (111) | 3543 | (null) | 0 | (no vehicles synced) |
+| 200 | VEL C and F JAMSHEDPUR 2 (52) | 3480 | (null) | 0 | (no vehicles synced) |
+| 201 | VEL C and F JEYPORE (57) | 3485 | (null) | 0 | (no vehicles synced) |
+| 202 | VEL C and F JHANSI (41) | 3469 | (null) | 0 | (no vehicles synced) |
+| 203 | VEL C and F JODHPUR (58) | 3486 | (null) | 0 | (no vehicles synced) |
+| 204 | VEL C and F JUNAGADH2 (98) | 3526 | (null) | 0 | (no vehicles synced) |
+| 205 | VEL C and F KANGRA 2 (46) | 3474 | (null) | 0 | (no vehicles synced) |
+| 206 | VEL C and F KANPUR 2 (87) | 3515 | (null) | 0 | (no vehicles synced) |
+| 207 | VEL C and F KOLKATA 2 (67) | 3495 | (null) | 0 | (no vehicles synced) |
+| 208 | VEL C and F KOTA 3 (91) | 3519 | (null) | 0 | (no vehicles synced) |
+| 209 | VEL C and F LUCKNOW (44) | 3472 | (null) | 0 | (no vehicles synced) |
+| 210 | VEL C and F LUDHIYANA (124) | 3613 | (null) | 0 | (no vehicles synced) |
+| 211 | VEL C and F MATHURA 2 (60) | 3488 | (null) | 0 | (no vehicles synced) |
+| 212 | VEL C and F MEERUT (82) | 3510 | (null) | 0 | (no vehicles synced) |
+| 213 | VEL C and F MUKTSAR (39) | 3467 | (null) | 0 | (no vehicles synced) |
+| 214 | VEL C and F PATNA 4 (79) | 3507 | (null) | 0 | (no vehicles synced) |
+| 215 | VEL C and F RAIPUR 6 (75) | 3503 | (null) | 0 | (no vehicles synced) |
+| 216 | VEL C and F RAJKOT 2 (80) | 3508 | (null) | 0 | (no vehicles synced) |
+| 217 | VEL C and F ROHTAK (38) | 3466 | (null) | 0 | (no vehicles synced) |
+| 218 | VEL C and F SAHARANPUR (107) | 3538 | (null) | 0 | (no vehicles synced) |
+| 219 | VEL C and F SATNA (123) | 3611 | (null) | 0 | (no vehicles synced) |
+| 220 | VEL C and F SIKKAR (90) | 3518 | (null) | 0 | (no vehicles synced) |
+| 221 | VEL C and F SILCHAR (85) | 3513 | (null) | 0 | (no vehicles synced) |
+| 222 | VEL C and F SILIGURI (59) | 3487 | (null) | 0 | (no vehicles synced) |
+| 223 | VEL C and F SOLAN 3 (54) | 3482 | (null) | 0 | (no vehicles synced) |
+| 224 | VEL C and F SONIPAT2 (55) | 3483 | (null) | 0 | (no vehicles synced) |
+| 225 | VEL C and F SURRENDRANAGAR (43) | 3471 | (null) | 0 | (no vehicles synced) |
+| 226 | VEL C and F UDAIPUR (113) | 3545 | (null) | 0 | (no vehicles synced) |
+| 227 | VEL C and F VALSAD (72) | 3500 | (null) | 0 | (no vehicles synced) |
+| 228 | VEL C and F VARANASI 4 (48) | 3476 | (null) | 0 | (no vehicles synced) |
+| 229 | VEL GOMTIPUR (47) | 3475 | (null) | 0 | (no vehicles synced) |
+| 230 | VEL GOMTIPUR 2 (37) | 3465 | (null) | 0 | (no vehicles synced) |
+| 231 | VEL HIRED LOC DHARUHERA MPL (86) | 3514 | (null) | 0 | (no vehicles synced) |
+| 232 | VEL HIRED LOCATION GUWAHATI (73) | 3501 | (null) | 0 | (no vehicles synced) |
+| 233 | VEL HIRED LOCATION HOWRAH MPL (110) | 3542 | (null) | 0 | (no vehicles synced) |
+| 234 | VEL HIRED LOCATION HOWRAH MPL (109) | 3540 | (null) | 0 | (no vehicles synced) |
+| 235 | VELC and F BHAGALPUR (51) | 3479 | (null) | 0 | (no vehicles synced) |
+| 236 | VELC and F WEST AHMEDABAD (94) | 3522 | (null) | 0 | (no vehicles synced) |
+| 237 | VIGNESWAR CARRIERS -KRISHNAPATNAM (207) | 4215 | (null) | 0 | (no vehicles synced) |
+| 238 | VIL BAREILLY (93) | 3521 | (null) | 0 | (no vehicles synced) |
+| 239 | VIL DHARAM 2 PROFITABILITY (115) | 3548 | (null) | 0 | (no vehicles synced) |
+| 240 | VIL DHARAM 2 PROFITABILITY (114) | 3547 | (null) | 0 | (no vehicles synced) |
+| 241 | VIL GOMTIPUR (118) | 3551 | (null) | 0 | (no vehicles synced) |
+| 242 | VIL GOMTIPUR 2 (130) | 3623 | (null) | 0 | (no vehicles synced) |
+| 243 | WESTER SUPERFRESH STORES PVT. LTD. (305) | 4339 | (null) | 0 | (no vehicles synced) |
+| 244 | ZUARI_CGU (145) | 3695 | (null) | 0 | (no vehicles synced) |
+| 245 | ZUARI_SGU (146) | 3696 | (null) | 0 | (no vehicles synced) |
+| 246 | ZUARI_SPM (144) | 3694 | (null) | 0 | (no vehicles synced) |
+| 247 | ZUARI_YERRAGUNTLA (143) | 3693 | (null) | 0 | (no vehicles synced) |

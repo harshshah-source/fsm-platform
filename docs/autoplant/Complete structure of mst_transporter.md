@@ -1,0 +1,25 @@
+transporter_id	bigint	NO	PRI	
+company_id	int	NO		
+createdby	varchar(100)	YES		
+created_datetime	datetime	YES		
+plant_id	int	NO		
+spoc_email	varchar(45)	YES		
+spoc_mobile	varchar(10)	YES		
+spoc_name	varchar(45)	YES		
+status	varchar(10)	NO		
+transporter_addressline1	varchar(500)	YES		
+transporter_addressline2	varchar(500)	YES		
+transporter_addressline3	varchar(500)	YES		
+transporter_city	varchar(100)	YES		
+transporter_code	varchar(45)	NO		
+transporter_country	varchar(100)	YES		
+transporter_district	varchar(100)	YES		
+transporter_location	varchar(200)	YES		
+transporter_name	varchar(60)	NO		
+transporter_pincode	varchar(100)	YES		
+transporter_relog_avaibility	varchar(100)	YES		
+transporter_state	varchar(100)	YES		
+transporter_zone	varchar(200)	YES		
+updatedby	varchar(100)	YES		
+updated_datetime	datetime	YES		
+company_name	varchar(60)	YES		
