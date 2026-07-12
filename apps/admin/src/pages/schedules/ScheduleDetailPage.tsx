@@ -14,6 +14,7 @@ import {
 } from '../../api/schedules';
 import { Badge, Button } from '../../components/ui';
 import type { BadgeTone } from '../../components/ui/Badge';
+import { PlantName } from '../../components/domain';
 
 /**
  * ZM Schedule detail (Issue 13b AC#2/#3/#4 · FE-12 parity, reference 12). The ordered stop list for one
@@ -182,7 +183,7 @@ function Stop({
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs text-ink-caps">Stop {stop.stopSequence}</span>
-          <span className="font-semibold text-ink-strong">{stop.plantName}</span>
+          <PlantName code={stop.plantName} variant="inline" className="font-semibold text-ink-strong" />
           <Badge tone={stop.status === 'OVERRIDDEN' ? 'warning' : 'neutral'}>
             {stop.status === 'AUTO_ASSIGNED' ? 'AUTO' : stop.status}
           </Badge>

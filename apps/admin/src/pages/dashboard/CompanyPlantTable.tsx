@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import type { CompanyPlantRow } from '../../api/dashboard';
 import { EmptyState, FilterBar, FilterSelect, Skeleton } from '../../components/data';
-import { DurationBadge, StatusPill, TierBadge } from '../../components/domain';
+import { DurationBadge, PlantName, StatusPill, TierBadge } from '../../components/domain';
 import { Button } from '../../components/ui';
 import { IconEye, IconEyeOff, IconTruck } from '../../components/ui/icons';
 import { apiTicketsByPlant, type TicketRow } from '../../api/tickets';
@@ -9,6 +9,7 @@ import { cn } from '../../lib/cn';
 import { downloadCsv, toCsv } from '../../lib/csv';
 import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
 import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
+import { formatPlantDisplayName } from '../../lib/plantNames';
 
 interface CompanyGroup {
   companyId: string;
@@ -74,7 +75,7 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
     const body = rows.map((r) => [
       r.companyName,
       r.companyTier,
-      r.plantName,
+      formatPlantDisplayName(r.plantName),
       r.totalInactive,
       r.totalDevices,
       ...SLA_BUCKETS.map((b) => r.byBucket[b] ?? 0),
@@ -145,7 +146,7 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
                   {co.plants.map((p) => (
                     <Fragment key={p.plantId}>
                       <tr className="border-b border-line last:border-b-0">
-                        <td className="px-4 py-2.5 pl-8 text-ink">{p.plantName}</td>
+                        <td className="px-4 py-2.5 pl-8 text-ink"><PlantName code={p.plantName} /></td>
                         <td
                           data-testid="plant-inactive-total"
                           className="px-4 py-2.5 text-right tabular-nums text-ink"
@@ -191,7 +192,7 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
                               <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
                                 <div className="flex items-center justify-between gap-2 border-b border-line bg-surface-raised px-4 py-2.5">
                                   <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
-                                    Open device tickets — {p.plantName}
+                                    Open device tickets — {formatPlantDisplayName(p.plantName)}
                                   </span>
                                   {!loadingPlant && (
                                     <span className="text-xs tabular-nums text-ink-muted">

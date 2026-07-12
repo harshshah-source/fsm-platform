@@ -1,5 +1,5 @@
 import type { CriticalQueueGroup } from '../../api/dashboard';
-import { DurationBadge, TierBadge } from '../../components/domain';
+import { DurationBadge, PlantName, TierBadge } from '../../components/domain';
 import { SLA_BUCKETS, type SlaBucket } from '../../lib/slaBucket';
 
 interface EscalationItem {
@@ -70,7 +70,7 @@ export function EscalationQueueList({ groups }: { groups: CriticalQueueGroup[] }
                   <TierBadge tier={it.companyTier} />
                 </div>
                 <div className="mt-0.5 truncate text-xs text-ink-muted">
-                  {it.companyName} · {it.plantName}
+                  {it.companyName} · <PlantName code={it.plantName} variant="inline" />
                 </div>
               </div>
               <DurationBadge bucket={it.slaBucket} latestGpsDatetime={it.latestGpsDatetime} />

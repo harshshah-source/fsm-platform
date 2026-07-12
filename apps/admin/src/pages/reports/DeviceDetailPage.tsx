@@ -16,7 +16,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { BarChartCard, ChartCard, type BarDatum } from '../../components/charts';
 import { DataTable, EmptyState, FilterBar, FilterSelect, PageHeader, type Column } from '../../components/data';
 import { Button, Field, Input, SectionCard } from '../../components/ui';
-import { SLABadge } from '../../components/domain';
+import { PlantName, SLABadge } from '../../components/domain';
 import { formatInactiveDuration } from '../../lib/inactiveDuration';
 import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
 
@@ -146,7 +146,7 @@ export function DeviceDetailPage() {
     },
     { key: 'vehicleNo', header: 'Vehicle Number', render: (r) => r.vehicleNo ?? '—' },
     { key: 'companyName', header: 'Company Name', render: (r) => r.companyName ?? '—' },
-    { key: 'plantName', header: 'Plant Name', render: (r) => r.plantName ?? '—' },
+    { key: 'plantName', header: 'Plant Name', render: (r) => (r.plantName ? <PlantName code={r.plantName} /> : '—') },
     { key: 'zoneName', header: 'Zone', render: (r) => r.zoneName ?? '—' },
     {
       key: 'inactiveDuration',

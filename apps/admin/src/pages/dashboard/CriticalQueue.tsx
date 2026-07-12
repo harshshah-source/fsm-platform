@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { CriticalQueueGroup } from '../../api/dashboard';
 import { apiAssignTicket, type ZoneEngineer } from '../../api/schedules';
-import { DurationBadge, TierBadge } from '../../components/domain';
+import { DurationBadge, PlantName, TierBadge } from '../../components/domain';
 import { FilterSelect } from '../../components/data';
 import { Badge, Button } from '../../components/ui';
 
@@ -52,7 +52,7 @@ export function CriticalQueue({
                     </span>
                     <TierBadge tier={g.companyTier} />
                   </div>
-                  <div className="mt-0.5 text-xs text-ink-muted">{g.plantName}</div>
+                  <PlantName code={g.plantName} className="mt-0.5 text-xs text-ink-muted" />
                 </div>
                 <Badge tone="critical">Cluster: {g.clusterSize}</Badge>
               </div>

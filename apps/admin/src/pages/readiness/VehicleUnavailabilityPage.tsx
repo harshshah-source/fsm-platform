@@ -14,7 +14,7 @@ import {
   PageHeader,
   type Column,
 } from '../../components/data';
-import { StatusPill } from '../../components/domain';
+import { PlantName, StatusPill } from '../../components/domain';
 import { Button, Field, Input } from '../../components/ui';
 
 /**
@@ -103,7 +103,7 @@ export function VehicleUnavailabilityPage() {
         </button>
       ),
     },
-    { key: 'plant', header: 'Vehicle & Plant', render: (row) => <span className="text-ink-strong">{row.plantName}</span> },
+    { key: 'plant', header: 'Vehicle & Plant', render: (row) => <PlantName code={row.plantName} className="text-ink-strong" /> },
     {
       key: 'reason',
       header: 'Reason',

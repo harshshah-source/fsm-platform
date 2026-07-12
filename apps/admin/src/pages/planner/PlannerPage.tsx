@@ -11,6 +11,7 @@ import { apiListSchedules, apiZoneEngineers, type ScheduleRow, type ZoneEngineer
 import { DateRangeChips, FilterSelect, MetricStrip, PageHeader, type Metric } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { cn } from '../../lib/cn';
+import { formatPlantDisplayName } from '../../lib/plantNames';
 
 /**
  * SE Planner grid (Issue 14b · FE-11 parity, reference 16, ADR-0022). The Zonal-Manager plant-visit
@@ -83,7 +84,10 @@ export function PlannerPage() {
   }, [dateFrom, dateTo]);
 
   const plantName = useCallback(
-    (plantId: string) => plants.find((p) => p.plantId === plantId)?.name ?? `Plant ${plantId}`,
+    (plantId: string) => {
+      const p = plants.find((pl) => pl.plantId === plantId);
+      return p ? formatPlantDisplayName(p.name) : `Plant ${plantId}`;
+    },
     [plants],
   );
 
