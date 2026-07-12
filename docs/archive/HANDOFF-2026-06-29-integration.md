@@ -1,5 +1,6 @@
 # Integration Handoff — 2026-06-29
 
+> **ARCHIVED 2026-07-12 — consumed session handoff.** Current state lives in `docs/SYSTEM-STATE-2026-07.md`; work tracking in `.scratch/fsm-platform-v1/INDEX.md`. Historical record only.
 **Branch:** `integration/fe-plus-backend` (merge commit `fd64150`, two parents).
 **Status:** ✅ Integrated and fully verified. This branch is now the **single source of truth** for continued development.
 

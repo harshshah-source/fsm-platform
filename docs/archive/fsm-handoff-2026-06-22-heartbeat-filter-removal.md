@@ -1,5 +1,6 @@
 # Handoff — Business-rule correction: activity-ping staleness is NOT a Hard Filter (2026-06-22)
 
+> **ARCHIVED 2026-07-12 — consumed session handoff.** Current state lives in `docs/SYSTEM-STATE-2026-07.md`; work tracking in `.scratch/fsm-platform-v1/INDEX.md`. Historical record only.
 ## What changed and why
 
 The Recommender Hard Filter carried an intra-day **15-min `last_activity_at` staleness drop**

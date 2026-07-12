@@ -1,5 +1,6 @@
 # FE Enterprise UI Parity — Phases F0–F5 (in progress)
 
+> **ARCHIVED 2026-07-12 — superseded progress board.** Per-issue FE statuses live in `.scratch/fsm-platform-v1/INDEX.md` (FE section); current state in `docs/SYSTEM-STATE-2026-07.md` §3k.
 **Branch:** `feat/fe-enterprise-ui` · **Backlog:** `.scratch/fsm-platform-v1/` (see `INDEX.md` "FE —
 Enterprise UI parity" section + per-issue files `FE-06`…`FE-26`) · **Design authority:**
 `.scratch/fsm-platform-v1/DESIGN-SYSTEM.md` (reference-derived) + the screenshots under

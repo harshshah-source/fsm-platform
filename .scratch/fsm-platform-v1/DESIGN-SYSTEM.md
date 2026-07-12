@@ -10,9 +10,9 @@
 > **backend / APIs / routing / auth / RBAC / state / business logic** are the *application* authority.
 > Where a mockup shows a superseded state (Approve gate, `REVIEW_PENDING`, `EXPECTED_BACK`,
 > SE-Confirmation/`trust_score`) the application authority wins — match the *chrome*, bind to the
-> *real state*. See `UI-RECOVERY-PLAN.md §6`.
+> *real state*. See `docs/archive/UI-RECOVERY-PLAN.md §6` (archived 2026-07-12).
 >
-> **Companion docs:** `UI-OWNERSHIP-PLAN.md`, `UI-RECOVERY-PLAN.md`, and the Frontend Master Plan.
+> **Companion docs (archived 2026-07-12):** `docs/archive/UI-OWNERSHIP-PLAN.md`, `docs/archive/UI-RECOVERY-PLAN.md`, and the Frontend Master Plan.
 > This document governs all FE-series issues.
 
 ---

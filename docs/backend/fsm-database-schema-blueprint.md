@@ -1,5 +1,6 @@
 # FSM GPS Field Service Management — Database Schema Blueprint
 
+> ⚠️ **DESIGN-TIME DOC (banner added 2026-07-12).** The "fixed" Express + Redis 7 + BullMQ stack line below was **superseded in the build**: shipped stack is NestJS + Prisma + Postgres 16/PostGIS, no Redis/BullMQ. The real schema is `apps/backend/prisma/schema.prisma` (narrated in `docs/SYSTEM-STATE-2026-07.md` §2); this blueprint is historical design reference.
 > **Status:** Database-first build blueprint · **Date:** 2026-06-08 · **Audience:** Senior backend engineers
 > **Document type:** Database schema design. Implementation-ready for `schema.prisma` + PostgreSQL migrations. **No production service code.**
 > **Stack (fixed):** Node.js 20 + Express + TypeScript (strict) + Prisma + PostgreSQL 16 + PostGIS + Redis 7 + BullMQ. **Not** NestJS.

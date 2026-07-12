@@ -4,7 +4,7 @@ Status: done (2026-07-07 — both slices + acceptance landed, see report at bott
 Depends on: 05, 97
 Refs: `docs/architecture/backend-engineering-review-2026-07-05.md` (A8, B7),
 `docs/audits/2026-07-07-production-validation-audit.md` (Finding 2, tickets = 0),
-`docs/HANDOFF-autoplant-ingestion-2026-07-07.md` §4.3, remediation plan R1 cadence row `ticket-create`.
+`docs/archive/HANDOFF-autoplant-ingestion-2026-07-07.md` §4.3, remediation plan R1 cadence row `ticket-create`.
 
 ## Problem
 

@@ -1,5 +1,6 @@
 # FSM GPS Field Service Management — Backend Low-Level Design
 
+> ⚠️ **DESIGN-TIME DOC (banner added 2026-07-12).** The Redis 7 / BullMQ / S3 / worker-process runtime this LLD assumes was **not adopted**: the shipped backend is a NestJS modular monolith with in-process `@nestjs/schedule` cron and no Redis/BullMQ/S3 (see `docs/SYSTEM-STATE-2026-07.md` §1.3). Business rules herein remain valid design reference; runtime/infra sections are historical.
 > **Status:** Build blueprint · **Date:** 2026-06-08 · **Audience:** Senior backend engineers
 > **Document type:** Backend architecture / low-level design. No production code in this document.
 

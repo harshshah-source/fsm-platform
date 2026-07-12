@@ -95,7 +95,8 @@ silently public).
 | `org` | Org graph CRUD: zones, plants, companies, users, engineers, SE coverage/territory, SLA rules, scoring weights, common kit, geography (PostGIS), zone-mapping | 14 admin controllers; `plant-eligible-floating-se.service.ts` MV refresh |
 | `ingestion` | Everything AutoPlant: master sync, snapshot worker, run ledgers, partitions, health, **ingestion scheduler** | see §3a/§3b; self-contained (own guards + `ScheduleModule.forRoot()`) |
 | `device-state` | Set-based recompute, SLA buckets, eligibility modes | **imported only by IngestionModule** (`device-state.module.ts:12-13`); other consumers reach the table via their own Prisma (#105 territory) |
-| `ticketing` | Ticket creation, query, troubleshoot submission, auto-recovery, repeat-escalation, vehicle-unavailability, non-op dual-confirm, recovery lifecycle, install create+lifecycle | 8 controllers |
+| `ticketing` | Ticket creation, query, troubleshoot submission, auto-recovery, repeat-escalation, vehicle-unavailability, non-op 
+dual-confirm, recovery lifecycle, install create+lifecycle | 8 controllers |
 | `devices` | Device list read + per-device cycles/downtime-trend + deal-type tag | `DeviceService`, `DeviceDetailService` |
 | `recommender` | Candidate selection, hard filters, scoring, canonical sort → `recommendations` | consumed by SchedulingModule |
 | `scheduling` | Batch dispatch, day-plan/schedule queries, ZM override, same-day update, dispatch-run + daily dispatch cron | `SchedulingModule` imports `RecommenderModule` (#113) |
@@ -550,6 +551,13 @@ INDEX.md header.)
 | `docs/HANDOFF-autoplant-ingestion-2026-07-07.md` | 5 commits, partition/ingestion pairing warning | accurate; its "pending" items partially closed since (#108/#112/#113) — needs a pointer |
 | `.scratch/…/issues/97-HANDOFF.md` | already banner-marked SUPERSEDED 2026-07-09 | accurate (self-corrected) |
 | `docs/progress/*` (49 files) | per-issue TDD reports + dated handoffs | historical records — no correction; do not treat any as current state |
+
+> **Doc consolidation applied 2026-07-12:** every superseded handoff/progress-board above (the two
+> stale `docs/architecture/` tracker/handoff files, `docs/HANDOFF-autoplant-ingestion-2026-07-07.md`,
+> `97-HANDOFF.md`, the 11 dated handoffs + `FE-enterprise-ui-parity.md` from `docs/progress/`, and the
+> four consumed `.scratch` planning artifacts) now lives in **`docs/archive/`** with ARCHIVED banners.
+> Per-issue TDD reports stay in `docs/progress/` as frozen completion records. The progress convention
+> going forward is in `CLAUDE.md` ("Progress & state convention").
 
 ### 4.4 Business rules in PRD/workflow that the code does NOT implement
 

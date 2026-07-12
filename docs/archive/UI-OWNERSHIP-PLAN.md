@@ -1,5 +1,6 @@
 # FSM Platform — UI Ownership Plan (Issues 01–21)
 
+> **ARCHIVED 2026-07-12 — consumed planning artifact.** Fully absorbed into the FE-00…FE-26 issue series + follow-ups (#62/#69/#78…) in `.scratch/fsm-platform-v1/INDEX.md`; nearly all done as of 2026-07-10.
 > Planning artifact. **No implementation, no code changes.** Maps every completed backend capability
 > (Issues 01–21) to the Admin/Mobile surface that should expose it. Backend-led TDD continues — this
 > does **not** switch the roadmap to UI-first. Screenshot references (`docs/ui/desktop/v2-reference/`,

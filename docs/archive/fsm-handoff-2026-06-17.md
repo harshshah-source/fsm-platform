@@ -1,5 +1,6 @@
 # Handoff — FSM Platform, Issue 01 (Foundation Skeleton & Infrastructure)
 
+> **ARCHIVED 2026-07-12 — consumed session handoff.** Current state lives in `docs/SYSTEM-STATE-2026-07.md`; work tracking in `.scratch/fsm-platform-v1/INDEX.md`. Historical record only.
 Date: 2026-06-17 · Workspace: `D:\fms_adminDashbooard\fsm-platform-greenfield`
 
 ## What this session did

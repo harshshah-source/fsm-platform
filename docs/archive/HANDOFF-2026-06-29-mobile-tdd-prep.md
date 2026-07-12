@@ -1,5 +1,6 @@
 # HANDOFF — Mobile Specification Sprint (TDD Preparation) · 2026-06-29
 
+> **ARCHIVED 2026-07-12 — consumed session handoff.** Current state lives in `docs/SYSTEM-STATE-2026-07.md`; work tracking in `.scratch/fsm-platform-v1/INDEX.md`. Historical record only.
 **Mode:** documentation only. No backend/frontend code changed; no business logic changed; no
 requirements invented. Every contract below is pinned to the verified backend on the integrated line
 (`main`) or to PRD/CONTEXT, cited inline in each issue.

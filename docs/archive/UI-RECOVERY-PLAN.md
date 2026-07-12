@@ -1,5 +1,6 @@
 # FSM Platform — UI Recovery Plan
 
+> **ARCHIVED 2026-07-12 — consumed planning artifact.** The ≥80%-parity roadmap it defined shipped as FE-00…FE-26 (see INDEX.md FE section, statuses as of 2026-07-10); `DESIGN-SYSTEM.md` remains the living visual authority.
 > Planning artifact. **No implementation.** Derived from the UI Parity Report and the platform Audit Report (2026-06-23).
 > Targets: **≥80% parity** vs admin-v2 mockups (`docs/ui/desktop/v2-reference/`, 28 screens) and **≥80% parity** vs mobile-v2 mockups (`docs/ui/mobile/`, 10 screens).
 

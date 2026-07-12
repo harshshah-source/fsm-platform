@@ -1,5 +1,6 @@
 # FSM GPS Field Service Management — Business & Technical Workflow
 
+> ℹ️ **Note (2026-07-12):** this document is authoritative as *business requirements* (per `docs/agents/domain.md`), but §25's "suggested tables" are superseded by the real schema (`apps/backend/prisma/schema.prisma`, narrated in `docs/SYSTEM-STATE-2026-07.md` §2), and several subsystems it describes are not yet built — the open set is tracked in SYSTEM-STATE §4.4, never here.
 > **Status:** Living document · **Date:** 2026-06-05
 > **Source of truth:** CONTEXT.md (domain language + resolved decisions) · docs/PRD-fsm-admin-dashboard.md (product behaviour)
 > **Contradictions found:** Listed in §31 Open Questions. No rules invented silently.

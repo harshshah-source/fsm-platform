@@ -1,5 +1,6 @@
 # Handoff — FSM Platform, Issues 05–08 (Issue 08 in progress)
 
+> **ARCHIVED 2026-07-12 — consumed session handoff.** Current state lives in `docs/SYSTEM-STATE-2026-07.md`; work tracking in `.scratch/fsm-platform-v1/INDEX.md`. Historical record only.
 Date: 2026-06-21 · Workspace: `D:\fms_adminDashbooard\fsm-platform-greenfield`
 Predecessor handoffs: `docs/progress/fsm-handoff-2026-06-17.md`, `...-mobile-shell-2026-06-18.md`
 

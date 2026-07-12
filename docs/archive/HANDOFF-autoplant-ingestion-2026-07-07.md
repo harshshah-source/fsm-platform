@@ -1,5 +1,6 @@
 # Handoff — FSM AutoPlant Ingestion Remediation
 
+> **ARCHIVED 2026-07-12 — consumed handoff.** Superseded by `docs/SYSTEM-STATE-2026-07.md` (the ingestion↔partition pairing rule is mirrored in INDEX.md's activation checklist + SYSTEM-STATE §6.2).
 > ℹ️ **Partially closed since (noted 2026-07-10):** the pending items here were subsequently
 > owned/landed by #108 (business sweeps), #112 (eligibility mode), #113 (dispatch cron). The
 > ingestion↔partition pairing rule in §4 item 5 remains authoritative (mirrored in INDEX.md).

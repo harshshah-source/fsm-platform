@@ -1,5 +1,6 @@
 # Handoff — AutoPlant Production Integration (2026-07-02)
 
+> **ARCHIVED 2026-07-12 — consumed session handoff.** Current state lives in `docs/SYSTEM-STATE-2026-07.md`; work tracking in `.scratch/fsm-platform-v1/INDEX.md`. Historical record only.
 Continue implementing the AutoPlant production ingestion pipeline, **one phase at a time, TDD**.
 This doc is a pointer sheet — the real content lives in the artifacts referenced below. Read them first.
 

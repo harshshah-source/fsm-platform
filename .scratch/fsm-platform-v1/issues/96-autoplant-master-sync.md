@@ -11,7 +11,7 @@ remaining tail is gated on Ops-Head / AutoPlant decisions + VPN — see "Open ga
 > §5 (master-sync design), §7 (schema deltas), §14 (risks R4/R6/R13/R14);
 > [`docs/architecture/zone-architecture-investigation.md`](../../../docs/architecture/zone-architecture-investigation.md)
 > §Revision 3 (org hierarchy = AutoPlant-authoritative; FSM operational Zone = FSM-owned);
-> local tracker `docs/architecture/autoplant-integration-progress-tracker.md` (Phase 4).
+> local tracker `docs/archive/autoplant-integration-progress-tracker.md` (Phase 4; archived 2026-07-12).
 
 ## Goal
 

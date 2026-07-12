@@ -1,5 +1,6 @@
 # FSM Platform — Documentation Reconciliation & Governance Review
 
+> **ARCHIVED 2026-07-12 — superseded reconciliation.** Superseded by the 2026-07-10 SYSTEM-STATE audit (`docs/SYSTEM-STATE-2026-07.md` §4) and the applied `DEV-GOVERNANCE-CHANGE-SET.md` (parity gate now in CLAUDE.md).
 > Governance/reconciliation review performed before continuing development (at Issue 21).
 > **Analysis only — no code, no file modifications other than this report.**
 > Authority order: CONTEXT.md → ADRs → PRD → workflow → backend design → issues → progress → codebase.

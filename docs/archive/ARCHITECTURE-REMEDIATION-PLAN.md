@@ -1,5 +1,6 @@
 # Architecture Remediation Plan — Backend Design Review (2026-07-02)
 
+> **ARCHIVED 2026-07-12 — executed/refiled plan.** R1–R4 landed pre-#97; R6→#100 (done), R7→#101 (partial), R8→#105, R9 tail→#103, R5/R10 → #106 perf family. Current gaps: `docs/SYSTEM-STATE-2026-07.md` §5.
 Status: ready-for-agent
 Scope: `apps/backend` only. Produced from a senior-architect design review of the NestJS
 modular-monolith at mid-build. Each section below is a self-contained remediation spec an

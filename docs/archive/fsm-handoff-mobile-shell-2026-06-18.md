@@ -1,5 +1,6 @@
 # Handoff — FSM Issue 01, Mobile Shell (slices 1–7 complete)
 
+> **ARCHIVED 2026-07-12 — consumed session handoff.** Current state lives in `docs/SYSTEM-STATE-2026-07.md`; work tracking in `.scratch/fsm-platform-v1/INDEX.md`. Historical record only.
 Date: 2026-06-18 · Workspace: `D:\fms_adminDashbooard\fsm-platform-greenfield`
 Predecessor handoff: `docs/progress/fsm-handoff-2026-06-17.md` · Canonical status: `docs/progress/01-foundation-skeleton-infra.md`
 Issue: `.scratch/fsm-platform-v1/issues/01-foundation-skeleton-infra.md` · Decisions: `docs/adr/0025-foundation-skeleton-infra.md`
