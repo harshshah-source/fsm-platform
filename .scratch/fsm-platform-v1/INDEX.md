@@ -23,7 +23,7 @@ data work) before `BUSINESS_SWEEPS_ENABLED` is ever flipped.
 
 | # | Item | Scope (one line) | Prereq | Evidence still open | Size |
 |---|---|---|---|---|---|
-| 1 | [#98](./issues/98-boot-ops-hardening.md) — finish | Land slice 4: global exception filter (+ pino/correlation-id tail), close the issue | none — slices 1–3 committed (`25a46d4`…`8c3a26f`) | filter WIP sits **uncommitted**: `apps/backend/src/common/filters/`, `app.module.ts` APP_FILTER diff, e2e spec untracked | S |
+| 1 | [#98](./issues/98-boot-ops-hardening.md) — finish | ~~Land slice 4: global exception filter~~ | — | ✅ **done 2026-07-12** — slice 4 committed `55183e6`; pino swap deliberately dropped (issue file) | S |
 | 2 | [#99](./issues/99-global-guard-validation-pipe.md) | Global `APP_GUARD` (`@Public()` opt-out) + `ValidationPipe` + body/CSV limits + route-guard sweep | #98 (error shape) | no `APP_GUARD`/`ValidationPipe` anywhere in `app.module.ts`/`main.ts` (grep 2026-07-12) | M |
 | 3 | [#91](./issues/91-production-auth-postgres-backed-credential-store.md) | Postgres-backed credential store + persistent refresh tokens (+#109's httpOnly-cookie leftover) | HITL: credential-column placement | `InMemoryUserStore` still live in `auth.module.ts`/`auth.service.ts` | L |
 | 4 | [#110](./issues/110-auth-rate-limiting.md) | Rate limiting / brute-force protection on `/auth/login`, `/auth/refresh`, `/api/non-op/confirm` | #91 (real store) | no throttler/rate-limit code in `apps/backend/src` (grep 2026-07-12) | S |
@@ -117,7 +117,7 @@ is now **resolved** — shipped as #97 Slice 2, committed `3c6b460` (`stale-run.
 `snapshot-run.service.ts:43`); #8 in-memory auth remains owned by **#91**). All backend/test-only,
 `ready-for-agent`.
 
-- 98 — Boot & ops hardening: fail-fast env validation + remove fallback JWT secret + `enableShutdownHooks` + `/api/health` + global exception filter/pino/correlation-id → *(audit #5 residual, #7)*
+- 98 — Boot & ops hardening: fail-fast env validation + remove fallback JWT secret + `enableShutdownHooks` + `/api/health` + global exception filter/correlation-id → *(**done** 2026-07-12, 4 slices `25a46d4` `e61b71a` `8c3a26f` `55183e6`; pino structured-logging swap deliberately not adopted — Nest Logger retained, correlation id ships via the filter on the error path; see issue file)* (audit #5 residual, #7)
 - 99 — Global `APP_GUARD` (`@Public()` opt-out) + `ValidationPipe` + body/CSV limits + route-guard sweep → *(audit #10)*
 - 100 — Batch dispatch: transactional + recommendation-consuming + partial uniques + advisory lock → *(**done** 2026-07-08, TDD — `dispatchForZone` now one `$transaction` (rollback on mid-loop failure, notifier fires post-commit) + consume `SUGGESTED→DISPATCHED` (2nd call = `{0,0,0}`) + per-zone `pg_try_advisory_xact_lock` + graceful P2002; migration `20260708120000` adds `recommendations_one_suggested_per_ticket` + `work_schedules_one_active_per_se_zone_day` (**zone_id added to key** vs spec, to permit floating/cross-zone plans; the 3rd requested index already existed as `batch_assignment_tickets_one_active_per_ticket`); 4 new specs, full suite 920 pass. Unblocks #113.)* (audit #2, part of #11)
 - 101 — Write-safety: `transitionOrConflict` helper + guarded transitions across ~8 racy state machines + inventory `qty` CHECK + concurrency tests → 100 *(**partial** 2026-07-09 `9940534` — shared helper (AC#1) + the **intraday accept-vs-timeout** leg + one-live-offer partial unique landed TDD; remaining racy sites still open, see issue file)* (audit #3, #11)

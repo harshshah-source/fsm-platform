@@ -464,8 +464,11 @@ POSTs) drive identical code paths with no cron.
 **Backend**: HS256 JWT `{user_id, role, zone_id}`, 15-min access (`token.service.ts:19`), 30-day
 single-use rotating refresh with reuse detection (`refresh-token-store.ts:15-32`) — but both stores
 are **in-memory** (`user-store.ts`), so every restart drops all sessions and users; DB-seeded users
-cannot log in (#91). **`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret**
-(`token.service.ts:18`, #98 open). Guard chain AuthGuard → RoleGuard → ZoneScopeGuard applied
+cannot log in (#91). ~~`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret~~ **closed by #98
+(done 2026-07-12, 4 slices `25a46d4`…`55183e6`): fail-fast boot config (no JWT fallback), public
+liveness/readiness probes, graceful shutdown + fatal bootstrap guard, global exception filter with
+error correlation ids (pino swap deliberately not adopted — Nest Logger retained).**
+Guard chain AuthGuard → RoleGuard → ZoneScopeGuard applied
 **per-controller** — no global `APP_GUARD` (#99): an endpoint without `@UseGuards` is silently
 public. `ZoneScopeGuard` rejects a ZM targeting another zone via `:zoneId`/`zone_id` param (403
 ZONE_SCOPE_VIOLATION); **deeper zone clamping is service-level and uneven** — e.g. install scope
@@ -700,7 +703,7 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 | `BUSINESS_SWEEPS_ENABLED=true` | dispatch cron + 10 field-loop/aggregation sweeps (§3g) |
 | `BUSINESS_SWEEP_*_CRON`, `INGESTION_*_CRON` | per-tick overrides (§3g table) |
 | `AUTOPLANT_*` (MySQL host/creds/schemas, `AUTOPLANT_SOURCE_UTC_OFFSET_MIN`) | unset ⇒ mock/empty sources, app boots fine |
-| `JWT_ACCESS_SECRET` | **falls back to a hardcoded dev value if unset** (#98) |
+| `JWT_ACCESS_SECRET` | **required at boot** — fail-fast validation, no fallback (#98 slice 1, `25a46d4`) |
 | `PORT`, `ADMIN_ORIGIN` | 3000 / `http://localhost:5173` defaults |
 
 ### 6.3 What blocks activation — classified
@@ -732,8 +735,8 @@ Risk if skipped: the platform stays a demo. Prereqs: Ops-Head availability only.
 **Track B — hardening before real traffic** (order matters):
 1. **#91 auth store** (+ its #109 leftover: httpOnly refresh cookie) — prereq for any exposure;
    HITL decision on credential placement. Risk: total.
-2. **#98 boot/ops** (fail-fast env incl. JWT secret, health, shutdown hooks, exception filter) —
-   cheap, unblocks #111. 
+2. ~~#98 boot/ops~~ **done 2026-07-12** (4 slices `25a46d4` `e61b71a` `8c3a26f` `55183e6`; pino
+   swap deliberately not adopted — see issue file). Unblocks #111.
 3. **#99 global guard + ValidationPipe** — closes the silently-public-endpoint class.
 4. **#110 rate limiting** — with #91/#98, completes the auth surface.
 5. **#101 remaining races** — before `BUSINESS_SWEEPS_ENABLED` + concurrent SEs (§5.5 list is the
