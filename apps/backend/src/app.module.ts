@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { HealthController } from './health/health.controller';
 import { HealthService } from './health/health.service';
 import { AuditModule } from './audit/audit.module';
@@ -154,6 +156,14 @@ import { ZonesController } from './zones/zones.controller';
     AuditTrailController,
     VouchersController,
   ],
-  providers: [AuthGuard, RoleGuard, ZoneScopeGuard, HealthService],
+  providers: [
+    AuthGuard,
+    RoleGuard,
+    ZoneScopeGuard,
+    HealthService,
+    // Global exception filter (#98): sanitized 500s + correlation id for every route, HttpException
+    // contracts (e.g. `{ code }`) preserved verbatim.
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
+  ],
 })
 export class AppModule {}
