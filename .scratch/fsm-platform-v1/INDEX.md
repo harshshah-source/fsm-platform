@@ -15,6 +15,37 @@ Sequence loosely follows the backend LLD phases P0–P7. "Blocked by" gives the 
 > Since then all work continued on **`feat/autoplant-integration`** (pushed to origin 2026-07-10),
 > which is the current single line of development — see `docs/SYSTEM-STATE-2026-07.md` §8.
 
+## Next up (planned 2026-07-12 — the only place this sequence lives)
+
+Sequencing per SYSTEM-STATE §7 Track B + the 2026-07-10 watched-run scoreboard: hardening
+(#91/#98/#99/#110/#107) before any real exposure; #101-remaining + #103 (and the B8/coverage
+data work) before `BUSINESS_SWEEPS_ENABLED` is ever flipped.
+
+| # | Item | Scope (one line) | Prereq | Evidence still open | Size |
+|---|---|---|---|---|---|
+| 1 | [#98](./issues/98-boot-ops-hardening.md) — finish | Land slice 4: global exception filter (+ pino/correlation-id tail), close the issue | none — slices 1–3 committed (`25a46d4`…`8c3a26f`) | filter WIP sits **uncommitted**: `apps/backend/src/common/filters/`, `app.module.ts` APP_FILTER diff, e2e spec untracked | S |
+| 2 | [#99](./issues/99-global-guard-validation-pipe.md) | Global `APP_GUARD` (`@Public()` opt-out) + `ValidationPipe` + body/CSV limits + route-guard sweep | #98 (error shape) | no `APP_GUARD`/`ValidationPipe` anywhere in `app.module.ts`/`main.ts` (grep 2026-07-12) | M |
+| 3 | [#91](./issues/91-production-auth-postgres-backed-credential-store.md) | Postgres-backed credential store + persistent refresh tokens (+#109's httpOnly-cookie leftover) | HITL: credential-column placement | `InMemoryUserStore` still live in `auth.module.ts`/`auth.service.ts` | L |
+| 4 | [#110](./issues/110-auth-rate-limiting.md) | Rate limiting / brute-force protection on `/auth/login`, `/auth/refresh`, `/api/non-op/confirm` | #91 (real store) | no throttler/rate-limit code in `apps/backend/src` (grep 2026-07-12) | S |
+| 5 | [#101](./issues/101-write-safety-guarded-transitions.md) — remaining | Guard the untreated racy sites (SE-submit vs auto-recovery, double troubleshoot submit, non-op stale writes, sweep overlaps, van-stock decrement) | none (helper + pattern landed `9940534`) | issue file `Status: partial`; SYSTEM-STATE §5.5 site list | M/L |
+| 6 | [#103](./issues/103-hot-fk-indexes-constraints.md) | Hot-FK indexes (`tickets.device_id`/`vehicle_id`, `audit_logs(actor_role,created_at)`) + remaining constraints | none | `model Ticket` has no `@@index` on `deviceId`/`vehicleId` (schema.prisma, verified 2026-07-12) | S |
+| 7 | [#107](./issues/107-ci-concurrency-guard-migration-tests.md) | CI: from-zero migrated DB + concurrency + route-guard + migration tests | #99 (guard sweep feeds it) | no `.github/workflows/` exists (checked 2026-07-12) | M |
+
+**Parallel ops track (HITL, gates `BUSINESS_SWEEPS_ENABLED` — not agent-executable):** B8 zone
+ratification via `docs/autoplant/R6-zone-map-proposal.md` (watched run: 5,259 unassignable, 1,369 of
+them UNZONED) + real SE roster/coverage entry via `/engineers/manage` + B7 eligibility standing
+decision (`all-deployed` set 2026-07-10) / [#116](./issues/116-sap-pgi-feed-seam.md) PGI feed.
+**Uncommitted WIP note (2026-07-12):** besides the #98 filter, an admin plant-name-label slice
+(`apps/admin/src/lib/plantNames.ts` + `PlantName.tsx` + 8 page edits + tests) sits unfiled — commit
+it under its own issue/stub before starting item 2.
+
+## Session log
+
+| Date | What landed | Commits |
+|---|---|---|
+| 2026-07-10 | #98 slices 1–3 (fail-fast boot, health probes, graceful shutdown); SYSTEM-STATE §6.1 watched-run record | `25a46d4` `e61b71a` `8c3a26f` `d57ccd8` |
+| 2026-07-12 | Doc consolidation: 20 superseded handoffs/boards/plans → `docs/archive/`; contradiction banners (backend LLD/blueprint, workflow §25); CLAUDE.md progress convention; this Next-up plan | `ebbe09e` `ce19bea` + this commit |
+
 **Planning artifacts (read before UI-touching work):**
 - [`DEV-GOVERNANCE-CHANGE-SET.md`](./DEV-GOVERNANCE-CHANGE-SET.md) — approved governance change set (parity gate, UI ownership; Part 3.3 governs mobile blocked-by-#54).
 - [`DESIGN-SYSTEM.md`](./DESIGN-SYSTEM.md) — **reference-derived design system** (the visual authority for all FE-series issues; governs tokens, components, page composition, fidelity rules).
