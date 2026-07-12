@@ -34,6 +34,23 @@ reference rules live in `docs/agents/workflow.md`. The red-green-refactor protoc
 `/tdd` skill — not restated in the docs. Authoritative UI references: `docs/ui/desktop/v2-reference/`
 and `docs/ui/mobile/`.
 
+## Progress & state convention (mandatory)
+
+**Two living documents, no forks.** `docs/SYSTEM-STATE-2026-07.md` is the only current-state
+document — when reality changes, edit its sections **in place**; never create a new
+"current state" / "progress" / "status" doc. `.scratch/fsm-platform-v1/INDEX.md` is the only
+work tracker — every session updates the issue statuses it touched **and appends one line to
+the "Session log" table** in INDEX.md (date · what landed · commit hashes).
+
+**Reading order for a new session:** `CLAUDE.md` → `docs/SYSTEM-STATE-2026-07.md` →
+`.scratch/fsm-platform-v1/INDEX.md` → the issue file being worked.
+
+**Handoff files** are only for genuinely interrupted work (uncommitted state a next session
+must recover). They live beside the issue while live and move to `docs/archive/` (git mv, with
+a 2-line ARCHIVED banner) as soon as they are consumed. `docs/archive/` is write-once history:
+nothing in it is current; nothing in it gets updated. Per-issue TDD completion reports remain
+`docs/progress/<issue>.md` — frozen once written; corrections go to INDEX/SYSTEM-STATE, not there.
+
 ## Surfacing rule (UI parity)
 
 Backend and UI are **one vertical slice**, not two phases. An issue with UI/mobile acceptance criteria
