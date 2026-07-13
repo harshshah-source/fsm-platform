@@ -274,8 +274,9 @@ when an in-scope plant names them) — no company allow-list, no reliance on the
 - **Guards**: `master_sync_runs` single-in-flight (409 `RUN_IN_PROGRESS`), stale-run reaper shared
   with snapshots. Unconfigured env binds `EMPTY_MASTER_SOURCE` → no-op.
 - **Known limit**: zone coverage is data-starved — zone_name is ~98% complete fleet-wide but
-  near-absent in the ACTIVE plants FSM syncs, so ~83% of synced devices land UNZONED
-  (`docs/audits/unzoned-plants-2026-07-07.md` `[spot-checked below, §4]`).
+  near-absent in the ACTIVE plants FSM syncs, so ~83% of synced devices landed UNZONED
+  (`docs/audits/unzoned-plants-2026-07-07.md` `[spot-checked below, §4]`). **Reduced to 23% on
+  2026-07-13 via 47 plant_zone_overrides (§6.1); the mechanism-starvation itself is unchanged.**
 
 ### 3b. Snapshot ingestion (#04/#97)
 
@@ -623,11 +624,13 @@ findings from this audit are filed as **#115** and **#116** (stubs in
    untracked** — a single-disk loss destroys the requirements + audit record, and a fresh clone
    can't even follow the documented agent workflow. (Same family as #114 `data/` shadowing the
    admin UI source, which also still makes the branch tip unbuildable from clone.)
-3. **UNZONED zone-derivation problem** (data, not code): 83% of synced devices land UNZONED
-   (validation audit exec summary; `docs/audits/unzoned-plants-2026-07-07.md`) because the ACTIVE
-   plants FSM syncs mostly lack `zone_name` — the crosswalk mechanism (§3a) is built but starved.
-   Blast radius: ZM dashboards/scoping/dispatch are meaningless for 5/6 of the fleet until Ops maps
-   values or pins plants (zone ratification, B8 gate).
+3. **UNZONED zone-derivation problem** (data, not code) — **materially reduced 2026-07-13**: was
+   83% of synced devices UNZONED (validation audit exec summary); after the zone-application
+   session pinned 47 plants via `plant_zone_overrides` + reapply, UNZONED devices are
+   **4,603 of 20,098 (23%)** (§6.1). Root cause stands: ACTIVE plants FSM syncs mostly lack
+   `zone_name`, so the crosswalk (§3a) stays starved — the residual 191-plant worklist is
+   `docs/audits/v2UnzonnedPlants.md` (mostly zero-vehicle depots; per-company asks with Ops).
+   Remaining blast radius: ~23% of fleet invisible to ZM dashboards/dispatch until B8 completes.
 4. **PGI feed absence** — NEW stub **#116**: `pgi_history` has no writer; `pgi` eligibility mode is
    permanently 0-candidate and Fleet-Uptime is structurally empty. #112 shipped the mode switch and
    B7 records the pending decision, but no issue owned building the feed until now.
@@ -696,6 +699,19 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 > switches confirmed OFF the whole session: `INGESTION_SCHEDULER_ENABLED=false`,
 > `PARTITION_MAINTENANCE_ENABLED=false`, `BUSINESS_SWEEPS_ENABLED` unset.
 
+> **Zone application — 2026-07-13 (B8 partially executed).** 47 UNZONED plants (10,599 audit
+> vehicles) pinned via `PUT /api/org/plant-zone-overrides` (reason carries sub-zone + provenance:
+> 20 Nuvista Excel(1), 20 vehicle-join, 6 EXCEL-3, 1 RISDA-family; East A/B→East, West A/B→West) +
+> `POST /reapply` (`updated: 47`). Survival proven both ways: `sync-masters` run 31 (751 plants
+> updated, zones untouched — insert-only upsert) and reapply #2 (`updated: 0`). 4 sub-zone synonym
+> rows inserted MAPPED (fresh-install seed = #118); `sdf` IGNORED via API; `central` left PENDING
+> (deliberate). Full pipeline run 32 (snapshot 19,175; device-state 20,098; 97 new tickets).
+> **Devices by zone, before → after: UNZONED 16,535 → 4,603 (23% of 20,098) · East 56 → 7,015 ·
+> North 174 → 3,714 · South 2,514 → 3,114 · West 794 → 1,652.** Plants: UNZONED 247 → 200.
+> Audit trail: 47× `PLANT_ZONE_OVERRIDE_SET`, 2× `ZONE_MAPPING_REAPPLIED`, 1× `ZONE_MAPPING_IGNORED`.
+> Residual: 191-plant worklist (`docs/audits/v2UnzonnedPlants.md`), 6 STAR CEMENT SHUTDOWN rows
+> deferred to #119, admin UI gap #120.
+
 ### 6.2 Env flags (all master switches default OFF; cron strings read once at boot)
 
 | Flag | Effect |
@@ -713,7 +729,8 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 
 - **Data-blocked**: SE roster + coverage (`engineer_master`/`se_coverage` empty in prod-shaped DBs;
   admin-enterable via `/engineers/manage`, tested seed exists — commit `0df556a`); zone mappings
-  (83% UNZONED until Ops ratifies, B8); `pgi_history` (needs #116 or the proxy).
+  (was 83% UNZONED; **23% since the 2026-07-13 application** — residual is the v2 worklist +
+  B8 sign-off); `pgi_history` (needs #116 or the proxy).
 - **Decision-blocked**: B7 eligibility mode (business accepts the `all-deployed` proxy or waits for
   PGI); B8 zone ratification; credential-column placement for #91 (HITL).
 - **Code-blocked**: nothing in the funnel itself (INDEX funnel table, re-verified §3). Hardening

@@ -1,6 +1,6 @@
 # UNZONED Plants with Company Names
 
-> Zone column enriched 2026-07-13 from SUMMARY REPORT Deployed (1).xlsx + plantName.md; second pass same day from SUMMARY REPORT Deployed (3).xlsx, plant-family-groupings-2026-07-13.md, and the AutoPlant vehicle-join (evidence: autoplant-unzoned-enrichment-2026-07-13.md); other fields unchanged.
+> Zone column enriched 2026-07-13 from SUMMARY REPORT Deployed (1).xlsx + plantName.md; second pass same day from SUMMARY REPORT Deployed (3).xlsx, plant-family-groupings-2026-07-13.md, and the AutoPlant vehicle-join (evidence: autoplant-unzoned-enrichment-2026-07-13.md); other fields unchanged. 6 STAR CEMENT rows marked SHUTDOWN: 3040/3530/3078 per UnzonneedPlantList_autoplantDB.csv (DB team, 2026-07-13); 3529/3619/3187 user-confirmed company shutdown (2026-07-13). **Applied to FSM dev DB 2026-07-13 via plant_zone_overrides API + reapply** (47 rows, sub-zones collapsed East A/B→East, West A/B→West; see audit_logs: 47× PLANT_ZONE_OVERRIDE_SET, 2× ZONE_MAPPING_REAPPLIED, 1× ZONE_MAPPING_IGNORED).
 
 Generated 2026-07-07T11:36:28.840Z from the FSM DB (post-pipeline) + AutoPlant `mst_company`.
 
@@ -21,11 +21,11 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 11 | Kadappa (5) | 3038 | South [EXCEL-3] | 384 | Vicat Cement |
 | 12 | SCL_Ranavav (2) | 3030 | West B [DERIVED via vehicle-join] | 380 | SAURASHTRA CEMENT |
 | 13 | DGFC_Test (178) | 3923 | (null) | 360 | DGFC |
-| 14 | BARPETA ROAD CRS-SCNEL (102) | 3530 | (null) | 341 | STAR CEMENT |
+| 14 | BARPETA ROAD CRS-SCNEL (102) | 3530 | SHUTDOWN [per UnzonneedPlantList_autoplantDB.csv 2026-07-13] | 341 | STAR CEMENT |
 | 15 | ESL STEEL LTD Steel Unit (139) | 3672 | (null) | 312 | Vedanta - ESL |
-| 16 | JORHAT CPW-SCL-LUMS (7) | 3040 | (null) | 280 | STAR CEMENT |
+| 16 | JORHAT CPW-SCL-LUMS (7) | 3040 | SHUTDOWN [per UnzonneedPlantList_autoplantDB.csv 2026-07-13] | 280 | STAR CEMENT |
 | 17 | JCP-9234 (180) | 4167 | East B | 279 | Nuvista |
-| 18 | PURNEA CPW SCL SGU (9) | 3078 | (null) | 207 | STAR CEMENT |
+| 18 | PURNEA CPW SCL SGU (9) | 3078 | SHUTDOWN [per UnzonneedPlantList_autoplantDB.csv 2026-07-13] | 207 | STAR CEMENT |
 | 19 | MCP-9233 (182) | 4169 | East B | 184 | Nuvista |
 | 20 | SCL_Sidheegram (3) | 3031 | West B [DERIVED via vehicle-join] | 179 | SAURASHTRA CEMENT |
 | 21 | ACP-9231 (181) | 4168 | East B | 178 | Nuvista |
@@ -36,7 +36,7 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 26 | MCP-9107 (26) | 3129 | East B | 149 | Nuvista |
 | 27 | HCIL -JHANSI (148) | 3698 | (null) | 148 | Zuari Cement |
 | 28 | SCP-9232 (183) | 4170 | East B | 148 | Nuvista |
-| 29 | PANDU PORT CPS SCL-GGU (101) | 3529 | (null) | 135 | STAR CEMENT |
+| 29 | PANDU PORT CPS SCL-GGU (101) | 3529 | SHUTDOWN [STAR CEMENT shutdown, user-confirmed 2026-07-13] | 135 | STAR CEMENT |
 | 30 | KHORDA (151) | 3704 | East A [DERIVED via vehicle-join] | 116 | HCCB |
 | 31 | BCP-5153 (13) | 3095 | East B | 90 | Nuvista |
 | 32 | SCP-9104 (122) | 3605 | East B | 90 | Nuvista |
@@ -50,7 +50,7 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 40 | DIC Plant (28) | 3456 | (null) | 32 | Prism Cement |
 | 41 | HIMJAL COPACK (159) | 3720 | South [DERIVED via vehicle-join] | 28 | HCCB |
 | 42 | GOA (154) | 3709 | West A [DERIVED via vehicle-join] | 25 | HCCB |
-| 43 | SCNEL SILCHAR CEMENT (128) | 3619 | (null) | 24 | STAR CEMENT |
+| 43 | SCNEL SILCHAR CEMENT (128) | 3619 | SHUTDOWN [STAR CEMENT shutdown, user-confirmed 2026-07-13] | 24 | STAR CEMENT |
 | 44 | ATMAKURU (160) | 3721 | South [DERIVED via vehicle-join] | 23 | HCCB |
 | 45 | CHUNAR TOLLING UNIT (20) | 3123 | (null) | 22 | Prism Cement |
 | 46 | J. K. CEMENTS LTD-MUDDAPUR (196) | 4204 | (null) | 21 | Shree Balaji Roadlines |
@@ -154,7 +154,7 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 144 | SHREE RENUKA SUGARS MUNOLI (291) | 4325 | (null) | 0 | (no vehicles synced) |
 | 145 | SONAI EATABLES INDIA PRIVATE LTD-INDAPUR (212) | 4220 | (null) | 0 | (no vehicles synced) |
 | 146 | SRIKALAHASTI (158) | 3718 | (null) | 0 | (no vehicles synced) |
-| 147 | StarCement - LUMS (27) | 3187 | (null) | 0 | (no vehicles synced) |
+| 147 | StarCement - LUMS (27) | 3187 | SHUTDOWN [STAR CEMENT shutdown, user-confirmed 2026-07-13] | 0 | (no vehicles synced) |
 | 148 | THE INDIA CEMENT LTD-LONI RAKE (204) | 4212 | (null) | 0 | (no vehicles synced) |
 | 149 | THE INDIA CEMENTS LTD (BAG)-Banswara, Rajasthan (227) | 4235 | (null) | 0 | (no vehicles synced) |
 | 150 | TIGER TRANSPORT-NELLORE (210) | 4218 | (null) | 0 | (no vehicles synced) |
