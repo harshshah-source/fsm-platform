@@ -62,7 +62,14 @@ export interface CsvRowError {
 
 export type UploadCsvOutcome =
   | { result: 'OK'; batchId: string; ticketIds: string[] }
-  | { result: 'INVALID'; errors: CsvRowError[] };
+  | { result: 'INVALID'; errors: CsvRowError[] }
+  | { result: 'TOO_MANY_ROWS'; maxRows: number; rows: number };
+
+/** Row cap on the CSV bulk path (#99) — enforced by count alone, before any per-row DB validation. */
+export function installCsvMaxRows(): number {
+  const raw = Number(process.env.INSTALL_CSV_MAX_ROWS);
+  return Number.isInteger(raw) && raw > 0 ? raw : 1000;
+}
 
 /** Resolved entity rows a validated install row needs to create its ticket. */
 interface ResolvedRow {
@@ -130,6 +137,10 @@ export class InstallService {
   ): Promise<UploadCsvOutcome> {
     const parsed = parseCsv(csv);
     if (parsed.result === 'INVALID') return parsed;
+    const maxRows = installCsvMaxRows();
+    if (parsed.rows.length > maxRows) {
+      return { result: 'TOO_MANY_ROWS', maxRows, rows: parsed.rows.length };
+    }
 
     const errors: CsvRowError[] = [];
     const resolvedRows: { row: InstallRowInput; resolved: ResolvedRow }[] = [];

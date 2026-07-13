@@ -1,12 +1,14 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { Public } from '../common/decorators/public.decorator';
 import { HealthService, type ReadinessResult } from './health.service';
 
 /**
- * Public liveness/readiness probes (#98 leg 4) — deliberately NOT guarded, so an orchestrator or load
- * balancer can poll them unauthenticated. Distinct from `GET /api/integration/health`, which is the
- * OH-only AutoPlant-source view. Liveness must have no dependencies; readiness gates on the DB.
+ * Public liveness/readiness probes (#98 leg 4) — deliberately unauthenticated (@Public, #99), so an
+ * orchestrator or load balancer can poll them. Distinct from `GET /api/integration/health`, which is
+ * the OH-only AutoPlant-source view. Liveness must have no dependencies; readiness gates on the DB.
  */
 @Controller('health')
+@Public()
 export class HealthController {
   constructor(private readonly health: HealthService) {}
 

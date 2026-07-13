@@ -14,6 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -118,9 +119,12 @@ export class NonOperationalController {
 
 /**
  * Public customer-confirmation link (Issue 35 AC#6). The customer clicks the one-time tokenised email
- * link — no auth — to confirm the marking. Deliberately outside the guarded controller.
+ * link — no auth — to confirm the marking. Deliberately outside the guarded controller (@Public, #99;
+ * the one-time token IS the credential). Rate limiting on this scrypt-free but token-guessable path
+ * is #110's scope.
  */
 @Controller('non-op')
+@Public()
 export class NonOperationalPublicController {
   constructor(private readonly nonOp: NonOperationalService) {}
 

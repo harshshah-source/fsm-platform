@@ -9,7 +9,8 @@ import { validateBootConfig } from './config/boot-config';
 async function bootstrap(): Promise<void> {
   // Fail-fast before any module boots: refuse to start on a missing/unsafe secret or bad DB URL (#98).
   validateBootConfig();
-  const app = await NestFactory.create(AppModule);
+  // bodyParser off so configureApp's explicit, env-tunable JSON limit is the ONLY parser (#99).
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
   // SIGTERM/SIGINT now run the Nest lifecycle, so onModuleDestroy (Prisma $disconnect, AutoPlant MySQL
   // pool end) actually fires on a graceful shutdown instead of the process being hard-killed (#98).
   app.enableShutdownHooks();

@@ -22,6 +22,7 @@ import {
   CrossZoneEscalationService,
   DecisionOutcome,
 } from './cross-zone-escalation.service';
+import { ApproveBody, DeferBody, DenyBody, FlagBody, SweepBody } from './cross-zone.dtos';
 
 const ALL_MANAGERS = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 const CROSS_ZONE_DECIDERS = ['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
@@ -46,17 +47,18 @@ export class CrossZoneController {
   @Post('sweep')
   @HttpCode(200)
   @Roles(...CROSS_ZONE_DECIDERS)
-  sweep(@Body() body: { zoneId?: number | string }): Promise<{ escalated: number }> {
+  sweep(@Body() body: SweepBody): Promise<{ escalated: number }> {
     return this.svc.sweepAutoEscalations(undefined, body.zoneId != null ? BigInt(body.zoneId) : undefined);
   }
 
   @Post('flag')
   @HttpCode(200)
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER')
-  async flag(@CurrentUser() user: AccessTokenClaims, @Body() body: { ticketId: string; reason: string }) {
-    if (!body.ticketId) throw new BadRequestException({ code: 'TICKET_REQUIRED' });
-    if (!body.reason) throw new BadRequestException({ code: 'REASON_REQUIRED' });
-    const out = await this.svc.flag(body.ticketId, body.reason, this.actor(user));
+  async flag(@CurrentUser() user: AccessTokenClaims, @Body() body: FlagBody) {
+    const { ticketId, reason } = body;
+    if (!ticketId) throw new BadRequestException({ code: 'TICKET_REQUIRED' });
+    if (!reason) throw new BadRequestException({ code: 'REASON_REQUIRED' });
+    const out = await this.svc.flag(ticketId, reason, this.actor(user));
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     if (out.result === 'FORBIDDEN_SCOPE') throw new ForbiddenException({ code: 'TICKET_OUT_OF_ZONE' });
     if (out.result === 'FORBIDDEN_TIER') throw new BadRequestException({ code: 'PLATINUM_USES_AUTO_ESCALATION' });
@@ -70,16 +72,16 @@ export class CrossZoneController {
   approve(
     @CurrentUser() user: AccessTokenClaims,
     @Param('id') id: string,
-    @Body() body: { targetZoneId: number; seId: string },
+    @Body() body: ApproveBody,
   ) {
     if (body.targetZoneId == null || !body.seId) throw new BadRequestException({ code: 'TARGET_ZONE_AND_SE_REQUIRED' });
-    return this.map(this.svc.approve(BigInt(id), Number(body.targetZoneId), body.seId, this.actor(user)));
+    return this.map(this.svc.approve(BigInt(id), body.targetZoneId, body.seId, this.actor(user)));
   }
 
   @Post(':id/deny')
   @HttpCode(200)
   @Roles(...CROSS_ZONE_DECIDERS)
-  deny(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string, @Body() body: { reason: string }) {
+  deny(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string, @Body() body: DenyBody) {
     if (!body.reason) throw new BadRequestException({ code: 'REASON_REQUIRED' });
     return this.map(this.svc.deny(BigInt(id), body.reason, this.actor(user)));
   }
@@ -90,7 +92,7 @@ export class CrossZoneController {
   defer(
     @CurrentUser() user: AccessTokenClaims,
     @Param('id') id: string,
-    @Body() body: { reviewDate: string; reason: string },
+    @Body() body: DeferBody,
   ) {
     if (!body.reviewDate || !body.reason) throw new BadRequestException({ code: 'REVIEW_DATE_AND_REASON_REQUIRED' });
     return this.map(this.svc.defer(BigInt(id), new Date(body.reviewDate), body.reason, this.actor(user)));

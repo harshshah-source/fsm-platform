@@ -1,5 +1,5 @@
-import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
+import { Module, ValidationPipe } from '@nestjs/common';
+import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { HealthController } from './health/health.controller';
 import { HealthService } from './health/health.service';
@@ -164,6 +164,18 @@ import { ZonesController } from './zones/zones.controller';
     // Global exception filter (#98): sanitized 500s + correlation id for every route, HttpException
     // contracts (e.g. `{ code }`) preserved verbatim.
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    // Global guard chain (#99), in order: every route authenticates by default (@Public opts out),
+    // then @Roles allow-lists, then ZM zone clamping. Per-controller @UseGuards stays valid (re-runs
+    // are idempotent) — but forgetting it no longer exposes a route.
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: RoleGuard },
+    { provide: APP_GUARD, useClass: ZoneScopeGuard },
+    // Global validation (#99): DTO-classed routes get whitelist + forbidNonWhitelisted + transform;
+    // interface-typed bodies are untouched (Nest skips non-class metatypes), so contracts don't drift.
+    {
+      provide: APP_PIPE,
+      useValue: new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+    },
   ],
 })
 export class AppModule {}

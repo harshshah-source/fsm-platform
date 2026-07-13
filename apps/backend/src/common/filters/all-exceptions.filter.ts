@@ -49,6 +49,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
+    // HTTP-layer errors thrown below Nest (http-errors family: body-parser's 413 PayloadTooLarge /
+    // 400 entity.parse.failed, …) carry a numeric status + an `expose` flag. Honor the status so an
+    // oversized body is a clean 413, not a mislabeled 500; use the library message only when the
+    // library itself marks it exposable (expose = status < 500 per http-errors).
+    const httpStatus = httpErrorStatus(exception);
+    if (httpStatus !== undefined) {
+      const exposed =
+        (exception as { expose?: boolean }).expose === true && exception instanceof Error
+          ? exception.message
+          : 'Request rejected';
+      this.logger.warn(`${request.method} ${request.url} → ${httpStatus} [${correlationId}] ${exposed}`);
+      response.status(httpStatus).json({ statusCode: httpStatus, message: exposed, correlationId });
+      return;
+    }
+
     // Unknown error: log the full cause (with stack) server-side, return a generic sanitized 500 so no
     // internal detail — DB errors, stack frames — can ever reach the client.
     const detail = exception instanceof Error ? (exception.stack ?? exception.message) : String(exception);
@@ -61,6 +76,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
     });
   }
+}
+
+/** 4xx status of an http-errors-style client error (`status`/`statusCode` field); undefined otherwise. */
+function httpErrorStatus(exception: unknown): number | undefined {
+  if (typeof exception !== 'object' || exception === null) return undefined;
+  const raw =
+    (exception as { status?: unknown }).status ?? (exception as { statusCode?: unknown }).statusCode;
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 400 && raw < 500 ? raw : undefined;
 }
 
 /** First value of a header that may arrive as a string or string[]; undefined when absent/blank. */

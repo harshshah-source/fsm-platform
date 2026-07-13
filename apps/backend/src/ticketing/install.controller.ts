@@ -156,6 +156,9 @@ export class InstallController {
       throw new BadRequestException({ code: 'CSV_REQUIRED' });
     }
     const out = await this.install.uploadCsv(body.csv, { role: user.role, zoneId: user.zone_id }, actor);
+    if (out.result === 'TOO_MANY_ROWS') {
+      throw new BadRequestException({ code: 'CSV_TOO_MANY_ROWS', maxRows: out.maxRows, rows: out.rows });
+    }
     if (out.result === 'INVALID') {
       throw new BadRequestException({ code: 'CSV_VALIDATION_FAILED', errors: out.errors });
     }
