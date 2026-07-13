@@ -712,6 +712,24 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 > Residual: 191-plant worklist (`docs/audits/v2UnzonnedPlants.md`), 6 STAR CEMENT SHUTDOWN rows
 > deferred to #119, admin UI gap #120.
 
+> **Live funnel re-run — 2026-07-13, post-zone-application (watched, all-manual, schedulers OFF).**
+> Mock SE workforce extended additively to the new zone weights (+9 SEs/+18 coverage rows on top of
+> the 0df556a 13; now 22 SEs: East 6 · South 6 · North 3 · West 3 · UNZONED 4 — existing SEs and
+> coverage untouched; every zone already had a mock ZM). `run-pipeline` (228 s): device-state
+> 20,106; **tickets created 5, total delta exactly 5, 0 devices with >1 open ticket — idempotency
+> held.** `dispatch-run` (16 s): **24 schedules · 567 tickets dispatched · 0 errors** (vs 13 · 275
+> on 2026-07-10). Scoreboard (single-moment): **inactive 5,843 → eligible 5,843 (100%,
+> all-deployed) → open tickets 6,840 → recommended 6,331 → dispatched 567 (≈95% of the 600
+> capacity ceiling) → unassignable 5,764, all `NO_ELIGIBLE_SE`.**
+> Per zone (schedules / dispatched / unassignable): East 7/158/1,306 · South 6/150/1,189 ·
+> North 4/100/590 · UNZONED 4/100/2,455 · West 3/59/224. East went from a 1-SE afterthought to the
+> biggest dispatch zone — the zone application is live in dispatch, not just in counts. Open
+> tickets on plants with NO SE coverage: 814 (was 1,463) — UNZONED 407 · West 203 · East 156 ·
+> South 46 · North 2. Only 1 SE / 3 plants ended up with cross-zone coverage after the plant moves
+> (the 07-10 UNZONED SE whose plants are now East/North); dispatch handled it via a cross-zone
+> schedule row (#100's zone_id-in-key design working as intended). Remaining unassignable mass is
+> capacity (5,764 tickets vs 600/day) + the UNZONED residual — a workforce/data question, not code.
+
 ### 6.2 Env flags (all master switches default OFF; cron strings read once at boot)
 
 | Flag | Effect |
