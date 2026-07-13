@@ -1,5 +1,7 @@
 # UNZONED Plants with Company Names
 
+> Zone column enriched 2026-07-13 from SUMMARY REPORT Deployed (1).xlsx + plantName.md; other fields unchanged.
+
 Generated 2026-07-07T11:36:28.840Z from the FSM DB (post-pipeline) + AutoPlant `mst_company`.
 
 Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not mirror company names).
@@ -7,42 +9,42 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | # | Plant (FSM id) | source_plant_id | raw zone | Vehicles | Company(ies) |
 |---|---|---|---|---|---|
 | 1 | KESORAM WORKS (24) | 3127 | (null) | 2195 | Vasavadatta |
-| 2 | RCP-9211 (11) | 3093 | (null) | 1762 | Nuvista |
-| 3 | NCP-9117 (103) | 3532 | (null) | 1446 | Nuvista |
-| 4 | CCP-9115 (100) | 3528 | (null) | 1141 | Nuvista |
+| 2 | RCP-9211 (11) | 3093 | East B | 1762 | Nuvista |
+| 3 | NCP-9117 (103) | 3532 | North | 1446 | Nuvista |
+| 4 | CCP-9115 (100) | 3528 | North | 1141 | Nuvista |
 | 5 | SATNA PLANT LINE 2 (19) | 3122 | (null) | 816 | Prism Cement |
 | 6 | SATNA PLANT LINE 1 (18) | 3121 | (null) | 527 | Prism Cement |
-| 7 | RCP-5151 (15) | 3097 | (null) | 470 | Nuvista |
-| 8 | JCP-9105 (121) | 3604 | (null) | 463 | Nuvista |
-| 9 | PCP-5150 (14) | 3096 | (null) | 431 | Nuvista |
-| 10 | HCP-9116 (33) | 3461 | (null) | 409 | Nuvista |
+| 7 | RCP-5151 (15) | 3097 | East B | 470 | Nuvista |
+| 8 | JCP-9105 (121) | 3604 | East B | 463 | Nuvista |
+| 9 | PCP-5150 (14) | 3096 | East B | 431 | Nuvista |
+| 10 | HCP-9116 (33) | 3461 | North | 409 | Nuvista |
 | 11 | Kadappa (5) | 3038 | (null) | 384 | Vicat Cement |
 | 12 | SCL_Ranavav (2) | 3030 | (null) | 380 | SAURASHTRA CEMENT |
 | 13 | DGFC_Test (178) | 3923 | (null) | 360 | DGFC |
 | 14 | BARPETA ROAD CRS-SCNEL (102) | 3530 | (null) | 341 | STAR CEMENT |
 | 15 | ESL STEEL LTD Steel Unit (139) | 3672 | (null) | 312 | Vedanta - ESL |
 | 16 | JORHAT CPW-SCL-LUMS (7) | 3040 | (null) | 280 | STAR CEMENT |
-| 17 | JCP-9234 (180) | 4167 | (null) | 279 | Nuvista |
+| 17 | JCP-9234 (180) | 4167 | East B | 279 | Nuvista |
 | 18 | PURNEA CPW SCL SGU (9) | 3078 | (null) | 207 | STAR CEMENT |
-| 19 | MCP-9233 (182) | 4169 | (null) | 184 | Nuvista |
+| 19 | MCP-9233 (182) | 4169 | East B | 184 | Nuvista |
 | 20 | SCL_Sidheegram (3) | 3031 | (null) | 179 | SAURASHTRA CEMENT |
-| 21 | ACP-9231 (181) | 4168 | (null) | 178 | Nuvista |
-| 22 | OCP-5152 (12) | 3094 | (null) | 165 | Nuvista |
+| 21 | ACP-9231 (181) | 4168 | East B | 178 | Nuvista |
+| 22 | OCP-5152 (12) | 3094 | East A | 165 | Nuvista |
 | 23 | Kalamboli (4) | 3037 | (null) | 162 | Vicat Cement |
 | 24 | HCIL_IMLAI (147) | 3697 | (null) | 157 | Zuari Cement |
-| 25 | ACP-9106 (25) | 3128 | (null) | 153 | Nuvista |
-| 26 | MCP-9107 (26) | 3129 | (null) | 149 | Nuvista |
+| 25 | ACP-9106 (25) | 3128 | East B | 153 | Nuvista |
+| 26 | MCP-9107 (26) | 3129 | East B | 149 | Nuvista |
 | 27 | HCIL -JHANSI (148) | 3698 | (null) | 148 | Zuari Cement |
-| 28 | SCP-9232 (183) | 4170 | (null) | 148 | Nuvista |
+| 28 | SCP-9232 (183) | 4170 | East B | 148 | Nuvista |
 | 29 | PANDU PORT CPS SCL-GGU (101) | 3529 | (null) | 135 | STAR CEMENT |
 | 30 | KHORDA (151) | 3704 | (null) | 116 | HCCB |
-| 31 | BCP-5153 (13) | 3095 | (null) | 90 | Nuvista |
-| 32 | SCP-9104 (122) | 3605 | (null) | 90 | Nuvista |
+| 31 | BCP-5153 (13) | 3095 | East B | 90 | Nuvista |
+| 32 | SCP-9104 (122) | 3605 | East B | 90 | Nuvista |
 | 33 | AMETHI TOLLING UNIT (23) | 3126 | (null) | 87 | Prism Cement |
-| 34 | BCP-9216 (17) | 3099 | (null) | 79 | Nuvista |
+| 34 | BCP-9216 (17) | 3099 | East B | 79 | Nuvista |
 | 35 | HINDUSTAN COCA-COLA BEVERAGES - SIDDIPET GF (163) | 3726 | (null) | 78 | HCCB |
-| 36 | PCP-9214 (10) | 3092 | (null) | 70 | Nuvista |
-| 37 | OCP-9215 (16) | 3098 | (null) | 69 | Nuvista |
+| 36 | PCP-9214 (10) | 3092 | East B | 70 | Nuvista |
+| 37 | OCP-9215 (16) | 3098 | East A | 69 | Nuvista |
 | 38 | DSTL K1PLANT (104) | 3533 | (null) | 59 | Deepak Fertilizer |
 | 39 | DEVARYAMJAL_GT (161) | 3722 | (null) | 37 | HCCB |
 | 40 | DIC Plant (28) | 3456 | (null) | 32 | Prism Cement |
@@ -58,7 +60,7 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 50 | Kalburgi (6) | 3039 | (null) | 15 | Vicat Cement |
 | 51 | RCP_NVL_HUB (185) | 4189 | (null) | 10 | Nuvista |
 | 52 | URWADE DEPOT - VIRTUAL (155) | 3710 | (null) | 10 | HCCB |
-| 53 | CCP-9236 (176) | 3746 | (null) | 9 | Nuvista |
+| 53 | CCP-9236 (176) | 3746 | North | 9 | Nuvista |
 | 54 | Coimbatore Plant (8) | 3077 | (null) | 9 | Vicat Cement |
 | 55 | ULTRATECH CEMENT LIMITED-SARALANAGAR SEDAM (197) | 4205 | (null) | 9 | Shree Balaji Roadlines |
 | 56 | BHARATIYAM COPACK (156) | 3716 | (null) | 6 | HCCB |
