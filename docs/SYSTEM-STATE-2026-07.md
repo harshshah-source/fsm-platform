@@ -468,9 +468,12 @@ cannot log in (#91). ~~`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret~
 (done 2026-07-12, 4 slices `25a46d4`…`55183e6`): fail-fast boot config (no JWT fallback), public
 liveness/readiness probes, graceful shutdown + fatal bootstrap guard, global exception filter with
 error correlation ids (pino swap deliberately not adopted — Nest Logger retained).**
-Guard chain AuthGuard → RoleGuard → ZoneScopeGuard applied
-**per-controller** — no global `APP_GUARD` (#99): an endpoint without `@UseGuards` is silently
-public. `ZoneScopeGuard` rejects a ZM targeting another zone via `:zoneId`/`zone_id` param (403
+Guard chain AuthGuard → RoleGuard → ZoneScopeGuard is now **global `APP_GUARD`** (#99, done
+2026-07-13 `aaf233e`): every route authenticates by default, `@Public()` opts out (login/refresh,
+health probes, non-op customer confirm — allowlist pinned by the route-sweep e2e). A global
+`ValidationPipe` (whitelist/forbid/transform) + cross-zone format DTOs turn body garbage into 400s;
+explicit `BODY_LIMIT_JSON` (1mb) + `INSTALL_CSV_MAX_ROWS` (1000) cap payloads.
+`ZoneScopeGuard` rejects a ZM targeting another zone via `:zoneId`/`zone_id` param (403
 ZONE_SCOPE_VIOLATION); **deeper zone clamping is service-level and uneven** — e.g. install scope
 was only closed by #102; cross-zone/CSM acting scope threads through `acting-context.ts` +
 `RequestActor` (#47). No rate limiting anywhere (#110): `/auth/login` scrypt is a CPU-DoS vector.
