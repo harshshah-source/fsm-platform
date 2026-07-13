@@ -1,6 +1,6 @@
 # UNZONED Plants with Company Names
 
-> Zone column enriched 2026-07-13 from SUMMARY REPORT Deployed (1).xlsx + plantName.md; other fields unchanged.
+> Zone column enriched 2026-07-13 from SUMMARY REPORT Deployed (1).xlsx + plantName.md; second pass same day from SUMMARY REPORT Deployed (3).xlsx, plant-family-groupings-2026-07-13.md, and the AutoPlant vehicle-join (evidence: autoplant-unzoned-enrichment-2026-07-13.md); other fields unchanged.
 
 Generated 2026-07-07T11:36:28.840Z from the FSM DB (post-pipeline) + AutoPlant `mst_company`.
 
@@ -12,14 +12,14 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 2 | RCP-9211 (11) | 3093 | East B | 1762 | Nuvista |
 | 3 | NCP-9117 (103) | 3532 | North | 1446 | Nuvista |
 | 4 | CCP-9115 (100) | 3528 | North | 1141 | Nuvista |
-| 5 | SATNA PLANT LINE 2 (19) | 3122 | (null) | 816 | Prism Cement |
-| 6 | SATNA PLANT LINE 1 (18) | 3121 | (null) | 527 | Prism Cement |
+| 5 | SATNA PLANT LINE 2 (19) | 3122 | East A [DERIVED via vehicle-join] | 816 | Prism Cement |
+| 6 | SATNA PLANT LINE 1 (18) | 3121 | East A [DERIVED via vehicle-join] | 527 | Prism Cement |
 | 7 | RCP-5151 (15) | 3097 | East B | 470 | Nuvista |
 | 8 | JCP-9105 (121) | 3604 | East B | 463 | Nuvista |
 | 9 | PCP-5150 (14) | 3096 | East B | 431 | Nuvista |
 | 10 | HCP-9116 (33) | 3461 | North | 409 | Nuvista |
-| 11 | Kadappa (5) | 3038 | (null) | 384 | Vicat Cement |
-| 12 | SCL_Ranavav (2) | 3030 | (null) | 380 | SAURASHTRA CEMENT |
+| 11 | Kadappa (5) | 3038 | South [EXCEL-3] | 384 | Vicat Cement |
+| 12 | SCL_Ranavav (2) | 3030 | West B [DERIVED via vehicle-join] | 380 | SAURASHTRA CEMENT |
 | 13 | DGFC_Test (178) | 3923 | (null) | 360 | DGFC |
 | 14 | BARPETA ROAD CRS-SCNEL (102) | 3530 | (null) | 341 | STAR CEMENT |
 | 15 | ESL STEEL LTD Steel Unit (139) | 3672 | (null) | 312 | Vedanta - ESL |
@@ -27,55 +27,55 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 17 | JCP-9234 (180) | 4167 | East B | 279 | Nuvista |
 | 18 | PURNEA CPW SCL SGU (9) | 3078 | (null) | 207 | STAR CEMENT |
 | 19 | MCP-9233 (182) | 4169 | East B | 184 | Nuvista |
-| 20 | SCL_Sidheegram (3) | 3031 | (null) | 179 | SAURASHTRA CEMENT |
+| 20 | SCL_Sidheegram (3) | 3031 | West B [DERIVED via vehicle-join] | 179 | SAURASHTRA CEMENT |
 | 21 | ACP-9231 (181) | 4168 | East B | 178 | Nuvista |
 | 22 | OCP-5152 (12) | 3094 | East A | 165 | Nuvista |
-| 23 | Kalamboli (4) | 3037 | (null) | 162 | Vicat Cement |
+| 23 | Kalamboli (4) | 3037 | West A [EXCEL-3] | 162 | Vicat Cement |
 | 24 | HCIL_IMLAI (147) | 3697 | (null) | 157 | Zuari Cement |
 | 25 | ACP-9106 (25) | 3128 | East B | 153 | Nuvista |
 | 26 | MCP-9107 (26) | 3129 | East B | 149 | Nuvista |
 | 27 | HCIL -JHANSI (148) | 3698 | (null) | 148 | Zuari Cement |
 | 28 | SCP-9232 (183) | 4170 | East B | 148 | Nuvista |
 | 29 | PANDU PORT CPS SCL-GGU (101) | 3529 | (null) | 135 | STAR CEMENT |
-| 30 | KHORDA (151) | 3704 | (null) | 116 | HCCB |
+| 30 | KHORDA (151) | 3704 | East A [DERIVED via vehicle-join] | 116 | HCCB |
 | 31 | BCP-5153 (13) | 3095 | East B | 90 | Nuvista |
 | 32 | SCP-9104 (122) | 3605 | East B | 90 | Nuvista |
 | 33 | AMETHI TOLLING UNIT (23) | 3126 | (null) | 87 | Prism Cement |
 | 34 | BCP-9216 (17) | 3099 | East B | 79 | Nuvista |
-| 35 | HINDUSTAN COCA-COLA BEVERAGES - SIDDIPET GF (163) | 3726 | (null) | 78 | HCCB |
+| 35 | HINDUSTAN COCA-COLA BEVERAGES - SIDDIPET GF (163) | 3726 | South [DERIVED via vehicle-join] | 78 | HCCB |
 | 36 | PCP-9214 (10) | 3092 | East B | 70 | Nuvista |
 | 37 | OCP-9215 (16) | 3098 | East A | 69 | Nuvista |
 | 38 | DSTL K1PLANT (104) | 3533 | (null) | 59 | Deepak Fertilizer |
-| 39 | DEVARYAMJAL_GT (161) | 3722 | (null) | 37 | HCCB |
+| 39 | DEVARYAMJAL_GT (161) | 3722 | South [DERIVED via vehicle-join] | 37 | HCCB |
 | 40 | DIC Plant (28) | 3456 | (null) | 32 | Prism Cement |
-| 41 | HIMJAL COPACK (159) | 3720 | (null) | 28 | HCCB |
-| 42 | GOA (154) | 3709 | (null) | 25 | HCCB |
+| 41 | HIMJAL COPACK (159) | 3720 | South [DERIVED via vehicle-join] | 28 | HCCB |
+| 42 | GOA (154) | 3709 | West A [DERIVED via vehicle-join] | 25 | HCCB |
 | 43 | SCNEL SILCHAR CEMENT (128) | 3619 | (null) | 24 | STAR CEMENT |
-| 44 | ATMAKURU (160) | 3721 | (null) | 23 | HCCB |
+| 44 | ATMAKURU (160) | 3721 | South [DERIVED via vehicle-join] | 23 | HCCB |
 | 45 | CHUNAR TOLLING UNIT (20) | 3123 | (null) | 22 | Prism Cement |
 | 46 | J. K. CEMENTS LTD-MUDDAPUR (196) | 4204 | (null) | 21 | Shree Balaji Roadlines |
 | 47 | KALBURGI CEMENT PRIVATE LIMITED-CHATRASHALA(TANDUR) (202) | 4210 | (null) | 20 | Shree Balaji Roadlines |
 | 48 | RUDAULI TOLLING UNIT (22) | 3125 | (null) | 17 | Prism Cement |
-| 49 | ACC CEMENT LIMITED-Chittapur (203) | 4211 | (null) | 16 | Shree Balaji Roadlines |
+| 49 | ACC CEMENT LIMITED-Chittapur (203) | 4211 | West A [DERIVED via vehicle-join] | 16 | Shree Balaji Roadlines |
 | 50 | Kalburgi (6) | 3039 | (null) | 15 | Vicat Cement |
-| 51 | RCP_NVL_HUB (185) | 4189 | (null) | 10 | Nuvista |
-| 52 | URWADE DEPOT - VIRTUAL (155) | 3710 | (null) | 10 | HCCB |
+| 51 | RCP_NVL_HUB (185) | 4189 | East B [DERIVED via RISDA family] | 10 | Nuvista |
+| 52 | URWADE DEPOT - VIRTUAL (155) | 3710 | West A [DERIVED via vehicle-join] | 10 | HCCB |
 | 53 | CCP-9236 (176) | 3746 | North | 9 | Nuvista |
 | 54 | Coimbatore Plant (8) | 3077 | (null) | 9 | Vicat Cement |
 | 55 | ULTRATECH CEMENT LIMITED-SARALANAGAR SEDAM (197) | 4205 | (null) | 9 | Shree Balaji Roadlines |
-| 56 | BHARATIYAM COPACK (156) | 3716 | (null) | 6 | HCCB |
-| 57 | KUMAR WATER PLANT (172) | 3739 | (null) | 6 | HCCB |
+| 56 | BHARATIYAM COPACK (156) | 3716 | South [DERIVED via vehicle-join] | 6 | HCCB |
+| 57 | KUMAR WATER PLANT (172) | 3739 | South [DERIVED via vehicle-join] | 6 | HCCB |
 | 58 | BHARATI CEMENT PRIVATE LIMITED MUMBAI TRANSIENT-SHEDUNG (215) | 4223 | (null) | 5 | Shree Balaji Roadlines |
-| 59 | HCCBPL- NEW COCHIN DEPOT (280) | 4314 | (null) | 5 | HCCB |
+| 59 | HCCBPL- NEW COCHIN DEPOT (280) | 4314 | South [DERIVED via vehicle-join] | 5 | HCCB |
 | 60 | KALBURGI CEMENT PRIVATE LIMITED-LONI BULK (200) | 4208 | (null) | 4 | Shree Balaji Roadlines |
 | 61 | KALBURGI CEMENT PRIVATE LIMITED-LONI KALBHOR (270) | 4303 | (null) | 4 | Shree Balaji Roadlines |
 | 62 | TATA STEEL BSL KHOPOLI-khopoli (206) | 4214 | (null) | 3 | Shree Balaji Roadlines |
 | 63 | CBT (134) | 3629 | (null) | 2 | UTCL |
-| 64 | CUTTACK DEPOT(TANGI) (152) | 3705 | (null) | 2 | HCCB |
-| 65 | DALMIA BHARAT CEMENT LTD -CHANDRAPUR (222) | 4230 | (null) | 2 | Shree Balaji Roadlines |
+| 64 | CUTTACK DEPOT(TANGI) (152) | 3705 | East A [DERIVED via vehicle-join] | 2 | HCCB |
+| 65 | DALMIA BHARAT CEMENT LTD -CHANDRAPUR (222) | 4230 | West A [DERIVED via vehicle-join] | 2 | Shree Balaji Roadlines |
 | 66 | JSW STEEL LIMITED-WADKHAL (195) | 4203 | (null) | 2 | Shree Balaji Roadlines |
 | 67 | P100 - VARUNA (141) | 3678 | (null) | 2 | Varuna_GPS |
-| 68 | POSCO-INDIA STEEL DISTRIBUTION CENTER PVT.LTD-TALEGAON (208) | 4216 | (null) | 2 | Shree Balaji Roadlines |
+| 68 | POSCO-INDIA STEEL DISTRIBUTION CENTER PVT.LTD-TALEGAON (208) | 4216 | West A [DERIVED via vehicle-join] | 2 | Shree Balaji Roadlines |
 | 69 | ULTRATECH CEMENT LIMITED-SEDUNG (216) | 4224 | (null) | 2 | Shree Balaji Roadlines |
 | 70 | 1101 SFD Nagda (49) | 3477 | (null) | 1 | ABG Pulp and Fibre |
 | 71 | EL Office (251) | 4272 | sdf | 1 | DFPCL POC |
@@ -94,11 +94,11 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 84 | ANSHIKA ROADWAYS-Gosalpur (221) | 4229 | (null) | 0 | (no vehicles synced) |
 | 85 | B.K.TRANSPORT-KRISHNAPATNAM (205) | 4213 | (null) | 0 | (no vehicles synced) |
 | 86 | BANGALORE - JOBWORK (288) | 4322 | (null) | 0 | (no vehicles synced) |
-| 87 | BAYVIEW BEVERAGES (VIZAG)PRIVATE LIMITED (177) | 3747 | (null) | 0 | (no vehicles synced) |
+| 87 | BAYVIEW BEVERAGES (VIZAG)PRIVATE LIMITED (177) | 3747 | South [DERIVED via vehicle-join] | 0 | (no vehicles synced) |
 | 88 | C/O GANPATI SUGAR INDUSTRIES (302) | 4336 | (null) | 0 | (no vehicles synced) |
 | 89 | C/O WESTERN FARMFRESH (301) | 4335 | (null) | 0 | (no vehicles synced) |
 | 90 | COIMBATORE DEPOT (165) | 3729 | (null) | 0 | (no vehicles synced) |
-| 91 | DEPOT_GGU (138) | 3652 | (null) | 0 | (no vehicles synced) |
+| 91 | DEPOT_GGU (138) | 3652 | South [EXCEL-3] | 0 | (no vehicles synced) |
 | 92 | FATUAH TOLLING UNIT (21) | 3124 | (null) | 0 | (no vehicles synced) |
 | 93 | GANGAIKONDAN COPACK (162) | 3724 | (null) | 0 | (no vehicles synced) |
 | 94 | GOA (184) | 4186 | (null) | 0 | (no vehicles synced) |
@@ -126,10 +126,10 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 116 | HINDUSTAN COCA-COLA BEVERAGES PRIVATE LIMITED (150) | 3703 | (null) | 0 | (no vehicles synced) |
 | 117 | JINDAL STEEL & POWER LTD., BARBIL-Raigarh (228) | 4236 | (null) | 0 | (no vehicles synced) |
 | 118 | JKPlant_Test (261) | 4290 | (null) | 0 | (no vehicles synced) |
-| 119 | Kalamboli (140) | 3674 | (null) | 0 | (no vehicles synced) |
+| 119 | Kalamboli (140) | 3674 | West A [EXCEL-3] | 0 | (no vehicles synced) |
 | 120 | KALBURGI CEMENT PRIVATE LIMITED-Mumbai Terminal (218) | 4226 | (null) | 0 | (no vehicles synced) |
 | 121 | KESORAM INDUSTRIES LIMITED-SEDUNG BULKTPOINT (211) | 4219 | (null) | 0 | (no vehicles synced) |
-| 122 | MAULA ALI DEPOT (167) | 3734 | (null) | 0 | (no vehicles synced) |
+| 122 | MAULA ALI DEPOT (167) | 3734 | South [DERIVED via vehicle-join] | 0 | (no vehicles synced) |
 | 123 | MCU (135) | 3632 | (null) | 0 | (no vehicles synced) |
 | 124 | MP BIRLA-MUKUTBAN (220) | 4228 | (null) | 0 | (no vehicles synced) |
 | 125 | MRN CHAMUNDI SUGAR JAMKHANDI (293) | 4327 | (null) | 0 | (no vehicles synced) |
@@ -146,8 +146,8 @@ Total UNZONED plants: **247**. Companies resolved from AutoPlant (FSM does not m
 | 136 | POSCO-INDIA STEEL DISTRIBUTION CENTER PVT.LTD-MANGAON (198) | 4206 | (null) | 0 | (no vehicles synced) |
 | 137 | PRISM JOHNSON LIMITED-SATNA (223) | 4231 | (null) | 0 | (no vehicles synced) |
 | 138 | RCCPL PRIVATE LIMITED -SHEDUNG (217) | 4225 | (null) | 0 | (no vehicles synced) |
-| 139 | RCM (137) | 3636 | (null) | 0 | (no vehicles synced) |
-| 140 | RCM (136) | 3635 | (null) | 0 | (no vehicles synced) |
+| 139 | RCM (137) | 3636 | South [EXCEL-3] | 0 | (no vehicles synced) |
+| 140 | RCM (136) | 3635 | South [EXCEL-3] | 0 | (no vehicles synced) |
 | 141 | REDHILLS DEPOT (149) | 3700 | (null) | 0 | (no vehicles synced) |
 | 142 | Shiva Cement Ltd-SUNDERGARH (226) | 4234 | (null) | 0 | (no vehicles synced) |
 | 143 | SHIVASHAKTI SUGARS LTD. (290) | 4324 | (null) | 0 | (no vehicles synced) |
