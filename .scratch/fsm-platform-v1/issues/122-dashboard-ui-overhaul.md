@@ -46,6 +46,33 @@ Type: full vertical slice (backend read enrichment + admin web)
 - Shared: dependency-free `lib/exportFile` (Excel SpreadsheetML + hand-assembled PDF + CSV) behind a
   reusable `ExportMenu`. 3 new specs; full admin suite green, tsc + build clean.
 
+## Batch 2 (2026-07-14 second QA pass — commits c86febc / ea97c6f / 33fe4fa)
+
+- **Snapshot alert investigated**: the banner was TRUTHFUL — runs 64/65 (14 Jul) FAILED ~30ms in at the
+  AutoPlant MySQL hop; last good data really is 13 Jul 18:28 IST. The tree's uncommitted
+  `autoplant-mysql.client.ts` WIP notes the real telemetry source is `ap_gpsmw.ng_gps_data` (grant
+  pending) — external-integration issue, NOT a banner bug. Banner made LIVE anyway (60s poll +
+  re-read on ingestion-complete). Run-Ingestion button fixed-width (no more search-field resize).
+- **Action-Required KPI card → Companies / Plants / Devices** via new `GET /api/dashboard/fleet-summary`
+  (scoped, deactivated plants excluded). The Action Required *panel* stays.
+- **Device-ID-shows-vehicle-number verified as SOURCE DATA**: 1,950 devices have `device_id` exactly
+  equal to their `vehicle_no` (Vasavadatta 1,449 / Saurashtra 393 / Deepak 75 / Prism 25 …) — AutoPlant's
+  master sends it that way. UI adds a tooltip on such cells; no FSM fix possible/needed.
+- **Company/Plant Overview**: multi-select removed; 8 bucket columns → one wrapping "SLA Spread" chip
+  row — table fits with no horizontal scroll.
+- **Device Detail**: company-dependent **plant dropdown** (filter-options grew a plants leg + `plantId`
+  list filter) and a 3-step **Assign SE** panel driving new `POST /api/schedules/assign-plants`
+  ({seId, plantIds[]}) → every OPEN+UNASSIGNED ticket at the plants through the canonical
+  `assignTicket` primitive (audit `MANUAL_PLANT_ASSIGN`, notifications, Shared-Pool exit).
+- **"Company 15 / #15" root cause**: the running backend process predated the #122 payload — rebuilt
+  `dist` + restarted; live API verified returning names. Drawer Overview enriched (company/plant names,
+  vehicle, assigned SE + OVERRIDDEN + batch/schedule refs).
+- **Batch Schedule**: rows lead with SE NAME + zone (uuid demoted), plain-language statuses
+  (Auto-Dispatched / ZM Adjusted), sortable counts, explanatory copy; `ZmScheduleRow`/`Detail` +
+  `ZoneEngineerRow` carry names so every SE picker app-wide shows names.
+- Tests: 4 backend e2e (`issue-122b-fleet-assign`) + `issue-122b-ui` admin spec; full admin suite 69
+  files green; live API verified post-restart.
+
 ## Notes / follow-ups
 
 - Universal search on Company/Plant Overview filters the company/plant tree by name/id; device- and
