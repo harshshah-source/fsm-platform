@@ -73,6 +73,20 @@ Type: full vertical slice (backend read enrichment + admin web)
 - Tests: 4 backend e2e (`issue-122b-fleet-assign`) + `issue-122b-ui` admin spec; full admin suite 69
   files green; live API verified post-restart.
 
+## Batch 2 follow-up (2026-07-14 evening — commit 845c939)
+
+- **"Device Detail page empty" report investigated**: NOT reproducible against the live API — every
+  query the page makes (plain list, scorecard deep-links, filter-options) returns thousands of rows
+  (20,309 devices; East zone alone 6,068 inactive-CRITICAL after a recompute changed the DB during the
+  day). The empty view was almost certainly rendered during the 16:44–16:51 backend-restart window
+  (EADDRINUSE port fight). Hardened anyway: the device list now passes `error`/`onRetry` into the
+  DataTable, so a failed load reads as a **failure with a Retry button**, never as "No devices".
+- **Companies / Plants KPI click-through built**: new `GET /api/dashboard/fleet-directory` (companies +
+  plants by name w/ counts, same scoped population as fleet-summary) + `/reports/fleet` **Fleet
+  Directory** page (tabs, search, sortable counts, multi-format download; company row → its plants;
+  plant row → Device Detail deep-link via the new `plantId` URL param). `MetricCard` gained `onClick`;
+  the Devices card links to `/reports/device`. Both ZM + OH dashboards.
+
 ## Notes / follow-ups
 
 - Universal search on Company/Plant Overview filters the company/plant tree by name/id; device- and
