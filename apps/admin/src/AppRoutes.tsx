@@ -26,6 +26,7 @@ import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
+import { ExportsPage } from './pages/exports/ExportsPage';
 import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
 import { RootCauseAnalyticsPage } from './pages/reports/RootCauseAnalyticsPage';
@@ -147,6 +148,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['OPERATIONS_HEAD']}>
                 <CsmApprovalSharePage />
+              </RoleRoute>
+            }
+          />
+          {/* Raw-data Exports — Operations Head only (Issue 120). */}
+          <Route
+            path="/exports"
+            element={
+              <RoleRoute roles={['OPERATIONS_HEAD']}>
+                <ExportsPage />
               </RoleRoute>
             }
           />

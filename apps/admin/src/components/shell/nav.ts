@@ -114,6 +114,7 @@ export function buildNav(role: string): NavGroup[] {
       items: [
         { label: 'Coverage', to: '/coverage', icon: IconMapPin },
         { label: 'CSM Backup Share', to: '/reports/csm-approval-share', icon: IconShare },
+        { label: 'Exports', to: '/exports', icon: IconClipboard },
         { label: 'Settings', to: '/settings', icon: IconSettings },
       ],
     });
