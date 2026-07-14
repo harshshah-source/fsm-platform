@@ -107,14 +107,24 @@ export function ScheduleDetailPage() {
       <Link to="/schedules" className="text-sm text-ink-muted hover:underline">
         ← Schedules
       </Link>
-      <h2 className="mb-1 mt-2 text-xl font-semibold text-ink-strong">{detail.seId}</h2>
-      <p className="mb-5 flex items-center gap-2 text-sm text-ink-muted">
+      <h2 className="mb-1 mt-2 text-xl font-semibold text-ink-strong">
+        {detail.seName ?? detail.seId}
+        <span className="ml-2 align-middle font-mono text-xs font-normal text-ink-muted">
+          {detail.seId.slice(0, 8)}
+        </span>
+      </h2>
+      <p className="mb-1 flex items-center gap-2 text-sm text-ink-muted">
         <span>
           {detail.dateFrom === detail.dateTo ? detail.dateFrom : `${detail.dateFrom} – ${detail.dateTo}`}
         </span>
         <span data-testid={`schedule-status-${detail.status}`}>
           <Badge tone={STATUS_TONE[detail.status] ?? 'neutral'}>{detail.status}</Badge>
         </span>
+      </p>
+      <p className="mb-5 text-xs text-ink-muted">
+        The SE visits the stops below in order; each stop is one plant with its assigned tickets. Every
+        change here (remove / defer / reassign / swap / split / reorder) commits immediately with a
+        mandatory reason and flags the plan OVERRIDDEN.
       </p>
 
       {conflict && (
@@ -318,7 +328,9 @@ function TicketRow({
           onChange={splitSelect.onToggle}
         />
       )}
-      <span className="font-medium text-ink-strong">Ticket {ticket.ticketId}</span>
+      <span className="font-medium text-ink-strong" title={ticket.ticketId}>
+        Ticket <span className="font-mono">#{ticket.ticketId.slice(0, 8)}</span>
+      </span>
       <TicketStateBadges ticket={ticket} />
       <WhySuggested ticket={ticket} />
       <Button type="button" size="sm" variant="ghost" onClick={() => setOpen((v) => (v === 'remove' ? null : 'remove'))}>
@@ -431,7 +443,7 @@ function SePicker({
         <option value="">Select…</option>
         {targets.map((e) => (
           <option key={e.engineerId} value={e.engineerId}>
-            {e.engineerId}
+            {e.name ?? e.engineerId}
           </option>
         ))}
       </select>

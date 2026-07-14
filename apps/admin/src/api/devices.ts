@@ -106,14 +106,17 @@ export interface DeviceListParams {
   /** Numeric zone id, or the literal `'UNZONED'`. */
   zoneId?: number | 'UNZONED';
   companyId?: number;
+  plantId?: number;
   /** Restrict to devices at or above CRITICAL severity (scorecard drill-down). */
   criticalPlus?: boolean;
 }
 
-/** The distinct zones / companies in the caller's scope — sources the filter dropdowns. */
+/** The distinct zones / companies / plants in the caller's scope — sources the filter dropdowns. */
 export interface DeviceFilterOptions {
   zones: { zoneId: number; name: string }[];
   companies: { companyId: number; name: string }[];
+  /** Plant × company pairs, so the plant dropdown can follow the company pick (Issue 122b). */
+  plants?: { plantId: number; name: string; companyId: number }[];
   hasUnzoned: boolean;
 }
 
@@ -129,6 +132,7 @@ export async function apiDeviceList(opts: DeviceListParams = {}): Promise<Device
   if (opts.bucket) params.set('bucket', opts.bucket);
   if (opts.zoneId != null) params.set('zoneId', String(opts.zoneId));
   if (opts.companyId != null) params.set('companyId', String(opts.companyId));
+  if (opts.plantId != null) params.set('plantId', String(opts.plantId));
   if (opts.criticalPlus) params.set('criticalPlus', 'true');
   const qs = params.toString();
   const data = await get<DeviceListPage | DeviceListRow[]>(`/devices${qs ? `?${qs}` : ''}`);

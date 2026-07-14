@@ -23,7 +23,10 @@ import { IconCalendar } from '../../components/ui/icons';
  * the monitoring fetch, the `Batch Schedules` aria-label, the `schedule-status-*` test ids, the
  * row→`/schedules/:seId` navigation, and the absence of any Approve gate are all preserved.
  */
+// Work-schedule statuses as the list returns them: ACTIVE (auto-dispatched, untouched) or
+// OVERRIDDEN (a ZM adjusted it). Labels are operator-facing; test ids keep the raw status.
 const STATUS_TONE: Record<string, BadgeTone> = {
+  ACTIVE: 'success',
   AUTO_ASSIGNED: 'neutral',
   OVERRIDDEN: 'warning',
 };
@@ -64,24 +67,56 @@ export function SchedulesPage() {
   const columns: Column<ScheduleRow>[] = [
     {
       key: 'engineer',
-      header: 'Engineer',
-      render: (r) => <span className="font-medium text-brand-700">{r.seId}</span>,
+      header: 'Service Engineer',
+      render: (r) => (
+        <div className="min-w-0">
+          <div className="font-medium text-brand-700">{r.seName ?? 'Unknown SE'}</div>
+          <div className="font-mono text-[10px] text-ink-muted">{r.seId.slice(0, 8)}</div>
+        </div>
+      ),
+      sortable: true,
+      sortValue: (r) => r.seName ?? '',
+    },
+    {
+      key: 'zone',
+      header: 'Zone',
+      render: (r) => <span className="text-ink">{r.zoneName ?? `Zone ${r.zoneId}`}</span>,
+      sortable: true,
+      sortValue: (r) => r.zoneName ?? r.zoneId,
     },
     {
       key: 'dates',
-      header: 'Dates',
+      header: 'Plan Date',
       render: (r) => (
-        <span className="text-ink">{r.dateFrom === r.dateTo ? r.dateFrom : `${r.dateFrom} – ${r.dateTo}`}</span>
+        <span className="text-ink tabular-nums">
+          {r.dateFrom === r.dateTo ? r.dateFrom : `${r.dateFrom} – ${r.dateTo}`}
+        </span>
       ),
     },
-    { key: 'batches', header: 'Batches', align: 'right', render: (r) => <span className="tabular-nums">{r.batchCount}</span> },
-    { key: 'tickets', header: 'Tickets', align: 'right', render: (r) => <span className="tabular-nums">{r.ticketCount}</span> },
+    {
+      key: 'batches',
+      header: 'Plant Stops',
+      align: 'right',
+      render: (r) => <span className="tabular-nums">{r.batchCount}</span>,
+      sortable: true,
+      sortValue: (r) => r.batchCount,
+    },
+    {
+      key: 'tickets',
+      header: 'Tickets',
+      align: 'right',
+      render: (r) => <span className="tabular-nums">{r.ticketCount}</span>,
+      sortable: true,
+      sortValue: (r) => r.ticketCount,
+    },
     {
       key: 'status',
       header: 'Status',
       render: (r) => (
         <span data-testid={`schedule-status-${r.status}`}>
-          <Badge tone={STATUS_TONE[r.status] ?? 'neutral'}>{r.status}</Badge>
+          <Badge tone={STATUS_TONE[r.status] ?? 'neutral'}>
+            {r.status === 'OVERRIDDEN' ? 'ZM Adjusted' : r.status === 'ACTIVE' ? 'Auto-Dispatched' : r.status}
+          </Badge>
         </span>
       ),
     },
@@ -91,7 +126,7 @@ export function SchedulesPage() {
     <div>
       <PageHeader
         title="Batch Schedule"
-        subtitle="Auto-assigned SE day plans — monitoring only. Batches dispatch automatically; no approval gate."
+        subtitle="Each row is one Service Engineer's day plan: the plant stops and tickets the system auto-dispatched to them. Click a row to see the ordered stops. Monitoring only — batches dispatch automatically, no approval step."
       />
       <MetricStrip metrics={metrics} />
       <DataTable

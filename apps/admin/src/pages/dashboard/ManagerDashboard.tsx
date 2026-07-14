@@ -3,10 +3,12 @@ import {
   apiActionRequired,
   apiCompanyPlantOverview,
   apiCriticalQueue,
+  apiFleetSummary,
   apiZoneOverview,
   type ActionRequiredCard,
   type CompanyPlantRow,
   type CriticalQueueGroup,
+  type FleetSummary,
   type ZoneOverviewRow,
 } from '../../api/dashboard';
 import { apiZoneEngineers, type ZoneEngineer } from '../../api/schedules';
@@ -33,6 +35,7 @@ export function ManagerDashboard() {
   const [companyPlants, setCompanyPlants] = useState<CompanyPlantRow[]>([]);
   const [critical, setCritical] = useState<CriticalQueueGroup[]>([]);
   const [actions, setActions] = useState<ActionRequiredCard[]>([]);
+  const [fleet, setFleet] = useState<FleetSummary | null>(null);
   const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +55,10 @@ export function ManagerDashboard() {
         setCritical(cq);
       })
       .catch(() => alive && setError('Failed to load dashboard'));
+    // Fleet-summary KPI counts — an older backend without the endpoint just leaves the cards at "—".
+    apiFleetSummary()
+      .then((f) => alive && typeof f?.devices === 'number' && setFleet(f))
+      .catch(() => undefined);
     // Zone-SE list feeds the Critical Queue assign picker; failure just leaves it empty.
     apiZoneEngineers()
       .then((e) => alive && setEngineers(e))
@@ -80,6 +87,9 @@ export function ManagerDashboard() {
     setZones(z);
     setCompanyPlants(cp);
     setCritical(cq);
+    apiFleetSummary()
+      .then((f) => typeof f?.devices === 'number' && setFleet(f))
+      .catch(() => undefined);
   }, []);
 
   const data: DashboardData = {
@@ -87,6 +97,7 @@ export function ManagerDashboard() {
     companyPlants,
     critical,
     actions,
+    fleet,
     engineers,
     error,
     onAssigned: refreshCritical,

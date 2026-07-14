@@ -17,7 +17,7 @@ import type { DashboardData } from './ZmDashboard';
  * source until the System Efficiency report (BE-42, surfaced by FE-24). Its cards render the reference
  * chrome with "—" placeholders rather than fabricated figures.
  */
-export function OpsHeadDashboard({ zones, companyPlants, actions, error, onDataRefetch }: DashboardData) {
+export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRefetch }: DashboardData) {
   // Bumped when a manual ingestion run completes AND its data refetch has resolved — the roll trigger
   // for the KPI odometers (keyed on completion, not on a value diff).
   const [lastRunAt, setLastRunAt] = useState<number | null>(null);
@@ -36,16 +36,17 @@ export function OpsHeadDashboard({ zones, companyPlants, actions, error, onDataR
     // Strictly the CRITICAL band (Issue 122) — same zone-overview source as the scorecard's Critical
     // column, so KPI == scorecard column sum by construction. Worse bands stay in the SLA distribution.
     const criticalDevices = sumCriticalDevices(zones);
-    const liveSources = actions.filter((a) => a.available && a.count > 0);
-    const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
     const roll = (value: number) => <RollingNumber value={value} runToken={lastRunAt} />;
+    // The Action-Required card was replaced by the fleet counts (Issue 122b).
     return [
       { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
       { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
       { label: 'Critical Devices', value: roll(criticalDevices), hint: 'pan-India, CRITICAL band', tone: 'critical', testId: 'kpi-critical' },
-      { label: 'Action Required', value: roll(actionTotal), hint: `${liveSources.length} live sources`, tone: 'info' },
+      { label: 'Companies', value: fleet ? roll(fleet.companies) : '—', hint: 'pan-India', tone: 'info', testId: 'kpi-companies' },
+      { label: 'Plants', value: fleet ? roll(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants' },
+      { label: 'Devices', value: fleet ? roll(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices' },
     ];
-  }, [zones, actions, lastRunAt]);
+  }, [zones, fleet, lastRunAt]);
 
   // Auto-Dispatch efficiency — gated on BE-42 / FE-24; reference chrome, no fabricated values.
   const efficiency: Metric[] = [
@@ -85,7 +86,7 @@ export function OpsHeadDashboard({ zones, companyPlants, actions, error, onDataR
           {error}
         </p>
       )}
-      <MetricStrip metrics={kpis} />
+      <MetricStrip metrics={kpis} cols={6} />
 
       <section aria-labelledby="auto-dispatch-heading" className="mb-8">
         <h3

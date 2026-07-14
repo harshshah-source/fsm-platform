@@ -16,7 +16,9 @@ const rows = [
   {
     scheduleId: '10',
     seId: 'se-north-1',
+    seName: 'Karan Singh',
     zoneId: '1',
+    zoneName: 'North',
     dateFrom: '2026-06-22',
     dateTo: '2026-06-22',
     status: 'AUTO_ASSIGNED',
@@ -26,7 +28,9 @@ const rows = [
   {
     scheduleId: '11',
     seId: 'se-north-2',
+    seName: 'Rajesh Kumar',
     zoneId: '1',
+    zoneName: 'North',
     dateFrom: '2026-06-22',
     dateTo: '2026-06-22',
     status: 'OVERRIDDEN',
@@ -68,7 +72,9 @@ describe('ZM Schedule list (Issue 13b AC#1)', () => {
     const bodyRows = table.getAllByRole('row').slice(1); // drop header
     expect(bodyRows).toHaveLength(2);
 
-    expect(bodyRows[0]).toHaveTextContent('se-north-1');
+    // Issue 122b — the operator-facing SE NAME leads the row (the uuid renders as a small hint).
+    expect(bodyRows[0]).toHaveTextContent('Karan Singh');
+    expect(bodyRows[0]).toHaveTextContent('North');
     expect(within(bodyRows[0]).getByTestId('schedule-status-AUTO_ASSIGNED')).toBeInTheDocument();
     expect(within(bodyRows[1]).getByTestId('schedule-status-OVERRIDDEN')).toBeInTheDocument();
 

@@ -97,10 +97,12 @@ export function RunIngestionButton({ onSuccess }: { onSuccess: () => void | Prom
         aria-live="polite"
         loading={running}
         disabled={running}
+        // Fixed width in BOTH states — the cycling status words are different lengths, and a
+        // free-width button would resize the whole top bar (the flex-1 search field) every 1.4s.
         className={
           running
-            ? 'ingest-live h-10 border-critical font-semibold text-critical'
-            : 'h-10'
+            ? 'ingest-live h-10 w-44 justify-center border-critical font-semibold text-critical'
+            : 'h-10 w-44 justify-center'
         }
         onClick={() => setConfirmOpen(true)}
       >

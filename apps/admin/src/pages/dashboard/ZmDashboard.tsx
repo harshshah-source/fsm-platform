@@ -3,6 +3,7 @@ import type {
   ActionRequiredCard,
   CompanyPlantRow,
   CriticalQueueGroup,
+  FleetSummary,
   ZoneOverviewRow,
 } from '../../api/dashboard';
 import type { ZoneEngineer } from '../../api/schedules';
@@ -19,6 +20,8 @@ export interface DashboardData {
   companyPlants: CompanyPlantRow[];
   critical: CriticalQueueGroup[];
   actions: ActionRequiredCard[];
+  /** Headline fleet counts (Issue 122b); null until loaded (or on an older backend). */
+  fleet: FleetSummary | null;
   engineers: ZoneEngineer[];
   error: string | null;
   onAssigned: () => void;
@@ -36,18 +39,19 @@ export function ZmDashboard({
   companyPlants,
   critical,
   actions,
+  fleet,
   engineers,
   error,
   onAssigned,
 }: DashboardData) {
-  // KPI strip derived from already-loaded data (no new endpoint). Uptime is gated on BE-39/40.
+  // KPI strip derived from already-loaded data. Uptime is gated on BE-39/40. The Action-Required
+  // card was replaced by the fleet counts (Issue 122b) — its queue lives on in the panel below.
+  const nf = useMemo(() => new Intl.NumberFormat('en-IN'), []);
   const metrics: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
     // Strictly the CRITICAL band (Issue 122) — same device-based source as the scorecard's Critical
     // column, so KPI == scorecard column sum by construction. Worse bands stay in the Zone Overview.
     const criticalDevices = sumCriticalDevices(zones);
-    const liveSources = actions.filter((a) => a.available && a.count > 0);
-    const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
     return [
       { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
       {
@@ -63,14 +67,11 @@ export function ZmDashboard({
         tone: 'critical',
         testId: 'kpi-critical',
       },
-      {
-        label: 'Action Required',
-        value: actionTotal,
-        hint: `${liveSources.length} live source${liveSources.length === 1 ? '' : 's'}`,
-        tone: 'info',
-      },
+      { label: 'Companies', value: fleet ? nf.format(fleet.companies) : '—', hint: 'in your scope', tone: 'info', testId: 'kpi-companies' },
+      { label: 'Plants', value: fleet ? nf.format(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants' },
+      { label: 'Devices', value: fleet ? nf.format(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices' },
     ];
-  }, [zones, actions]);
+  }, [zones, fleet, nf]);
 
   return (
     <div>
@@ -91,7 +92,7 @@ export function ZmDashboard({
           {error}
         </p>
       )}
-      <MetricStrip metrics={metrics} />
+      <MetricStrip metrics={metrics} cols={6} />
       <ActionRequiredPanel cards={actions} />
       <ZoneOverviewTable rows={zones} />
       <CompanyPlantTable rows={companyPlants} />

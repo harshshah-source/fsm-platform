@@ -68,7 +68,16 @@ export interface ActionRequiredCard {
   source: string;
 }
 
+/** Headline fleet counts for the KPI strip (Issue 122b): companies / plants / devices in scope. */
+export interface FleetSummary {
+  companies: number;
+  plants: number;
+  devices: number;
+}
+
 export const apiZoneOverview = () => get<ZoneOverviewRow[]>('/dashboard/zone-overview');
+
+export const apiFleetSummary = () => get<FleetSummary>('/dashboard/fleet-summary');
 
 export const apiCompanyPlantOverview = (params: { companyId?: string; plantId?: string } = {}) => {
   const q = new URLSearchParams();

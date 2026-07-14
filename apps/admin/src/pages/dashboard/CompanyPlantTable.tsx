@@ -7,7 +7,13 @@ import { IconChevronRight, IconTruck } from '../../components/ui/icons';
 import { apiTicketsList, type TicketRow } from '../../api/tickets';
 import { cn } from '../../lib/cn';
 import { exportTable, type ExportFormat } from '../../lib/exportFile';
-import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_RANGE_LABEL, criticalOnlyCount, SLA_BUCKETS } from '../../lib/slaBucket';
+import {
+  BUCKET_CLASS,
+  BUCKET_LABEL,
+  BUCKET_LABEL_RANGE,
+  criticalOnlyCount,
+  SLA_BUCKETS,
+} from '../../lib/slaBucket';
 import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 
@@ -45,17 +51,46 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
   return [...byCompany.values()];
 }
 
-// select + company + plant + inactive/total + N buckets + critical + expander.
-const COLSPAN = 5 + SLA_BUCKETS.length + 1;
+// company + plant + inactive/total + SLA spread + critical + expander.
+const COLSPAN = 6;
 
 type AssignmentFilter = '' | 'FORMALLY_ASSIGNED' | 'UNASSIGNED';
 
 /**
- * Company/Plant Overview (Issue 06 AC#3 · FE-06 · Issue 122 rework). Company is its own column and the
- * table opens collapsed to one aggregate row per company; expanding a company reveals its plants, and
- * a plant drills down to its open device tickets (device · vehicle · assignment · overridden · SLA).
- * A universal search + assignment-state filter scope the tree and the drill-down; a multi-format
- * (CSV / Excel / PDF) download exports either the checkbox selection or the whole filtered view.
+ * The per-bucket counts as one compact wrapping chip row (Issue 122b) — replaces eight fixed columns
+ * so the whole table fits on screen with no horizontal scroll. Only non-zero buckets render; each chip
+ * keeps its `bucket-<B>` test id and shows the label + range on hover.
+ */
+function SlaSpread({ byBucket }: { byBucket: Record<string, number> }) {
+  const nonZero = SLA_BUCKETS.filter((b) => (byBucket[b] ?? 0) > 0);
+  if (nonZero.length === 0) return <span className="text-xs text-ink-muted/50">—</span>;
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      {nonZero.map((b) => (
+        <span
+          key={b}
+          data-testid={`bucket-${b}`}
+          title={BUCKET_LABEL_RANGE[b]}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
+            BUCKET_CLASS[b],
+          )}
+        >
+          <span className="max-w-20 truncate font-normal">{BUCKET_LABEL[b]}</span>
+          {byBucket[b]}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Company/Plant Overview (Issue 06 AC#3 · FE-06 · Issue 122/122b rework). Company is its own column
+ * and the table opens collapsed to one aggregate row per company; expanding a company reveals its
+ * plants, and a plant drills down to its open device tickets (device · vehicle · assignment ·
+ * overridden · SLA). The per-bucket counts render as one compact chip row (`SlaSpread`) so the table
+ * needs NO horizontal scrolling. A universal search + assignment-state filter scope the tree and the
+ * drill-down; the download exports the whole filtered view as CSV / Excel / PDF.
  */
 export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
   const [search, setSearch] = useState('');
@@ -64,8 +99,6 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
   const [openPlant, setOpenPlant] = useState<string | null>(null);
   const [devices, setDevices] = useState<Record<string, TicketRow[]>>({});
   const [loadingPlant, setLoadingPlant] = useState<string | null>(null);
-  // Multi-select for download: company ids and `plant:<id>` keys.
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const term = search.trim().toLowerCase();
   const companies = useMemo(() => {
@@ -115,25 +148,9 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
     }
   };
 
-  const toggleSelect = (key: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  // Rows to export: the checkbox selection (companies expand to all their plants), else everything
-  // currently visible after search. One flat row per plant.
+  // Download the current filtered view — one flat row per plant.
   const exportOverview = (format: ExportFormat) => {
-    const chosen: CompanyPlantRow[] = [];
-    for (const g of companies) {
-      for (const p of g.plants) {
-        const picked = selected.size === 0 || selected.has(g.companyId) || selected.has(`plant:${p.plantId}`);
-        if (picked) chosen.push(p);
-      }
-    }
+    const chosen = companies.flatMap((g) => g.plants);
     const headers = [
       'Company', 'Tier', 'Plant', 'Total inactive', 'Total devices', 'Critical',
       ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b]),
@@ -152,24 +169,6 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
 
   const th =
     'whitespace-nowrap px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-caps';
-
-  const bucketCells = (byBucket: Record<string, number>) =>
-    SLA_BUCKETS.map((b) => {
-      const count = byBucket[b] ?? 0;
-      return (
-        <td key={b} className="px-4 py-2.5 text-right">
-          <span
-            data-testid={`bucket-${b}`}
-            className={cn(
-              'inline-block min-w-7 rounded-full px-1.5 text-center text-xs font-semibold tabular-nums',
-              count > 0 ? BUCKET_CLASS[b] : 'text-ink-muted/40',
-            )}
-          >
-            {count}
-          </span>
-        </td>
-      );
-    });
 
   return (
     <section aria-labelledby="company-plant-heading" className="mb-8">
@@ -200,143 +199,111 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
           <ExportMenu onExport={exportOverview} disabled={companies.length === 0} label="Download" />
         </FilterBar>
       </div>
-      {selected.size > 0 && (
-        <p className="mb-2 text-xs text-ink-muted">
-          {selected.size} selected for download.{' '}
-          <button type="button" className="underline" onClick={() => setSelected(new Set())}>
-            Clear
-          </button>
-        </p>
-      )}
       <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
-        <div className="overflow-x-auto">
-          <table aria-label="Company/Plant Overview" className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-line bg-surface-sunken/60">
-                <th className={cn(th, 'w-8')}></th>
-                <th className={th}>Company</th>
-                <th className={th}>Plant</th>
-                <th className={cn(th, 'text-right')}>Inactive / Total</th>
-                {SLA_BUCKETS.map((b) => (
-                  <th key={b} className={cn(th, 'text-right')}>
-                    <span className="flex flex-col items-end leading-tight">
-                      <span>{BUCKET_LABEL[b]}</span>
-                      <span className="text-[10px] font-normal normal-case tracking-normal text-ink-muted tabular-nums">
-                        {BUCKET_RANGE_LABEL[b]}
-                      </span>
-                    </span>
-                  </th>
-                ))}
-                <th className={cn(th, 'text-right')}>Critical</th>
-                <th className={cn(th, 'text-right')}>Devices</th>
+        <table aria-label="Company/Plant Overview" className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line bg-surface-sunken/60">
+              <th className={th}>Company</th>
+              <th className={th}>Plant</th>
+              <th className={cn(th, 'text-right')}>Inactive / Total</th>
+              <th className={th}>SLA Spread</th>
+              <th className={cn(th, 'text-right')}>Critical</th>
+              <th className={cn(th, 'text-right')}>Devices</th>
+            </tr>
+          </thead>
+          <tbody>
+            {companies.length === 0 && (
+              <tr>
+                <td colSpan={COLSPAN} className="p-0">
+                  <EmptyState icon={<IconTruck />} message="No companies match this search." />
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {companies.length === 0 && (
-                <tr>
-                  <td colSpan={COLSPAN} className="p-0">
-                    <EmptyState icon={<IconTruck />} message="No companies match this search." />
-                  </td>
-                </tr>
-              )}
-              {companies.map((co) => {
-                const open = openCompanies.has(co.companyId);
-                return (
-                  <Fragment key={co.companyId}>
-                    {/* Company aggregate row (collapsed by default). */}
-                    <tr
-                      className="cursor-pointer border-b border-line bg-surface-sunken/50 hover:bg-surface-sunken"
-                      onClick={() => toggleCompany(co.companyId)}
-                    >
-                      <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${co.companyName}`}
-                          checked={selected.has(co.companyId)}
-                          onChange={() => toggleSelect(co.companyId)}
+            )}
+            {companies.map((co) => {
+              const open = openCompanies.has(co.companyId);
+              return (
+                <Fragment key={co.companyId}>
+                  {/* Company aggregate row (collapsed by default). */}
+                  <tr
+                    className="cursor-pointer border-b border-line bg-surface-sunken/50 hover:bg-surface-sunken"
+                    onClick={() => toggleCompany(co.companyId)}
+                  >
+                    <td className="px-4 py-2.5 font-semibold text-ink-strong">
+                      <span className="flex items-center gap-1.5">
+                        <IconChevronRight
+                          className={cn('h-4 w-4 shrink-0 text-ink-muted transition-transform', open && 'rotate-90')}
                         />
-                      </td>
-                      <td className="px-4 py-2.5 font-semibold text-ink-strong">
-                        <span className="flex items-center gap-1.5">
-                          <IconChevronRight
-                            className={cn('h-4 w-4 shrink-0 text-ink-muted transition-transform', open && 'rotate-90')}
-                          />
-                          {co.companyName}
-                          <TierBadge tier={co.companyTier} className="ml-1 align-middle" />
-                          <span className="ml-1 text-xs font-normal text-ink-muted">
-                            {co.plants.length} plant{co.plants.length === 1 ? '' : 's'}
-                          </span>
+                        <span className="min-w-0 truncate">{co.companyName}</span>
+                        <TierBadge tier={co.companyTier} className="ml-1 shrink-0 align-middle" />
+                        <span className="ml-1 shrink-0 text-xs font-normal text-ink-muted">
+                          {co.plants.length} plant{co.plants.length === 1 ? '' : 's'}
                         </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-ink-muted">—</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                        {formatInactiveOfTotal(co.totalInactive, co.totalDevices)}
-                      </td>
-                      {bucketCells(co.byBucket)}
-                      <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-critical">
-                        {criticalOnlyCount(co.byBucket)}
-                      </td>
-                      <td className="px-4 py-2.5" />
-                    </tr>
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-ink-muted">—</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-ink">
+                      {formatInactiveOfTotal(co.totalInactive, co.totalDevices)}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <SlaSpread byBucket={co.byBucket} />
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-critical">
+                      {criticalOnlyCount(co.byBucket)}
+                    </td>
+                    <td className="px-4 py-2.5" />
+                  </tr>
 
-                    {open &&
-                      co.plants.map((p) => (
-                        <Fragment key={p.plantId}>
-                          <tr className="border-b border-line last:border-b-0">
-                            <td className="px-4 py-2.5 pl-8" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                aria-label={`Select plant ${formatPlantDisplayName(p.plantName)}`}
-                                checked={selected.has(`plant:${p.plantId}`) || selected.has(co.companyId)}
-                                onChange={() => toggleSelect(`plant:${p.plantId}`)}
-                              />
-                            </td>
-                            <td className="px-4 py-2.5 text-ink-muted">—</td>
-                            <td className="px-4 py-2.5 text-ink">
-                              <PlantName code={p.plantName} />
-                            </td>
-                            <td
-                              data-testid="plant-inactive-total"
-                              className="px-4 py-2.5 text-right tabular-nums text-ink"
+                  {open &&
+                    co.plants.map((p) => (
+                      <Fragment key={p.plantId}>
+                        <tr className="border-b border-line last:border-b-0">
+                          <td className="px-4 py-2.5 pl-10 text-ink-muted">—</td>
+                          <td className="px-4 py-2.5 text-ink">
+                            <PlantName code={p.plantName} />
+                          </td>
+                          <td
+                            data-testid="plant-inactive-total"
+                            className="px-4 py-2.5 text-right tabular-nums text-ink"
+                          >
+                            {formatInactiveOfTotal(p.totalInactive, p.totalDevices)}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <SlaSpread byBucket={p.byBucket} />
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-critical">
+                            {criticalOnlyCount(p.byBucket)}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => togglePlant(p.plantId)}
+                              aria-expanded={openPlant === p.plantId}
+                              className="whitespace-nowrap text-xs font-medium text-brand-700 hover:underline"
                             >
-                              {formatInactiveOfTotal(p.totalInactive, p.totalDevices)}
-                            </td>
-                            {bucketCells(p.byBucket)}
-                            <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-critical">
-                              {criticalOnlyCount(p.byBucket)}
-                            </td>
-                            <td className="px-4 py-2.5 text-right">
-                              <button
-                                type="button"
-                                onClick={() => togglePlant(p.plantId)}
-                                aria-expanded={openPlant === p.plantId}
-                                className="text-xs font-medium text-brand-700 hover:underline"
-                              >
-                                {openPlant === p.plantId ? 'Hide devices' : 'View devices'}
-                              </button>
+                              {openPlant === p.plantId ? 'Hide devices' : 'View devices'}
+                            </button>
+                          </td>
+                        </tr>
+                        {openPlant === p.plantId && (
+                          <tr>
+                            <td colSpan={COLSPAN} className="bg-surface-sunken/40 p-0">
+                              <div className="px-6 py-4 sm:px-10">
+                                <OpenDeviceTickets
+                                  plantLabel={formatPlantDisplayName(p.plantName)}
+                                  loading={loadingPlant === p.plantId}
+                                  tickets={devices[p.plantId] ?? []}
+                                />
+                              </div>
                             </td>
                           </tr>
-                          {openPlant === p.plantId && (
-                            <tr>
-                              <td colSpan={COLSPAN} className="bg-surface-sunken/40 p-0">
-                                <div className="px-6 py-4 sm:px-10">
-                                  <OpenDeviceTickets
-                                    plantLabel={formatPlantDisplayName(p.plantName)}
-                                    loading={loadingPlant === p.plantId}
-                                    tickets={devices[p.plantId] ?? []}
-                                  />
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      ))}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                        )}
+                      </Fragment>
+                    ))}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </section>
   );
@@ -372,44 +339,54 @@ function OpenDeviceTickets({
       ) : tickets.length === 0 ? (
         <EmptyState icon={<IconTruck />} message="No open device tickets at this plant." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-line bg-surface-sunken/50 text-left text-[11px] uppercase tracking-wider text-ink-caps">
-                <th className="px-4 py-2 font-semibold">Device</th>
-                <th className="px-4 py-2 font-semibold">Vehicle No.</th>
-                <th className="px-4 py-2 font-semibold">Assignment</th>
-                <th className="px-4 py-2 font-semibold">SLA</th>
-                <th className="px-4 py-2 font-semibold">Status</th>
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line bg-surface-sunken/50 text-left text-[11px] uppercase tracking-wider text-ink-caps">
+              <th className="px-4 py-2 font-semibold">Device</th>
+              <th className="px-4 py-2 font-semibold">Vehicle No.</th>
+              <th className="px-4 py-2 font-semibold">Assignment</th>
+              <th className="px-4 py-2 font-semibold">SLA</th>
+              <th className="px-4 py-2 font-semibold">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tickets.map((d) => (
+              <tr key={d.ticketId} className="border-b border-line/70 last:border-b-0 hover:bg-surface-sunken/50">
+                {/* For some companies AutoPlant's master sends the vehicle registration AS the device id
+                    (verified against ap source 2026-07-14 — 1,950 devices, mostly Vasavadatta /
+                    Saurashtra / Deepak). Not an FSM bug; flag it so operators aren't confused. */}
+                <td
+                  className="px-4 py-2.5 font-mono tabular-nums text-ink-strong"
+                  title={
+                    d.vehicleNo && d.deviceId === d.vehicleNo
+                      ? 'AutoPlant source data uses the vehicle number as this device\'s ID'
+                      : undefined
+                  }
+                >
+                  {d.deviceId}
+                </td>
+                <td className="px-4 py-2.5 font-mono text-xs text-ink">{d.vehicleNo ?? '—'}</td>
+                <td className="px-4 py-2.5">
+                  {d.assignmentState === 'FORMALLY_ASSIGNED' ? (
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <Badge tone="success">Assigned</Badge>
+                      {d.overridden && <Badge tone="info">Overridden</Badge>}
+                      {d.assignedSeName && <span className="text-xs text-ink-muted">{d.assignedSeName}</span>}
+                    </span>
+                  ) : (
+                    <Badge tone="warning">Unassigned</Badge>
+                  )}
+                </td>
+                <td className="px-4 py-2.5">
+                  <DurationBadge bucket={d.slaBucket} latestGpsDatetime={d.latestGpsDatetime} />
+                </td>
+                <td className="px-4 py-2.5">
+                  <StatusPill status={d.status} />
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {tickets.map((d) => (
-                <tr key={d.ticketId} className="border-b border-line/70 last:border-b-0 hover:bg-surface-sunken/50">
-                  <td className="px-4 py-2.5 font-mono tabular-nums text-ink-strong">{d.deviceId}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-ink">{d.vehicleNo ?? '—'}</td>
-                  <td className="px-4 py-2.5">
-                    {d.assignmentState === 'FORMALLY_ASSIGNED' ? (
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <Badge tone="success">Assigned</Badge>
-                        {d.overridden && <Badge tone="info">Overridden</Badge>}
-                        {d.assignedSeName && <span className="text-xs text-ink-muted">{d.assignedSeName}</span>}
-                      </span>
-                    ) : (
-                      <Badge tone="warning">Unassigned</Badge>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <DurationBadge bucket={d.slaBucket} latestGpsDatetime={d.latestGpsDatetime} />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <StatusPill status={d.status} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );

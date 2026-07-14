@@ -22,7 +22,10 @@ async function get<T>(path: string): Promise<T> {
 export interface ScheduleRow {
   scheduleId: string;
   seId: string;
+  /** SE display name (Issue 122b) — render this, keep seId as the key. */
+  seName?: string | null;
   zoneId: string;
+  zoneName?: string | null;
   dateFrom: string;
   dateTo: string;
   status: string;
@@ -65,6 +68,7 @@ export interface ScheduleStop {
 export interface ScheduleDetail {
   scheduleId: string;
   seId: string;
+  seName?: string | null;
   status: string;
   dateFrom: string;
   dateTo: string;
@@ -76,6 +80,8 @@ export const apiScheduleDetail = (engineerId: string) =>
 
 export interface ZoneEngineer {
   engineerId: string;
+  /** SE display name (Issue 122b) — pickers should never show a bare uuid. */
+  name?: string | null;
   coverageType: string;
   zoneId: string;
   dailyCapacity: number;
@@ -101,6 +107,26 @@ export async function apiAssignTicket(ticketId: string, seId: string): Promise<A
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as AssignOk;
+}
+
+/** Result of the multi-plant manual assign (Issue 122b): per-plant tallies + overall totals. */
+export interface PlantAssignSummary {
+  seId: string;
+  assigned: number;
+  alreadyAssigned: number;
+  perPlant: { plantId: string; assigned: number; openUnassigned: number }[];
+}
+
+/** Manual multi-plant SE assignment (Issue 122b, Device Detail page) — assigns every OPEN +
+ *  UNASSIGNED ticket at the selected plants to the SE via the canonical assignTicket flow. */
+export async function apiAssignPlants(seId: string, plantIds: string[]): Promise<PlantAssignSummary> {
+  const res = await fetch(`${BASE_URL}/schedules/assign-plants`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ seId, plantIds }),
+  });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as PlantAssignSummary;
 }
 
 export type OverrideCommand =

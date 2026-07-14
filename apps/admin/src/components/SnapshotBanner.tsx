@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiSnapshotLatest, type SnapshotLatestView } from '../api/snapshots';
 import { useAuth } from '../auth/AuthProvider';
+import { onIngestionComplete } from '../pages/dashboard/ingestionEvents';
 
 /**
  * The Snapshot freshness banner (Issue 04 AC#5/#6). Rides the top of every admin page: it shows
@@ -8,8 +9,13 @@ import { useAuth } from '../auth/AuthProvider';
  * most recent run FAILED or is stuck RUNNING past the expected window.
  *
  * A snapshot targets <10 min (AC#7); a run still RUNNING past STUCK_AFTER_MS is treated as stuck.
+ *
+ * Live (Issue 122b): the banner re-reads on a poll AND immediately after a manual "Run Ingestion
+ * Now" completes — previously it fetched once on mount, so a recovered (or newly failed) run kept
+ * showing the stale verdict until a full page reload.
  */
 const STUCK_AFTER_MS = 15 * 60 * 1000;
+const POLL_MS = 60 * 1000;
 
 function isStuck(view: SnapshotLatestView): boolean {
   const latest = view.latest;
@@ -25,20 +31,25 @@ export function SnapshotBanner() {
   const { session } = useAuth();
   const [view, setView] = useState<SnapshotLatestView | null>(null);
 
-  useEffect(() => {
-    if (!session) return;
-    let cancelled = false;
+  const refresh = useCallback(() => {
     apiSnapshotLatest()
-      .then((v) => {
-        if (!cancelled) setView(v);
-      })
+      .then(setView)
       .catch(() => {
         /* banner stays silent on a transient fetch error rather than blocking the page */
       });
+  }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    refresh();
+    const id = setInterval(refresh, POLL_MS);
+    // A completed manual ingestion run changes the verdict right now — re-read immediately.
+    const off = onIngestionComplete(refresh);
     return () => {
-      cancelled = true;
+      clearInterval(id);
+      off();
     };
-  }, [session]);
+  }, [session, refresh]);
 
   // Hidden when logged out (e.g. the login page) or before the first read resolves.
   if (!session || !view) return null;

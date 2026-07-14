@@ -22,6 +22,7 @@ import { formatInactiveDuration } from '../../lib/inactiveDuration';
 import { exportTable, type ExportFormat } from '../../lib/exportFile';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
+import { AssignSePanel } from './AssignSePanel';
 
 /** Assignment-state pill shared by the device list + detail (Issue 122). */
 function AssignmentBadge({ state }: { state: string | null | undefined }) {
@@ -69,7 +70,11 @@ export function DeviceDetailPage() {
   const [bucket, setBucket] = useState(searchParams.get('bucket') ?? '');
   const [zoneId, setZoneId] = useState(searchParams.get('zoneId') ?? ''); // '' = all; 'UNZONED' or a numeric id string
   const [companyId, setCompanyId] = useState(searchParams.get('companyId') ?? ''); // '' = all
-  const [options, setOptions] = useState<DeviceFilterOptions>({ zones: [], companies: [], hasUnzoned: false });
+  const [plantId, setPlantId] = useState(''); // '' = all; follows the company pick
+  const [assignOpen, setAssignOpen] = useState(false);
+  // Bumped after a successful manual assignment so the list refetches with fresh assignment columns.
+  const [assignedToken, setAssignedToken] = useState(0);
+  const [options, setOptions] = useState<DeviceFilterOptions>({ zones: [], companies: [], plants: [], hasUnzoned: false });
   const [rows, setRows] = useState<DeviceListRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0); // 0-indexed
@@ -89,7 +94,16 @@ export function DeviceDetailPage() {
   // past a now-smaller result set.
   useEffect(() => {
     setPage(0);
-  }, [search, sort, status, bucket, zoneId, companyId]);
+  }, [search, sort, status, bucket, zoneId, companyId, plantId]);
+
+  // The plant dropdown follows the company pick — drop a plant that no longer belongs.
+  useEffect(() => {
+    if (!plantId || !companyId) return;
+    const stillValid = (options.plants ?? []).some(
+      (p) => String(p.plantId) === plantId && String(p.companyId) === companyId,
+    );
+    if (!stillValid) setPlantId('');
+  }, [companyId, plantId, options.plants]);
 
   useEffect(() => {
     let live = true;
@@ -102,6 +116,7 @@ export function DeviceDetailPage() {
       bucket: bucket || undefined,
       zoneId: zoneId === '' ? undefined : zoneId === 'UNZONED' ? 'UNZONED' : Number(zoneId),
       companyId: companyId === '' ? undefined : Number(companyId),
+      plantId: plantId === '' ? undefined : Number(plantId),
     })
       .then((res) => {
         if (!live) return;
@@ -112,7 +127,7 @@ export function DeviceDetailPage() {
     return () => {
       live = false;
     };
-  }, [search, page, sort, status, bucket, zoneId, companyId]);
+  }, [search, page, sort, status, bucket, zoneId, companyId, plantId, assignedToken]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -121,6 +136,15 @@ export function DeviceDetailPage() {
     apiDeviceCycles(selectedId).then((r) => setCycles(r.cycles)).catch(() => setCycles([]));
     apiDeviceDowntimeTrend(selectedId).then(setTrend).catch(() => setTrend(null));
   }, [selectedId]);
+
+  // Plant dropdown options — scoped to the picked company; de-duplicated when unscoped (a plant
+  // serving several companies appears once per company in `options.plants`).
+  const dedupedPlants = useMemo(() => {
+    const all = options.plants ?? [];
+    const scoped = companyId ? all.filter((p) => String(p.companyId) === companyId) : all;
+    const seen = new Set<number>();
+    return scoped.filter((p) => (seen.has(p.plantId) ? false : (seen.add(p.plantId), true)));
+  }, [options.plants, companyId]);
 
   const selected = useMemo(() => rows.find((r) => r.deviceId === selectedId) ?? null, [rows, selectedId]);
   const effectiveDealType = dealType ?? selected?.dealType ?? null;
@@ -233,6 +257,17 @@ export function DeviceDetailPage() {
       <PageHeader
         title="Device Detail"
         subtitle="Per-device lifetime downtime history and trend — failure cycles, root cause, component and verification context. Recent detail is hot; the lifetime trend reads the monthly summary. Zone-scoped for ZM."
+        actions={
+          <Button
+            type="button"
+            size="sm"
+            variant={assignOpen ? 'secondary' : 'primary'}
+            data-testid="assign-se-toggle"
+            onClick={() => setAssignOpen((o) => !o)}
+          >
+            {assignOpen ? 'Close Assign SE' : 'Assign SE'}
+          </Button>
+        }
       />
 
       {error && (
@@ -285,7 +320,24 @@ export function DeviceDetailPage() {
             </option>
           ))}
         </FilterSelect>
+        {/* Plant dropdown follows the company pick (Issue 122b) — only that company's plants list. */}
+        <FilterSelect aria-label="Plant" value={plantId} onChange={(e) => setPlantId(e.target.value)}>
+          <option value="">All plants</option>
+          {dedupedPlants.map((p) => (
+            <option key={p.plantId} value={String(p.plantId)}>
+              {formatPlantDisplayName(p.name)}
+            </option>
+          ))}
+        </FilterSelect>
       </FilterBar>
+
+      {assignOpen && (
+        <AssignSePanel
+          options={options}
+          onAssigned={() => setAssignedToken((t) => t + 1)}
+          onClose={() => setAssignOpen(false)}
+        />
+      )}
 
       <ChartCard
         title="Devices"

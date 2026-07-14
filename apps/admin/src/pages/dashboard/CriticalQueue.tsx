@@ -113,7 +113,7 @@ function AssignControl({
           <option value="">Select SE…</option>
           {engineers.map((e) => (
             <option key={e.engineerId} value={e.engineerId}>
-              {e.engineerId}
+              {e.name ?? e.engineerId}
             </option>
           ))}
         </FilterSelect>

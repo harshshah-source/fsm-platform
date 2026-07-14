@@ -7,6 +7,7 @@ import { apiTicketDetail, apiTicketForms, type TicketDetail, type TicketForm } f
 import { apiTicketVerification, type TicketVerification } from '../../api/verification';
 import { Button } from '../../components/ui';
 import { Modal } from '../../components/overlay/Modal';
+import { formatPlantDisplayName } from '../../lib/plantNames';
 import { BucketBadge, InlineBadges } from './ticketBadges';
 
 const RECOVERY_TERMINAL = new Set(['CLOSED', 'FAILED_RECOVERY']);
@@ -149,18 +150,51 @@ export function TicketDetailDrawer() {
             <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-sm">
               <dt className="text-slate-500">Device</dt>
               <dd className="font-medium">{ticket.deviceId}</dd>
+              {ticket.vehicleNo && (
+                <>
+                  <dt className="text-slate-500">Vehicle</dt>
+                  <dd className="font-mono text-xs">{ticket.vehicleNo}</dd>
+                </>
+              )}
               <dt className="text-slate-500">Work type</dt>
               <dd>{ticket.workType}</dd>
               <dt className="text-slate-500">Status</dt>
               <dd>{ticket.status}</dd>
+              <dt className="text-slate-500">Company</dt>
+              <dd>
+                {ticket.companyName ?? `#${ticket.companyId}`}{' '}
+                <span className="text-xs text-slate-400">({ticket.companyTier})</span>
+              </dd>
               <dt className="text-slate-500">Plant</dt>
-              <dd>{ticket.plantId}</dd>
-              <dt className="text-slate-500">Company tier</dt>
-              <dd>{ticket.companyTier}</dd>
+              <dd>{ticket.plantName ? formatPlantDisplayName(ticket.plantName) : `#${ticket.plantId}`}</dd>
+              {/* Live assignment context (Issue 122b): who holds the ticket, and through which batch. */}
+              <dt className="text-slate-500">Assigned SE</dt>
+              <dd data-testid="drawer-assigned-se">
+                {ticket.assignmentState === 'FORMALLY_ASSIGNED' ? (
+                  <span>
+                    <span className="font-medium">{ticket.assignedSeName ?? ticket.assignedSeId ?? '—'}</span>
+                    {ticket.overridden && (
+                      <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+                        OVERRIDDEN
+                      </span>
+                    )}
+                    {ticket.batchId && (
+                      <span className="block text-xs text-slate-400">
+                        Batch #{ticket.batchId}
+                        {ticket.scheduleId ? ` · Schedule #${ticket.scheduleId}` : ''}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-amber-700">Unassigned</span>
+                )}
+              </dd>
               <dt className="text-slate-500">Inactive for</dt>
               <dd>
                 <BucketBadge bucket={ticket.slaBucket} latestGpsDatetime={ticket.latestGpsDatetime} />
               </dd>
+              <dt className="text-slate-500">Created</dt>
+              <dd className="text-xs">{new Date(ticket.createdAt).toLocaleString()}</dd>
               <dt className="text-slate-500">Flags</dt>
               <dd>
                 <InlineBadges ticket={ticket} />
