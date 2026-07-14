@@ -16,6 +16,8 @@ async function get<T>(path: string): Promise<T> {
 export interface ZoneOverviewRow {
   zoneId: string;
   zoneName: string;
+  /** The zone's Zonal Manager display name (Issue 122 scorecard column); null when unset. */
+  zonalManagerName?: string | null;
   totalInactive: number;
   /** All devices (active + inactive) in the zone — denominator for `inactive / total` (Issue 2). */
   totalDevices: number;

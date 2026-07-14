@@ -26,6 +26,15 @@ export interface DeviceListRow {
   /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
   latestGpsDatetime: string | null;
   isInactive: boolean;
+  /** The device's latest live ticket, if any — the assignment context (Issue 122). */
+  openTicketId?: string | null;
+  openTicketStatus?: string | null;
+  /** UNASSIGNED | FORMALLY_ASSIGNED for the open ticket; null when the device has no live ticket. */
+  assignmentState?: string | null;
+  assignedSeName?: string | null;
+  batchId?: string | null;
+  batchStatus?: string | null;
+  scheduleId?: string | null;
 }
 
 export interface DeviceCycle {
@@ -97,6 +106,8 @@ export interface DeviceListParams {
   /** Numeric zone id, or the literal `'UNZONED'`. */
   zoneId?: number | 'UNZONED';
   companyId?: number;
+  /** Restrict to devices at or above CRITICAL severity (scorecard drill-down). */
+  criticalPlus?: boolean;
 }
 
 /** The distinct zones / companies in the caller's scope — sources the filter dropdowns. */
@@ -118,6 +129,7 @@ export async function apiDeviceList(opts: DeviceListParams = {}): Promise<Device
   if (opts.bucket) params.set('bucket', opts.bucket);
   if (opts.zoneId != null) params.set('zoneId', String(opts.zoneId));
   if (opts.companyId != null) params.set('companyId', String(opts.companyId));
+  if (opts.criticalPlus) params.set('criticalPlus', 'true');
   const qs = params.toString();
   const data = await get<DeviceListPage | DeviceListRow[]>(`/devices${qs ? `?${qs}` : ''}`);
   // Tolerate both shapes: the paged `{ rows, total }` and the legacy bare array (a backend that

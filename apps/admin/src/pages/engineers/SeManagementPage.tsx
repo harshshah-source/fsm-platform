@@ -17,6 +17,7 @@ import {
 } from '../../components/data';
 import { Badge, Button, Field, Input } from '../../components/ui';
 import { FilterSelect } from '../../components/data';
+import { PlantName, SLABadge } from '../../components/domain';
 import type { BadgeTone } from '../../components/ui/Badge';
 import type { MetricTone } from '../../components/data';
 
@@ -191,7 +192,7 @@ export function SeManagementPage() {
         {selectedId && (
           <section
             aria-label="SE detail"
-            className="w-80 shrink-0 rounded-card border border-line bg-surface-card p-4 text-sm shadow-sm"
+            className="max-h-[80vh] w-[28rem] shrink-0 overflow-y-auto rounded-card border border-line bg-surface-card p-4 text-sm shadow-sm"
           >
             {!detail && <p className="text-ink-muted">Loading…</p>}
             {detail && (
@@ -199,6 +200,7 @@ export function SeManagementPage() {
                 <h3 className="mb-1 text-base font-semibold text-ink-strong">{detail.name}</h3>
                 <p className="mb-3 text-xs text-ink-muted">
                   {detail.coverageType} · {detail.activityStatus}
+                  {detail.zoneName ? ` · ${detail.zoneName}` : ''}
                 </p>
 
                 <div className="mb-3">
@@ -206,6 +208,56 @@ export function SeManagementPage() {
                   <div className="text-ink">
                     {detail.dayPlan.status ?? 'No active schedule'} · {detail.dayPlan.ticketCount} ticket(s)
                   </div>
+                </div>
+
+                <div className="mb-3" data-testid="se-scheduled-work">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">
+                    Scheduled Work
+                  </div>
+                  {!detail.schedule && <div className="text-ink-muted">No active work schedule.</div>}
+                  {detail.schedule && (
+                    <>
+                      <div className="mb-2 text-xs text-ink-muted">
+                        Schedule #{detail.schedule.scheduleId} · {detail.schedule.status} ·{' '}
+                        {detail.schedule.dateFrom}
+                        {detail.schedule.dateTo !== detail.schedule.dateFrom ? `–${detail.schedule.dateTo}` : ''}
+                      </div>
+                      {detail.stops.length === 0 && (
+                        <div className="text-ink-muted">No plant stops in this schedule.</div>
+                      )}
+                      <ol className="flex flex-col gap-2">
+                        {detail.stops.map((stop) => (
+                          <li
+                            key={stop.batchId}
+                            className="rounded-md border border-line bg-surface-sunken px-3 py-2"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-ink-strong">
+                                <span className="mr-1 text-ink-muted">#{stop.stopSequence}</span>
+                                {stop.plantName ? <PlantName code={stop.plantName} /> : `Plant ${stop.plantId}`}
+                              </span>
+                              {stop.status === 'OVERRIDDEN' && <Badge tone="info">Overridden</Badge>}
+                            </div>
+                            <ul className="mt-1.5 flex flex-col gap-1">
+                              {stop.tickets.map((t) => (
+                                <li key={t.ticketId} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                                  <span className="text-ink-muted">{t.workType}</span>
+                                  <span className="font-mono text-ink-strong">Dev {t.deviceId}</span>
+                                  {t.vehicleNo && <span className="font-mono text-ink">{t.vehicleNo}</span>}
+                                  {t.companyName && <span className="text-ink-muted">{t.companyName}</span>}
+                                  {t.slaBucket && <SLABadge bucket={t.slaBucket} />}
+                                  <span className="text-ink-muted">· {t.status}</span>
+                                </li>
+                              ))}
+                              {stop.tickets.length === 0 && (
+                                <li className="text-xs text-ink-muted">No live tickets in this stop.</li>
+                              )}
+                            </ul>
+                          </li>
+                        ))}
+                      </ol>
+                    </>
+                  )}
                 </div>
 
                 <div className="mb-3">

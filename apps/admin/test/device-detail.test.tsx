@@ -1,6 +1,7 @@
 import type { SessionView } from '@fsm/shared';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../src/auth/AuthProvider';
 import { DeviceDetailPage } from '../src/pages/reports/DeviceDetailPage';
@@ -50,7 +51,9 @@ function stub(extra?: (url: string, opts?: RequestInit) => Response | undefined)
 function renderPage(session: SessionView = OH) {
   return render(
     <AuthProvider initialSession={session}>
-      <DeviceDetailPage />
+      <MemoryRouter>
+        <DeviceDetailPage />
+      </MemoryRouter>
     </AuthProvider>,
   );
 }

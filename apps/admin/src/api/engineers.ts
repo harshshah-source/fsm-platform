@@ -52,16 +52,42 @@ export interface AvailabilityRow {
   setByRole: string | null;
 }
 
+/** One ticket inside an SE's day-plan stop, with its full operating context (Issue 122 drill-down). */
+export interface EngineerStopTicket {
+  ticketId: string;
+  deviceId: string;
+  vehicleNo: string | null;
+  workType: string;
+  status: string;
+  slaBucket: string | null;
+  companyName: string | null;
+}
+
+/** One plant stop in the SE's current Work Schedule — what the SE is scheduled to work. */
+export interface EngineerStop {
+  batchId: string;
+  stopSequence: number;
+  status: string;
+  plantId: string;
+  plantName: string | null;
+  tickets: EngineerStopTicket[];
+}
+
 export interface EngineerDetail {
   seId: string;
   name: string;
   zoneId: string;
+  zoneName: string | null;
   coverageType: string;
   dailyCapacity: number;
   isActive: boolean;
   activityStatus: ActivityStatus;
   availabilityStatus: string;
   dayPlan: { status: string | null; ticketCount: number };
+  /** Current Work Schedule header (null when no active schedule). */
+  schedule: { scheduleId: string; status: string; dateFrom: string; dateTo: string } | null;
+  /** Plant stops of the current schedule, in stop order, each with its live tickets in context. */
+  stops: EngineerStop[];
   vanStock: VanStockItem[];
   kit: { complete: boolean; missing: KitMissing[] };
   availabilityRows: AvailabilityRow[];

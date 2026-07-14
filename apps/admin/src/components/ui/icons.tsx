@@ -202,3 +202,15 @@ export const IconHelp = (p: IconProps) => (
     <path d="M12 17h.01" />
   </Svg>
 );
+export const IconDownload = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3v12" />
+    <path d="m7 11 5 5 5-5" />
+    <path d="M4 20h16" />
+  </Svg>
+);
+export const IconChevronRight = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m9 6 6 6-6 6" />
+  </Svg>
+);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DateRangeChips, MetricStrip, PageHeader, RollingNumber, type Metric } from '../../components/data';
 import { DistributionBar, type DistSegment } from '../../components/charts';
 import { Badge } from '../../components/ui';
-import { BUCKET_HEX, BUCKET_LABEL_RANGE, SLA_BUCKETS, sumCriticalPlusDevices } from '../../lib/slaBucket';
+import { BUCKET_HEX, BUCKET_LABEL_RANGE, SLA_BUCKETS, sumCriticalDevices } from '../../lib/slaBucket';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { onIngestionComplete } from './ingestionEvents';
 import { ScorecardTable } from './ScorecardTable';
@@ -33,16 +33,16 @@ export function OpsHeadDashboard({ zones, companyPlants, actions, error, onDataR
 
   const kpis: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
-    // Device-based Critical+ (same zone-overview source as the scorecard) — equals the scorecard
-    // Critical+ column sum by construction, never the open-ticket count (Issue 1).
-    const criticalPlusDevices = sumCriticalPlusDevices(zones);
+    // Strictly the CRITICAL band (Issue 122) — same zone-overview source as the scorecard's Critical
+    // column, so KPI == scorecard column sum by construction. Worse bands stay in the SLA distribution.
+    const criticalDevices = sumCriticalDevices(zones);
     const liveSources = actions.filter((a) => a.available && a.count > 0);
     const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
     const roll = (value: number) => <RollingNumber value={value} runToken={lastRunAt} />;
     return [
       { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
       { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
-      { label: 'Critical+ Devices', value: roll(criticalPlusDevices), hint: 'pan-India', tone: 'critical', testId: 'kpi-critical-plus' },
+      { label: 'Critical Devices', value: roll(criticalDevices), hint: 'pan-India, CRITICAL band', tone: 'critical', testId: 'kpi-critical' },
       { label: 'Action Required', value: roll(actionTotal), hint: `${liveSources.length} live sources`, tone: 'info' },
     ];
   }, [zones, actions, lastRunAt]);

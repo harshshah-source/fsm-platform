@@ -1,4 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import type { CompanyPlantRow, ZoneOverviewRow } from '../src/api/dashboard';
 import { ScorecardTable } from '../src/pages/dashboard/ScorecardTable';
@@ -17,7 +19,11 @@ const plant: CompanyPlantRow = {
 
 describe('Issue 2 — inactive / total presentation', () => {
   it('Scorecard shows inactive / total per zone', () => {
-    render(<ScorecardTable rows={[zone]} />);
+    render(
+      <MemoryRouter>
+        <ScorecardTable rows={[zone]} />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('scorecard-inactive-total')).toHaveTextContent('3 / 10');
   });
 
@@ -26,8 +32,10 @@ describe('Issue 2 — inactive / total presentation', () => {
     expect(screen.getByTestId('zone-inactive-total')).toHaveTextContent('3 / 10');
   });
 
-  it('Company/Plant shows inactive / total per plant', () => {
+  it('Company/Plant shows inactive / total per plant (after expanding the company)', async () => {
     render(<CompanyPlantTable rows={[plant]} />);
+    // Collapsed by default (Issue 122) — expand the company to reveal its plant rows.
+    await userEvent.click(screen.getByText('Acme'));
     expect(within(screen.getByTestId('plant-inactive-total')).getByText('2 / 40')).toBeInTheDocument();
   });
 });

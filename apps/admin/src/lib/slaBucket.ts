@@ -35,6 +35,21 @@ export function criticalPlusCount(byBucket: Record<string, number>): number {
 }
 
 /**
+ * Count of devices in strictly the CRITICAL band (Issue 122 decision). The dashboard "Critical
+ * Devices" KPI + the scorecard "Critical" column use THIS, not `criticalPlusCount` — the operator
+ * asked to see only the single CRITICAL bucket, not the whole critical-and-worse range (worse bands
+ * — Long-Pending / Severe / … — are still visible in the Zone Overview + SLA distribution).
+ */
+export function criticalOnlyCount(byBucket: Record<string, number>): number {
+  return byBucket.CRITICAL ?? 0;
+}
+
+/** Sum of strictly-CRITICAL devices across zones — the canonical "Critical Devices" KPI (Issue 122). */
+export function sumCriticalDevices(zones: ReadonlyArray<{ byBucket: Record<string, number> }>): number {
+  return zones.reduce((sum, z) => sum + criticalOnlyCount(z.byBucket), 0);
+}
+
+/**
  * Sum of critical+ devices across zones — the canonical "Critical+ Devices" KPI. Derived from the same
  * `zone-overview` byBucket data the scorecard renders, so the KPI always equals the scorecard column
  * sum (Issue 1: A + B + C + D = X by construction).

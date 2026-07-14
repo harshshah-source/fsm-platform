@@ -10,9 +10,21 @@ export interface TicketRow {
   status: string;
   deviceId: string;
   plantId: string;
+  /** Plant display name (may be an AutoPlant short code — format with `formatPlantDisplayName`). */
+  plantName?: string | null;
   companyId: string;
+  companyName?: string | null;
+  /** Vehicle registration number — the operator-facing vehicle identity. */
+  vehicleNo?: string | null;
   companyTier: string;
   assignmentState: string;
+  /** The SE holding the ticket's active day-plan batch (null while UNASSIGNED). */
+  assignedSeId?: string | null;
+  assignedSeName?: string | null;
+  batchId?: string | null;
+  scheduleId?: string | null;
+  /** True when the assignment was ZM-overridden (batch or schedule OVERRIDDEN). */
+  overridden?: boolean;
   slaBucket: string | null;
   /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
   latestGpsDatetime: string | null;
@@ -46,6 +58,10 @@ export interface TicketFilters {
   status?: string;
   companyId?: string;
   plantId?: string;
+  /** Free-text plant lookup — matches the plant name (partial) or a numeric plant id. */
+  plant?: string;
+  /** Universal search: device id, vehicle number, plant/company name or id. */
+  q?: string;
   assignmentState?: string;
   bucket?: string;
 }

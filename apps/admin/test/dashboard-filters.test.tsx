@@ -45,13 +45,13 @@ describe('Dashboard filters (Issue 06 AC#2/#3)', () => {
     expect(table().getByText('SOUTH')).toBeInTheDocument();
   });
 
-  it('filters Company/Plant Overview by company', async () => {
+  it('filters Company/Plant Overview by the universal search (Issue 122)', async () => {
     render(<CompanyPlantTable rows={cpRows} />);
     const table = () => within(screen.getByRole('table', { name: /company\/plant overview/i }));
     expect(table().getByText('Acme')).toBeInTheDocument();
     expect(table().getByText('Globex')).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText(/filter by company/i), 'Globex');
+    await userEvent.type(screen.getByLabelText(/search company, plant or id/i), 'Globex');
     expect(table().queryByText('Acme')).not.toBeInTheDocument();
     expect(table().getByText('Globex')).toBeInTheDocument();
   });

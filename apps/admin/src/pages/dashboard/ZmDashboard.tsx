@@ -8,7 +8,7 @@ import type {
 import type { ZoneEngineer } from '../../api/schedules';
 import { DateRangeChips, MetricStrip, PageHeader, type Metric } from '../../components/data';
 import { Badge } from '../../components/ui';
-import { sumCriticalPlusDevices } from '../../lib/slaBucket';
+import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { CriticalQueue } from './CriticalQueue';
@@ -43,9 +43,9 @@ export function ZmDashboard({
   // KPI strip derived from already-loaded data (no new endpoint). Uptime is gated on BE-39/40.
   const metrics: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
-    // Device-based Critical+ (zone-overview source) — consistent with the Ops-Head KPI and the
-    // scorecard everywhere (Issue 1), not the open-ticket count.
-    const criticalPlusDevices = sumCriticalPlusDevices(zones);
+    // Strictly the CRITICAL band (Issue 122) — same device-based source as the scorecard's Critical
+    // column, so KPI == scorecard column sum by construction. Worse bands stay in the Zone Overview.
+    const criticalDevices = sumCriticalDevices(zones);
     const liveSources = actions.filter((a) => a.available && a.count > 0);
     const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
     return [
@@ -57,11 +57,11 @@ export function ZmDashboard({
         tone: 'warning',
       },
       {
-        label: 'Critical+ Devices',
-        value: criticalPlusDevices,
-        hint: 'at or above CRITICAL',
+        label: 'Critical Devices',
+        value: criticalDevices,
+        hint: 'in the CRITICAL band',
         tone: 'critical',
-        testId: 'kpi-critical-plus',
+        testId: 'kpi-critical',
       },
       {
         label: 'Action Required',

@@ -43,29 +43,32 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-describe('Company/Plant Overview (Issue 06 AC#3)', () => {
-  it('groups plants under their company with tier, and drills a plant down to devices', async () => {
+describe('Company/Plant Overview (Issue 06 AC#3 / Issue 122)', () => {
+  it('opens collapsed, expands a company to its plants, then drills a plant down to devices', async () => {
     stubTickets('5005');
     render(<CompanyPlantTable rows={rows} />);
 
-    // Company → plant levels are visible (scoped to the table; the company-filter <option> echoes
-    // the same company name outside it).
     const table = within(screen.getByRole('table', { name: /company\/plant overview/i }));
+    // Company is its own row and visible; the plant is hidden until the company is expanded.
     expect(table.getByText('Acme Logistics')).toBeInTheDocument();
     expect(table.getByText('PLATINUM')).toBeInTheDocument();
+    expect(table.queryByText('Yard-1')).not.toBeInTheDocument();
+
+    // Expand the company row → the plant appears in its own Plant column.
+    await userEvent.click(table.getByText('Acme Logistics'));
     const plantRow = table.getByText('Yard-1').closest('tr')!;
     expect(within(plantRow).getByTestId('bucket-CRITICAL')).toHaveTextContent('2');
 
-    // Drill the plant down to its devices (the third level).
+    // Drill the plant down to its open device tickets (the third level).
     await userEvent.click(within(plantRow).getByRole('button', { name: /devices/i }));
     expect(await screen.findByText(/5005/)).toBeInTheDocument();
   });
 
-  it('offers a CSV export', () => {
+  it('offers a multi-format download and an assignment-state filter', () => {
     stubTickets('5005');
     render(<CompanyPlantTable rows={rows} />);
-    expect(
-      screen.getByRole('button', { name: /export company\/plant overview/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/download format/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/assignment state/i)).toBeInTheDocument();
   });
 });

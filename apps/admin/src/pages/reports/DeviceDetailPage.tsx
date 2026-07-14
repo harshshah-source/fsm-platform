@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   apiDeviceCycles,
   apiDeviceDowntimeTrend,
@@ -14,11 +15,20 @@ import {
 } from '../../api/devices';
 import { useAuth } from '../../auth/AuthProvider';
 import { BarChartCard, ChartCard, type BarDatum } from '../../components/charts';
-import { DataTable, EmptyState, FilterBar, FilterSelect, PageHeader, type Column } from '../../components/data';
-import { Button, Field, Input, SectionCard } from '../../components/ui';
+import { DataTable, EmptyState, ExportMenu, FilterBar, FilterSelect, PageHeader, type Column } from '../../components/data';
+import { Badge, Button, Field, Input, SectionCard } from '../../components/ui';
 import { PlantName, SLABadge } from '../../components/domain';
 import { formatInactiveDuration } from '../../lib/inactiveDuration';
+import { exportTable, type ExportFormat } from '../../lib/exportFile';
+import { formatPlantDisplayName } from '../../lib/plantNames';
 import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
+
+/** Assignment-state pill shared by the device list + detail (Issue 122). */
+function AssignmentBadge({ state }: { state: string | null | undefined }) {
+  if (state === 'FORMALLY_ASSIGNED') return <Badge tone="success">Assigned</Badge>;
+  if (state === 'UNASSIGNED') return <Badge tone="warning">Unassigned</Badge>;
+  return <span className="text-xs text-ink-muted">No open ticket</span>;
+}
 
 const humanize = (c: string | null) => (c ? c.split('_').map((w) => w[0] + w.slice(1).toLowerCase()).join(' ') : '—');
 const hrs = (n: number) => `${Math.round(n)}h`;
@@ -47,12 +57,18 @@ export function DeviceDetailPage() {
   const { session } = useAuth();
   const isOpsHead = session?.role === 'OPERATIONS_HEAD';
 
+  // Deep-link support (Issue 122): the Zone Performance Scorecard links here pre-filtered by
+  // zone / bucket / status. Read those once as the initial filter values.
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get('status');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<DeviceSort>('LONGEST_INACTIVE');
-  const [status, setStatus] = useState<DeviceStatusFilter>('ALL');
-  const [bucket, setBucket] = useState('');
-  const [zoneId, setZoneId] = useState(''); // '' = all; 'UNZONED' or a numeric id string
-  const [companyId, setCompanyId] = useState(''); // '' = all
+  const [status, setStatus] = useState<DeviceStatusFilter>(
+    initialStatus === 'INACTIVE' || initialStatus === 'ACTIVE' ? initialStatus : 'ALL',
+  );
+  const [bucket, setBucket] = useState(searchParams.get('bucket') ?? '');
+  const [zoneId, setZoneId] = useState(searchParams.get('zoneId') ?? ''); // '' = all; 'UNZONED' or a numeric id string
+  const [companyId, setCompanyId] = useState(searchParams.get('companyId') ?? ''); // '' = all
   const [options, setOptions] = useState<DeviceFilterOptions>({ zones: [], companies: [], hasUnzoned: false });
   const [rows, setRows] = useState<DeviceListRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -162,7 +178,38 @@ export function DeviceDetailPage() {
       render: (r) =>
         r.slaBucket ? <SLABadge bucket={r.slaBucket} showRange /> : <span className="text-xs text-ink-muted">Active</span>,
     },
+    {
+      key: 'assignment',
+      header: 'Assignment',
+      render: (r) => (
+        <span className="flex flex-col gap-0.5">
+          <AssignmentBadge state={r.assignmentState} />
+          {r.assignedSeName && <span className="text-xs text-ink-muted">{r.assignedSeName}</span>}
+        </span>
+      ),
+    },
   ];
+
+  // Flat export of the current (filtered) device page — CSV / Excel / PDF (Issue 122), no dependency.
+  const exportDevices = (format: ExportFormat) => {
+    const headers = [
+      'Device ID', 'Vehicle Number', 'Company', 'Plant', 'Zone', 'SLA Bucket',
+      'Assignment', 'Assigned SE', 'Open Ticket', 'Batch',
+    ];
+    const body = rows.map((r) => [
+      r.deviceId,
+      r.vehicleNo ?? '',
+      r.companyName ?? '',
+      r.plantName ? formatPlantDisplayName(r.plantName) : '',
+      r.zoneName ?? '',
+      r.slaBucket ?? 'ACTIVE',
+      r.assignmentState ?? '',
+      r.assignedSeName ?? '',
+      r.openTicketId ?? '',
+      r.batchId ?? '',
+    ]);
+    exportTable(format, 'device-detail', 'Device Detail', headers, body);
+  };
 
   const summaryColumns: Column<DeviceDowntimeTrend['monthly'][number]>[] = [
     { key: 'month', header: 'Month', render: (m) => m.month },
@@ -244,8 +291,11 @@ export function DeviceDetailPage() {
         title="Devices"
         className="mb-5"
         action={
-          <span data-testid="device-list-count" className="text-xs text-ink-muted tabular-nums">
-            {total === 0 ? 'No devices' : `Showing ${nf.format(fromRow)}–${nf.format(toRow)} of ${nf.format(total)}`}
+          <span className="flex items-center gap-3">
+            <span data-testid="device-list-count" className="text-xs text-ink-muted tabular-nums">
+              {total === 0 ? 'No devices' : `Showing ${nf.format(fromRow)}–${nf.format(toRow)} of ${nf.format(total)}`}
+            </span>
+            <ExportMenu onExport={exportDevices} disabled={rows.length === 0} label="Download" />
           </span>
         }
       >
@@ -309,6 +359,42 @@ export function DeviceDetailPage() {
                 </div>
               ))}
               {!trend && <p className="text-sm text-ink-muted">Loading lifetime stats…</p>}
+            </div>
+
+            <div data-testid="device-assignment" className="mt-4 rounded-md border border-line bg-surface-sunken px-3 py-2">
+              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-muted">Assignment</div>
+              {selected.assignmentState ? (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                  <span className="flex items-center gap-2">
+                    <AssignmentBadge state={selected.assignmentState} />
+                  </span>
+                  {selected.assignedSeName && (
+                    <span className="text-ink">
+                      <span className="text-ink-muted">SE:</span> {selected.assignedSeName}
+                    </span>
+                  )}
+                  {selected.batchId && (
+                    <span className="text-ink">
+                      <span className="text-ink-muted">Batch:</span> #{selected.batchId}
+                      {selected.batchStatus === 'OVERRIDDEN' && (
+                        <Badge tone="info" className="ml-1.5">Overridden</Badge>
+                      )}
+                    </span>
+                  )}
+                  {selected.scheduleId && (
+                    <span className="text-ink">
+                      <span className="text-ink-muted">Schedule:</span> #{selected.scheduleId}
+                    </span>
+                  )}
+                  {selected.openTicketId && (
+                    <span className="font-mono text-xs text-ink-muted">
+                      Ticket #{selected.openTicketId.slice(0, 8)}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="text-sm text-ink-muted">No open ticket for this device.</div>
+              )}
             </div>
 
             {isOpsHead && (
