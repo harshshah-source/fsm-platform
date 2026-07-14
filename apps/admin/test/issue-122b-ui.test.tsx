@@ -1,11 +1,12 @@
 import type { SessionView } from '@fsm/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../src/auth/AuthProvider';
 import { DashboardHome } from '../src/pages/dashboard/DashboardHome';
 import { DeviceDetailPage } from '../src/pages/reports/DeviceDetailPage';
+import { FleetDirectoryPage } from '../src/pages/reports/FleetDirectoryPage';
 
 /**
  * Issue 122b UI — (1) the dashboard KPI strip carries Companies / Plants / Devices from
@@ -42,6 +43,14 @@ beforeEach(() => {
     if (u.includes('/schedules/assign-plants') && init?.method === 'POST')
       return json({ seId: 'se-1', assigned: 3, alreadyAssigned: 0, perPlant: [{ plantId: '100', assigned: 2, openUnassigned: 2 }, { plantId: '101', assigned: 1, openUnassigned: 1 }] });
     if (u.includes('/dashboard/fleet-summary')) return json({ companies: 42, plants: 1180, devices: 19301 });
+    if (u.includes('/dashboard/fleet-directory'))
+      return json({
+        companies: [{ companyId: '7', name: 'UltraTech', tier: 'PLATINUM', plantCount: 2, deviceCount: 120 }],
+        plants: [
+          { plantId: '100', name: 'UT Plant A', companyId: '7', companyName: 'UltraTech', zoneName: 'North', deviceCount: 80 },
+          { plantId: '200', name: 'Prism Plant', companyId: '8', companyName: 'Prism', zoneName: 'East', deviceCount: 40 },
+        ],
+      });
     if (u.includes('/devices/filter-options')) return json(filterOptions);
     if (u.includes('/devices')) return json({ rows: [], total: 0 });
     if (/\/engineers$/.test(u)) return json(engineers);
@@ -71,6 +80,34 @@ describe('Issue 122b — fleet KPI cards', () => {
     expect(screen.getByTestId('kpi-devices')).toHaveTextContent('19301');
     // The Action-Required KPI card is gone from the strip (the panel below is a ZM-view feature).
     expect(screen.queryByText(/^action required$/i)).toBeNull();
+  });
+});
+
+describe('Issue 122b — Fleet Directory click-through', () => {
+  it('the Companies KPI card navigates to the directory, which lists companies and plants by name', async () => {
+    const user = userEvent.setup();
+    render(
+      <AuthProvider initialSession={OH}>
+        <MemoryRouter initialEntries={['/']}>
+          <Routes>
+            <Route path="/" element={<DashboardHome />} />
+            <Route path="/reports/fleet" element={<FleetDirectoryPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+    await user.click(await screen.findByTestId('kpi-companies'));
+
+    // Companies tab first: the company row is there by NAME with its counts.
+    const companiesTable = within(await screen.findByRole('table', { name: /fleet companies/i }));
+    expect(companiesTable.getByText('UltraTech')).toBeInTheDocument();
+    expect(companiesTable.getByText('120')).toBeInTheDocument();
+
+    // Clicking the company row jumps to its plants.
+    await user.click(companiesTable.getByText('UltraTech'));
+    const plantsTable = within(await screen.findByRole('table', { name: /fleet plants/i }));
+    expect(plantsTable.getByText(/UT Plant A/)).toBeInTheDocument();
+    expect(plantsTable.queryByText(/Prism Plant/)).not.toBeInTheDocument(); // other company filtered out
   });
 });
 

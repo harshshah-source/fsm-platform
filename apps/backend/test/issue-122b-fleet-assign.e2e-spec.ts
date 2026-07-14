@@ -116,6 +116,23 @@ describe('Issue 122b — fleet summary + plant filter + multi-plant assign', () 
     expect(res.body.devices).toBeGreaterThanOrEqual(2);
   });
 
+  it('fleet-directory lists the seeded company and plants by name with device counts', async () => {
+    const token = await login('ops.head@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get('/api/dashboard/fleet-directory')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const co = res.body.companies.find((c: { companyId: string }) => c.companyId === String(companyId));
+    expect(co).toMatchObject({ name: 'Co-i122b-' + NS, tier: 'GOLD', plantCount: 2, deviceCount: 2 });
+    const plant = res.body.plants.find((p: { plantId: string }) => p.plantId === String(plantA));
+    expect(plant).toMatchObject({
+      name: 'PlantA-i122b-' + NS,
+      companyName: 'Co-i122b-' + NS,
+      zoneName: 'Z-i122b-' + NS,
+      deviceCount: 1,
+    });
+  });
+
   it('filter-options lists plants with their company link; plantId filters the device list', async () => {
     const token = await login('ops.head@fsm.test');
     const opts = await request(app.getHttpServer())

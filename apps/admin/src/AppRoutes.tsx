@@ -29,6 +29,7 @@ import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { ExportsPage } from './pages/exports/ExportsPage';
 import { PlantDeactivationsPage } from './pages/admin/PlantDeactivationsPage';
 import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
+import { FleetDirectoryPage } from './pages/reports/FleetDirectoryPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
 import { RootCauseAnalyticsPage } from './pages/reports/RootCauseAnalyticsPage';
 import { SystemEfficiencyPage } from './pages/reports/SystemEfficiencyPage';
@@ -113,6 +114,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <DeviceDetailPage />
+              </RoleRoute>
+            }
+          />
+          {/* Fleet Directory (Issue 122b) — the Companies/Plants KPI cards' click-through. */}
+          <Route
+            path="/reports/fleet"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <FleetDirectoryPage />
               </RoleRoute>
             }
           />

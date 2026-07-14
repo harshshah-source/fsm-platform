@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DateRangeChips, MetricStrip, PageHeader, RollingNumber, type Metric } from '../../components/data';
 import { DistributionBar, type DistSegment } from '../../components/charts';
 import { Badge } from '../../components/ui';
@@ -18,6 +19,7 @@ import type { DashboardData } from './ZmDashboard';
  * chrome with "—" placeholders rather than fabricated figures.
  */
 export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRefetch }: DashboardData) {
+  const navigate = useNavigate();
   // Bumped when a manual ingestion run completes AND its data refetch has resolved — the roll trigger
   // for the KPI odometers (keyed on completion, not on a value diff).
   const [lastRunAt, setLastRunAt] = useState<number | null>(null);
@@ -42,11 +44,11 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRef
       { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
       { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
       { label: 'Critical Devices', value: roll(criticalDevices), hint: 'pan-India, CRITICAL band', tone: 'critical', testId: 'kpi-critical' },
-      { label: 'Companies', value: fleet ? roll(fleet.companies) : '—', hint: 'pan-India', tone: 'info', testId: 'kpi-companies' },
-      { label: 'Plants', value: fleet ? roll(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants' },
-      { label: 'Devices', value: fleet ? roll(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices' },
+      { label: 'Companies', value: fleet ? roll(fleet.companies) : '—', hint: 'pan-India', tone: 'info', testId: 'kpi-companies', onClick: () => navigate('/reports/fleet?tab=companies') },
+      { label: 'Plants', value: fleet ? roll(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants', onClick: () => navigate('/reports/fleet?tab=plants') },
+      { label: 'Devices', value: fleet ? roll(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
     ];
-  }, [zones, fleet, lastRunAt]);
+  }, [zones, fleet, lastRunAt, navigate]);
 
   // Auto-Dispatch efficiency — gated on BE-42 / FE-24; reference chrome, no fabricated values.
   const efficiency: Metric[] = [

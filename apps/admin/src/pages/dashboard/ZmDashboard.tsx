@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type {
   ActionRequiredCard,
   CompanyPlantRow,
@@ -44,6 +45,7 @@ export function ZmDashboard({
   error,
   onAssigned,
 }: DashboardData) {
+  const navigate = useNavigate();
   // KPI strip derived from already-loaded data. Uptime is gated on BE-39/40. The Action-Required
   // card was replaced by the fleet counts (Issue 122b) — its queue lives on in the panel below.
   const nf = useMemo(() => new Intl.NumberFormat('en-IN'), []);
@@ -67,11 +69,11 @@ export function ZmDashboard({
         tone: 'critical',
         testId: 'kpi-critical',
       },
-      { label: 'Companies', value: fleet ? nf.format(fleet.companies) : '—', hint: 'in your scope', tone: 'info', testId: 'kpi-companies' },
-      { label: 'Plants', value: fleet ? nf.format(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants' },
-      { label: 'Devices', value: fleet ? nf.format(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices' },
+      { label: 'Companies', value: fleet ? nf.format(fleet.companies) : '—', hint: 'in your scope', tone: 'info', testId: 'kpi-companies', onClick: () => navigate('/reports/fleet?tab=companies') },
+      { label: 'Plants', value: fleet ? nf.format(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants', onClick: () => navigate('/reports/fleet?tab=plants') },
+      { label: 'Devices', value: fleet ? nf.format(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
     ];
-  }, [zones, fleet, nf]);
+  }, [zones, fleet, nf, navigate]);
 
   return (
     <div>

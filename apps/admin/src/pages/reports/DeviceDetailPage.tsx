@@ -70,10 +70,12 @@ export function DeviceDetailPage() {
   const [bucket, setBucket] = useState(searchParams.get('bucket') ?? '');
   const [zoneId, setZoneId] = useState(searchParams.get('zoneId') ?? ''); // '' = all; 'UNZONED' or a numeric id string
   const [companyId, setCompanyId] = useState(searchParams.get('companyId') ?? ''); // '' = all
-  const [plantId, setPlantId] = useState(''); // '' = all; follows the company pick
+  const [plantId, setPlantId] = useState(searchParams.get('plantId') ?? ''); // '' = all; follows the company pick
   const [assignOpen, setAssignOpen] = useState(false);
   // Bumped after a successful manual assignment so the list refetches with fresh assignment columns.
   const [assignedToken, setAssignedToken] = useState(0);
+  // Bumped by the table's Retry action after a failed load (e.g. the backend was restarting).
+  const [retryToken, setRetryToken] = useState(0);
   const [options, setOptions] = useState<DeviceFilterOptions>({ zones: [], companies: [], plants: [], hasUnzoned: false });
   const [rows, setRows] = useState<DeviceListRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -96,9 +98,10 @@ export function DeviceDetailPage() {
     setPage(0);
   }, [search, sort, status, bucket, zoneId, companyId, plantId]);
 
-  // The plant dropdown follows the company pick — drop a plant that no longer belongs.
+  // The plant dropdown follows the company pick — drop a plant that no longer belongs. Skips until
+  // the options have actually loaded, so a deep-linked plantId isn't cleared by the empty first render.
   useEffect(() => {
-    if (!plantId || !companyId) return;
+    if (!plantId || !companyId || (options.plants ?? []).length === 0) return;
     const stillValid = (options.plants ?? []).some(
       (p) => String(p.plantId) === plantId && String(p.companyId) === companyId,
     );
@@ -122,12 +125,13 @@ export function DeviceDetailPage() {
         if (!live) return;
         setRows(res.rows);
         setTotal(res.total);
+        setError(null);
       })
       .catch(() => live && setError('Failed to load devices'));
     return () => {
       live = false;
     };
-  }, [search, page, sort, status, bucket, zoneId, companyId, plantId, assignedToken]);
+  }, [search, page, sort, status, bucket, zoneId, companyId, plantId, assignedToken, retryToken]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -358,6 +362,10 @@ export function DeviceDetailPage() {
           rowTestId={(r) => `dev-row-${r.deviceId}`}
           ariaLabel="Device list"
           onRowClick={select}
+          // A failed load must read as a failure with a Retry — never as "no devices" (Issue 122b:
+          // an operator saw the empty state while the backend was mid-restart and reported a bug).
+          error={error}
+          onRetry={() => setRetryToken((t) => t + 1)}
           empty={<EmptyState message="No devices for the current scope." />}
         />
         {total > PAGE_SIZE && (

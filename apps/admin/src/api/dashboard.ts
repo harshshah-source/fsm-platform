@@ -75,9 +75,32 @@ export interface FleetSummary {
   devices: number;
 }
 
+/** One company / plant row in the Fleet Directory (the Companies/Plants KPI click-through). */
+export interface FleetDirectoryCompany {
+  companyId: string;
+  name: string;
+  tier: string | null;
+  plantCount: number;
+  deviceCount: number;
+}
+export interface FleetDirectoryPlant {
+  plantId: string;
+  name: string;
+  companyId: string | null;
+  companyName: string | null;
+  zoneName: string | null;
+  deviceCount: number;
+}
+export interface FleetDirectory {
+  companies: FleetDirectoryCompany[];
+  plants: FleetDirectoryPlant[];
+}
+
 export const apiZoneOverview = () => get<ZoneOverviewRow[]>('/dashboard/zone-overview');
 
 export const apiFleetSummary = () => get<FleetSummary>('/dashboard/fleet-summary');
+
+export const apiFleetDirectory = () => get<FleetDirectory>('/dashboard/fleet-directory');
 
 export const apiCompanyPlantOverview = (params: { companyId?: string; plantId?: string } = {}) => {
   const q = new URLSearchParams();

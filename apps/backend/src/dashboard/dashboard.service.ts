@@ -64,6 +64,30 @@ export interface FleetSummary {
   devices: number;
 }
 
+/** One company in the Fleet Directory (Issue 122b KPI click-through). */
+export interface FleetDirectoryCompany {
+  companyId: string;
+  name: string;
+  tier: string | null;
+  plantCount: number;
+  deviceCount: number;
+}
+
+/** One plant in the Fleet Directory. */
+export interface FleetDirectoryPlant {
+  plantId: string;
+  name: string;
+  companyId: string | null;
+  companyName: string | null;
+  zoneName: string | null;
+  deviceCount: number;
+}
+
+export interface FleetDirectory {
+  companies: FleetDirectoryCompany[];
+  plants: FleetDirectoryPlant[];
+}
+
 export interface ActionRequiredCard {
   key: string;
   label: string;
@@ -203,6 +227,47 @@ export class DashboardService {
       JOIN plants p ON p.plant_id = ds.plant_id
       WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}`);
     return rows[0] ?? { companies: 0, plants: 0, devices: 0 };
+  }
+
+  /**
+   * The Fleet Directory (Issue 122b — the Companies/Plants KPI cards' click-through): every company
+   * and plant in the caller's scope BY NAME, with plant/device counts. Same population as
+   * {@link fleetSummary} (tracked devices, ZM zone-scoped, deactivated plants excluded), so the
+   * directory row counts always reconcile with the KPI numbers.
+   */
+  async fleetDirectory(scope: ZoneScope): Promise<FleetDirectory> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+    const zoneFilter =
+      restrictZone !== null ? Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+
+    const companies = await this.prisma.$queryRaw<
+      Array<{ companyId: string; name: string; tier: string | null; plantCount: number; deviceCount: number }>
+    >(Prisma.sql`
+      SELECT c.company_id::text AS "companyId", c.name AS "name", c.company_tier::text AS "tier",
+             COUNT(DISTINCT ds.plant_id)::int AS "plantCount", COUNT(*)::int AS "deviceCount"
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      JOIN company_master c ON c.company_id = ds.company_id
+      WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
+      GROUP BY c.company_id, c.name, c.company_tier
+      ORDER BY "deviceCount" DESC`);
+
+    const plants = await this.prisma.$queryRaw<
+      Array<{ plantId: string; name: string; companyId: string | null; companyName: string | null; zoneName: string | null; deviceCount: number }>
+    >(Prisma.sql`
+      SELECT p.plant_id::text AS "plantId", p.name AS "name",
+             c.company_id::text AS "companyId", c.name AS "companyName",
+             z.name AS "zoneName", COUNT(*)::int AS "deviceCount"
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      LEFT JOIN company_master c ON c.company_id = ds.company_id
+      WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
+      GROUP BY p.plant_id, p.name, c.company_id, c.name, z.name
+      ORDER BY "deviceCount" DESC`);
+
+    return { companies, plants };
   }
 
   async companyPlantOverview(
