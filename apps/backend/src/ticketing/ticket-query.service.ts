@@ -21,10 +21,23 @@ export interface TicketView {
   failureCycleId: string | null;
   deviceId: string;
   vehicleId: string | null;
+  /** Vehicle registration number (`vehicles.vehicle_no`) — the operator-facing identity. */
+  vehicleNo: string | null;
   plantId: string;
+  /** Plant display name (may be an AutoPlant short code — the UI formats it). */
+  plantName: string | null;
   companyId: string;
+  companyName: string | null;
   companyTier: CompanyTier;
   assignmentState: AssignmentState;
+  /** The SE holding the ticket's active day-plan batch (null while UNASSIGNED). */
+  assignedSeId: string | null;
+  assignedSeName: string | null;
+  /** Active batch / schedule the ticket sits in (null while UNASSIGNED). */
+  batchId: string | null;
+  scheduleId: string | null;
+  /** True when the assignment was ZM-overridden (batch or schedule status OVERRIDDEN). */
+  overridden: boolean;
   slaBucket: SlaBucket | null;
   /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
   latestGpsDatetime: string | null;
@@ -82,7 +95,12 @@ export interface TicketListFilters {
   status?: string;
   workType?: string;
   companyId?: string;
+  /** Numeric plant id — exact match. */
   plantId?: string;
+  /** Free-text plant lookup: matches the plant name (ILIKE) or, when numeric, the plant id. */
+  plant?: string;
+  /** Universal search: device id, vehicle number, plant name/id, company name/id. */
+  q?: string;
   assignmentState?: string;
   bucket?: string;
   limit?: number;
@@ -111,8 +129,13 @@ const SEVERITY_RANK = Prisma.sql`CASE ds.sla_bucket
 const SELECT_COLUMNS = Prisma.sql`
   t.ticket_id::text AS "ticketId", t.work_type::text AS "workType", t.status::text AS "status",
   t.failure_cycle_id::text AS "failureCycleId", t.device_id::text AS "deviceId",
-  t.vehicle_id::text AS "vehicleId", t.plant_id::text AS "plantId", t.company_id::text AS "companyId",
+  t.vehicle_id::text AS "vehicleId", v.vehicle_no AS "vehicleNo",
+  t.plant_id::text AS "plantId", p.name AS "plantName",
+  t.company_id::text AS "companyId", c.name AS "companyName",
   t.company_tier::text AS "companyTier", t.assignment_state::text AS "assignmentState",
+  asg.se_id::text AS "assignedSeId", asg.se_name AS "assignedSeName",
+  asg.batch_id::text AS "batchId", asg.schedule_id::text AS "scheduleId",
+  COALESCE(asg.batch_status = 'OVERRIDDEN' OR asg.schedule_status = 'OVERRIDDEN', false) AS "overridden",
   ds.sla_bucket::text AS "slaBucket", ds.latest_gps_datetime AS "latestGpsDatetime",
   t.repeat_failure AS "repeatFailure",
   fc.state::text AS "failureCycleState",
@@ -122,11 +145,27 @@ const SELECT_COLUMNS = Prisma.sql`
   t.created_at AS "createdAt",
   t.last_state_changed_at AS "lastStateChangedAt"`;
 
+// The ticket's ACTIVE day-plan assignment (Issue 122): its one live batch_assignment_tickets row
+// (partial unique `WHERE removed_at IS NULL`) → batch → schedule → assigned-SE user. LATERAL keeps
+// it one row per ticket; UNASSIGNED tickets simply carry NULLs.
 const FROM_JOINS = Prisma.sql`
   FROM tickets t
   LEFT JOIN device_states ds ON ds.device_id = t.device_id
   LEFT JOIN failure_cycles fc ON fc.cycle_id = t.failure_cycle_id
-  JOIN plants p ON p.plant_id = t.plant_id`;
+  JOIN plants p ON p.plant_id = t.plant_id
+  LEFT JOIN company_master c ON c.company_id = t.company_id
+  LEFT JOIN vehicles v ON v.vehicle_id = t.vehicle_id
+  LEFT JOIN LATERAL (
+    SELECT pba.batch_id, pba.status AS batch_status, pba.se_id, u.name AS se_name,
+           ws.schedule_id, ws.status AS schedule_status
+    FROM batch_assignment_tickets bat
+    JOIN plant_batch_assignments pba ON pba.batch_id = bat.batch_id
+    JOIN work_schedules ws ON ws.schedule_id = pba.schedule_id
+    LEFT JOIN users u ON u.user_id = pba.se_id
+    WHERE bat.ticket_id = t.ticket_id AND bat.removed_at IS NULL
+    ORDER BY bat.created_at DESC
+    LIMIT 1
+  ) asg ON true`;
 
 type RawRow = {
   ticketId: string;
@@ -135,10 +174,18 @@ type RawRow = {
   failureCycleId: string | null;
   deviceId: string;
   vehicleId: string | null;
+  vehicleNo: string | null;
   plantId: string;
+  plantName: string | null;
   companyId: string;
+  companyName: string | null;
   companyTier: CompanyTier;
   assignmentState: AssignmentState;
+  assignedSeId: string | null;
+  assignedSeName: string | null;
+  batchId: string | null;
+  scheduleId: string | null;
+  overridden: boolean;
   slaBucket: SlaBucket | null;
   latestGpsDatetime: Date | null;
   repeatFailure: boolean;
@@ -156,10 +203,18 @@ const toView = (r: RawRow): TicketView => ({
   failureCycleId: r.failureCycleId,
   deviceId: r.deviceId,
   vehicleId: r.vehicleId,
+  vehicleNo: r.vehicleNo,
   plantId: r.plantId,
+  plantName: r.plantName,
   companyId: r.companyId,
+  companyName: r.companyName,
   companyTier: r.companyTier,
   assignmentState: r.assignmentState,
+  assignedSeId: r.assignedSeId,
+  assignedSeName: r.assignedSeName,
+  batchId: r.batchId,
+  scheduleId: r.scheduleId,
+  overridden: r.overridden,
   slaBucket: r.slaBucket,
   latestGpsDatetime: r.latestGpsDatetime ? r.latestGpsDatetime.toISOString() : null,
   repeatFailure: r.repeatFailure,
@@ -191,6 +246,26 @@ export class TicketQueryService {
       conds.push(Prisma.sql`AND t.company_id = ${BigInt(filters.companyId)}`);
     if (filters.plantId && /^\d+$/.test(filters.plantId))
       conds.push(Prisma.sql`AND t.plant_id = ${BigInt(filters.plantId)}`);
+    // Free-text plant lookup — a numeric value matches the id OR the name (some plant names are codes).
+    const plant = filters.plant?.trim();
+    if (plant) {
+      const like = `%${plant}%`;
+      conds.push(
+        /^\d+$/.test(plant)
+          ? Prisma.sql`AND (t.plant_id = ${BigInt(plant)} OR p.name ILIKE ${like})`
+          : Prisma.sql`AND p.name ILIKE ${like}`,
+      );
+    }
+    // Universal search across the operator-facing identities (Issue 122 dashboard/ticket search).
+    const q = filters.q?.trim();
+    if (q) {
+      const like = `%${q}%`;
+      const idMatch = /^\d+$/.test(q)
+        ? Prisma.sql` OR t.plant_id = ${BigInt(q)} OR t.company_id = ${BigInt(q)}`
+        : Prisma.empty;
+      conds.push(Prisma.sql`AND (t.device_id ILIKE ${like} OR v.vehicle_no ILIKE ${like}
+        OR p.name ILIKE ${like} OR c.name ILIKE ${like}${idMatch})`);
+    }
     const where = conds.length ? Prisma.join(conds, ' ') : Prisma.empty;
 
     const limit = Math.min(filters.limit && filters.limit > 0 ? filters.limit : 100, 500);

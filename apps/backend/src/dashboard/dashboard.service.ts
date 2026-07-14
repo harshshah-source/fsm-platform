@@ -10,6 +10,8 @@ const EXCLUDE_DEACTIVATED_PLANTS = Prisma.sql`AND p.plant_id NOT IN (SELECT plan
 export interface ZoneOverviewRow {
   zoneId: string;
   zoneName: string;
+  /** The zone's Zonal Manager display name (`zones.zonal_manager_user_id` → `users.name`); null if unset. */
+  zonalManagerName: string | null;
   totalInactive: number;
   /** All devices (active + inactive) whose plant is in this zone — the denominator for `inactive / total`. */
   totalDevices: number;
@@ -149,6 +151,12 @@ export class DashboardService {
       GROUP BY z.zone_id`);
     const totalByZone = new Map(totals.map((t) => [t.zoneId, t.total]));
 
+    // Zonal Manager display name per zone (Issue 122 scorecard column) — tiny unconditional read.
+    const zms = await this.prisma.$queryRaw<{ zoneId: string; zmName: string | null }[]>(Prisma.sql`
+      SELECT z.zone_id::text AS "zoneId", u.name AS "zmName"
+      FROM zones z LEFT JOIN users u ON u.user_id = z.zonal_manager_user_id`);
+    const zmByZone = new Map(zms.map((z) => [z.zoneId, z.zmName]));
+
     const byZone = new Map<string, ZoneOverviewRow>();
     for (const r of grouped) {
       let row = byZone.get(r.zoneId);
@@ -156,6 +164,7 @@ export class DashboardService {
         row = {
           zoneId: r.zoneId,
           zoneName: r.zoneName,
+          zonalManagerName: zmByZone.get(r.zoneId) ?? null,
           totalInactive: 0,
           totalDevices: totalByZone.get(r.zoneId) ?? 0,
           byBucket: {},

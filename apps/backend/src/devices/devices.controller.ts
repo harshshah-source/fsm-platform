@@ -60,6 +60,7 @@ export class DevicesController {
     @Query('bucket') bucket?: string,
     @Query('zoneId') zoneId?: string,
     @Query('companyId') companyId?: string,
+    @Query('criticalPlus') criticalPlus?: string,
   ): Promise<DeviceListPage> {
     return this.devices.listDevices(
       { role: user.role, zoneId: user.zone_id },
@@ -72,6 +73,7 @@ export class DevicesController {
         bucket: (bucket as SlaBucket) || undefined,
         zoneId: zoneId === 'UNZONED' ? 'UNZONED' : zoneId ? Number(zoneId) : undefined,
         companyId: companyId ? Number(companyId) : undefined,
+        criticalPlus: criticalPlus === 'true' || criticalPlus === '1',
       },
     );
   }

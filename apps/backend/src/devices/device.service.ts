@@ -25,6 +25,16 @@ export interface DeviceListRow {
   /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
   latestGpsDatetime: string | null;
   isInactive: boolean;
+  /** The device's latest live (not closed/failed) ticket, if any — the assignment context (Issue 122). */
+  openTicketId: string | null;
+  openTicketStatus: string | null;
+  /** UNASSIGNED | FORMALLY_ASSIGNED for the open ticket; null when the device has no live ticket. */
+  assignmentState: string | null;
+  /** SE holding the open ticket's active day-plan batch (null while unassigned). */
+  assignedSeName: string | null;
+  batchId: string | null;
+  batchStatus: string | null;
+  scheduleId: string | null;
 }
 
 export interface DeviceListScope {
@@ -54,6 +64,8 @@ export interface DeviceListFilters {
   /** Numeric zone id, or the literal `'UNZONED'` for plants with no zone (the bulk of the fleet). */
   zoneId?: number | 'UNZONED';
   companyId?: number;
+  /** Restrict to devices at or above CRITICAL severity (the scorecard drill-down, Issue 122). */
+  criticalPlus?: boolean;
 }
 
 /** The distinct zones / companies present in the caller's device scope — sources the filter dropdowns. */
@@ -184,12 +196,23 @@ export class DeviceService {
         slaBucket: SlaBucket | null;
         latestGpsDatetime: Date | null;
         isInactive: boolean;
+        openTicketId: string | null;
+        openTicketStatus: string | null;
+        assignmentState: string | null;
+        assignedSeName: string | null;
+        batchId: string | null;
+        batchStatus: string | null;
+        scheduleId: string | null;
         total: number;
       }[]
     >(Prisma.sql`
       SELECT ds.device_id AS "deviceId", v.vehicle_no AS "vehicleNo", d.device_type AS "deviceType",
              d.deal_type AS "dealType", p.name AS "plantName", z.name AS "zoneName", c.name AS "companyName",
              ds.sla_bucket AS "slaBucket", ds.latest_gps_datetime AS "latestGpsDatetime", ds.is_inactive AS "isInactive",
+             ot.ticket_id::text AS "openTicketId", ot.status::text AS "openTicketStatus",
+             ot.assignment_state::text AS "assignmentState",
+             asg.se_name AS "assignedSeName", asg.batch_id::text AS "batchId",
+             asg.batch_status::text AS "batchStatus", asg.schedule_id::text AS "scheduleId",
              COUNT(*) OVER()::int AS "total"
       FROM device_states ds
       JOIN devices d ON d.device_id = ds.device_id
@@ -197,6 +220,26 @@ export class DeviceService {
       LEFT JOIN plants p ON p.plant_id = ds.plant_id
       LEFT JOIN zones z ON z.zone_id = p.zone_id
       LEFT JOIN company_master c ON c.company_id = ds.company_id
+      LEFT JOIN LATERAL (
+        SELECT t.ticket_id, t.status, t.assignment_state
+        FROM tickets t
+        WHERE t.device_id = ds.device_id
+          AND t.status NOT IN ('CLOSED', 'CLOSED_AUTO_RECOVERY', 'CLOSED_NON_OPERATIONAL',
+                               'FAILED_VERIFICATION', 'FAILED_ACTIVATION', 'FAILED_RECOVERY',
+                               'RECEIVED_AT_WAREHOUSE')
+        ORDER BY t.created_at DESC
+        LIMIT 1
+      ) ot ON true
+      LEFT JOIN LATERAL (
+        SELECT pba.batch_id, pba.status AS batch_status, ws.schedule_id, u.name AS se_name
+        FROM batch_assignment_tickets bat
+        JOIN plant_batch_assignments pba ON pba.batch_id = bat.batch_id
+        JOIN work_schedules ws ON ws.schedule_id = pba.schedule_id
+        LEFT JOIN users u ON u.user_id = pba.se_id
+        WHERE bat.ticket_id = ot.ticket_id AND bat.removed_at IS NULL
+        ORDER BY bat.created_at DESC
+        LIMIT 1
+      ) asg ON true
       WHERE 1=1 ${where}
       ORDER BY ${orderBy}
       LIMIT ${limit} OFFSET ${offset}`);
@@ -231,6 +274,11 @@ export class DeviceService {
 
     if (opts.bucket && SLA_BUCKET_VALUES.includes(opts.bucket)) {
       conds.push(Prisma.sql`AND ds.sla_bucket = ${opts.bucket}::sla_bucket`);
+    }
+    if (opts.criticalPlus) {
+      conds.push(
+        Prisma.sql`AND ds.sla_bucket IN ('CRITICAL','HIGH_CRITICAL','SEVERE','VERY_SEVERE','LONG_PENDING')`,
+      );
     }
     if (opts.zoneId === 'UNZONED') conds.push(Prisma.sql`AND p.zone_id IS NULL`);
     else if (typeof opts.zoneId === 'number' && Number.isFinite(opts.zoneId)) {
