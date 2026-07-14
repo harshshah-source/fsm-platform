@@ -9,7 +9,10 @@ export interface ZmScope {
 export interface ZmScheduleRow {
   scheduleId: string;
   seId: string;
+  /** SE display name (Issue 122b) — the operator-facing identity; the uuid stays the key. */
+  seName: string | null;
   zoneId: string;
+  zoneName: string | null;
   dateFrom: string;
   dateTo: string;
   status: string;
@@ -19,6 +22,8 @@ export interface ZmScheduleRow {
 
 export interface ZoneEngineerRow {
   engineerId: string;
+  /** SE display name (Issue 122b) — pickers should never show a bare uuid. */
+  name: string | null;
   coverageType: string;
   zoneId: string;
   dailyCapacity: number;
@@ -63,6 +68,7 @@ export interface ZmDetailStop {
 export interface ZmScheduleDetail {
   scheduleId: string;
   seId: string;
+  seName: string | null;
   status: string;
   dateFrom: string;
   dateTo: string;
@@ -86,6 +92,8 @@ export class ZmScheduleQueryService {
       where: { status: { in: [...ACTIVE_STATUSES] }, ...this.zoneFilter(scope) },
       orderBy: [{ zoneId: 'asc' }, { seId: 'asc' }],
       include: {
+        engineer: { select: { user: { select: { name: true } } } },
+        zone: { select: { name: true } },
         batches: {
           where: { status: { in: ['AUTO_ASSIGNED', 'OVERRIDDEN'] } },
           include: { tickets: { where: { removedAt: null }, select: { id: true } } },
@@ -96,7 +104,9 @@ export class ZmScheduleQueryService {
     return schedules.map((s) => ({
       scheduleId: String(s.scheduleId),
       seId: s.seId,
+      seName: s.engineer?.user?.name ?? null,
       zoneId: String(s.zoneId),
+      zoneName: s.zone?.name ?? null,
       dateFrom: s.dateFrom.toISOString().slice(0, 10),
       dateTo: s.dateTo.toISOString().slice(0, 10),
       status: s.status,
@@ -110,6 +120,7 @@ export class ZmScheduleQueryService {
       where: { seId: engineerId, status: { in: [...ACTIVE_STATUSES] }, ...this.zoneFilter(scope) },
       orderBy: { dispatchedAt: 'desc' },
       include: {
+        engineer: { select: { user: { select: { name: true } } } },
         batches: {
           where: { status: { in: ['AUTO_ASSIGNED', 'OVERRIDDEN'] } },
           orderBy: { stopSequence: 'asc' },
@@ -148,6 +159,7 @@ export class ZmScheduleQueryService {
     return {
       scheduleId: String(schedule.scheduleId),
       seId: schedule.seId,
+      seName: schedule.engineer?.user?.name ?? null,
       status: schedule.status,
       dateFrom: schedule.dateFrom.toISOString().slice(0, 10),
       dateTo: schedule.dateTo.toISOString().slice(0, 10),
@@ -165,9 +177,11 @@ export class ZmScheduleQueryService {
     const engineers = await this.prisma.engineerMaster.findMany({
       where: { isActive: true, ...this.zoneFilter(scope) },
       orderBy: { engineerId: 'asc' },
+      include: { user: { select: { name: true } } },
     });
     return engineers.map((e) => ({
       engineerId: e.engineerId,
+      name: e.user?.name ?? null,
       coverageType: e.coverageType,
       zoneId: String(e.zoneId),
       dailyCapacity: e.dailyCapacity,
