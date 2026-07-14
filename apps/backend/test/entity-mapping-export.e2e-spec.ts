@@ -18,6 +18,9 @@ describe('/api/exports/entity-mapping (e2e)', () => {
   const deviceId = `EXP-${NS}`;
   const vehicleNo = `EXPV-${NS}`;
   const sourcePlantId = BigInt(NS.slice(-9));
+  // Second device on a DEACTIVATED plant (Issue 119) — proves plant_fsm_status = 'deactivated'.
+  const deactivatedDeviceId = `EXPD-${NS}`;
+  const deactivatedSourcePlantId = BigInt(NS.slice(-9)) + 1n;
 
   const login = async (email: string): Promise<string> => {
     const res = await request(app.getHttpServer())
@@ -67,13 +70,33 @@ describe('/api/exports/entity-mapping (e2e)', () => {
         computedAt: new Date(),
       },
     });
+
+    // A device whose plant carries an active deactivation → exported as plant_fsm_status 'deactivated'.
+    const deactivatedPlant = await prisma.plant.create({
+      data: { name: `EXP Dead Plant ${NS}`, zoneId: 1n, sourcePlantId: deactivatedSourcePlantId },
+    });
+    await prisma.device.create({ data: { deviceId: deactivatedDeviceId } });
+    await prisma.deviceState.create({
+      data: {
+        deviceId: deactivatedDeviceId,
+        plantId: deactivatedPlant.plantId,
+        companyId: company.companyId,
+        isInactive: true,
+        eligibleForUptime: true,
+        computedAt: new Date(),
+      },
+    });
+    await prisma.plantDeactivation.create({
+      data: { plantId: deactivatedPlant.plantId, reason: 'export test', deactivatedAt: new Date() },
+    });
   });
 
   afterAll(async () => {
-    await prisma.deviceState.deleteMany({ where: { deviceId } });
-    await prisma.device.deleteMany({ where: { deviceId } });
+    await prisma.deviceState.deleteMany({ where: { deviceId: { in: [deviceId, deactivatedDeviceId] } } });
+    await prisma.device.deleteMany({ where: { deviceId: { in: [deviceId, deactivatedDeviceId] } } });
     await prisma.vehicle.deleteMany({ where: { vehicleNo } });
-    await prisma.plant.deleteMany({ where: { sourcePlantId } });
+    await prisma.plantDeactivation.deleteMany({ where: { plant: { sourcePlantId: deactivatedSourcePlantId } } });
+    await prisma.plant.deleteMany({ where: { sourcePlantId: { in: [sourcePlantId, deactivatedSourcePlantId] } } });
     await app.close();
   });
 
@@ -149,5 +172,17 @@ describe('/api/exports/entity-mapping (e2e)', () => {
     expect(col('sla_bucket')).toBe('CRITICAL');
     expect(col('eligible_for_uptime')).toBe('true');
     expect(col('open_ticket_count')).toBe('0');
+  });
+
+  it("marks a deactivated plant's device as plant_fsm_status 'deactivated' (#119)", async () => {
+    const token = await login('ops.head@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get('/api/exports/entity-mapping')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const line = res.text.split('\n').find((l) => l.startsWith(`${deactivatedDeviceId},`));
+    expect(line).toBeDefined();
+    const cells = (line as string).split(',');
+    expect(cells[ENTITY_MAPPING_HEADERS.indexOf('plant_fsm_status')]).toBe('deactivated');
   });
 });
