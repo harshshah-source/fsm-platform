@@ -84,7 +84,8 @@ export class RecommenderService {
         workType: 'TROUBLESHOOT',
         status: 'OPEN',
         assignmentState: 'UNASSIGNED',
-        plant: { zoneId },
+        // Deactivated plants (Issue 119) are skipped by dispatch — no SE is sent to a shut plant.
+        plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
       },
       include: {
         company: { select: { companyTier: true, companyPriorityRank: true } },
@@ -263,7 +264,12 @@ export class RecommenderService {
    */
   private async installBacklog(zoneId: bigint): Promise<RunCandidate[]> {
     const installs = await this.prisma.ticket.findMany({
-      where: { workType: 'INSTALL', status: 'REQUESTED', assignmentState: 'UNASSIGNED', plant: { zoneId } },
+      where: {
+        workType: 'INSTALL',
+        status: 'REQUESTED',
+        assignmentState: 'UNASSIGNED',
+        plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
+      },
       include: { company: { select: { companyTier: true, companyPriorityRank: true } } },
     });
     const ordered = installSort(

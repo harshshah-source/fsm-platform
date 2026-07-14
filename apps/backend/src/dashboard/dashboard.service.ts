@@ -2,6 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+/** Devices on a deactivated plant (Issue 119) drop out of every dashboard count + SLA bucket; they are
+ *  surfaced instead on the OH "Plant Deactivations" list. Self-contained predicate — appended to any
+ *  aggregation joined to `plants p`. */
+const EXCLUDE_DEACTIVATED_PLANTS = Prisma.sql`AND p.plant_id NOT IN (SELECT plant_id FROM plant_deactivations WHERE reactivated_at IS NULL)`;
+
 export interface ZoneOverviewRow {
   zoneId: string;
   zoneName: string;
@@ -129,7 +134,7 @@ export class DashboardService {
       FROM device_states ds
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
-      WHERE ds.is_inactive = true AND ds.sla_bucket IS NOT NULL ${zoneFilter}
+      WHERE ds.is_inactive = true AND ds.sla_bucket IS NOT NULL ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
       GROUP BY z.zone_id, z.name, ds.sla_bucket
       ORDER BY z.zone_id`);
 
@@ -140,7 +145,7 @@ export class DashboardService {
       FROM device_states ds
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
-      WHERE true ${zoneFilter}
+      WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
       GROUP BY z.zone_id`);
     const totalByZone = new Map(totals.map((t) => [t.zoneId, t.total]));
 
@@ -186,7 +191,7 @@ export class DashboardService {
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
       JOIN company_master c ON c.company_id = ds.company_id
-      WHERE ds.is_inactive = true AND ds.sla_bucket IS NOT NULL ${extra}
+      WHERE ds.is_inactive = true AND ds.sla_bucket IS NOT NULL ${extra} ${EXCLUDE_DEACTIVATED_PLANTS}
       GROUP BY c.company_id, c.name, c.company_tier, z.zone_id, p.plant_id, p.name, ds.sla_bucket
       ORDER BY c.company_tier, c.name, p.name`);
 
@@ -198,7 +203,7 @@ export class DashboardService {
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
       JOIN company_master c ON c.company_id = ds.company_id
-      WHERE true ${extra}
+      WHERE true ${extra} ${EXCLUDE_DEACTIVATED_PLANTS}
       GROUP BY c.company_id, p.plant_id`);
     const totalByKey = new Map(totals.map((t) => [`${t.companyId}:${t.plantId}`, t.total]));
 

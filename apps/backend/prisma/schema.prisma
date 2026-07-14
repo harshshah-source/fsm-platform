@@ -221,6 +221,7 @@ model Plant {
   tickets        Ticket[]
   batches        PlantBatchAssignment[]
   plannerEntries SePlanner[]
+  deactivations  PlantDeactivation[]
 
   @@index([zoneId])
   @@map("plants")
@@ -1581,6 +1582,31 @@ model PlantZoneOverride {
 
   @@index([fsmZoneId])
   @@map("plant_zone_overrides")
+}
+
+/// FSM-owned plant deactivation (Issue 119). An OH marks a plant retired/shut; its devices leave
+/// eligibility/ticket-creation/dashboard counts/dispatch and its open tickets are cancelled — all
+/// reversible. Deliberately a side table (never in the master-sync update set, same anti-drift posture
+/// as PlantZoneOverride): sync can never resurrect a deactivated plant. A row is the ACTIVE deactivation
+/// while `reactivatedAt` is null; reactivation stamps `reactivatedAt`/`reactivatedBy` and keeps history.
+/// A partial-unique index (`plant_deactivations_one_active_per_plant`, raw SQL in the migration) enforces
+/// at most one active deactivation per plant while permitting repeated deactivate/reactivate cycles.
+model PlantDeactivation {
+  id                 BigInt    @id @default(autoincrement())
+  plantId            BigInt    @map("plant_id")
+  reason             String
+  deactivatedBy      String?   @map("deactivated_by") @db.Uuid
+  deactivatedAt      DateTime  @default(now()) @map("deactivated_at") @db.Timestamptz(6)
+  reactivationReason String?   @map("reactivation_reason")
+  reactivatedBy      String?   @map("reactivated_by") @db.Uuid
+  reactivatedAt      DateTime? @map("reactivated_at") @db.Timestamptz(6)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  plant Plant @relation(fields: [plantId], references: [plantId])
+
+  @@index([plantId])
+  @@map("plant_deactivations")
 }
 
 /// Master-sync run bookkeeping — mirrors snapshot_runs for the AutoPlant ap_masters synchroniser

@@ -25,13 +25,18 @@ export class TicketCreationService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createForInactiveEligible(now: Date = new Date()): Promise<{ created: number }> {
+    // Deactivated plants (Issue 119) are excluded here so no new Troubleshoot Ticket is opened for a
+    // shut plant; on reactivation the exclusion lifts and the next run re-creates for still-inactive devices.
+    const deactivatedPlantIds = (
+      await this.prisma.plantDeactivation.findMany({ where: { reactivatedAt: null }, select: { plantId: true } })
+    ).map((r) => r.plantId);
     const candidates = await this.prisma.deviceState.findMany({
       where: {
         isInactive: true,
         eligibleForUptime: true,
         hasOpenFailureCycle: false,
         // A Troubleshoot Ticket needs a plant + company; a device with no current fitment can't be ticketed.
-        plantId: { not: null },
+        plantId: deactivatedPlantIds.length > 0 ? { not: null, notIn: deactivatedPlantIds } : { not: null },
         companyId: { not: null },
       },
     });

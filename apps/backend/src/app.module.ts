@@ -78,6 +78,7 @@ import { VerificationModule } from './verification/verification.module';
 import { VerificationController } from './verification/verification.controller';
 import { VouchersModule } from './vouchers/vouchers.module';
 import { ExportsModule } from './exports/exports.module';
+import { PlantDeactivationModule } from './plant-deactivation/plant-deactivation.module';
 import { VouchersController } from './vouchers/vouchers.controller';
 import { ZonesController } from './zones/zones.controller';
 
@@ -109,6 +110,7 @@ import { ZonesController } from './zones/zones.controller';
     NotificationsModule,
     VouchersModule,
     ExportsModule,
+    PlantDeactivationModule,
   ],
   controllers: [
     HealthController,

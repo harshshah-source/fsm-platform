@@ -89,8 +89,7 @@ export class EntityMappingExportService {
 
   private page(afterDeviceId: string): Promise<ExportRow[]> {
     // Keyset on device_id (the device_states PK) — stable order, no OFFSET drift on a large scan.
-    // plant_fsm_status: the deactivation join lands with #119 Task A (plant_deactivations); until then
-    // every plant reads 'active' — the column exists so the export shape is final and forward-compatible.
+    // plant_fsm_status: 'deactivated' when the plant has an active row in plant_deactivations (#119).
     return this.prisma.$queryRaw<ExportRow[]>(Prisma.sql`
       SELECT ds.device_id AS "deviceId",
              v.vehicle_no AS "vehicleNo",
@@ -103,7 +102,7 @@ export class EntityMappingExportService {
                   ELSE 'mapped' END AS "zoneSource",
              t.name AS "transporter",
              v.status AS "deploymentStatus",
-             'active' AS "plantFsmStatus",
+             CASE WHEN pd.plant_id IS NOT NULL THEN 'deactivated' ELSE 'active' END AS "plantFsmStatus",
              ds.latest_gps_datetime AS "latestGpsDatetime",
              ds.inactivity_hours AS "inactiveHours",
              ds.sla_bucket::text AS "slaBucket",
@@ -119,6 +118,7 @@ export class EntityMappingExportService {
       LEFT JOIN company_master c ON c.company_id = ds.company_id
       LEFT JOIN transporters t ON t.transporter_id = ds.transporter_id
       LEFT JOIN plant_zone_overrides pzo ON pzo.source_plant_id = p.source_plant_id
+      LEFT JOIN plant_deactivations pd ON pd.plant_id = p.plant_id AND pd.reactivated_at IS NULL
       WHERE ds.device_id > ${afterDeviceId}
       ORDER BY ds.device_id
       LIMIT ${PAGE_SIZE}`);
