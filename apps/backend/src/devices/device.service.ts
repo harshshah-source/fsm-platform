@@ -64,14 +64,17 @@ export interface DeviceListFilters {
   /** Numeric zone id, or the literal `'UNZONED'` for plants with no zone (the bulk of the fleet). */
   zoneId?: number | 'UNZONED';
   companyId?: number;
+  plantId?: number;
   /** Restrict to devices at or above CRITICAL severity (the scorecard drill-down, Issue 122). */
   criticalPlus?: boolean;
 }
 
-/** The distinct zones / companies present in the caller's device scope — sources the filter dropdowns. */
+/** The distinct zones / companies / plants present in the caller's device scope — sources the filter dropdowns. */
 export interface DeviceFilterOptions {
   zones: { zoneId: number; name: string }[];
   companies: { companyId: number; name: string }[];
+  /** Each plant with the company its devices belong to, so the plant dropdown can follow the company pick. */
+  plants: { plantId: number; name: string; companyId: number }[];
   hasUnzoned: boolean;
 }
 
@@ -287,6 +290,9 @@ export class DeviceService {
     if (typeof opts.companyId === 'number' && Number.isFinite(opts.companyId)) {
       conds.push(Prisma.sql`AND ds.company_id = ${BigInt(opts.companyId)}`);
     }
+    if (typeof opts.plantId === 'number' && Number.isFinite(opts.plantId)) {
+      conds.push(Prisma.sql`AND ds.plant_id = ${BigInt(opts.plantId)}`);
+    }
     return conds;
   }
 
@@ -302,7 +308,7 @@ export class DeviceService {
         ? Prisma.sql`AND p.zone_id = ${BigInt(scope.zoneId)}`
         : Prisma.empty;
 
-    const [zones, companies, unzoned] = await Promise.all([
+    const [zones, companies, plants, unzoned] = await Promise.all([
       this.prisma.$queryRaw<{ zoneId: bigint; name: string }[]>(Prisma.sql`
         SELECT DISTINCT z.zone_id AS "zoneId", z.name AS "name"
         FROM device_states ds
@@ -317,6 +323,15 @@ export class DeviceService {
         LEFT JOIN plants p ON p.plant_id = ds.plant_id
         WHERE 1=1 ${zmScope}
         ORDER BY c.name ASC`),
+      // Plant × company pairs present in the device population — the company-dependent plant dropdown
+      // (Issue 122b). A plant serving two companies appears once per company, which is exactly what a
+      // company-filtered dropdown needs.
+      this.prisma.$queryRaw<{ plantId: bigint; name: string; companyId: bigint }[]>(Prisma.sql`
+        SELECT DISTINCT p.plant_id AS "plantId", p.name AS "name", ds.company_id AS "companyId"
+        FROM device_states ds
+        JOIN plants p ON p.plant_id = ds.plant_id
+        WHERE ds.company_id IS NOT NULL ${zmScope}
+        ORDER BY p.name ASC`),
       this.prisma.$queryRaw<{ has: boolean }[]>(Prisma.sql`
         SELECT EXISTS (
           SELECT 1 FROM device_states ds
@@ -328,6 +343,7 @@ export class DeviceService {
     return {
       zones: zones.map((z) => ({ zoneId: Number(z.zoneId), name: z.name })),
       companies: companies.map((c) => ({ companyId: Number(c.companyId), name: c.name })),
+      plants: plants.map((p) => ({ plantId: Number(p.plantId), name: p.name, companyId: Number(p.companyId) })),
       hasUnzoned: unzoned[0]?.has ?? false,
     };
   }

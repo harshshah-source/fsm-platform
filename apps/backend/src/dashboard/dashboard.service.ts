@@ -57,6 +57,13 @@ export interface CriticalQueueGroup {
   tickets: CriticalQueueTicket[];
 }
 
+/** Headline fleet counts for the dashboard KPI strip (Issue 122b): companies / plants / devices in scope. */
+export interface FleetSummary {
+  companies: number;
+  plants: number;
+  devices: number;
+}
+
 export interface ActionRequiredCard {
   key: string;
   label: string;
@@ -176,6 +183,26 @@ export class DashboardService {
       row.totalInactive += r.count;
     }
     return [...byZone.values()];
+  }
+
+  /**
+   * Headline fleet counts (Issue 122b KPI cards): distinct companies, distinct plants, and tracked
+   * devices in the caller's scope. Derived from `device_states` (the tracked fleet — consistent with
+   * every other dashboard read), same ZM zone scoping, deactivated plants excluded.
+   */
+  async fleetSummary(scope: ZoneScope): Promise<FleetSummary> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+    const zoneFilter =
+      restrictZone !== null ? Prisma.sql`AND p.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+
+    const rows = await this.prisma.$queryRaw<{ companies: number; plants: number; devices: number }[]>(Prisma.sql`
+      SELECT COUNT(DISTINCT ds.company_id)::int AS "companies",
+             COUNT(DISTINCT ds.plant_id)::int AS "plants",
+             COUNT(*)::int AS "devices"
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}`);
+    return rows[0] ?? { companies: 0, plants: 0, devices: 0 };
   }
 
   async companyPlantOverview(

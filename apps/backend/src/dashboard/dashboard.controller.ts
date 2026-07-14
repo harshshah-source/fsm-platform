@@ -9,6 +9,7 @@ import {
   type ActionRequiredCard,
   type CompanyPlantRow,
   type CriticalQueueGroup,
+  type FleetSummary,
   type ZoneOverviewRow,
 } from './dashboard.service';
 
@@ -50,5 +51,12 @@ export class DashboardController {
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   actionRequired(@CurrentUser() user: AccessTokenClaims): Promise<ActionRequiredCard[]> {
     return this.dashboard.actionRequired({ role: user.role, zoneId: user.zone_id });
+  }
+
+  /** Headline fleet counts for the KPI strip (Issue 122b): companies / plants / devices in scope. */
+  @Get('fleet-summary')
+  @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
+  fleetSummary(@CurrentUser() user: AccessTokenClaims): Promise<FleetSummary> {
+    return this.dashboard.fleetSummary({ role: user.role, zoneId: user.zone_id });
   }
 }

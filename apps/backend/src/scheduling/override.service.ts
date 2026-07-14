@@ -34,6 +34,14 @@ export type AssignOutcome =
   | { result: 'NOT_FOUND' }
   | { result: 'ALREADY_ASSIGNED' };
 
+/** Result of the multi-plant manual assign (Issue 122b): per-plant tallies + the overall totals. */
+export interface PlantAssignSummary {
+  seId: string;
+  assigned: number;
+  alreadyAssigned: number;
+  perPlant: { plantId: string; assigned: number; openUnassigned: number }[];
+}
+
 type BatchWithSchedule = Prisma.PlantBatchAssignmentGetPayload<{ include: { schedule: true } }>;
 
 /**
@@ -290,6 +298,45 @@ export class OverrideService {
 
     await this.notifier.dayPlanOverridden({ seId, scheduleId: ids.scheduleId, batchId: ids.batchId, action: auditAction });
     return { result: 'OK', scheduleId: String(ids.scheduleId), batchId: String(ids.batchId), ticketId, seId };
+  }
+
+  /**
+   * Manual multi-plant SE assignment (Issue 122b, Device Detail page). For each selected plant, every
+   * OPEN + UNASSIGNED ticket is formally assigned to the SE through the exact same {@link assignTicket}
+   * primitive the Critical-Queue one-click and the ZM same-day ADD use — so schedules, plant batches,
+   * stop ordering, audit rows, notifications and the Shared-Pool exit all behave identically to the
+   * system flow. Zone scope is enforced per ticket inside assignTicket (out-of-scope plants contribute
+   * nothing rather than failing the whole batch).
+   */
+  async assignPlants(
+    plantIds: string[],
+    seId: string,
+    scope: ZmScope,
+    actor: ActorContext,
+    now: Date = new Date(),
+  ): Promise<PlantAssignSummary | { result: 'SE_NOT_FOUND' }> {
+    const se = await this.prisma.engineerMaster.findUnique({ where: { engineerId: seId } });
+    if (!se) return { result: 'SE_NOT_FOUND' };
+
+    const ids = plantIds.filter((p) => /^\d+$/.test(p)).map((p) => BigInt(p));
+    const summary: PlantAssignSummary = { seId, assigned: 0, alreadyAssigned: 0, perPlant: [] };
+
+    for (const plantId of ids) {
+      const open = await this.prisma.ticket.findMany({
+        where: { plantId, status: 'OPEN', assignmentState: 'UNASSIGNED' },
+        select: { ticketId: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      let assigned = 0;
+      for (const t of open) {
+        const outcome = await this.assignTicket(t.ticketId, seId, scope, actor, now, 'MANUAL_PLANT_ASSIGN');
+        if (outcome.result === 'OK') assigned += 1;
+        else if (outcome.result === 'ALREADY_ASSIGNED') summary.alreadyAssigned += 1;
+      }
+      summary.assigned += assigned;
+      summary.perPlant.push({ plantId: String(plantId), assigned, openUnassigned: open.length });
+    }
+    return summary;
   }
 
   private async swapSe(
