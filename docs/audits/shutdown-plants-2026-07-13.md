@@ -20,3 +20,10 @@ ACTIVE-only) and several still carry vehicles in `mst_vehicle`. The shutdown cla
 the DB team CSV and an in-session confirmation — not from AutoPlant state. Confirm with the DB
 team before treating these as permanently closed. Note 3628 (GGU, UTCL) shares the DB team's
 'GGU' family with 3529/3530 but is NOT marked shutdown — it is a different company's plant.
+
+**Update 2026-07-14 (#119 applied):** all six were deactivated in FSM via the OH
+plant-deactivation API (`plant_deactivations` side table — 935 open tickets cancelled, UNZONED
+operational device count 4,607 → 3,620). Each deactivation reason records the caveat above.
+This is **reversible**: if the DB team walks the shutdown claim back, reactivate via
+`POST /api/plants/:plantId/reactivate` (or the OH Plant Deactivations page) and the pipeline
+re-creates tickets for still-inactive devices on the next run.

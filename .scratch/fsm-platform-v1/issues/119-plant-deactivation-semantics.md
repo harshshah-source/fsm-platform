@@ -1,6 +1,17 @@
 # 119 — Plant deactivation semantics (FSM-owned flag + device/ticket effects)
-Status: needs-triage
+Status: done (2026-07-14 — slices 1–4; commits 563c39d, 4ddf347, 09ec199 + slice-4 docs commit)
 Type: schema + business design (HITL: business-rule decision)
+
+> **Resolution (2026-07-14):** Built as a `plant_deactivations` side table (anti-drift, never in the
+> master-sync update set; partial-unique one-active-row-per-plant). OH-only API
+> `POST /api/plants/:plantId/deactivate|reactivate` + `GET /api/plants/deactivations`, admin page
+> "Plant Deactivations". Deactivate cancels open tickets (`CLOSED` /
+> `OPERATIONS_HEAD_OVERRIDE_CLOSE` / `PLANT_DEACTIVATED: <reason>`, FailureCycle → `FAILED`) in one
+> audited tx; downstream exclusions in ticket-creation, dashboard counts, recommender dispatch, and
+> the #121 export (`plant_fsm_status`). **Applied to the six STAR CEMENT plants** (3040, 3530, 3078,
+> 3529, 3619, 3187) via the real API on the dev DB: 935 open tickets cancelled, UNZONED (zone 5)
+> operational device count 4,607 → 3,620. Reasons record the disputed-claim caveat (AutoPlant still
+> lists all six ACTIVE) — reversible via reactivate if the DB team overturns the shutdown report.
 
 > Source: zone-application session 2026-07-13 (Phase 2C, deferred by design). Six STAR CEMENT
 > plants are reported shut down (`docs/audits/shutdown-plants-2026-07-13.md`) but FSM has no

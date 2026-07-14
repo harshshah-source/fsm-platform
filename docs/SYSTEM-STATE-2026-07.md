@@ -329,6 +329,17 @@ TROUBLESHOOT `ticket` (tier denormalised), the OPEN `ticket_event`, and the
 - **Known limit**: per-candidate loop (one transaction per device) — fine at current volumes;
   unbounded candidate list is a #106-family concern only if a mass outage flips thousands inactive
   at once `[INFERRED]`.
+- **Deactivated-plant exclusion (#119, 2026-07-14)**: FSM-owned `plant_deactivations` side table
+  (`plant-deactivation/` module; partial-unique one-active-row-per-plant, anti-drift like
+  `plant_zone_overrides` — never in the master-sync update set). OH-only
+  `POST /api/plants/:id/deactivate|reactivate` + `GET /api/plants/deactivations` + admin
+  **Plant Deactivations** page. Deactivate cancels the plant's open tickets in one audited tx
+  (`CLOSED` + `closureType OPERATIONS_HEAD_OVERRIDE_CLOSE` + `closureReason
+  'PLANT_DEACTIVATED: <reason>'`, parent FailureCycle → `FAILED` so no REPEAT mis-flag) and the
+  plant is excluded from ticket creation (here), dashboard counts, recommender dispatch, and the
+  #121 export (`plant_fsm_status='deactivated'`). Reactivation stamps history; the pipeline
+  re-creates tickets for still-inactive devices next run. Applied to the 6 STAR CEMENT plants
+  on the dev DB (§6.1).
 
 ### 3e. Recommender (#10/#72/#75)
 
@@ -597,6 +608,8 @@ INDEX.md header.)
 - The **zone-mapping crosswalk + UNZONED holding zone + per-plant override** machinery (§3a) —
   the workflow doc still assumes plants arrive zoned.
 - **`eligibility_mode` setting** with the `all-deployed` interim proxy (#112) and its audited flip.
+- **FSM-owned plant deactivation** (#119, §3d) — the workflow doc assumes every synced plant is
+  serviceable; deactivation + cancel-open-tickets semantics exist only in code/issue file.
 - The **three ops master switches** + per-sweep cron env matrix (§3g) and the
   ingestion↔partition-maintenance coupling rule.
 - **Master-sync skip accounting** (`master_sync_rejects`) and `/api/integration/health`
@@ -627,10 +640,13 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 3. **UNZONED zone-derivation problem** (data, not code) — **materially reduced 2026-07-13**: was
    83% of synced devices UNZONED (validation audit exec summary); after the zone-application
    session pinned 47 plants via `plant_zone_overrides` + reapply, UNZONED devices are
-   **4,603 of 20,098 (23%)** (§6.1). Root cause stands: ACTIVE plants FSM syncs mostly lack
-   `zone_name`, so the crosswalk (§3a) stays starved — the residual 191-plant worklist is
-   `docs/audits/v2UnzonnedPlants.md` (mostly zero-vehicle depots; per-company asks with Ops).
-   Remaining blast radius: ~23% of fleet invisible to ZM dashboards/dispatch until B8 completes.
+   **4,603 of 20,098 (23%)** (§6.1); **further reduced 2026-07-14** — the 6 STAR CEMENT shutdown
+   plants were deactivated via #119, so the *operational* UNZONED count (what dashboards/dispatch
+   see) is **3,620** (987 devices now on deactivated plants). Root cause stands: ACTIVE plants FSM
+   syncs mostly lack `zone_name`, so the crosswalk (§3a) stays starved — the residual 191-plant
+   worklist is `docs/audits/v2UnzonnedPlants.md` (mostly zero-vehicle depots; per-company asks with
+   Ops). Remaining blast radius: ~18% of fleet invisible to ZM dashboards/dispatch until B8
+   completes.
 4. **PGI feed absence** — NEW stub **#116**: `pgi_history` has no writer; `pgi` eligibility mode is
    permanently 0-candidate and Fleet-Uptime is structurally empty. #112 shipped the mode switch and
    B7 records the pending decision, but no issue owned building the feed until now.
@@ -730,6 +746,15 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 > schedule row (#100's zone_id-in-key design working as intended). Remaining unassignable mass is
 > capacity (5,764 tickets vs 600/day) + the UNZONED residual — a workforce/data question, not code.
 
+> **Plant deactivation application — 2026-07-14 (#119 slice 4).** The 6 STAR CEMENT shutdown
+> plants (3040, 3530, 3078, 3529, 3619, 3187 — all zone 5/UNZONED) deactivated through the real
+> OH API on the dev DB: **935 open tickets cancelled** (`OPERATIONS_HEAD_OVERRIDE_CLOSE`,
+> cycles → FAILED), **UNZONED operational device count 4,607 → 3,620** (Δ 987). Each reason
+> records the disputed-claim caveat (AutoPlant `mst_plant` still lists all six ACTIVE) —
+> reversible via reactivate if the DB team overturns `docs/audits/shutdown-plants-2026-07-13.md`.
+> Verified: LIST endpoint shows 6; #121 export reports all 987 devices `plant_fsm_status=
+> deactivated`; all 6 rows survive a simulated master-sync mirror refresh (real sync VPN-blocked).
+
 ### 6.2 Env flags (all master switches default OFF; cron strings read once at boot)
 
 | Flag | Effect |
@@ -747,8 +772,9 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 
 - **Data-blocked**: SE roster + coverage (`engineer_master`/`se_coverage` empty in prod-shaped DBs;
   admin-enterable via `/engineers/manage`, tested seed exists — commit `0df556a`); zone mappings
-  (was 83% UNZONED; **23% since the 2026-07-13 application** — residual is the v2 worklist +
-  B8 sign-off); `pgi_history` (needs #116 or the proxy).
+  (was 83% UNZONED; **23% since the 2026-07-13 application, 3,620 operational devices after the
+  2026-07-14 #119 STAR CEMENT deactivations** — residual is the v2 worklist + B8 sign-off);
+  `pgi_history` (needs #116 or the proxy).
 - **Decision-blocked**: B7 eligibility mode (business accepts the `all-deployed` proxy or waits for
   PGI); B8 zone ratification; credential-column placement for #91 (HITL).
 - **Code-blocked**: nothing in the funnel itself (INDEX funnel table, re-verified §3). Hardening
