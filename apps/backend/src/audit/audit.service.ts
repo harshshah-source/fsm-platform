@@ -45,6 +45,14 @@ export function auditActor(actor: RequestActor): AuditActorFields {
 export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Record a standalone audit row for an action with no accompanying mutation (e.g. a read-only
+   * export download). Same insert shape as {@link withAudit}, without wrapping a caller mutation.
+   */
+  async record(entry: AuditEntry): Promise<void> {
+    await this.withAudit(entry, async () => undefined);
+  }
+
   async withAudit<T>(
     entry: AuditEntry,
     work: (tx: Prisma.TransactionClient) => Promise<T>,
