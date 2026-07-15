@@ -9,6 +9,7 @@ import type {
 } from '../../api/dashboard';
 import type { ZoneEngineer } from '../../api/schedules';
 import { DateRangeChips, MetricStrip, PageHeader, type Metric } from '../../components/data';
+import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
@@ -96,6 +97,21 @@ export function ZmDashboard({
       )}
       <MetricStrip metrics={metrics} cols={6} />
       <ActionRequiredPanel cards={actions} />
+
+      {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),
+          over the zone-scoped rows the ZM already receives. */}
+      <section aria-labelledby="sla-distribution-heading" className="mb-8">
+        <h3
+          id="sla-distribution-heading"
+          className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-ink-caps"
+        >
+          SLA Bucket Distribution
+        </h3>
+        <div className="rounded-card border border-line bg-surface-card p-4 shadow-sm">
+          <SlaBucketBarChart zones={zones} />
+        </div>
+      </section>
+
       <ZoneOverviewTable rows={zones} />
       <CompanyPlantTable rows={companyPlants} />
       <CriticalQueue groups={critical} engineers={engineers} onAssigned={onAssigned} />

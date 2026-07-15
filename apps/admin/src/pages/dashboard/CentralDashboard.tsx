@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { DateRangeChips, MetricStrip, PageHeader, type Metric } from '../../components/data';
+import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { EscalationQueueList } from './EscalationQueueList';
@@ -45,6 +46,22 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, erro
         </p>
       )}
       <MetricStrip metrics={metrics} />
+
+      {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),
+          over the cross-zone rows the CSM already receives. Rendered above the Escalation Queue —
+          the queue can run to thousands of rows, and the fleet picture must stay above the fold. */}
+      <section aria-labelledby="sla-distribution-heading" className="mb-8">
+        <h3
+          id="sla-distribution-heading"
+          className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-ink-caps"
+        >
+          SLA Bucket Distribution
+        </h3>
+        <div className="rounded-card border border-line bg-surface-card p-4 shadow-sm">
+          <SlaBucketBarChart zones={zones} />
+        </div>
+      </section>
+
       <EscalationQueueList groups={critical} />
       <ScorecardTable rows={zones} />
       <CompanyPlantTable rows={companyPlants} />
