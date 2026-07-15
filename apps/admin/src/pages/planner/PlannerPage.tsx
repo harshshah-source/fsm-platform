@@ -131,7 +131,7 @@ export function PlannerPage() {
   }, [engineers, entries, dateFrom, dateTo]);
 
   const th =
-    'whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-caps';
+    'whitespace-nowrap px-3 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-white';
 
   return (
     <div>
@@ -183,12 +183,12 @@ export function PlannerPage() {
         <div className="overflow-x-auto">
           <table aria-label="SE Planner grid" className="w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b border-line bg-surface-sunken/60">
+              <tr className="border-b border-chrome-700 bg-chrome-900">
                 <th className={th}>Engineer</th>
                 <th className={th}>Coverage</th>
                 <th className={th}>Batch Schedule</th>
                 {days.map((d) => (
-                  <th key={d} className={cn(th, 'text-center font-medium')}>
+                  <th key={d} className={cn(th, 'text-center')}>
                     {d}
                   </th>
                 ))}

@@ -151,6 +151,16 @@
     line-height: 1rem;
     text-transform: uppercase;
   }
+  /* Table header band — black with bold white text on every table (2026-07-15 re-theme ask).
+     Base-layer default so bespoke <thead>s inherit it; components that set their own header
+     utilities use bg-chrome-900/text-white explicitly. */
+  thead {
+    background-color: var(--color-chrome-900);
+  }
+  thead th {
+    color: #fff;
+    font-weight: 700;
+  }
   td {
     color: var(--color-ink);
   }

@@ -168,7 +168,7 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
   };
 
   const th =
-    'whitespace-nowrap px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-caps';
+    'whitespace-nowrap px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-white';
 
   return (
     <section aria-labelledby="company-plant-heading" className="mb-8">
@@ -202,7 +202,7 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
       <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
         <table aria-label="Company/Plant Overview" className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-line bg-surface-sunken/60">
+            <tr className="border-b border-chrome-700 bg-chrome-900">
               <th className={th}>Company</th>
               <th className={th}>Plant</th>
               <th className={cn(th, 'text-right')}>Inactive / Total</th>
@@ -341,12 +341,12 @@ function OpenDeviceTickets({
       ) : (
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-line bg-surface-sunken/50 text-left text-[11px] uppercase tracking-wider text-ink-caps">
-              <th className="px-4 py-2 font-semibold">Device</th>
-              <th className="px-4 py-2 font-semibold">Vehicle No.</th>
-              <th className="px-4 py-2 font-semibold">Assignment</th>
-              <th className="px-4 py-2 font-semibold">SLA</th>
-              <th className="px-4 py-2 font-semibold">Status</th>
+            <tr className="border-b border-chrome-700 bg-chrome-900 text-left text-[11px] uppercase tracking-wider text-white">
+              <th className="px-4 py-2 font-bold">Device</th>
+              <th className="px-4 py-2 font-bold">Vehicle No.</th>
+              <th className="px-4 py-2 font-bold">Assignment</th>
+              <th className="px-4 py-2 font-bold">SLA</th>
+              <th className="px-4 py-2 font-bold">Status</th>
             </tr>
           </thead>
           <tbody>

@@ -102,10 +102,10 @@ export function AccessMatrixGrid() {
       <div className={cardWrap}>
         <table aria-label="Role access matrix" className={tableClass}>
           <thead>
-            <tr className="border-b border-line bg-surface-sunken/60 text-left">
-              <th className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-ink-caps">Feature</th>
+            <tr className="border-b border-chrome-700 bg-chrome-900 text-left">
+              <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white">Feature</th>
               {MATRIX_ROLES.map((r) => (
-                <th key={r} className="px-3 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
+                <th key={r} className="px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-white">
                   {ROLE_SHORT[r]}
                 </th>
               ))}

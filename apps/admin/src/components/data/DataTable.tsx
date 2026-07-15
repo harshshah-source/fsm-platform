@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../lib/cn';
 import { EmptyState, ErrorState, Skeleton } from './feedback';
 
@@ -23,6 +23,11 @@ interface DataTableProps<T> {
   rowTestId?: (row: T) => string;
   /** Left accent colour class per row (e.g. severity), applied as a left border. */
   rowAccent?: (row: T) => string | undefined;
+  /**
+   * Marks the row that is "open" elsewhere on the page (e.g. the detail drawer's ticket). The row is
+   * tinted, carries `aria-current="true"`, and is scrolled into view once when it becomes active.
+   */
+  rowActive?: (row: T) => boolean;
   loading?: boolean;
   error?: string | null;
   /** Retry handler surfaced by the built-in inline error state. */
@@ -49,6 +54,7 @@ export function DataTable<T>({
   onRowClick,
   rowTestId,
   rowAccent,
+  rowActive,
   loading,
   error,
   onRetry,
@@ -57,6 +63,9 @@ export function DataTable<T>({
   maxBodyHeight = '70vh',
 }: DataTableProps<T>) {
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  // The active row auto-scrolls into view exactly once per row key — not on every re-render, or the
+  // table would fight the user's own scrolling on each data refresh.
+  const scrolledActiveKey = useRef<string | null>(null);
 
   const sorted = useMemo(() => {
     if (!sort) return rows;
@@ -86,7 +95,7 @@ export function DataTable<T>({
       >
         <table aria-label={ariaLabel} className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-line bg-surface-raised text-left">
+            <tr className="border-b border-chrome-700 bg-chrome-900 text-left">
               {columns.map((c) => (
                 <th
                   key={c.key}
@@ -99,13 +108,13 @@ export function DataTable<T>({
                       : undefined
                   }
                   className={cn(
-                    'whitespace-nowrap px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-ink-caps',
+                    'whitespace-nowrap px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-white',
                     c.align === 'right' && 'text-right tabular-nums',
-                    c.sortable && 'cursor-pointer select-none hover:text-ink-strong',
+                    c.sortable && 'cursor-pointer select-none hover:text-white/75',
                     // Sticky header: each cell carries its own opaque bg + hairline so it paints cleanly
                     // over scrolling rows (a tr background does not reliably back a sticky th).
                     stickyHeader &&
-                      'sticky top-0 z-10 bg-surface-raised shadow-[inset_0_-1px_0_var(--color-line)]',
+                      'sticky top-0 z-10 bg-chrome-900 shadow-[inset_0_-1px_0_var(--color-chrome-700)]',
                     c.className,
                   )}
                 >
@@ -148,10 +157,24 @@ export function DataTable<T>({
               !error &&
               sorted.map((row) => {
                 const accent = rowAccent?.(row);
+                const active = rowActive?.(row) ?? false;
                 return (
                   <tr
                     key={rowKey(row)}
                     data-testid={rowTestId?.(row)}
+                    aria-current={active ? 'true' : undefined}
+                    ref={
+                      active
+                        ? (el) => {
+                            const k = rowKey(row);
+                            if (el && scrolledActiveKey.current !== k) {
+                              scrolledActiveKey.current = k;
+                              // Optional-chained: jsdom has no scrollIntoView.
+                              el.scrollIntoView?.({ block: 'nearest' });
+                            }
+                          }
+                        : undefined
+                    }
                     onClick={onRowClick ? () => onRowClick(row) : undefined}
                     // Keyboard parity for clickable rows: focusable + Enter/Space activate. The <tr> keeps
                     // its implicit `row` role (no role override) so table semantics/selectors stay intact.
@@ -171,6 +194,8 @@ export function DataTable<T>({
                       onRowClick &&
                         'cursor-pointer hover:bg-surface-sunken/70 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50',
                       accent && `border-l-2 ${accent}`,
+                      // Active tint wins over the hover wash; the inset bar marks it even when hovered.
+                      active && 'bg-info-bg/60 hover:bg-info-bg/60 shadow-[inset_3px_0_0_var(--color-info)]',
                     )}
                   >
                     {columns.map((c) => (
