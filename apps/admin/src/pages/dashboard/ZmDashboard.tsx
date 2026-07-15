@@ -8,13 +8,14 @@ import type {
   ZoneOverviewRow,
 } from '../../api/dashboard';
 import type { ZoneEngineer } from '../../api/schedules';
-import { DateRangeChips, MetricStrip, PageHeader, type Metric } from '../../components/data';
+import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { CriticalQueue } from './CriticalQueue';
+import { DashboardHero } from './DashboardHero';
 import { ZoneOverviewTable } from './ZoneOverviewTable';
 
 export interface DashboardData {
@@ -24,6 +25,8 @@ export interface DashboardData {
   actions: ActionRequiredCard[];
   /** Headline fleet counts (Issue 122b); null until loaded (or on an older backend). */
   fleet: FleetSummary | null;
+  /** Current-month fleet uptime % (BE-39 Fleet Uptime report); null until loaded / no computed data. */
+  fleetUptime: number | null;
   engineers: ZoneEngineer[];
   error: string | null;
   onAssigned: () => void;
@@ -42,13 +45,14 @@ export function ZmDashboard({
   critical,
   actions,
   fleet,
+  fleetUptime,
   engineers,
   error,
   onAssigned,
 }: DashboardData) {
   const navigate = useNavigate();
-  // KPI strip derived from already-loaded data. Uptime is gated on BE-39/40. The Action-Required
-  // card was replaced by the fleet counts (Issue 122b) — its queue lives on in the panel below.
+  // KPI strip derived from already-loaded data. Uptime comes from the Fleet Uptime report (BE-39). The
+  // Action-Required card was replaced by the fleet counts (Issue 122b) — its queue lives on in the panel below.
   const nf = useMemo(() => new Intl.NumberFormat('en-IN'), []);
   const metrics: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
@@ -56,7 +60,14 @@ export function ZmDashboard({
     // column, so KPI == scorecard column sum by construction. Worse bands stay in the Zone Overview.
     const criticalDevices = sumCriticalDevices(zones);
     return [
-      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand', hero: true },
+      {
+        label: 'Fleet Uptime',
+        value: fleetUptime != null ? `${fleetUptime.toFixed(1)}%` : '—',
+        hint: fleetUptime != null ? 'this month, eligible devices' : 'awaiting Fleet Uptime run',
+        tone: 'brand',
+        hero: true,
+        testId: 'kpi-uptime',
+      },
       {
         label: 'Inactive Devices',
         value: inactive,
@@ -74,13 +85,13 @@ export function ZmDashboard({
       { label: 'Plants', value: fleet ? nf.format(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants', onClick: () => navigate('/reports/fleet?tab=plants') },
       { label: 'Devices', value: fleet ? nf.format(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
     ];
-  }, [zones, fleet, nf, navigate]);
+  }, [zones, fleet, fleetUptime, nf, navigate]);
 
   return (
     <div>
-      <PageHeader
+      {/* Hero top section (docs/ui/hero-ref.jpg): 3 KPIs each side of the truck. */}
+      <DashboardHero
         title="Zone Operations Dashboard"
-        subtitle="Live fleet readiness, action queue, and CRITICAL+ work for your zone."
         actions={
           <>
             <Badge tone="success" dot>
@@ -89,13 +100,14 @@ export function ZmDashboard({
             <DateRangeChips />
           </>
         }
+        left={metrics.slice(0, 3)}
+        right={metrics.slice(3, 6)}
       />
       {error && (
         <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
-      <MetricStrip metrics={metrics} cols={6} />
       <ActionRequiredPanel cards={actions} />
 
       {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),

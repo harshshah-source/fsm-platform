@@ -25,6 +25,13 @@ function stubFetch() {
           { zoneId: '1', zoneName: 'NORTH', totalInactive: 5, byBucket: { CRITICAL: 3, WARNING: 2 }, trendPctVsPrevDay: null },
           { zoneId: '2', zoneName: 'SOUTH', totalInactive: 2, byBucket: { WARNING: 2 }, trendPctVsPrevDay: null },
         ];
+      } else if (url.includes('reports/fleet-uptime')) {
+        body = {
+          month: '2026-07-01',
+          groupBy: 'zone',
+          fleet: { eligibleDeviceCount: 20309, uptimePct: 84.41, autoRecoveryClosures: 0, seRepairedClosures: 935 },
+          rows: [],
+        };
       } else if (url.includes('dashboard/critical-queue')) {
         body = [
           {
@@ -65,6 +72,16 @@ describe('FE-07 role-variant dashboards', () => {
     expect(screen.getByRole('table', { name: /zone performance scorecard/i })).toBeInTheDocument();
     // Not the ZM variant.
     expect(screen.queryByText('Zone Operations Dashboard')).not.toBeInTheDocument();
+  });
+
+  it('the Fleet Uptime hero KPI shows the current-month uptime % from the Fleet Uptime report', async () => {
+    stubFetch();
+    renderHome(opsHead);
+
+    // Hero card is wired to /reports/fleet-uptime (fleet.uptimePct), formatted to 1 decimal.
+    const uptime = await screen.findByTestId('kpi-uptime');
+    expect(uptime).toHaveTextContent('84.4%');
+    expect(uptime).toHaveTextContent(/Fleet Uptime/i);
   });
 
   it('Central Service Manager (not acting) sees the Cross-Zone Central Tower with the Escalation Queue', async () => {

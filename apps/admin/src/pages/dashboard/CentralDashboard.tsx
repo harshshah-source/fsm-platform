@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { DateRangeChips, MetricStrip, PageHeader, type Metric } from '../../components/data';
+import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
 import { CompanyPlantTable } from './CompanyPlantTable';
+import { DashboardHero } from './DashboardHero';
 import { EscalationQueueList } from './EscalationQueueList';
 import { ScorecardTable } from './ScorecardTable';
 import type { DashboardData } from './ZmDashboard';
@@ -12,25 +13,32 @@ import type { DashboardData } from './ZmDashboard';
  * pan-zone KPI strip, the cross-zone Escalation Queue, the Zone Performance Scorecard, and the
  * Company/Plant overview — all over the existing role-scoped aggregations (CSM receives every zone).
  */
-export function CentralDashboard({ zones, companyPlants, critical, actions, error }: DashboardData) {
+export function CentralDashboard({ zones, companyPlants, critical, actions, fleetUptime, error }: DashboardData) {
   const metrics: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
     const escalations = critical.reduce((s, g) => s + g.tickets.length, 0);
     const liveSources = actions.filter((a) => a.available && a.count > 0);
     const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
     return [
-      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand', hero: true },
+      {
+        label: 'Fleet Uptime',
+        value: fleetUptime != null ? `${fleetUptime.toFixed(1)}%` : '—',
+        hint: fleetUptime != null ? 'this month, eligible devices' : 'awaiting Fleet Uptime run',
+        tone: 'brand',
+        hero: true,
+        testId: 'kpi-uptime',
+      },
       { label: 'Zones Covered', value: zones.length, hint: 'cross-zone scope', tone: 'info' },
       { label: 'Inactive Devices', value: inactive, hint: 'all zones', tone: 'warning' },
       { label: 'Escalations', value: escalations, hint: `${actionTotal} action items`, tone: 'critical' },
     ];
-  }, [zones, critical, actions]);
+  }, [zones, critical, actions, fleetUptime]);
 
   return (
     <div>
-      <PageHeader
+      {/* Hero top section (docs/ui/hero-ref.jpg): 2 KPIs each side of the truck. */}
+      <DashboardHero
         title="Cross-Zone Central Tower"
-        subtitle="Pan-zone escalations, zone performance, and fleet load across every zone you cover."
         actions={
           <>
             <Badge tone="success" dot>
@@ -39,13 +47,14 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, erro
             <DateRangeChips />
           </>
         }
+        left={metrics.slice(0, 2)}
+        right={metrics.slice(2, 4)}
       />
       {error && (
         <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
-      <MetricStrip metrics={metrics} />
 
       {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),
           over the cross-zone rows the CSM already receives. Rendered above the Escalation Queue —

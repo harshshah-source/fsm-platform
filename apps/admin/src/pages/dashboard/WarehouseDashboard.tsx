@@ -16,11 +16,10 @@ import {
   DataTable,
   DateRangeChips,
   EmptyState,
-  MetricStrip,
-  PageHeader,
   type Column,
   type Metric,
 } from '../../components/data';
+import { DashboardHero } from './DashboardHero';
 import { AgeChip, StatusPill } from '../../components/domain';
 import { Badge, Button, Field, Input, SectionCard } from '../../components/ui';
 import { Modal } from '../../components/overlay/Modal';
@@ -162,9 +161,9 @@ export function WarehouseDashboard() {
 
   return (
     <div data-testid="warehouse-dashboard">
-      <PageHeader
+      {/* Hero top section (docs/ui/hero-ref.jpg): 2 KPIs each side of the truck. */}
+      <DashboardHero
         title="Zone Warehouse Fulfillment"
-        subtitle="Component requests, blocked tickets, and shadow-use reconciliation for your zone warehouse."
         actions={
           <>
             <Badge tone="success" dot>
@@ -173,6 +172,8 @@ export function WarehouseDashboard() {
             <DateRangeChips />
           </>
         }
+        left={metrics.slice(0, 2)}
+        right={metrics.slice(2, 4)}
       />
 
       {error && (
@@ -180,8 +181,6 @@ export function WarehouseDashboard() {
           {error}
         </p>
       )}
-
-      <MetricStrip metrics={metrics} />
 
       <SectionCard
         title="Component Request Queue"

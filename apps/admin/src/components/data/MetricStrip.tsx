@@ -29,14 +29,38 @@ const ACCENT: Record<MetricTone, string> = {
   neutral: 'before:bg-neutral',
 };
 
+/* Frosted-glass tint per tone (DashboardHero cards floating over the truck imagery) — a translucent
+ * tone wash fading into the card surface, over a backdrop blur. Token-routed via opacity modifiers. */
+const GLASS: Record<MetricTone, string> = {
+  brand: 'from-brand-600/15 to-surface-card/75',
+  info: 'from-info/15 to-surface-card/75',
+  success: 'from-success/15 to-surface-card/75',
+  warning: 'from-warning/20 to-surface-card/75',
+  critical: 'from-critical/15 to-surface-card/75',
+  verified: 'from-verified/15 to-surface-card/75',
+  neutral: 'from-neutral/10 to-surface-card/75',
+};
+
 /** Single KPI card — big numeral, caps label, optional hint, left tone accent. Clickable when
  *  `onClick` is set (renders as a real button so keyboard/AT get the affordance for free).
- *  `hero` inverts the card to the black reference hero with a red accent. */
-export function MetricCard({ label, value, hint, tone = 'neutral', testId, onClick, hero = false }: Metric) {
+ *  `hero` inverts the card to the black reference hero with a red accent. `glass` (visual only)
+ *  renders the translucent tone-tinted treatment used by the dashboard hero layout. */
+export function MetricCard({
+  label,
+  value,
+  hint,
+  tone = 'neutral',
+  testId,
+  onClick,
+  hero = false,
+  glass = false,
+}: Metric & { glass?: boolean }) {
   const className = cn(
     'group relative block w-full overflow-hidden rounded-card border p-4 text-left shadow-card transition-all hover:-translate-y-0.5 hover:shadow-card-hover',
     'before:absolute before:inset-y-0 before:left-0 before:w-1 before:rounded-l-card',
-    hero ? 'border-chrome-700 bg-chrome-900 before:bg-brand-600' : ['border-line bg-surface-card', ACCENT[tone]],
+    hero
+      ? [glass ? 'border-chrome-700/70 bg-chrome-900/85 backdrop-blur-md' : 'border-chrome-700 bg-chrome-900', 'before:bg-brand-600']
+      : [ACCENT[tone], glass ? ['border-white/60 bg-gradient-to-br backdrop-blur-md', GLASS[tone]] : 'border-line bg-surface-card'],
     onClick && 'cursor-pointer focus-ring',
     onClick && !hero && 'hover:border-line-strong',
   );

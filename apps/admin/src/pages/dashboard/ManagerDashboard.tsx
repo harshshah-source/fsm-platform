@@ -11,6 +11,7 @@ import {
   type FleetSummary,
   type ZoneOverviewRow,
 } from '../../api/dashboard';
+import { apiFleetUptime } from '../../api/reports';
 import { apiZoneEngineers, type ZoneEngineer } from '../../api/schedules';
 import { useAuth } from '../../auth/AuthProvider';
 import { CentralDashboard } from './CentralDashboard';
@@ -36,6 +37,7 @@ export function ManagerDashboard() {
   const [critical, setCritical] = useState<CriticalQueueGroup[]>([]);
   const [actions, setActions] = useState<ActionRequiredCard[]>([]);
   const [fleet, setFleet] = useState<FleetSummary | null>(null);
+  const [fleetUptime, setFleetUptime] = useState<number | null>(null);
   const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,6 +60,11 @@ export function ManagerDashboard() {
     // Fleet-summary KPI counts — an older backend without the endpoint just leaves the cards at "—".
     apiFleetSummary()
       .then((f) => alive && typeof f?.devices === 'number' && setFleet(f))
+      .catch(() => undefined);
+    // Current-month Fleet Uptime % for the hero card (BE-39). Left at "—" until the monthly summary is
+    // computed (report reports 0 eligible devices) or on a backend without the endpoint.
+    apiFleetUptime({ groupBy: 'zone' })
+      .then((r) => alive && r?.fleet?.eligibleDeviceCount > 0 && setFleetUptime(r.fleet.uptimePct))
       .catch(() => undefined);
     // Zone-SE list feeds the Critical Queue assign picker; failure just leaves it empty.
     apiZoneEngineers()
@@ -90,6 +97,9 @@ export function ManagerDashboard() {
     apiFleetSummary()
       .then((f) => typeof f?.devices === 'number' && setFleet(f))
       .catch(() => undefined);
+    apiFleetUptime({ groupBy: 'zone' })
+      .then((r) => r?.fleet?.eligibleDeviceCount > 0 && setFleetUptime(r.fleet.uptimePct))
+      .catch(() => undefined);
   }, []);
 
   const data: DashboardData = {
@@ -98,6 +108,7 @@ export function ManagerDashboard() {
     critical,
     actions,
     fleet,
+    fleetUptime,
     engineers,
     error,
     onAssigned: refreshCritical,

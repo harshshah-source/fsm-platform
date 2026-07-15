@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DateRangeChips, MetricStrip, PageHeader, RollingNumber, type Metric } from '../../components/data';
+import { DateRangeChips, RollingNumber, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { CompanyPlantTable } from './CompanyPlantTable';
+import { DashboardHero } from './DashboardHero';
 import { onIngestionComplete } from './ingestionEvents';
 import { ScorecardTable } from './ScorecardTable';
 import type { DashboardData } from './ZmDashboard';
@@ -18,7 +19,7 @@ import type { DashboardData } from './ZmDashboard';
  * source until the System Efficiency report (BE-42, surfaced by FE-24). Its cards render the reference
  * chrome with "—" placeholders rather than fabricated figures.
  */
-export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRefetch }: DashboardData) {
+export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, error, onDataRefetch }: DashboardData) {
   const navigate = useNavigate();
   // Bumped when a manual ingestion run completes AND its data refetch has resolved — the roll trigger
   // for the KPI odometers (keyed on completion, not on a value diff).
@@ -41,14 +42,21 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRef
     const roll = (value: number) => <RollingNumber value={value} runToken={lastRunAt} />;
     // The Action-Required card was replaced by the fleet counts (Issue 122b).
     return [
-      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand', hero: true },
+      {
+        label: 'Fleet Uptime',
+        value: fleetUptime != null ? `${fleetUptime.toFixed(1)}%` : '—',
+        hint: fleetUptime != null ? 'this month, eligible devices' : 'awaiting Fleet Uptime run',
+        tone: 'brand',
+        hero: true,
+        testId: 'kpi-uptime',
+      },
       { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
       { label: 'Critical Devices', value: roll(criticalDevices), hint: 'pan-India, CRITICAL band', tone: 'critical', testId: 'kpi-critical' },
       { label: 'Companies', value: fleet ? roll(fleet.companies) : '—', hint: 'pan-India', tone: 'info', testId: 'kpi-companies', onClick: () => navigate('/reports/fleet?tab=companies') },
       { label: 'Plants', value: fleet ? roll(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants', onClick: () => navigate('/reports/fleet?tab=plants') },
       { label: 'Devices', value: fleet ? roll(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
     ];
-  }, [zones, fleet, lastRunAt, navigate]);
+  }, [zones, fleet, fleetUptime, lastRunAt, navigate]);
 
   // Auto-Dispatch efficiency — gated on BE-42 / FE-24; reference chrome, no fabricated values.
   const efficiency: Metric[] = [
@@ -60,9 +68,10 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRef
 
   return (
     <div>
-      <PageHeader
+      {/* Hero top section (docs/ui/hero-ref.jpg): 3 KPIs each side of the truck, the efficiency
+          strip riding over its lower edge. Same cards/testIds as the old flat strips. */}
+      <DashboardHero
         title="Pan-India Fleet Command"
-        subtitle="Nationwide fleet readiness, dispatch efficiency, and zone performance at a glance."
         actions={
           <>
             <Badge tone="success" dot>
@@ -71,23 +80,17 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRef
             <DateRangeChips />
           </>
         }
+        left={kpis.slice(0, 3)}
+        right={kpis.slice(3, 6)}
+        bottom={efficiency}
+        bottomHeading="Auto-Dispatch System Efficiency"
+        bottomHeadingId="auto-dispatch-heading"
       />
       {error && (
         <p role="alert" className="mb-4 text-sm text-critical">
           {error}
         </p>
       )}
-      <MetricStrip metrics={kpis} cols={6} />
-
-      <section aria-labelledby="auto-dispatch-heading" className="mb-8">
-        <h3
-          id="auto-dispatch-heading"
-          className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-ink-caps"
-        >
-          Auto-Dispatch System Efficiency
-        </h3>
-        <MetricStrip metrics={efficiency} className="mb-0" />
-      </section>
 
       <section aria-labelledby="sla-distribution-heading" className="mb-8">
         <h3
