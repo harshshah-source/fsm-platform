@@ -1,5 +1,5 @@
 # 123 — Batch-Assignment transparency (dispatch ledger + manager drill-down)
-Status: partial
+Status: done
 Type: AFK
 
 > Source: manager need to answer "why did the batch run assign (or fail to assign) this ticket to
@@ -11,7 +11,12 @@ Type: AFK
 > selection/scoring/ordering, plus the manager drill-down over it.
 >
 > **2026-07-15 — backend landed (slices 1–3).** Schema + write path committed (`e20d622`, `e9e6f05`);
-> read endpoints + e2e land with this file. Remaining in-scope: the manager UI drill-down (slice 4).
+> read endpoints + e2e land with this file.
+> **2026-07-16 — manager UI drill-down landed (FE slices 1–4)**, closing the issue: DataTable
+> expandable-row primitive + runs list → run detail (config-in-effect panel) → zone → batch with the
+> inline precedence-terms decision trace. Read-endpoint gaps found by the contract map were fixed
+> first (`a150c13`: `scoreDegenerate` on rows, `seNames` in the trace, `actorName`); Gap B (effective
+> config in the snapshot) is the #124 follow-up, rendered as "Default (not overridden)" meanwhile.
 
 ## What to build
 
@@ -30,7 +35,7 @@ Type: AFK
    Foreign-zone behaviour is per-route and deliberate (see the controller docstring): zone detail
    (`:zoneId` param) → 403 via the global `ZoneScopeGuard` (#99, the platform-standard zone-scope
    response); batch/trace (no `:zoneId`) → 404 via the service clamp.
-4. **Manager UI drill-down (slice 4 — pending):** runs list → run detail (config-in-effect panel + zone
+4. **Manager UI drill-down (slice 4 — done):** runs list → run detail (config-in-effect panel + zone
    cards) → zone → batch → assignment table with an expandable per-ticket decision trace that explains
    the pick in **precedence terms** and **hides score numbers while `scoreDegenerate=true`**. Reuse the
    current theme/table patterns; role-matrix + render tests.
@@ -43,7 +48,7 @@ Type: AFK
 - [x] Per-run system-actor audit event (`DISPATCH_RUN_STARTED`/`FINISHED`).
 - [x] Read endpoints role-guarded; ZM zone-clamped (list totals, run-detail cards, zone/batch/trace); e2e 10/10 green.
 - [x] Observe-only: selection/scoring/locking untouched; slice-2 byte-identical e2e green.
-- [ ] Manager UI drill-down built to the ACs above (slice 4).
+- [x] Manager UI drill-down built to the ACs above (slice 4) — runs list → run detail (config panel + zone cards) → zone → batch → inline decision trace; scores hidden while degenerate; ZM never links to a foreign zone.
 
 ## Storage estimate (~6k tickets/day)
 
