@@ -5,6 +5,10 @@ import type { ZmScope } from './zm-schedule-query.service';
 export interface DispatchRunListRow {
   runId: string;
   trigger: string;
+  /** Actor role for a MANUAL run (null for CRON / system runs). */
+  actorRole: string | null;
+  /** Actor display name for a MANUAL run, resolved from actorUserId (null for CRON / unknown user). */
+  actorName: string | null;
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
@@ -35,7 +39,6 @@ export interface DispatchRunZoneCard {
 
 export interface DispatchRunDetail extends Omit<DispatchRunListRow, 'zones'> {
   actorUserId: string | null;
-  actorRole: string | null;
   /** The config that actually applied — frozen at run start, not today's values. */
   configSnapshot: Record<string, unknown>;
   /** Per-zone cards (a ZM sees only their own). Replaces the list row's numeric `zones` count. */
@@ -81,6 +84,12 @@ export interface DispatchAssignmentRow {
   /** Canonical processing rank from the recommendation (null for pre-ledger rows). */
   rank: number | null;
   score: number | null;
+  /**
+   * Whether this row's score is degenerate (all candidates score identically → precedence decided).
+   * Surfaced on the row so the assignment table can hide numeric scores and show precedence terms
+   * without a per-ticket trace fetch. Null for pre-ledger rows with no trace.
+   */
+  scoreDegenerate: boolean | null;
   recStatus: string | null;
   ticketStatus: string;
   hasTrace: boolean;
@@ -105,6 +114,8 @@ export interface DispatchTicketTrace {
   trace: Record<string, unknown>;
   scoreBreakdown: Record<string, unknown> | null;
   recStatus: string | null;
+  /** seId → display name for every SE named in the trace (chosen + runners-up); UUIDs read as names. */
+  seNames: Record<string, string | null>;
 }
 
 /**
@@ -140,10 +151,13 @@ export class DispatchTransparencyQueryService {
       },
     });
 
+    const actorNames = await this.resolveActorNames(runs.map((r) => r.actorUserId));
     return runs.map((run) => {
       const base = {
         runId: run.runId.toString(),
         trigger: run.trigger,
+        actorRole: run.actorRole,
+        actorName: run.actorUserId ? (actorNames.get(run.actorUserId) ?? null) : null,
         startedAt: run.startedAt.toISOString(),
         finishedAt: run.finishedAt?.toISOString() ?? null,
         durationMs: run.finishedAt ? run.finishedAt.getTime() - run.startedAt.getTime() : null,
@@ -205,11 +219,13 @@ export class DispatchTransparencyQueryService {
       error: z.error,
     }));
 
+    const actorNames = await this.resolveActorNames([run.actorUserId]);
     return {
       runId: run.runId.toString(),
       trigger: run.trigger,
       actorUserId: run.actorUserId,
       actorRole: run.actorRole,
+      actorName: run.actorUserId ? (actorNames.get(run.actorUserId) ?? null) : null,
       startedAt: run.startedAt.toISOString(),
       finishedAt: run.finishedAt?.toISOString() ?? null,
       durationMs: run.finishedAt ? run.finishedAt.getTime() - run.startedAt.getTime() : null,
@@ -325,7 +341,13 @@ export class DispatchTransparencyQueryService {
     const ticketIds = batch.tickets.map((t) => t.ticket.ticketId);
     const recs = await this.prisma.recommendation.findMany({
       where: { runId, ticketId: { in: ticketIds } },
-      select: { ticketId: true, processingRank: true, status: true, scoreBreakdown: true, trace: { select: { traceId: true } } },
+      select: {
+        ticketId: true,
+        processingRank: true,
+        status: true,
+        scoreBreakdown: true,
+        trace: { select: { traceId: true, trace: true } },
+      },
     });
     const recByTicket = new Map(recs.map((r) => [r.ticketId, r]));
 
@@ -349,6 +371,7 @@ export class DispatchTransparencyQueryService {
           sortOrder: t.sortOrder,
           rank: rec?.processingRank ?? null,
           score: typeof breakdown?.score === 'number' ? (breakdown.score as number) : null,
+          scoreDegenerate: rec?.trace ? Boolean((rec.trace.trace as Record<string, unknown>)?.scoreDegenerate) : null,
           recStatus: rec?.status ?? null,
           ticketStatus: t.ticket.status,
           hasTrace: rec?.trace != null,
@@ -364,14 +387,43 @@ export class DispatchTransparencyQueryService {
       include: { recommendation: { select: { scoreBreakdown: true, status: true } } },
     });
     if (!trace) return null;
+    const traceJson = (trace.trace as Record<string, unknown>) ?? {};
     return {
       runId: runId.toString(),
       ticketId: trace.ticketId,
       seId: trace.seId,
-      trace: (trace.trace as Record<string, unknown>) ?? {},
+      trace: traceJson,
       scoreBreakdown: (trace.recommendation?.scoreBreakdown as Record<string, unknown> | null) ?? null,
       recStatus: trace.recommendation?.status ?? null,
+      seNames: await this.resolveSeNames(traceJson),
     };
+  }
+
+  /** actorUserId → display name for MANUAL-run actors (dedupes; skips CRON/null actors). */
+  private async resolveActorNames(ids: (string | null)[]): Promise<Map<string, string>> {
+    const unique = [...new Set(ids.filter((id): id is string => id != null))];
+    if (unique.length === 0) return new Map();
+    const users = await this.prisma.user.findMany({
+      where: { userId: { in: unique } },
+      select: { userId: true, name: true },
+    });
+    return new Map(users.map((u) => [u.userId, u.name]));
+  }
+
+  /** Names for every SE the trace references (chosen + runners-up) so the UI shows names, not UUIDs. */
+  private async resolveSeNames(traceJson: Record<string, unknown>): Promise<Record<string, string | null>> {
+    const seIds = new Set<string>();
+    const chosen = traceJson.chosen as { seId?: string } | null;
+    if (chosen?.seId) seIds.add(chosen.seId);
+    for (const r of (traceJson.runnersUp as { seId?: string }[] | undefined) ?? []) {
+      if (r?.seId) seIds.add(r.seId);
+    }
+    if (seIds.size === 0) return {};
+    const engineers = await this.prisma.engineerMaster.findMany({
+      where: { engineerId: { in: [...seIds] } },
+      select: { engineerId: true, user: { select: { name: true } } },
+    });
+    return Object.fromEntries(engineers.map((e) => [e.engineerId, e.user?.name ?? null]));
   }
 
   /** The ZM clamp: non-null zone id when the caller is a ZONAL_MANAGER (mirrors ZmScheduleQueryService). */

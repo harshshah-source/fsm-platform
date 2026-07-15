@@ -39,6 +39,7 @@ describe('/api/dispatch-runs (e2e)', () => {
   let tZmAssigned: string;
   let tZmUnassignable: string;
   let tOther: string;
+  let ohActorName: string;
   const userIds: string[] = [];
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
@@ -104,6 +105,8 @@ describe('/api/dispatch-runs (e2e)', () => {
     await app.init();
     prisma = app.get(PrismaService);
 
+    await purgeOrphans(prisma);
+
     // The ZM's zone (id 1) must exist as a row; create it if this DB doesn't have it yet.
     const zm = await prisma.zone.findUnique({ where: { zoneId: ZM_ZONE } });
     if (!zm) {
@@ -132,9 +135,17 @@ describe('/api/dispatch-runs (e2e)', () => {
     // this shared DB). The ledger/zone-row writes were pinned in dispatch-transparency.e2e-spec.
     const recommender = app.get(RecommenderService);
     const dispatch = app.get(BatchAssignmentService);
+    // Login users (ops.head@fsm.test) live in the in-memory auth store, not the `users` table
+    // (#91 InMemoryUserStore), so the actor needs a real row to resolve a name from.
+    const ohActor = await prisma.user.create({
+      data: { name: 'OH Actor ' + NS, role: 'OPERATIONS_HEAD', phone: 'ph-oh-' + NS, email: `oh-actor-${NS}@dt-api.test` },
+    });
+    userIds.push(ohActor.userId);
+    ohActorName = ohActor.name;
     const run = await prisma.dispatchRun.create({
       data: {
         trigger: 'MANUAL',
+        actorUserId: ohActor.userId,
         actorRole: 'OPERATIONS_HEAD',
         startedAt: NOW,
         configSnapshot: {
@@ -226,6 +237,8 @@ describe('/api/dispatch-runs (e2e)', () => {
     });
     expect(row.startedAt).toBeDefined();
     expect(row.durationMs).toBeGreaterThanOrEqual(0);
+    // Gap A: MANUAL run shows who triggered it (name + role), not just a UUID.
+    expect(row).toMatchObject({ actorRole: 'OPERATIONS_HEAD', actorName: ohActorName });
   });
 
   it('ZM list totals are clamped to their zone slice', async () => {
@@ -245,6 +258,7 @@ describe('/api/dispatch-runs (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(res.body.configSnapshot.capacity[seZm]).toEqual({ dailyCapacity: 25, isActive: true });
+    expect(res.body).toMatchObject({ actorRole: 'OPERATIONS_HEAD', actorName: ohActorName });
     expect(res.body.zones).toHaveLength(2);
     const zmCard = res.body.zones.find((z: any) => z.zoneId === ZM_ZONE.toString());
     expect(zmCard).toMatchObject({ mode: 'DEFICIT', recommended: 1, unassignable: 1, ticketsDispatched: 1 });
@@ -314,6 +328,8 @@ describe('/api/dispatch-runs (e2e)', () => {
     });
     expect(typeof res.body.rows[0].score).toBe('number');
     expect(res.body.rows[0].deviceId).toBeDefined();
+    // Gap C: degeneracy is on the row so the table can hide scores without N trace fetches.
+    expect(res.body.rows[0].scoreDegenerate).toBe(true);
   });
 
   it('ZM cannot read a foreign zone batch', async () => {
@@ -333,6 +349,8 @@ describe('/api/dispatch-runs (e2e)', () => {
     expect(res.body.trace.chosen).toMatchObject({ seId: seZm, coverageType: 'DEDICATED', precedenceRank: 1 });
     expect(res.body.trace.scoreDegenerate).toBe(true);
     expect(res.body.scoreBreakdown).toBeDefined();
+    // Gap D: seId -> name map so the trace reads in human terms, not UUIDs.
+    expect(res.body.seNames[seZm]).toMatch(/^SE zm-/);
 
     await request(app.getHttpServer())
       .get(`/api/dispatch-runs/${runId}/tickets/${tOther}/trace`)
@@ -346,3 +364,47 @@ describe('/api/dispatch-runs (e2e)', () => {
     await request(app.getHttpServer()).get('/api/dispatch-runs').expect(401);
   });
 });
+
+/**
+ * Self-healing pre-clean: purge any orphaned artifacts this spec left behind if a previous run
+ * aborted mid-`beforeAll` (e.g. before its `afterAll` could scope its deletes). Pattern-matched on
+ * this spec's own naming (`P-dt-*`, `*@dt-api.test`, `Z-dt-api-*`, `Co-dt-api-*`) so it never touches
+ * other suites' data or the shared ZM zone (id 1, named `Z1-dt-api-*` — deliberately NOT purged).
+ * FK-safe order: decision traces (RESTRICT on ticket_id + run_id) before tickets/runs; run_id links
+ * on recommendations/work_schedules are SET NULL, dispatch_run_zones CASCADE with the run.
+ */
+async function purgeOrphans(prisma: PrismaService): Promise<void> {
+  const plants = await prisma.plant.findMany({ where: { name: { startsWith: 'P-dt-' } }, select: { plantId: true } });
+  const users = await prisma.user.findMany({ where: { email: { endsWith: '@dt-api.test' } }, select: { userId: true } });
+  const plantIds = plants.map((p) => p.plantId);
+  const userIds = users.map((u) => u.userId);
+  if (plantIds.length === 0 && userIds.length === 0) return;
+
+  const tickets = plantIds.length
+    ? await prisma.ticket.findMany({ where: { plantId: { in: plantIds } }, select: { ticketId: true, deviceId: true } })
+    : [];
+  const ticketIds = tickets.map((t) => t.ticketId);
+  const deviceIds = [...new Set(tickets.map((t) => t.deviceId).filter((d): d is string => d != null))];
+  const runs = userIds.length
+    ? await prisma.dispatchRun.findMany({ where: { actorUserId: { in: userIds } }, select: { runId: true } })
+    : [];
+  const runIds = runs.map((r) => r.runId);
+
+  await prisma.dispatchDecisionTrace.deleteMany({ where: { OR: [{ ticketId: { in: ticketIds } }, { runId: { in: runIds } }] } });
+  await prisma.batchAssignmentTicket.deleteMany({ where: { ticketId: { in: ticketIds } } });
+  await prisma.plantBatchAssignment.deleteMany({ where: { plantId: { in: plantIds } } });
+  await prisma.workSchedule.deleteMany({ where: { OR: [{ runId: { in: runIds } }, { seId: { in: userIds } }] } });
+  await prisma.recommendation.deleteMany({ where: { ticketId: { in: ticketIds } } });
+  await prisma.dispatchRun.deleteMany({ where: { runId: { in: runIds } } }); // zone rows cascade
+  await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
+  await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
+  await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
+  await prisma.seCoverage.deleteMany({ where: { seId: { in: userIds } } });
+  await prisma.deviceState.deleteMany({ where: { deviceId: { in: deviceIds } } });
+  await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
+  await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: userIds } } });
+  await prisma.user.deleteMany({ where: { userId: { in: userIds } } });
+  await prisma.plant.deleteMany({ where: { plantId: { in: plantIds } } });
+  await prisma.company.deleteMany({ where: { name: { startsWith: 'Co-dt-api-' } } });
+  await prisma.zone.deleteMany({ where: { name: { startsWith: 'Z-dt-api-other-' } } });
+}
