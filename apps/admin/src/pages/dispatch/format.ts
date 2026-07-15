@@ -69,6 +69,22 @@ export function componentLabel(component: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/** 1 → "1st", 2 → "2nd", 3 → "3rd", 4 → "4th"… for precedence-rank prose. */
+export function ordinal(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
 /** Translate the common `m h * * *` daily cron to human time; fall back to the raw expression. */
 export function humanizeCron(cron: string): string {
   const parts = cron.trim().split(/\s+/);

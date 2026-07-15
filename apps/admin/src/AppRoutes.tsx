@@ -16,6 +16,7 @@ import { CrossZonePage } from './pages/cross-zone/CrossZonePage';
 import { DispatchRunsPage } from './pages/dispatch/DispatchRunsPage';
 import { DispatchRunDetailPage } from './pages/dispatch/DispatchRunDetailPage';
 import { DispatchZoneDetailPage } from './pages/dispatch/DispatchZoneDetailPage';
+import { DispatchBatchDetailPage } from './pages/dispatch/DispatchBatchDetailPage';
 import { InstallCreatePage } from './pages/install/InstallCreatePage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
@@ -107,6 +108,14 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <DispatchZoneDetailPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/dispatch-runs/:runId/batches/:batchId"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <DispatchBatchDetailPage />
               </RoleRoute>
             }
           />
