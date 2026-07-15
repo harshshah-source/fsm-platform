@@ -11,6 +11,8 @@ export interface DispatchOptions {
   dateFrom: Date;
   dateTo: Date;
   now?: Date;
+  /** Dispatch-run ledger id (transparency feature) — stamped on created schedules, observe-only. */
+  runId?: bigint;
 }
 
 export interface DispatchSummary {
@@ -94,6 +96,7 @@ export class BatchAssignmentService {
             status: 'ACTIVE',
             source: 'SYSTEM_GENERATED',
             dispatchedAt: now,
+            runId: opts.runId ?? null,
           },
         });
         schedules++;

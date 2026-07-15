@@ -59,12 +59,22 @@ describe('Issue 113 — DispatchRunService.runForActiveZones', () => {
   });
 
   afterAll(async () => {
+    // Ledger cleanup: runs this spec opened (deleting a run cascades its zone rows and SET-NULLs the
+    // run_id stamps; deleting recommendations cascades their decision traces).
+    const runs = await prisma.dispatchRun.findMany({
+      where: { recommendations: { some: { ticketId: { in: ticketIds } } } },
+      select: { runId: true },
+    });
     const schedules = await prisma.workSchedule.findMany({ where: { zoneId }, select: { scheduleId: true } });
     const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } }, select: { batchId: true } });
     await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
     await prisma.plantBatchAssignment.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
     await prisma.workSchedule.deleteMany({ where: { zoneId } });
     await prisma.recommendation.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await prisma.dispatchRun.deleteMany({ where: { runId: { in: runs.map((r) => r.runId) } } });
+    await prisma.auditLog.deleteMany({
+      where: { entityType: 'dispatch_run', entityId: { in: runs.map((r) => r.runId.toString()) } },
+    });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });

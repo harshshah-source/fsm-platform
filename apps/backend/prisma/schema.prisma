@@ -342,7 +342,7 @@ model Recommendation {
 
   ticket   Ticket                 @relation(fields: [ticketId], references: [ticketId])
   engineer EngineerMaster?        @relation(fields: [seId], references: [engineerId])
-  run      DispatchRun?           @relation(fields: [runId], references: [runId])
+  run      DispatchRun?           @relation(fields: [runId], references: [runId], onDelete: SetNull)
   trace    DispatchDecisionTrace?
 
   @@index([ticketId])
@@ -501,7 +501,7 @@ model WorkSchedule {
 
   engineer EngineerMaster         @relation(fields: [seId], references: [engineerId])
   zone     Zone                   @relation(fields: [zoneId], references: [zoneId])
-  run      DispatchRun?           @relation(fields: [runId], references: [runId])
+  run      DispatchRun?           @relation(fields: [runId], references: [runId], onDelete: SetNull)
   batches  PlantBatchAssignment[]
 
   @@index([seId, dateFrom])
@@ -655,8 +655,8 @@ model DispatchRunZone {
   startedAt           DateTime          @map("started_at") @db.Timestamptz(6)
   finishedAt          DateTime?         @map("finished_at") @db.Timestamptz(6)
 
-  run  DispatchRun @relation(fields: [runId], references: [runId])
-  zone Zone        @relation(fields: [zoneId], references: [zoneId])
+  run  DispatchRun @relation(fields: [runId], references: [runId], onDelete: Cascade)
+  zone Zone        @relation(fields: [zoneId], references: [zoneId], onDelete: Cascade)
 
   @@unique([runId, zoneId])
   @@index([zoneId])
@@ -681,7 +681,7 @@ model DispatchDecisionTrace {
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   run            DispatchRun     @relation(fields: [runId], references: [runId])
-  recommendation Recommendation  @relation(fields: [recommendationId], references: [recommendationId])
+  recommendation Recommendation  @relation(fields: [recommendationId], references: [recommendationId], onDelete: Cascade)
   ticket         Ticket          @relation(fields: [ticketId], references: [ticketId])
   engineer       EngineerMaster? @relation(fields: [seId], references: [engineerId])
 

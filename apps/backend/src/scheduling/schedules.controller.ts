@@ -52,8 +52,13 @@ export class SchedulesController {
   @Post('dispatch-run')
   @HttpCode(200)
   @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
-  dispatchRunNow(): Promise<DispatchRunSummary> {
-    return this.dispatchRun.runForActiveZones();
+  dispatchRunNow(@CurrentUser() user: AccessTokenClaims): Promise<DispatchRunSummary> {
+    // MANUAL + actor land on the dispatch_runs ledger row and its audit bracket.
+    return this.dispatchRun.runForActiveZones(new Date(), {
+      trigger: 'MANUAL',
+      actorUserId: user.user_id,
+      actorRole: user.role,
+    });
   }
 
   @Get('me')

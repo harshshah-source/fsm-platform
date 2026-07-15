@@ -12,6 +12,8 @@ import { type ScoringWeights, scoreCandidate } from './scoring';
 
 const DEFAULT_CLUSTER_MULTIPLIER = 1.25;
 const DEFAULT_WEIGHT_SET = 'v1';
+/** Bounded trace: at most this many runners-up are recorded per ticket (drop COUNTS cover the rest). */
+const TRACE_RUNNERS_UP = 5;
 // PREVENTIVE-mode code defaults (Issue 72), used when no `<ref>_preventive` set is configured in
 // `priority_rule_config`. Repeat-failure flips from penalty to bonus and aged devices add — biasing the
 // planner toward repeat-offenders and aged devices (CONTEXT §5). Tunable via the DB set.
@@ -32,11 +34,30 @@ const BUCKET_SEVERITY: DeviceBucket[] = [
 ];
 const urgencyFromBucket = (b: DeviceBucket): number => BUCKET_SEVERITY.indexOf(b) / (BUCKET_SEVERITY.length - 1);
 
+/** Why an unassignable ticket's candidate pool ended up empty (transparency trace). */
+export type PoolEmptyReason = 'NO_COVERAGE' | 'ALL_DROPPED';
+
+/**
+ * Zone-level unassignable reason buckets: NO_COVERAGE (the plant returned zero candidates — an Ops
+ * coverage gap) vs ALL_DROPPED (candidates existed; `dropBuckets` counts which hard filters emptied
+ * the pool). Feeds the dispatch_run_zones card, aggregated over unassignable tickets only.
+ */
+export interface UnassignableReasons {
+  NO_COVERAGE: number;
+  ALL_DROPPED: number;
+  dropBuckets: Record<string, number>;
+}
+
 export interface RunSummary {
   recommended: number;
   unassignable: number;
   /** The zone's active Recommender mode this run, switched off the Soft Inactive Count (Issue 40). */
   mode: RecommenderMode;
+  /** The weight set that actually applied — stamped per-zone on the dispatch-run ledger. */
+  weightSetRef: string;
+  /** Tickets entering the processing loop (canonical-sorted TROUBLESHOOT + PREVENTIVE installs). */
+  ticketsConsidered: number;
+  unassignableReasons: UnassignableReasons;
 }
 
 /**
@@ -73,7 +94,7 @@ export class RecommenderService {
     private readonly softInactive: SoftInactiveCountService = new SoftInactiveCountService(prisma),
   ) {}
 
-  async runForZone(zoneId: bigint, opts: { now?: Date } = {}): Promise<RunSummary> {
+  async runForZone(zoneId: bigint, opts: { now?: Date; runId?: bigint } = {}): Promise<RunSummary> {
     const now = opts.now ?? new Date();
     // Soft Inactive Count drives the deficit/preventive switch (Issue 40, CONTEXT §5). Recorded on the
     // run + each recommendation's breakdown; full preventive-mode scoring re-prioritisation → follow-up.
@@ -132,6 +153,10 @@ export class RecommenderService {
 
     let recommended = 0;
     let unassignable = 0;
+    // Transparency trace (observe-only): collected per ticket, batch-inserted after the loop when a
+    // dispatch-run ledger id is supplied. Selection/scoring above and below is untouched.
+    const traceRows: Prisma.DispatchDecisionTraceCreateManyInput[] = [];
+    const unassignableReasons: UnassignableReasons = { NO_COVERAGE: 0, ALL_DROPPED: 0, dropBuckets: {} };
 
     for (let i = 0; i < runList.length; i++) {
       const t = runList[i];
@@ -169,8 +194,14 @@ export class RecommenderService {
       seededPlants.add(String(t.plantId));
       const multiplier = isSeed ? 1 : clusterMultiplier;
 
+      // Per-filter drop COUNTS across the whole pool — the trace never stores dropped rows verbatim.
+      const dropCounts: Record<string, number> = {};
+      for (const d of filtered.dropped) dropCounts[d.reason] = (dropCounts[d.reason] ?? 0) + 1;
+      const dropReasonBySe = new Map(filtered.dropped.map((d) => [d.candidate.seId, d.reason]));
+      const passedSet = new Set(passed.map((c) => c.seId));
+
       if (chosen === null) {
-        await this.prisma.recommendation.create({
+        const rec = await this.prisma.recommendation.create({
           data: {
             ticketId: t.ticketId,
             seId: null,
@@ -180,8 +211,40 @@ export class RecommenderService {
             processingRank,
             status: 'UNASSIGNABLE',
             path: 'MORNING_BATCH',
+            runId: opts.runId ?? null,
           },
         });
+        // Coverage gap vs capacity/filter problem — first-class in the trace and the zone rollup.
+        const poolEmptyReason: PoolEmptyReason = ordered.length === 0 ? 'NO_COVERAGE' : 'ALL_DROPPED';
+        unassignableReasons[poolEmptyReason]++;
+        for (const [reason, n] of Object.entries(dropCounts))
+          unassignableReasons.dropBuckets[reason] = (unassignableReasons.dropBuckets[reason] ?? 0) + n;
+        if (opts.runId !== undefined) {
+          traceRows.push({
+            runId: opts.runId,
+            recommendationId: rec.recommendationId,
+            ticketId: t.ticketId,
+            zoneId,
+            seId: null,
+            trace: {
+              candidatesTotal: ordered.length,
+              passedCount: 0,
+              dropCounts,
+              chosen: null,
+              runnersUp: ordered.slice(0, TRACE_RUNNERS_UP).map((c, idx) => ({
+                seId: c.seId,
+                coverageType: c.coverageType,
+                precedenceRank: idx + 1,
+                verdict: 'DROPPED',
+                dropReason: dropReasonBySe.get(c.seId) ?? null,
+                plannerPlanned: planned?.has(c.seId) ?? false,
+                score: null,
+              })),
+              scoreDegenerate: true,
+              poolEmptyReason,
+            } as Prisma.InputJsonValue,
+          });
+        }
         // Component-Blocked Queue (Issue 21): if a candidate was dropped because their Common Kit is
         // incomplete, record the ticket with the missing parts so the ZM sees an operational reason.
         const kitDrop = filtered.dropped.find((d) => d.reason === 'COMMON_KIT_INCOMPLETE');
@@ -197,24 +260,21 @@ export class RecommenderService {
       await this.inventory.resolveComponentBlock(t.ticketId, now);
 
       const coverageType = ordered.find((c) => c.seId === chosen.seId)!.coverageType;
-      const scored = scoreCandidate(
-        {
-          companyPriorityRank: t.companyPriorityRank,
-          // Install candidates have no SLA bucket → zero dispatch urgency (backlog, not an active outage).
-          dispatchUrgency: t.deviceBucket ? urgencyFromBucket(t.deviceBucket) : 0,
-          repeatFailure: t.repeatFailure,
-          // Age drives the PREVENTIVE aged-bias term (weighted 0 in DEFICIT). For installs the anchor is the
-          // backlog target date, so older Install backlog ranks higher.
-          inactivityHours: t.ageAnchor ? Math.max(0, (now.getTime() - t.ageAnchor.getTime()) / 3_600_000) : null,
-          distanceFromPrevStopKm: null, // Floating distance-from-previous-stop deferred (needs day-plan geo)
-        },
-        weights,
-        multiplier,
-      );
+      const features = {
+        companyPriorityRank: t.companyPriorityRank,
+        // Install candidates have no SLA bucket → zero dispatch urgency (backlog, not an active outage).
+        dispatchUrgency: t.deviceBucket ? urgencyFromBucket(t.deviceBucket) : 0,
+        repeatFailure: t.repeatFailure,
+        // Age drives the PREVENTIVE aged-bias term (weighted 0 in DEFICIT). For installs the anchor is the
+        // backlog target date, so older Install backlog ranks higher.
+        inactivityHours: t.ageAnchor ? Math.max(0, (now.getTime() - t.ageAnchor.getTime()) / 3_600_000) : null,
+        distanceFromPrevStopKm: null, // Floating distance-from-previous-stop deferred (needs day-plan geo)
+      };
+      const scored = scoreCandidate(features, weights, multiplier);
 
       assigned.set(chosen.seId, (assigned.get(chosen.seId) ?? 0) + 1);
 
-      await this.prisma.recommendation.create({
+      const rec = await this.prisma.recommendation.create({
         data: {
           ticketId: t.ticketId,
           seId: chosen.seId,
@@ -233,12 +293,73 @@ export class RecommenderService {
           processingRank,
           status: 'SUGGESTED',
           path: 'MORNING_BATCH',
+          runId: opts.runId ?? null,
         },
       });
       recommended++;
+
+      if (opts.runId !== undefined) {
+        // Distance-from-previous-stop is the only per-SE score component and is deferred-null, so all
+        // of a ticket's candidates score identically — precedence decides, and the trace says so.
+        const scoreDegenerate = features.distanceFromPrevStopKm === null || (weights['distance'] ?? 0) === 0;
+        const chosenRank = ordered.findIndex((c) => c.seId === chosen.seId) + 1;
+        const plannerPlanned = planned?.has(chosen.seId) ?? false;
+        traceRows.push({
+          runId: opts.runId,
+          recommendationId: rec.recommendationId,
+          ticketId: t.ticketId,
+          zoneId,
+          seId: chosen.seId,
+          trace: {
+            candidatesTotal: ordered.length,
+            passedCount: passed.length,
+            dropCounts,
+            chosen: {
+              seId: chosen.seId,
+              coverageType,
+              precedenceRank: chosenRank,
+              plannerPlanned,
+              // True only when the SE Planner soft bias actually changed the pick (ADR-0022).
+              plannerBias: plannerPlanned && passed[0]?.seId !== chosen.seId,
+              capacityAtDecision: {
+                used: assigned.get(chosen.seId) ?? 1,
+                cap: capacity.get(chosen.seId)?.dailyCapacity ?? null,
+              },
+              clusterSeed: isSeed,
+            },
+            runnersUp: ordered
+              .filter((c) => c.seId !== chosen.seId)
+              .slice(0, TRACE_RUNNERS_UP)
+              .map((c) => ({
+                seId: c.seId,
+                coverageType: c.coverageType,
+                precedenceRank: ordered.findIndex((o) => o.seId === c.seId) + 1,
+                verdict: passedSet.has(c.seId) ? 'PASSED' : 'DROPPED',
+                dropReason: dropReasonBySe.get(c.seId) ?? null,
+                plannerPlanned: planned?.has(c.seId) ?? false,
+                // PASSED runners-up are scored purely for the trace (pure function, observe-only);
+                // identical to the winner's score while `scoreDegenerate` holds.
+                score: passedSet.has(c.seId) ? scoreCandidate(features, weights, multiplier).score : null,
+              })),
+            scoreDegenerate,
+            poolEmptyReason: null,
+          } as Prisma.InputJsonValue,
+        });
+      }
     }
 
-    return { recommended, unassignable, mode };
+    if (opts.runId !== undefined && traceRows.length > 0) {
+      await this.prisma.dispatchDecisionTrace.createMany({ data: traceRows });
+    }
+
+    return {
+      recommended,
+      unassignable,
+      mode,
+      weightSetRef,
+      ticketsConsidered: runList.length,
+      unassignableReasons,
+    };
   }
 
   /** Memoise Common-Kit completeness for an SE within a run (Issue 21). */
