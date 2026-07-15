@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../lib/cn';
 import { EmptyState, ErrorState, Skeleton } from './feedback';
 
@@ -28,6 +28,11 @@ interface DataTableProps<T> {
    * tinted, carries `aria-current="true"`, and is scrolled into view once when it becomes active.
    */
   rowActive?: (row: T) => boolean;
+  /**
+   * Visual treatment for the active row. `'info'` (default) is the subtle blue tint; `'danger'` paints
+   * it solid red with white text — used on the Tickets list so the open ticket's row reads as selected.
+   */
+  activeVariant?: 'info' | 'danger';
   loading?: boolean;
   error?: string | null;
   /** Retry handler surfaced by the built-in inline error state. */
@@ -39,6 +44,13 @@ interface DataTableProps<T> {
    */
   stickyHeader?: boolean;
   maxBodyHeight?: string;
+  /**
+   * Disclosure: when supplied and it returns non-null for a row, that row becomes expandable — a
+   * trailing chevron toggles a full-width panel (rendered below the row) holding the returned content.
+   * Row click toggles the panel (takes over from `onRowClick`, which expandable tables don't use).
+   * Rows for which this returns null render normally with no chevron.
+   */
+  renderExpanded?: (row: T) => ReactNode;
 }
 
 /**
@@ -55,14 +67,25 @@ export function DataTable<T>({
   rowTestId,
   rowAccent,
   rowActive,
+  activeVariant = 'info',
   loading,
   error,
   onRetry,
   empty,
   stickyHeader = false,
   maxBodyHeight = '70vh',
+  renderExpanded,
 }: DataTableProps<T>) {
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const toggleExpanded = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  // Total column count including the trailing chevron cell — used for full-width state/expansion rows.
+  const totalCols = columns.length + (renderExpanded ? 1 : 0);
   // The active row auto-scrolls into view exactly once per row key — not on every re-render, or the
   // table would fight the user's own scrolling on each data refresh.
   const scrolledActiveKey = useRef<string | null>(null);
@@ -122,6 +145,15 @@ export function DataTable<T>({
                   {c.sortable && sort?.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
                 </th>
               ))}
+              {renderExpanded && (
+                <th
+                  aria-hidden
+                  className={cn(
+                    'w-10 px-2 py-3',
+                    stickyHeader && 'sticky top-0 z-10 bg-chrome-900 shadow-[inset_0_-1px_0_var(--color-chrome-700)]',
+                  )}
+                />
+              )}
             </tr>
           </thead>
           <tbody>
@@ -139,7 +171,7 @@ export function DataTable<T>({
 
             {!loading && error && (
               <tr>
-                <td colSpan={columns.length} className="p-0">
+                <td colSpan={totalCols} className="p-0">
                   <ErrorState message={error} onRetry={onRetry} />
                 </td>
               </tr>
@@ -147,7 +179,7 @@ export function DataTable<T>({
 
             {!loading && !error && sorted.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="p-0">
+                <td colSpan={totalCols} className="p-0">
                   {empty ?? <EmptyState />}
                 </td>
               </tr>
@@ -156,61 +188,90 @@ export function DataTable<T>({
             {!loading &&
               !error &&
               sorted.map((row) => {
+                const key = rowKey(row);
                 const accent = rowAccent?.(row);
                 const active = rowActive?.(row) ?? false;
+                // Expansion takes precedence over onRowClick: an expandable row toggles its panel.
+                const expandedContent = renderExpanded?.(row);
+                const canExpand = expandedContent != null;
+                const isOpen = canExpand && expanded.has(key);
+                const activate = canExpand ? () => toggleExpanded(key) : onRowClick ? () => onRowClick(row) : undefined;
                 return (
-                  <tr
-                    key={rowKey(row)}
-                    data-testid={rowTestId?.(row)}
-                    aria-current={active ? 'true' : undefined}
-                    ref={
-                      active
-                        ? (el) => {
-                            const k = rowKey(row);
-                            if (el && scrolledActiveKey.current !== k) {
-                              scrolledActiveKey.current = k;
-                              // Optional-chained: jsdom has no scrollIntoView.
-                              el.scrollIntoView?.({ block: 'nearest' });
+                  <Fragment key={key}>
+                    <tr
+                      data-testid={rowTestId?.(row)}
+                      aria-current={active ? 'true' : undefined}
+                      aria-expanded={canExpand ? isOpen : undefined}
+                      ref={
+                        active
+                          ? (el) => {
+                              if (el && scrolledActiveKey.current !== key) {
+                                scrolledActiveKey.current = key;
+                                // Optional-chained: jsdom has no scrollIntoView.
+                                el.scrollIntoView?.({ block: 'nearest' });
+                              }
                             }
-                          }
-                        : undefined
-                    }
-                    onClick={onRowClick ? () => onRowClick(row) : undefined}
-                    // Keyboard parity for clickable rows: focusable + Enter/Space activate. The <tr> keeps
-                    // its implicit `row` role (no role override) so table semantics/selectors stay intact.
-                    tabIndex={onRowClick ? 0 : undefined}
-                    onKeyDown={
-                      onRowClick
-                        ? (e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              onRowClick(row);
+                          : undefined
+                      }
+                      onClick={activate}
+                      // Keyboard parity for clickable rows: focusable + Enter/Space activate. The <tr> keeps
+                      // its implicit `row` role (no role override) so table semantics/selectors stay intact.
+                      tabIndex={activate ? 0 : undefined}
+                      onKeyDown={
+                        activate
+                          ? (e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                activate();
+                              }
                             }
-                          }
-                        : undefined
-                    }
-                    className={cn(
-                      'border-b border-line/80 last:border-b-0 transition-colors',
-                      onRowClick &&
-                        'cursor-pointer hover:bg-surface-sunken/70 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50',
-                      accent && `border-l-2 ${accent}`,
-                      // Active tint wins over the hover wash; the inset bar marks it even when hovered.
-                      active && 'bg-info-bg/60 hover:bg-info-bg/60 shadow-[inset_3px_0_0_var(--color-info)]',
+                          : undefined
+                      }
+                      className={cn(
+                        'border-b border-line/80 last:border-b-0 transition-colors',
+                        activate &&
+                          'cursor-pointer hover:bg-surface-sunken/70 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50',
+                        isOpen && 'bg-surface-sunken/50',
+                        accent && `border-l-2 ${accent}`,
+                        // Active tint wins over the hover wash; the inset bar marks it even when hovered.
+                        // 'danger' paints the whole row red with white text (the `[&>td]:text-white`
+                        // overrides each cell's default `text-ink`); coloured badges keep their own fill.
+                        active &&
+                          (activeVariant === 'danger'
+                            ? 'bg-critical text-white hover:bg-critical shadow-[inset_3px_0_0_var(--color-critical)] [&>td]:text-white'
+                            : 'bg-info-bg/60 hover:bg-info-bg/60 shadow-[inset_3px_0_0_var(--color-info)]'),
+                      )}
+                    >
+                      {columns.map((c) => (
+                        <td
+                          key={c.key}
+                          className={cn(
+                            'px-4 py-3 align-middle text-ink',
+                            c.align === 'right' && 'text-right tabular-nums',
+                            c.className,
+                          )}
+                        >
+                          {c.render ? c.render(row) : null}
+                        </td>
+                      ))}
+                      {renderExpanded && (
+                        <td className="w-10 px-2 py-3 text-center align-middle text-ink-muted">
+                          {canExpand && (
+                            <span aria-hidden className="inline-block transition-transform">
+                              {isOpen ? '▾' : '▸'}
+                            </span>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-b border-line/80 last:border-b-0 bg-surface-sunken/40">
+                        <td colSpan={totalCols} className="px-4 py-4 align-top text-ink">
+                          {expandedContent}
+                        </td>
+                      </tr>
                     )}
-                  >
-                    {columns.map((c) => (
-                      <td
-                        key={c.key}
-                        className={cn(
-                          'px-4 py-3 align-middle text-ink',
-                          c.align === 'right' && 'text-right tabular-nums',
-                          c.className,
-                        )}
-                      >
-                        {c.render ? c.render(row) : null}
-                      </td>
-                    ))}
-                  </tr>
+                  </Fragment>
                 );
               })}
           </tbody>

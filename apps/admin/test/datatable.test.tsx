@@ -92,6 +92,33 @@ describe('DataTable shared primitive', () => {
     expect(header.className).toMatch(/sticky/);
   });
 
+  it('toggles an expandable row panel on click and collapses it again', async () => {
+    renderTable({ renderExpanded: (r) => <div>Detail for {r.name}</div> });
+    // Panels start collapsed.
+    expect(screen.queryByText('Detail for Alpha')).toBeNull();
+    const alphaRow = screen.getByText('Alpha').closest('tr')!;
+    expect(alphaRow).toHaveAttribute('aria-expanded', 'false');
+
+    await userEvent.click(alphaRow);
+    expect(screen.getByText('Detail for Alpha')).toBeInTheDocument();
+    expect(alphaRow).toHaveAttribute('aria-expanded', 'true');
+    // Only the clicked row expands.
+    expect(screen.queryByText('Detail for Beta')).toBeNull();
+
+    await userEvent.click(alphaRow);
+    expect(screen.queryByText('Detail for Alpha')).toBeNull();
+    expect(alphaRow).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('renders no chevron/expansion affordance for rows whose renderExpanded returns null', () => {
+    renderTable({ renderExpanded: (r) => (r.name === 'Alpha' ? <div>Detail for Alpha</div> : null) });
+    const alphaRow = screen.getByText('Alpha').closest('tr')!;
+    const betaRow = screen.getByText('Beta').closest('tr')!;
+    expect(alphaRow).toHaveAttribute('aria-expanded', 'false');
+    // Beta has no expandable content → no aria-expanded, not focusable.
+    expect(betaRow).not.toHaveAttribute('aria-expanded');
+  });
+
   it('Skeleton uses animate-pulse, which the global reduced-motion rule neutralizes', () => {
     // The actual motion reduction lives in a global @media (prefers-reduced-motion) block that disables
     // animation-duration app-wide; the primitive only needs to opt into that animation class.
