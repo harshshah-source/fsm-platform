@@ -13,6 +13,7 @@ import { HelpCenterPage } from './pages/help/HelpCenterPage';
 import { KitchenSink } from './pages/KitchenSink';
 import { LoginPage } from './pages/LoginPage';
 import { CrossZonePage } from './pages/cross-zone/CrossZonePage';
+import { DispatchRunsPage } from './pages/dispatch/DispatchRunsPage';
 import { InstallCreatePage } from './pages/install/InstallCreatePage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
@@ -78,6 +79,16 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <ScheduleDetailPage />
+              </RoleRoute>
+            }
+          />
+          {/* Batch-Assignment transparency drill-down (Issue 123) — manager roles; ZM zone-clamped
+              server-side. Detail / zone / batch routes land in the following slices. */}
+          <Route
+            path="/dispatch-runs"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <DispatchRunsPage />
               </RoleRoute>
             }
           />

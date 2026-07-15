@@ -71,6 +71,7 @@ export function buildNav(role: string): NavGroup[] {
     operations.push(
       { label: 'Create Install', to: '/install', icon: IconTruck },
       { label: 'Schedules', to: '/schedules', icon: IconCalendar },
+      { label: 'Dispatch Runs', to: '/dispatch-runs', icon: IconClipboard },
       { label: 'Intra-day Queue', to: '/intraday', icon: IconClock },
       { label: 'SE Activity', to: '/engineers', icon: IconActivity },
       { label: 'Manage SEs', to: '/engineers/manage', icon: IconShield },
