@@ -14,6 +14,7 @@ import { KitchenSink } from './pages/KitchenSink';
 import { LoginPage } from './pages/LoginPage';
 import { CrossZonePage } from './pages/cross-zone/CrossZonePage';
 import { DispatchRunsPage } from './pages/dispatch/DispatchRunsPage';
+import { DispatchRunDetailPage } from './pages/dispatch/DispatchRunDetailPage';
 import { InstallCreatePage } from './pages/install/InstallCreatePage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
@@ -89,6 +90,14 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <DispatchRunsPage />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="/dispatch-runs/:runId"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <DispatchRunDetailPage />
               </RoleRoute>
             }
           />

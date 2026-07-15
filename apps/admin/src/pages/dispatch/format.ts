@@ -51,3 +51,35 @@ export function triggerActor(run: Pick<DispatchRunListRow, 'trigger' | 'actorNam
 export function weightsAreDefault(priorityRules: { weightSetRef: string }[]): boolean {
   return priorityRules.length === 0;
 }
+
+/** Plain-language names for the scoring components captured in a run's priority-rule snapshot. */
+const COMPONENT_LABEL: Record<string, string> = {
+  companyPriorityRank: 'Customer priority',
+  dispatchUrgency: 'SLA urgency',
+  repeatFailure: 'Repeat failures',
+  inactivityHours: 'Device age / idle',
+  age: 'Device age / idle',
+  distance: 'Travel distance (not yet used)',
+};
+
+export function componentLabel(component: string): string {
+  if (COMPONENT_LABEL[component]) return COMPONENT_LABEL[component];
+  // Fallback: humanize a raw key (camelCase / snake_case → spaced, capitalized).
+  const spaced = component.replace(/[_-]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Translate the common `m h * * *` daily cron to human time; fall back to the raw expression. */
+export function humanizeCron(cron: string): string {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length === 5 && parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+    const min = Number(parts[0]);
+    const hour = Number(parts[1]);
+    if (Number.isInteger(min) && Number.isInteger(hour)) {
+      const h12 = hour % 12 === 0 ? 12 : hour % 12;
+      const ampm = hour < 12 ? 'AM' : 'PM';
+      return `daily at ${h12}:${String(min).padStart(2, '0')} ${ampm}`;
+    }
+  }
+  return cron;
+}
