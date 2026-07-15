@@ -136,6 +136,7 @@ model EngineerMaster {
   availability          SeAvailability[]
   leaveRequests         LeaveRequest[]
   expenseVouchers       ExpenseVoucher[]
+  dispatchTraces        DispatchDecisionTrace[]
 
   @@index([zoneId])
   @@index([lastActivityAt])
@@ -178,6 +179,7 @@ model Zone {
   warehouseStock ZoneWarehouseStock[]
   zoneMappings   ZoneMapping[]
   plantOverrides PlantZoneOverride[]
+  dispatchRuns   DispatchRunZone[]
 
   @@index([zonalManagerUserId])
   @@map("zones")
@@ -334,13 +336,18 @@ model Recommendation {
   status           String
   path             RecPath
   retryChain       Json?        @map("retry_chain")
+  /// Dispatch-run ledger link (transparency feature) — null for pre-ledger rows and the intraday path.
+  runId            BigInt?      @map("run_id")
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  ticket   Ticket          @relation(fields: [ticketId], references: [ticketId])
-  engineer EngineerMaster? @relation(fields: [seId], references: [engineerId])
+  ticket   Ticket                 @relation(fields: [ticketId], references: [ticketId])
+  engineer EngineerMaster?        @relation(fields: [seId], references: [engineerId])
+  run      DispatchRun?           @relation(fields: [runId], references: [runId])
+  trace    DispatchDecisionTrace?
 
   @@index([ticketId])
   @@index([seId])
+  @@index([runId])
   @@map("recommendations")
 }
 
@@ -487,15 +494,19 @@ model WorkSchedule {
   dispatchedAt     DateTime?          @map("dispatched_at") @db.Timestamptz(6)
   lastOverriddenBy String?            @map("last_overridden_by") @db.Uuid
   lastOverriddenAt DateTime?          @map("last_overridden_at") @db.Timestamptz(6)
+  /// Dispatch-run ledger link (transparency feature) — null for pre-ledger and ZM_MANUAL schedules.
+  runId            BigInt?            @map("run_id")
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   engineer EngineerMaster         @relation(fields: [seId], references: [engineerId])
   zone     Zone                   @relation(fields: [zoneId], references: [zoneId])
+  run      DispatchRun?           @relation(fields: [runId], references: [runId])
   batches  PlantBatchAssignment[]
 
   @@index([seId, dateFrom])
   @@index([zoneId, status])
+  @@index([runId])
   @@map("work_schedules")
 }
 
@@ -562,6 +573,121 @@ model SePlanner {
   @@unique([seId, plantId, plannedDate])
   @@index([plannedDate])
   @@map("se_planner")
+}
+
+/// How a dispatch run was started — the daily cron tick or the manual `POST /schedules/dispatch-run`.
+enum DispatchRunTrigger {
+  CRON
+  MANUAL
+
+  @@map("dispatch_run_trigger")
+}
+
+enum DispatchRunStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+
+  @@map("dispatch_run_status")
+}
+
+/// A zone's Recommender operating mode at run time (Soft Inactive Count switch, Issue 40) —
+/// persisted per run-zone so past runs show the mode that actually applied.
+enum DispatchZoneMode {
+  DEFICIT
+  PREVENTIVE
+
+  @@map("dispatch_zone_mode")
+}
+
+/// Batch-Assignment transparency ledger — one row per `runForActiveZones` invocation (snapshot_runs
+/// posture): created RUNNING up front, finalized SUCCESS/PARTIAL/FAILED (PARTIAL mirrors the
+/// contained per-zone failure semantics). `configSnapshot` is captured AT RUN START (active
+/// priority_rule_config sets, plant_cluster_multiplier, eligibility_mode, per-SE capacity map,
+/// scheduler flag/cron), so historical runs display the config that applied — not today's.
+/// Observe-only: the ledger records the dispatch, it never alters selection/scoring/ordering.
+model DispatchRun {
+  runId             BigInt             @id @default(autoincrement()) @map("run_id")
+  trigger           DispatchRunTrigger
+  actorUserId       String?            @map("actor_user_id") @db.Uuid
+  actorRole         String?            @map("actor_role")
+  startedAt         DateTime           @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt        DateTime?          @map("finished_at") @db.Timestamptz(6)
+  status            DispatchRunStatus  @default(RUNNING)
+  zones             Int                @default(0)
+  schedules         Int                @default(0)
+  batches           Int                @default(0)
+  ticketsDispatched Int                @default(0) @map("tickets_dispatched")
+  recommended       Int                @default(0)
+  unassignable      Int                @default(0)
+  configSnapshot    Json               @map("config_snapshot")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  zoneRows        DispatchRunZone[]
+  traces          DispatchDecisionTrace[]
+  recommendations Recommendation[]
+  workSchedules   WorkSchedule[]
+
+  @@index([startedAt(sort: Desc)])
+  @@map("dispatch_runs")
+}
+
+/// Per-zone breakdown of a dispatch run — feeds the run-detail zone cards directly.
+/// `unassignableReasons` distinguishes NO_COVERAGE (plant returned zero candidates — an Ops
+/// coverage gap) from ALL_DROPPED (candidates existed; `dropBuckets` shows which hard filters
+/// emptied the pool). `mode`/`weightSetRef` are null when the zone errored before the recommender ran.
+model DispatchRunZone {
+  id                  BigInt            @id @default(autoincrement())
+  runId               BigInt            @map("run_id")
+  zoneId              BigInt            @map("zone_id")
+  mode                DispatchZoneMode?
+  weightSetRef        String?           @map("weight_set_ref")
+  ticketsConsidered   Int               @default(0) @map("tickets_considered")
+  recommended         Int               @default(0)
+  unassignable        Int               @default(0)
+  unassignableReasons Json?             @map("unassignable_reasons")
+  schedules           Int               @default(0)
+  batches             Int               @default(0)
+  ticketsDispatched   Int               @default(0) @map("tickets_dispatched")
+  error               String?
+  startedAt           DateTime          @map("started_at") @db.Timestamptz(6)
+  finishedAt          DateTime?         @map("finished_at") @db.Timestamptz(6)
+
+  run  DispatchRun @relation(fields: [runId], references: [runId])
+  zone Zone        @relation(fields: [zoneId], references: [zoneId])
+
+  @@unique([runId, zoneId])
+  @@index([zoneId])
+  @@map("dispatch_run_zones")
+}
+
+/// Bounded per-ticket decision trace, 1:1 with the run's `recommendations` row. The jsonb carries
+/// per-filter drop COUNTS (never raw dropped rows), the chosen SE's precedence context
+/// (coverage tier, precedence rank, planner-bias, capacity slot, cluster seed) and the top-5
+/// runners-up (precedence rank + coverage tier + PASSED/DROPPED verdict; scores are stamped
+/// `scoreDegenerate` while distance-from-previous-stop is deferred-null — precedence decides today).
+/// Unassignable tickets get the same row (`seId` null) with `poolEmptyReason`
+/// NO_COVERAGE | ALL_DROPPED. Retention: 90 days (#104 matrix), same window as `recommendations`.
+model DispatchDecisionTrace {
+  traceId          BigInt   @id @default(autoincrement()) @map("trace_id")
+  runId            BigInt   @map("run_id")
+  recommendationId BigInt   @unique @map("recommendation_id")
+  ticketId         String   @map("ticket_id") @db.Uuid
+  zoneId           BigInt   @map("zone_id")
+  seId             String?  @map("se_id") @db.Uuid
+  trace            Json
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  run            DispatchRun     @relation(fields: [runId], references: [runId])
+  recommendation Recommendation  @relation(fields: [recommendationId], references: [recommendationId])
+  ticket         Ticket          @relation(fields: [ticketId], references: [ticketId])
+  engineer       EngineerMaster? @relation(fields: [seId], references: [engineerId])
+
+  @@index([runId, zoneId])
+  @@index([ticketId])
+  @@map("dispatch_decision_traces")
 }
 
 /// SE soft-state type (schema D7) — temporary field-progress signal, never a ticket lifecycle state.
@@ -1811,6 +1937,7 @@ model Ticket {
   intradayInsertions           IntradayInsertion[]
   crossZoneEscalations         CrossZoneEscalation[]
   batchTickets                 BatchAssignmentTicket[]
+  dispatchTraces               DispatchDecisionTrace[]
   softStates                   SoftState[]
   troubleshootingSubmissions   TroubleshootingSubmission[]
   verificationRuns             VerificationRun[]
@@ -1822,6 +1949,9 @@ model Ticket {
   @@index([status, plantId])
   @@index([workType, status])
   @@index([companyId])
+  // Latest-ticket-per-device lookups (device list lateral, device-detail reads) — without this the
+  // 20k-device fleet list seq-scans tickets once per device (~80s page load).
+  @@index([deviceId, createdAt(sort: Desc)])
   @@index([nonOpMarkingId])
   @@index([assignedSeId])
   @@index([installBatchId])
