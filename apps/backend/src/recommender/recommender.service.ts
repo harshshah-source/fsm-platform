@@ -339,6 +339,11 @@ export class RecommenderService {
                 plannerPlanned: planned?.has(c.seId) ?? false,
                 // PASSED runners-up are scored purely for the trace (pure function, observe-only);
                 // identical to the winner's score while `scoreDegenerate` holds.
+                // TODO: when distance scoring lands (weights.distance > 0 && distanceFromPrevStopKm !== null),
+                // scoreCandidate MUST receive per-candidate features, not the ticket's features. Otherwise
+                // scoreDegenerate flips off and runner-up scores become misleadingly equal to the winner's —
+                // the trace becomes an actively wrong 'why this SE' explanation. Reference: transparency
+                // audit 2026-07-16, note 1.
                 score: passedSet.has(c.seId) ? scoreCandidate(features, weights, multiplier).score : null,
               })),
             scoreDegenerate,

@@ -7,6 +7,7 @@ import { DAY_PLAN_NOTIFIER, LoggingDayPlanNotifier } from './day-plan-notifier';
 import { DayPlanQueryService } from './day-plan-query.service';
 import { DispatchRunService } from './dispatch-run.service';
 import { DispatchSchedulerService } from './dispatch-scheduler.service';
+import { DispatchTransparencyQueryService } from './dispatch-transparency-query.service';
 import { OverrideService } from './override.service';
 import { SameDayUpdateService } from './same-day-update.service';
 import { SOFT_STATE_CONFLICT } from './soft-state-conflict';
@@ -24,6 +25,7 @@ import { ZmScheduleQueryService } from './zm-schedule-query.service';
     BatchAssignmentService,
     DayPlanQueryService,
     ZmScheduleQueryService,
+    DispatchTransparencyQueryService,
     OverrideService,
     SameDayUpdateService,
     // Issue 113 — the daily Recommender → Day-Plan dispatch run + its scheduler tick. The scheduler is
@@ -39,6 +41,6 @@ import { ZmScheduleQueryService } from './zm-schedule-query.service';
     // Issue 15 AC#7 — the real soft_states-backed conflict source replaces the 13a no-conflict seam.
     { provide: SOFT_STATE_CONFLICT, useClass: PrismaSoftStateConflictPort },
   ],
-  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, OverrideService, SameDayUpdateService, DispatchRunService],
+  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService],
 })
 export class SchedulingModule {}
