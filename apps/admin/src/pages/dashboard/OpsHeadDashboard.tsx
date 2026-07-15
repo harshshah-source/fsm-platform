@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DateRangeChips, MetricStrip, PageHeader, RollingNumber, type Metric } from '../../components/data';
-import { DistributionBar, type DistSegment } from '../../components/charts';
+import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
-import { BUCKET_HEX, BUCKET_LABEL_RANGE, SLA_BUCKETS, sumCriticalDevices } from '../../lib/slaBucket';
+import { sumCriticalDevices } from '../../lib/slaBucket';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { onIngestionComplete } from './ingestionEvents';
 import { ScorecardTable } from './ScorecardTable';
@@ -58,17 +58,6 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRef
     { label: 'Avg Resolution', value: '—', hint: 'System Efficiency (BE-42)', tone: 'neutral' },
   ];
 
-  // SLA Bucket Distribution — aggregate every zone's bucket counts into the heat-ramp.
-  const segments: DistSegment[] = useMemo(
-    () =>
-      SLA_BUCKETS.map((b) => ({
-        label: BUCKET_LABEL_RANGE[b],
-        value: zones.reduce((s, z) => s + (z.byBucket[b] ?? 0), 0),
-        color: BUCKET_HEX[b],
-      })),
-    [zones],
-  );
-
   return (
     <div>
       <PageHeader
@@ -107,8 +96,10 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRef
         >
           SLA Bucket Distribution
         </h3>
+        {/* Reference bar graph (uiDashboardSLA Bucket Distribution.jpg): per-zone bars grouped by
+            bucket, semantic SLA colours, dashed average line, dark hover pill + count legend. */}
         <div className="rounded-card border border-line bg-surface-card p-4 shadow-sm">
-          <DistributionBar segments={segments} />
+          <SlaBucketBarChart zones={zones} />
         </div>
       </section>
 
