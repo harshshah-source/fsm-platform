@@ -28,7 +28,7 @@ export function SectionCard({
   return (
     <Card className={className}>
       {(title || action) && (
-        <div className="flex items-center justify-between gap-3 border-b border-line bg-gradient-to-r from-surface-raised via-surface-card to-luxury-100/45 px-5 py-4">
+        <div className="flex items-center justify-between gap-3 border-b border-line bg-surface-raised/70 px-5 py-4">
           {typeof title === 'string' ? (
             <h3 className="text-[0.82rem] font-semibold text-ink-strong">{title}</h3>
           ) : (

@@ -8,9 +8,9 @@ export const CHART = {
   warning: '#d99100',
   critical: '#b42318',
   criticalDeep: '#7a1b12',
-  neutral: '#94a3b8',
-  axis: '#8a93a3',
-  grid: '#e7e5e1',
+  neutral: '#9aa0aa',
+  axis: '#83868e',
+  grid: '#e4e6ea',
 } as const;
 
 export const CHART_PALETTE = [

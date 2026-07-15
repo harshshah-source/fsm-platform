@@ -79,7 +79,7 @@ export function TopBar() {
 
       {/* Page identity — muted eyebrow over a prominent current-page title (clear "you are here"). */}
       <div className="hidden shrink-0 flex-col justify-center leading-tight lg:flex">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-luxury-700">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-brand-600">
           FSM Command Console
         </span>
         <span className="text-[15px] font-semibold leading-tight text-ink-strong">
@@ -136,7 +136,7 @@ export function TopBar() {
 
         {/* Profile section — initials avatar (brand-tinted) + identity, grouped as a distinct card. */}
         <div className="flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface-card py-1 pl-1.5 pr-1.5 shadow-card sm:pr-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-luxury-100 text-[11px] font-bold text-luxury-700 ring-1 ring-luxury-300/60">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-300/40 text-[11px] font-bold text-brand-700 ring-1 ring-brand-300/70">
             {initials}
           </span>
           <div className="hidden leading-tight sm:block">

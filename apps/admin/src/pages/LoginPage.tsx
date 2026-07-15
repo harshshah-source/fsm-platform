@@ -15,7 +15,7 @@ const LOGIN_MESSAGE: Record<string, string> = {
 // light `Input` primitive, so the dark classes win without a class-merge dependency.
 const darkInput =
   'h-10 w-full rounded-md border border-white/10 bg-chrome-900/70 text-sm text-white shadow-sm ' +
-  'placeholder:text-chrome-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-luxury-300/45';
+  'placeholder:text-chrome-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/60';
 
 // KPI tiles + feature list are static marketing chrome from the reference (00-login).
 const STATS = [
@@ -65,9 +65,9 @@ export function LoginPage() {
     <div
       className="grid min-h-screen bg-chrome-900 text-white lg:grid-cols-[1.05fr_0.95fr]"
       style={{
-        // Faint blueprint grid over the dark chrome, matching the 00-login reference backdrop.
+        // Faint blueprint grid over the dark chrome, with a soft red brand glow (uiDashboardRef re-theme).
         backgroundImage:
-          'radial-gradient(circle at 18% 12%, rgba(234,209,154,0.16), transparent 28rem), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)',
+          'radial-gradient(circle at 18% 12%, rgba(185,16,43,0.14), transparent 28rem), linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px)',
         backgroundSize: '48px 48px',
       }}
     >
@@ -164,7 +164,7 @@ export function LoginPage() {
               <label className="flex items-center gap-2 text-chrome-text">
                 <input type="checkbox" className="h-3.5 w-3.5 rounded border-chrome-700" /> Remember me
               </label>
-              <a href="#" className="font-semibold text-luxury-300 hover:text-white hover:underline">
+              <a href="#" className="font-semibold text-brand-300 hover:text-white hover:underline">
                 Forgot Password?
               </a>
             </div>
@@ -183,7 +183,7 @@ export function LoginPage() {
           <ul className="mt-6 space-y-2 border-t border-white/10 pt-6 text-xs text-chrome-text">
             {FEATURES.map((f) => (
               <li key={f} className="flex items-center gap-2">
-                <IconCheck className="h-3.5 w-3.5 text-luxury-300" /> {f}
+                <IconCheck className="h-3.5 w-3.5 text-brand-300" /> {f}
               </li>
             ))}
           </ul>

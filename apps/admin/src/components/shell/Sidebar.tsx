@@ -63,10 +63,10 @@ export function Sidebar({ role }: { role: string }) {
           collapsed ? 'lg:w-[4.75rem]' : 'lg:w-64',
         )}
       >
-        {/* Brand band — white, so the wordmark is colour-identical to the legacy reference. */}
+        {/* Brand band — rides the dark rail (uiDashboardRef reference); the red wordmark stays legible on black. */}
         <div
           className={cn(
-            'flex h-[4.25rem] shrink-0 items-center gap-3 border-b border-line bg-surface-card px-3 shadow-sm',
+            'flex h-[4.25rem] shrink-0 items-center gap-3 border-b border-white/10 px-3',
             collapsed && 'lg:justify-center lg:px-2',
           )}
         >
@@ -75,7 +75,7 @@ export function Sidebar({ role }: { role: string }) {
             onClick={toggleCollapsed}
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-expanded={!collapsed}
-            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface-card text-ink-strong transition-colors hover:bg-surface-sunken focus-ring lg:flex"
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-chrome-text transition-colors hover:bg-white/10 hover:text-white focus-ring lg:flex"
           >
             <IconMenu className="h-[18px] w-[18px]" />
           </button>
@@ -86,7 +86,7 @@ export function Sidebar({ role }: { role: string }) {
             type="button"
             onClick={closeMobile}
             aria-label="Close menu"
-            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-surface-card text-ink-strong transition-colors hover:bg-surface-sunken focus-ring lg:hidden"
+            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-chrome-text transition-colors hover:bg-white/10 hover:text-white focus-ring lg:hidden"
           >
             <IconClose className="h-[18px] w-[18px]" />
           </button>
@@ -123,10 +123,10 @@ export function Sidebar({ role }: { role: string }) {
                         onFocus={showTip(item.label)}
                         onBlur={hideTip}
                         className={cn(
-                          'flex items-center gap-2.5 rounded-md border-l-2 px-2 py-2 text-[13px] font-medium transition-[background-color,border-color,color,box-shadow] focus-ring',
+                          'flex items-center gap-2.5 rounded-lg border-l-2 px-2 py-2 text-[13px] font-medium transition-[background-color,border-color,color,box-shadow] focus-ring',
                           collapsed && 'lg:justify-center lg:gap-0 lg:px-0',
                           active
-                            ? 'border-luxury-300 bg-white/10 text-white shadow-sm ring-1 ring-white/5'
+                            ? 'border-brand-600 bg-white/10 text-white shadow-sm ring-1 ring-white/10'
                             : 'border-transparent text-chrome-text hover:bg-white/10 hover:text-white',
                         )}
                       >
