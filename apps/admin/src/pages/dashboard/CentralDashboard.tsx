@@ -18,7 +18,7 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, erro
     const liveSources = actions.filter((a) => a.available && a.count > 0);
     const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
     return [
-      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
+      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand', hero: true },
       { label: 'Zones Covered', value: zones.length, hint: 'cross-zone scope', tone: 'info' },
       { label: 'Inactive Devices', value: inactive, hint: 'all zones', tone: 'warning' },
       { label: 'Escalations', value: escalations, hint: `${actionTotal} action items`, tone: 'critical' },

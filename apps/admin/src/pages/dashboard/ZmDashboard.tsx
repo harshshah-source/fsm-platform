@@ -55,7 +55,7 @@ export function ZmDashboard({
     // column, so KPI == scorecard column sum by construction. Worse bands stay in the Zone Overview.
     const criticalDevices = sumCriticalDevices(zones);
     return [
-      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
+      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand', hero: true },
       {
         label: 'Inactive Devices',
         value: inactive,

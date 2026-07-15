@@ -78,7 +78,7 @@ export function WarehouseDashboard() {
     const open = requests.filter((r) => r.status === 'REQUESTED' || r.status === 'APPROVED' || r.status === 'SHIPPED').length;
     const slaValue = fulfillment && typeof fulfillment.withinSlaPct === 'number' ? `${fulfillment.withinSlaPct}%` : '—';
     return [
-      { label: 'Open Requests', value: open, hint: 'awaiting fulfilment', tone: 'info' },
+      { label: 'Open Requests', value: open, hint: 'awaiting fulfilment', tone: 'info', hero: true },
       { label: 'Tickets Blocked', value: blocked.length, hint: 'on a component', tone: 'warning' },
       { label: 'Low-Stock SKUs', value: stock.length ? lowStockCount : '—', hint: 'available ≤ threshold', tone: 'critical' },
       { label: 'Fulfillment SLA', value: slaValue, hint: fulfillment ? `within ${fulfillment.slaWindowDays}d` : 'Component requests', tone: 'brand' },

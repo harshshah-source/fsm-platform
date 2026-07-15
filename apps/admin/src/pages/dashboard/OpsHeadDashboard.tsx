@@ -41,7 +41,7 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, error, onDataRef
     const roll = (value: number) => <RollingNumber value={value} runToken={lastRunAt} />;
     // The Action-Required card was replaced by the fleet counts (Issue 122b).
     return [
-      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand' },
+      { label: 'Fleet Uptime', value: '—', hint: 'Live with Fleet Uptime report', tone: 'brand', hero: true },
       { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
       { label: 'Critical Devices', value: roll(criticalDevices), hint: 'pan-India, CRITICAL band', tone: 'critical', testId: 'kpi-critical' },
       { label: 'Companies', value: fleet ? roll(fleet.companies) : '—', hint: 'pan-India', tone: 'info', testId: 'kpi-companies', onClick: () => navigate('/reports/fleet?tab=companies') },
