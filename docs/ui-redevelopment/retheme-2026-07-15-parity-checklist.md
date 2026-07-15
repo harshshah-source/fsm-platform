@@ -117,3 +117,21 @@ Other pages (all `[U]`):
 After styling: re-verify every `[T]` file item-by-item above; `[U]` files must show zero diff
 (`git diff --stat`); targeted vitest runs (shell, login, dashboards, ui-primitives, datatable,
 routing) green; `tsc` + `vite build` clean.
+
+## Verification results (2026-07-15)
+
+- Every `[T]` file re-checked against its element list: diffs are className/token-value only
+  (plus the additive `hero` prop on MetricCard); no element, handler, route, label, testId,
+  aria attribute, or API call added/removed. `[U]` files: zero re-theme diff (the only other
+  working-tree changes are this branch's pre-existing AutoPlant/reports WIP layer).
+- SLA severity colors: `lib/slaBucket.ts` (BUCKET_HEX + badge classes) untouched; semantic
+  `info/success/verified/warning/critical/neutral` tokens byte-identical in `index.css`;
+  chart semantic series colors unchanged (only axis/grid/neutral grays cooled).
+- Tests: full admin suite green — 69 files / 250 tests. `tsc --noEmit` clean;
+  `vite build` clean.
+- Visual capture (`npm run visual:capture`, live backend): 27/28 pages captured across all
+  four roles and eyeballed — black sidebar, gray canvas, white rounded cards, black hero KPI,
+  red-as-accent all confirmed. `08-ticket-detail` timed out on the row-click helper, but
+  `28-tickets-drawer` exercises the same drawer flow and captured correctly.
+- `visual/baseline/` still holds the pre-re-theme (warm/gold) baselines; `visual:compare`
+  will intentionally diff until baselines are re-blessed after this re-theme lands.
