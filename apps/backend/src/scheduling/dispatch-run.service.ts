@@ -108,7 +108,10 @@ export class DispatchRunService {
         batches += out.batches;
         recommended += rec.recommended ?? 0;
         unassignable += rec.unassignable ?? 0;
-        await this.zoneRow(run.runId, zoneId, zoneStart, rec, out, null);
+        // #126 — a benign non-dispatch (schedule conflict / lock contention) is no longer silent: its
+        // reason (+ orphan-cleanup count) is stamped on the zone row's `error` field. A dispatched zone
+        // carries `skipReason` undefined → null, unchanged.
+        await this.zoneRow(run.runId, zoneId, zoneStart, rec, out, out.skipReason ?? null);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         this.logger.error(`dispatch run failed for zone ${zoneId}: ${message}`);

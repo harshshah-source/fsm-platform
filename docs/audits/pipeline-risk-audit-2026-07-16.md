@@ -72,6 +72,8 @@ detectability · owner.
 
 ### NEW-1 — Dispatch wedges an entire zone via orphaned `SUGGESTED` recommendations *(headline)*
 
+> **RESOLVED 2026-07-16 by #126** (guard-not-throw + finalized/null-run orphan sweep + post-rollback cleanup + reason-annotated zone skip; TDD `test/dispatch-zone-wedge.e2e-spec.ts`). Per-SE isolation of the conflict is the fast-follow #127.
+
 - **Where:** `recommender/recommender.service.ts:204,277` (unguarded `recommendation.create`) +
   `scheduling/batch-assignment.service.ts:54-152` (zone-wide tx, P2002 swallowed to `skipped`) +
   **absence** of any cleanup (`recommendation` status is mutated in exactly one place —

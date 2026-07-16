@@ -1,5 +1,11 @@
 # 126 — Dispatch permanently wedges a zone via orphaned SUGGESTED recommendations
-Status: ready-for-agent
+Status: done (2026-07-16, TDD) — guard-not-throw on the recommender SUGGESTED create + finalized/null-run
+orphan sweep (`recommender.service.ts` `clearFinalizedOrphans`) as the PRIMARY no-wedge guarantee;
+post-rollback orphan cleanup + reason-annotated zone skip (`batch-assignment.service.ts`
+`clearRunZoneOrphans`/`conflictingScheduleSeIds`; `dispatch-run.service.ts` stamps the reason on the
+zone row). Decided semantics pinned by tests: finalized/null-run orphan → cleared for fresh re-eval;
+still-RUNNING orphan → skipped, left intact. RED→GREEN spec `test/dispatch-zone-wedge.e2e-spec.ts`
+(4 tests); dev-DB reconciliation found 0 orphans. Per-SE isolation is [[127]] (fast-follow, still open).
 Type: AFK
 
 > Source: pipeline risk audit 2026-07-16 (`docs/audits/pipeline-risk-audit-2026-07-16.md`, finding
@@ -62,11 +68,13 @@ the intended clean skip).
 - `recommendations.run_id` exists and is indexed (`migrations/20260715090000_dispatch_run_ledger:78-79`)
   and is stamped on every recommendation the run writes (`recommender.service.ts:214,296`). So an
   orphan set is precisely addressable as `WHERE run_id = <run> AND status = 'SUGGESTED'`.
-- `dispatch_decision_traces.recommendation_id` FK is **`ON DELETE RESTRICT`**
-  (`migrations/20260715090000_dispatch_run_ledger:96`), and a trace row is written for every
-  recommendation the run produces (`recommender.service.ts:356-358`). Any cleanup that DELETEs an
-  orphaned recommendation must delete its trace row first — and this RESTRICT is also why the current
-  manual recovery ("just delete the stuck recs") is non-obvious and error-prone.
+- `dispatch_decision_traces.recommendation_id` FK is **`ON DELETE CASCADE`** — the original
+  `20260715090000_dispatch_run_ledger:96` RESTRICT was **superseded** by
+  `20260715093000_dispatch_ledger_on_delete:26` (relaxed for the #104 retention purge). So deleting an
+  orphaned recommendation **cascades its trace away** — cleanup is a single `recommendation.deleteMany`,
+  no trace-first ordering. (`dispatch_decision_traces.run_id` stays RESTRICT, so a `dispatch_run` row
+  still can't be deleted out from under a live trace — irrelevant to rec cleanup.) A trace row is
+  written for every recommendation a run with a `runId` produces (`recommender.service.ts:356-358`).
 
 ## Fix approach (APPROVED 2026-07-16)
 
@@ -94,7 +102,7 @@ orphan is **cleared for fresh re-evaluation — never consumed as-is.** Rational
 
 Concretely, a pre-existing live `SUGGESTED` can only belong to:
 - (i) a prior **finalized** `dispatch_run` (SUCCESS/PARTIAL/FAILED) — a genuine crash-window orphan →
-  the run clears it (**trace-first**, RESTRICT FK) and writes fresh under the **current** `run_id`; or
+  the run clears it (a plain rec delete; the trace cascades) and writes fresh under the **current** `run_id`; or
 - (ii) a **still-RUNNING** concurrent run → the guard **skips** the create (that run owns the ticket;
   the per-zone advisory lock serializes the dispatch). Its recs are **never** deleted.
 
@@ -114,9 +122,9 @@ schedule/rec `run_id` mismatch (they already resolve per-entity; **verify, don't
       next recommender run for Z does **not** throw — it clears the finalized-run orphan and
       re-evaluates fresh (and skips a still-RUNNING run's rec). Zone self-heals, no manual step. Tested.
 - [ ] **Cleanup (hygiene):** a rolled-back / lock-skipped `dispatchForZone` deletes its own run's
-      orphan `SUGGESTED` recs **and their trace rows, traces-first** (`dispatch_decision_traces.recommendation_id`
-      FK is `ON DELETE RESTRICT`), keyed `(run_id = thisRun, zoneId, status='SUGGESTED')`. After the
-      common-path rollback, **zero** orphans remain.
+      orphan `SUGGESTED` recs keyed `(run_id = thisRun, zoneId, status='SUGGESTED')`; their trace rows
+      cascade away (`dispatch_decision_traces.recommendation_id` is `ON DELETE CASCADE`,
+      `migrations/20260715093000:26`). After the common-path rollback, **zero** orphans remain.
 - [ ] **Detectability — never a silent skip:** a whole-zone skip is recorded in `dispatch_run_zones`
       with a machine-readable **reason** identifying the conflict (e.g. the conflicting SE's existing
       schedule), never a bare `skipped{0,0,0}` with `error:null`. The cleanup path likewise records the

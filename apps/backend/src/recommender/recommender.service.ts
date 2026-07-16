@@ -158,6 +158,15 @@ export class RecommenderService {
     const traceRows: Prisma.DispatchDecisionTraceCreateManyInput[] = [];
     const unassignableReasons: UnassignableReasons = { NO_COVERAGE: 0, ALL_DROPPED: 0, dropBuckets: {} };
 
+    // #126 — clear crash-window orphan SUGGESTED recs before (re)suggesting this zone. A live
+    // SUGGESTED whose owning dispatch_run is already finalized (or is null / pre-ledger) is a leftover
+    // from a rolled-back dispatch that nothing consumed; left in place it collides with the
+    // one-SUGGESTED-per-ticket unique below and P2002-wedges the whole zone every run. Deleting it lets
+    // this run re-evaluate the ticket fresh — a stale decision (prior availability/capacity) is never
+    // consumed. Recs owned by a still-RUNNING run (a concurrent live dispatch) are deliberately left
+    // alone; the per-create guard below skips those tickets instead. Trace rows cascade on delete.
+    await this.clearFinalizedOrphans(zoneId);
+
     for (let i = 0; i < runList.length; i++) {
       const t = runList[i];
       const processingRank = i + 1;
@@ -272,30 +281,41 @@ export class RecommenderService {
       };
       const scored = scoreCandidate(features, weights, multiplier);
 
-      assigned.set(chosen.seId, (assigned.get(chosen.seId) ?? 0) + 1);
-
-      const rec = await this.prisma.recommendation.create({
-        data: {
-          ticketId: t.ticketId,
-          seId: chosen.seId,
-          companyTier: t.companyTier,
-          deviceBucket: t.deviceBucket,
-          scoreBreakdown: {
-            ...scored.breakdown,
-            mode,
-            weightSetRef,
-            coverageType,
+      // #126 — guard-not-throw. Stale orphans from finalized/aborted runs were cleared before the
+      // loop, so a one-SUGGESTED-per-ticket collision surviving to here can only be a concurrent,
+      // still-RUNNING dispatch run that already holds a live SUGGESTED for this ticket. That run owns
+      // it → skip rather than throw and wedge the whole zone. Capacity is credited only on success.
+      let recommendationId: bigint;
+      try {
+        const created = await this.prisma.recommendation.create({
+          data: {
+            ticketId: t.ticketId,
+            seId: chosen.seId,
             companyTier: t.companyTier,
             deviceBucket: t.deviceBucket,
-            companyPriorityRank: t.companyPriorityRank,
-            score: scored.score,
-          } as Prisma.InputJsonValue,
-          processingRank,
-          status: 'SUGGESTED',
-          path: 'MORNING_BATCH',
-          runId: opts.runId ?? null,
-        },
-      });
+            scoreBreakdown: {
+              ...scored.breakdown,
+              mode,
+              weightSetRef,
+              coverageType,
+              companyTier: t.companyTier,
+              deviceBucket: t.deviceBucket,
+              companyPriorityRank: t.companyPriorityRank,
+              score: scored.score,
+            } as Prisma.InputJsonValue,
+            processingRank,
+            status: 'SUGGESTED',
+            path: 'MORNING_BATCH',
+            runId: opts.runId ?? null,
+          },
+        });
+        recommendationId = created.recommendationId;
+      } catch (e) {
+        if ((e as { code?: string }).code === 'P2002') continue;
+        throw e;
+      }
+
+      assigned.set(chosen.seId, (assigned.get(chosen.seId) ?? 0) + 1);
       recommended++;
 
       if (opts.runId !== undefined) {
@@ -306,7 +326,7 @@ export class RecommenderService {
         const plannerPlanned = planned?.has(chosen.seId) ?? false;
         traceRows.push({
           runId: opts.runId,
-          recommendationId: rec.recommendationId,
+          recommendationId,
           ticketId: t.ticketId,
           zoneId,
           seId: chosen.seId,
@@ -365,6 +385,25 @@ export class RecommenderService {
       ticketsConsidered: runList.length,
       unassignableReasons,
     };
+  }
+
+  /**
+   * #126 — delete crash-window orphan SUGGESTED recs for a zone before (re)suggesting. A live
+   * SUGGESTED whose owning `dispatch_run` is already finalized (or whose `run_id` is null / pre-ledger)
+   * is a leftover from a rolled-back or never-consumed dispatch; clearing it lets this run re-evaluate
+   * fresh and frees the one-SUGGESTED-per-ticket unique so the zone can never wedge. Recs owned by a
+   * still-RUNNING run (a concurrent live dispatch) are left untouched — the per-create guard skips
+   * those tickets instead. `dispatch_decision_traces` rows cascade on delete. Returns the count cleared.
+   */
+  private async clearFinalizedOrphans(zoneId: bigint): Promise<number> {
+    const { count } = await this.prisma.recommendation.deleteMany({
+      where: {
+        status: 'SUGGESTED',
+        ticket: { plant: { zoneId } },
+        OR: [{ runId: null }, { run: { status: { not: 'RUNNING' } } }],
+      },
+    });
+    return count;
   }
 
   /** Memoise Common-Kit completeness for an SE within a run (Issue 21). */

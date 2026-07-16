@@ -19,6 +19,14 @@ export interface DispatchSummary {
   schedules: number;
   batches: number;
   tickets: number;
+  /**
+   * #126 — set when the zone was NOT dispatched and why (recorded on the `dispatch_run_zones` row
+   * instead of a silent `{0,0,0}`). `LOCK_CONTENDED` = a concurrent dispatch held the per-zone lock;
+   * `SCHEDULE_CONFLICT: …` = a pre-existing ACTIVE schedule collided and the zone tx rolled back.
+   */
+  skipReason?: string | null;
+  /** #126 — orphan SUGGESTED recs cleared after a rolled-back dispatch (ledger hygiene). */
+  orphansCleared?: number;
 }
 
 /**
@@ -142,17 +150,32 @@ export class BatchAssignmentService {
       return { schedules, batches, tickets };
       });
     } catch (e) {
-      // Uniqueness backstop lost the race (Issue 100 AC#4): another dispatch already placed this work.
-      // The designed outcome is a clean no-op, not a raw 500. Any other error propagates.
+      // #126 — the zone tx rolled back. Rollback-cause-agnostic FIRST step: clear THIS run's orphan
+      // SUGGESTED recs for the zone so they can never poison a future run (the recommender wrote them
+      // outside this tx and the rollback did not touch them). Keyed by (run_id, zone) so a concurrent
+      // run's recs are never deleted; trace rows cascade.
+      const orphansCleared = await this.clearRunZoneOrphans(opts.runId, zoneId);
       if ((e as { code?: string }).code === 'P2002') {
-        this.logger.warn(`dispatch for zone ${zoneId} lost a uniqueness race — treated as a no-op`);
-        return skipped;
+        // Uniqueness backstop lost the race (Issue 100 AC#4): a pre-existing ACTIVE schedule for one of
+        // this zone's SEs collided (e.g. a ZM manual schedule). Record WHY on the ledger zone row —
+        // never a silent no-op — and return so the run continues with the rest of its zones.
+        const conflictSeIds = await this.conflictingScheduleSeIds(zoneId, opts.dateFrom);
+        const who = conflictSeIds.length ? `SE(s) ${conflictSeIds.join(', ')}` : 'an existing schedule';
+        const skipReason = `SCHEDULE_CONFLICT: ${who} already hold an ACTIVE schedule for this zone/day; ${orphansCleared} orphan SUGGESTED rec(s) cleared`;
+        this.logger.warn(`dispatch for zone ${zoneId} skipped — ${skipReason}`);
+        return { ...skipped, skipReason, orphansCleared };
       }
+      // Any other rollback (deadlock / statement timeout / …): orphans are already cleared; rethrow so
+      // the dispatch run records the zone error (it is a genuine failure, not a benign skip).
+      this.logger.error(
+        `dispatch for zone ${zoneId} rolled back (${orphansCleared} orphan SUGGESTED cleared): ${e instanceof Error ? e.message : String(e)}`,
+      );
       throw e;
     }
 
-    // Lock was held by a concurrent dispatch — nothing was written, nothing to announce.
-    if (summary === null) return skipped;
+    // Lock was held by a concurrent dispatch — nothing was written; that dispatch owns this zone's
+    // recs, so leave them (do NOT clean) and record the contended-lock reason on the zone row.
+    if (summary === null) return { ...skipped, skipReason: 'LOCK_CONTENDED' };
 
     // "Day Plan is live" — fires after commit, regardless of channel availability (Issue 11 AC#4); the
     // seam swaps to the Issue 03 notification spine without changing this dispatch contract.
@@ -171,5 +194,32 @@ export class BatchAssignmentService {
    */
   private orderPlantStops(byPlant: Map<bigint, string[]>): [bigint, string[]][] {
     return [...byPlant.entries()];
+  }
+
+  /**
+   * #126 — SEs already holding an ACTIVE schedule for (zone, day): the conflict source behind a
+   * dispatch P2002 on `work_schedules_one_active_per_se_zone_day`. Reported on the ledger zone row so
+   * the skip names WHO blocked it (per-SE isolation of the conflict is #127).
+   */
+  private async conflictingScheduleSeIds(zoneId: bigint, dateFrom: Date): Promise<string[]> {
+    const rows = await this.prisma.workSchedule.findMany({
+      where: { zoneId, dateFrom, status: 'ACTIVE' },
+      select: { seId: true },
+    });
+    return [...new Set(rows.map((r) => r.seId))];
+  }
+
+  /**
+   * #126 — clear THIS run's orphan SUGGESTED recs for one zone after a rolled-back dispatch. Keyed
+   * `(run_id, zone, status='SUGGESTED')` so a concurrent run's recs are never touched; trace rows
+   * cascade. A no-op when the caller supplied no `runId` (nothing to key on safely — the recommender's
+   * finalized/null-run sweep collects those on the next run).
+   */
+  private async clearRunZoneOrphans(runId: bigint | undefined, zoneId: bigint): Promise<number> {
+    if (runId === undefined) return 0;
+    const { count } = await this.prisma.recommendation.deleteMany({
+      where: { runId, status: 'SUGGESTED', ticket: { plant: { zoneId } } },
+    });
+    return count;
   }
 }
