@@ -52,6 +52,13 @@ export interface DispatchBatchRow {
   seName: string | null;
   plantId: string;
   plantName: string;
+  /**
+   * Owning company for the batch, derived from its tickets (a batch is one plant, so normally one
+   * company); when a batch spans companies the first is shown with a `+N` suffix. Null if no tickets.
+   * Transporter is deliberately absent here — it is per-vehicle-per-ticket, not a clean batch-level
+   * value; it surfaces at the assignment-row / trace level instead (follow-up #125 for batch rollup).
+   */
+  companyName: string | null;
   stopSequence: number;
   status: string;
   ticketCount: number;
@@ -64,6 +71,7 @@ export interface DispatchUnassignableRow {
   deviceId: string | null;
   plantId: string | null;
   plantName: string | null;
+  companyName: string | null;
   poolEmptyReason: string | null;
   dropCounts: Record<string, number>;
 }
@@ -78,6 +86,10 @@ export interface DispatchZoneDetail {
 export interface DispatchAssignmentRow {
   ticketId: string;
   deviceId: string | null;
+  /** Ticket context, resolved so managers read names not IDs. Vehicle/transporter null when unlinked. */
+  companyName: string | null;
+  vehicleNo: string | null;
+  transporterName: string | null;
   plantId: string;
   seId: string;
   sortOrder: number;
@@ -116,6 +128,14 @@ export interface DispatchTicketTrace {
   recStatus: string | null;
   /** seId → display name for every SE named in the trace (chosen + runners-up); UUIDs read as names. */
   seNames: Record<string, string | null>;
+  /** Full ticket identity for the "why this SE" strip — read context without navigating away. */
+  identity: {
+    deviceId: string | null;
+    vehicleNo: string | null;
+    plantName: string | null;
+    companyName: string | null;
+    transporterName: string | null;
+  };
 }
 
 /**
@@ -260,7 +280,10 @@ export class DispatchTransparencyQueryService {
           orderBy: { stopSequence: 'asc' },
           include: {
             plant: { select: { name: true } },
-            tickets: { where: { removedAt: null }, select: { id: true } },
+            tickets: {
+              where: { removedAt: null },
+              select: { id: true, ticket: { select: { company: { select: { name: true } } } } },
+            },
           },
         },
       },
@@ -276,6 +299,7 @@ export class DispatchTransparencyQueryService {
         seName: s.engineer?.user?.name ?? null,
         plantId: b.plantId.toString(),
         plantName: b.plant.name,
+        companyName: distinctLabel(b.tickets.map((t) => t.ticket?.company?.name ?? null)),
         stopSequence: b.stopSequence,
         status: b.status,
         ticketCount: b.tickets.length,
@@ -285,7 +309,11 @@ export class DispatchTransparencyQueryService {
 
     const unassignableTraces = await this.prisma.dispatchDecisionTrace.findMany({
       where: { runId, zoneId, seId: null },
-      include: { ticket: { select: { deviceId: true, plantId: true, plant: { select: { name: true } } } } },
+      include: {
+        ticket: {
+          select: { deviceId: true, plantId: true, plant: { select: { name: true } }, company: { select: { name: true } } },
+        },
+      },
       orderBy: { traceId: 'asc' },
     });
     const unassignable: DispatchUnassignableRow[] = unassignableTraces.map((t) => {
@@ -295,6 +323,7 @@ export class DispatchTransparencyQueryService {
         deviceId: t.ticket?.deviceId ?? null,
         plantId: t.ticket ? t.ticket.plantId.toString() : null,
         plantName: t.ticket?.plant?.name ?? null,
+        companyName: t.ticket?.company?.name ?? null,
         poolEmptyReason: (trace.poolEmptyReason as string | null) ?? null,
         dropCounts: (trace.dropCounts as Record<string, number>) ?? {},
       };
@@ -332,7 +361,17 @@ export class DispatchTransparencyQueryService {
         tickets: {
           where: { removedAt: null },
           orderBy: { sortOrder: 'asc' },
-          include: { ticket: { select: { ticketId: true, deviceId: true, status: true } } },
+          include: {
+            ticket: {
+              select: {
+                ticketId: true,
+                deviceId: true,
+                status: true,
+                company: { select: { name: true } },
+                vehicle: { select: { vehicleNo: true, transporter: { select: { name: true } } } },
+              },
+            },
+          },
         },
       },
     });
@@ -366,6 +405,9 @@ export class DispatchTransparencyQueryService {
         return {
           ticketId: t.ticket.ticketId,
           deviceId: t.ticket.deviceId,
+          companyName: t.ticket.company?.name ?? null,
+          vehicleNo: t.ticket.vehicle?.vehicleNo ?? null,
+          transporterName: t.ticket.vehicle?.transporter?.name ?? null,
           plantId: batch.plantId.toString(),
           seId: batch.seId,
           sortOrder: t.sortOrder,
@@ -384,7 +426,17 @@ export class DispatchTransparencyQueryService {
     const zoneClamp = this.zmZone(scope);
     const trace = await this.prisma.dispatchDecisionTrace.findFirst({
       where: { runId, ticketId, ...(zoneClamp !== null ? { zoneId: zoneClamp } : {}) },
-      include: { recommendation: { select: { scoreBreakdown: true, status: true } } },
+      include: {
+        recommendation: { select: { scoreBreakdown: true, status: true } },
+        ticket: {
+          select: {
+            deviceId: true,
+            plant: { select: { name: true } },
+            company: { select: { name: true } },
+            vehicle: { select: { vehicleNo: true, transporter: { select: { name: true } } } },
+          },
+        },
+      },
     });
     if (!trace) return null;
     const traceJson = (trace.trace as Record<string, unknown>) ?? {};
@@ -396,6 +448,13 @@ export class DispatchTransparencyQueryService {
       scoreBreakdown: (trace.recommendation?.scoreBreakdown as Record<string, unknown> | null) ?? null,
       recStatus: trace.recommendation?.status ?? null,
       seNames: await this.resolveSeNames(traceJson),
+      identity: {
+        deviceId: trace.ticket?.deviceId ?? null,
+        vehicleNo: trace.ticket?.vehicle?.vehicleNo ?? null,
+        plantName: trace.ticket?.plant?.name ?? null,
+        companyName: trace.ticket?.company?.name ?? null,
+        transporterName: trace.ticket?.vehicle?.transporter?.name ?? null,
+      },
     };
   }
 
@@ -434,6 +493,17 @@ export class DispatchTransparencyQueryService {
 
 function sum<T>(items: T[], f: (t: T) => number): number {
   return items.reduce((n, it) => n + f(it), 0);
+}
+
+/**
+ * A single label for a set of per-ticket values (e.g. a batch's companies). One distinct value → that
+ * value; several → the first with a `+N` suffix; none → null. Keeps batch rows honest when a plant's
+ * tickets span more than one company without adding columns.
+ */
+function distinctLabel(values: (string | null)[]): string | null {
+  const distinct = [...new Set(values.filter((v): v is string => v != null))];
+  if (distinct.length === 0) return null;
+  return distinct.length === 1 ? distinct[0] : `${distinct[0]} +${distinct.length - 1}`;
 }
 
 /** Per-SE daily capacity from the run's frozen config snapshot — never today's engineer_master. */

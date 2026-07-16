@@ -40,6 +40,11 @@ describe('/api/dispatch-runs (e2e)', () => {
   let tZmUnassignable: string;
   let tOther: string;
   let ohActorName: string;
+  let vehicleNo: string;
+  let transporterName: string;
+  let vehicleId: bigint;
+  let transporterId: bigint;
+  const companyName = 'Co-dt-api-' + NS;
   const userIds: string[] = [];
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
@@ -131,6 +136,18 @@ describe('/api/dispatch-runs (e2e)', () => {
     tZmUnassignable = await makeTicket(plantZmUncovered, companyId);
     tOther = await makeTicket(plantOther, companyId);
 
+    // Vehicle + transporter on the assigned ticket, so the enrichment fields (vehicleNo /
+    // transporterName) have a value to resolve (Issue 125).
+    const transporter = await prisma.transporter.create({ data: { name: 'TR-dt-api-' + NS, companyId } });
+    transporterId = transporter.transporterId;
+    transporterName = transporter.name;
+    const vehicle = await prisma.vehicle.create({
+      data: { vehicleNo: 'VN-dt-' + NS, plantId: plantZm, companyId, transporterId },
+    });
+    vehicleId = vehicle.vehicleId;
+    vehicleNo = vehicle.vehicleNo;
+    await prisma.ticket.update({ where: { ticketId: tZmAssigned }, data: { vehicleId } });
+
     // Real write path, scoped to our two zones (a full runForActiveZones would dispatch every zone in
     // this shared DB). The ledger/zone-row writes were pinned in dispatch-transparency.e2e-spec.
     const recommender = app.get(RecommenderService);
@@ -205,6 +222,8 @@ describe('/api/dispatch-runs (e2e)', () => {
     await prisma.dispatchRun.deleteMany({ where: { runId } }); // zone rows cascade
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await prisma.vehicle.deleteMany({ where: { vehicleId } }); // after tickets (FK ticket.vehicle_id)
+    await prisma.transporter.deleteMany({ where: { transporterId } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.seCoverage.deleteMany({ where: { seId: { in: userIds } } });
     await prisma.deviceState.deleteMany({ where: { deviceId: { in: deviceIds } } });
@@ -290,10 +309,13 @@ describe('/api/dispatch-runs (e2e)', () => {
       capacityUsed: { used: 1, cap: 25 },
     });
     expect(res.body.batches[0].scheduleId).toBeDefined();
+    // Enrichment (Issue 125): company beside plant on both batch and unassignable rows.
+    expect(res.body.batches[0].companyName).toBe(companyName);
     expect(res.body.unassignable).toHaveLength(1);
     expect(res.body.unassignable[0]).toMatchObject({
       ticketId: tZmUnassignable,
       poolEmptyReason: 'NO_COVERAGE',
+      companyName,
     });
   });
 
@@ -330,6 +352,8 @@ describe('/api/dispatch-runs (e2e)', () => {
     expect(res.body.rows[0].deviceId).toBeDefined();
     // Gap C: degeneracy is on the row so the table can hide scores without N trace fetches.
     expect(res.body.rows[0].scoreDegenerate).toBe(true);
+    // Enrichment (Issue 125): company/vehicle/transporter context on the assignment row.
+    expect(res.body.rows[0]).toMatchObject({ companyName, vehicleNo, transporterName });
   });
 
   it('ZM cannot read a foreign zone batch', async () => {
@@ -351,6 +375,14 @@ describe('/api/dispatch-runs (e2e)', () => {
     expect(res.body.scoreBreakdown).toBeDefined();
     // Gap D: seId -> name map so the trace reads in human terms, not UUIDs.
     expect(res.body.seNames[seZm]).toMatch(/^SE zm-/);
+    // Enrichment (Issue 125): full ticket-identity strip for "why this SE" without navigating away.
+    expect(res.body.identity).toMatchObject({
+      deviceId: expect.any(String),
+      plantName: 'P-dt-zm-' + NS,
+      companyName,
+      vehicleNo,
+      transporterName,
+    });
 
     await request(app.getHttpServer())
       .get(`/api/dispatch-runs/${runId}/tickets/${tOther}/trace`)
@@ -398,6 +430,9 @@ async function purgeOrphans(prisma: PrismaService): Promise<void> {
   await prisma.dispatchRun.deleteMany({ where: { runId: { in: runIds } } }); // zone rows cascade
   await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
   await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
+  // Vehicles/transporters reference plants/company — clear them (after tickets) before plant/company.
+  await prisma.vehicle.deleteMany({ where: { vehicleNo: { startsWith: 'VN-dt-' } } });
+  await prisma.transporter.deleteMany({ where: { name: { startsWith: 'TR-dt-api-' } } });
   await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
   await prisma.seCoverage.deleteMany({ where: { seId: { in: userIds } } });
   await prisma.deviceState.deleteMany({ where: { deviceId: { in: deviceIds } } });
