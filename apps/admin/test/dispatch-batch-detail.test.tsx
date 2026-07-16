@@ -23,6 +23,9 @@ const batch = {
     {
       ticketId: 't-uuid-1',
       deviceId: 'DEV-9001',
+      companyName: 'UltraTech',
+      vehicleNo: 'RJ14-GA-1234',
+      transporterName: 'Blue Dart',
       plantId: '10',
       seId: 'se-uuid-1',
       sortOrder: 0,
@@ -43,6 +46,7 @@ const trace = {
   scoreBreakdown: { score: 4.2 },
   recStatus: 'DISPATCHED',
   seNames: { 'se-uuid-1': 'Ramesh Kumar', 'se-uuid-2': 'Suresh Rao' },
+  identity: { deviceId: 'DEV-9001', vehicleNo: 'RJ14-GA-1234', plantName: 'Kotputli Works', companyName: 'UltraTech', transporterName: 'Blue Dart' },
   trace: {
     candidatesTotal: 3,
     passedCount: 2,
@@ -100,6 +104,10 @@ describe('Dispatch batch detail (Issue 123)', () => {
     expect(row.getByText('Precedence')).toBeInTheDocument();
     // The raw score number is not shown on the row.
     expect(row.queryByText('4.20')).toBeNull();
+    // Enrichment (Issue 125): vehicle under device, company + transporter columns.
+    expect(row.getByText('RJ14-GA-1234')).toBeInTheDocument();
+    expect(row.getByText('UltraTech')).toBeInTheDocument();
+    expect(row.getByText('Blue Dart')).toBeInTheDocument();
   });
 
   it('expands the row to the precedence-terms trace with SE names, not UUIDs', async () => {
@@ -111,6 +119,9 @@ describe('Dispatch batch detail (Issue 123)', () => {
 
     expect(await screen.findByText(/Chosen: Ramesh Kumar/)).toBeInTheDocument();
     expect(screen.getByText(/1st of 3 eligible/)).toBeInTheDocument();
+    // Identity strip (Issue 125): full context in the expanded trace.
+    expect(screen.getByText('Kotputli Works')).toBeInTheDocument();
+    expect(screen.getByText('Transporter')).toBeInTheDocument();
     // Runner-up rendered by name (not UUID) with its verdict.
     expect(screen.getByText(/Suresh Rao/)).toBeInTheDocument();
     expect(screen.getByText('PASSED')).toBeInTheDocument();

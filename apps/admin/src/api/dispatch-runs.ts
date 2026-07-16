@@ -82,6 +82,8 @@ export interface DispatchBatchRow {
   seName: string | null;
   plantId: string;
   plantName: string;
+  /** Owning company for the batch (derived from its tickets; "First +N" when it spans companies). */
+  companyName: string | null;
   stopSequence: number;
   status: string;
   ticketCount: number;
@@ -93,6 +95,7 @@ export interface DispatchUnassignableRow {
   deviceId: string | null;
   plantId: string | null;
   plantName: string | null;
+  companyName: string | null;
   poolEmptyReason: PoolEmptyReason | null;
   dropCounts: Record<string, number>;
 }
@@ -107,6 +110,9 @@ export interface DispatchZoneDetail {
 export interface DispatchAssignmentRow {
   ticketId: string;
   deviceId: string | null;
+  companyName: string | null;
+  vehicleNo: string | null;
+  transporterName: string | null;
   plantId: string;
   seId: string;
   sortOrder: number;
@@ -171,6 +177,14 @@ export interface DispatchTicketTrace {
   recStatus: string | null;
   /** seId → display name for every SE named in the trace (chosen + runners-up). */
   seNames: Record<string, string | null>;
+  /** Full ticket identity for the "why this SE" strip — read context without navigating away. */
+  identity: {
+    deviceId: string | null;
+    vehicleNo: string | null;
+    plantName: string | null;
+    companyName: string | null;
+    transporterName: string | null;
+  };
 }
 
 export const apiDispatchRuns = (limit?: number) =>

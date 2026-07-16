@@ -26,7 +26,26 @@ export function DispatchBatchDetailPage() {
   useEffect(load, [runId, batchId]);
 
   const columns: Column<DispatchAssignmentRow>[] = [
-    { key: 'device', header: 'Device', render: (r) => r.deviceId ?? <span className="font-mono text-xs">{r.ticketId.slice(0, 8)}</span> },
+    {
+      key: 'device',
+      header: 'Device / Vehicle',
+      render: (r) => (
+        <div>
+          <div>{r.deviceId ?? <span className="font-mono text-xs">{r.ticketId.slice(0, 8)}</span>}</div>
+          {r.vehicleNo && <div className="text-xs text-ink-muted">{r.vehicleNo}</div>}
+        </div>
+      ),
+    },
+    {
+      key: 'company',
+      header: 'Company',
+      render: (r) => (
+        <div>
+          <div>{r.companyName ?? '—'}</div>
+          {r.transporterName && <div className="text-xs text-ink-muted">{r.transporterName}</div>}
+        </div>
+      ),
+    },
     { key: 'rank', header: 'Rank', align: 'right', render: (r) => (r.rank == null ? '—' : `#${r.rank}`) },
     {
       key: 'basis',

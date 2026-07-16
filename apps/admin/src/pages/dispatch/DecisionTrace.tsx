@@ -12,11 +12,30 @@ import { POOL_EMPTY_LABEL, ordinal } from './format';
  */
 export function DecisionTraceView({ data }: { data: DispatchTicketTrace }) {
   const t = data.trace;
+  const id = data.identity;
   const name = (seId: string | null) => (seId ? (data.seNames[seId] ?? seId.slice(0, 8)) : '—');
   const dropEntries = Object.entries(t.dropCounts ?? {});
+  const idParts = [
+    id.deviceId && { label: 'Device', value: id.deviceId },
+    id.vehicleNo && { label: 'Vehicle', value: id.vehicleNo },
+    id.plantName && { label: 'Plant', value: id.plantName },
+    id.companyName && { label: 'Company', value: id.companyName },
+    id.transporterName && { label: 'Transporter', value: id.transporterName },
+  ].filter((p): p is { label: string; value: string } => Boolean(p));
 
   return (
     <div className="space-y-3 text-sm">
+      {idParts.length > 0 && (
+        <div className="flex flex-wrap gap-x-5 gap-y-1 rounded-md border border-line bg-surface-card px-3 py-2">
+          {idParts.map((p) => (
+            <span key={p.label} className="text-xs">
+              <span className="font-semibold uppercase tracking-wider text-ink-caps">{p.label} </span>
+              <span className="text-ink">{p.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
       {t.chosen ? (
         <div>
           <div className="flex flex-wrap items-center gap-2">

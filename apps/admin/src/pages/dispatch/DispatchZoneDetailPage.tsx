@@ -35,7 +35,16 @@ export function DispatchZoneDetailPage() {
 
   const batchColumns: Column<DispatchBatchRow>[] = [
     { key: 'se', header: 'Engineer', render: (b) => b.seName ?? <span className="font-mono text-xs">{b.seId.slice(0, 8)}</span> },
-    { key: 'plant', header: 'Plant', render: (b) => b.plantName },
+    {
+      key: 'plant',
+      header: 'Plant',
+      render: (b) => (
+        <div>
+          <div>{b.plantName}</div>
+          {b.companyName && <div className="text-xs text-ink-muted">{b.companyName}</div>}
+        </div>
+      ),
+    },
     { key: 'stop', header: 'Stop', align: 'right', render: (b) => b.stopSequence },
     { key: 'status', header: 'Status', render: (b) => <Badge tone="neutral">{b.status}</Badge> },
     { key: 'tickets', header: 'Tickets', align: 'right', render: (b) => b.ticketCount },
@@ -53,7 +62,16 @@ export function DispatchZoneDetailPage() {
 
   const unassignableColumns: Column<DispatchUnassignableRow>[] = [
     { key: 'device', header: 'Device', render: (u) => u.deviceId ?? <span className="font-mono text-xs">{u.ticketId.slice(0, 8)}</span> },
-    { key: 'plant', header: 'Plant', render: (u) => u.plantName ?? '—' },
+    {
+      key: 'plant',
+      header: 'Plant',
+      render: (u) => (
+        <div>
+          <div>{u.plantName ?? '—'}</div>
+          {u.companyName && <div className="text-xs text-ink-muted">{u.companyName}</div>}
+        </div>
+      ),
+    },
     {
       key: 'reason',
       header: 'Why unassignable',

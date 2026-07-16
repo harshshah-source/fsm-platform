@@ -31,6 +31,7 @@ const zoneDetail = {
       seName: 'Ramesh Kumar',
       plantId: '10',
       plantName: 'Kotputli Works',
+      companyName: 'UltraTech',
       stopSequence: 1,
       status: 'ACTIVE',
       ticketCount: 1,
@@ -43,6 +44,7 @@ const zoneDetail = {
       deviceId: 'DEV-9001',
       plantId: '11',
       plantName: 'Nathdwara Works',
+      companyName: 'Shree Cement',
       poolEmptyReason: 'NO_COVERAGE',
       dropCounts: {},
     },
@@ -73,10 +75,12 @@ describe('Dispatch zone detail (Issue 123)', () => {
     const batch = within(await screen.findByTestId('dispatch-batch-row-900'));
     expect(batch.getByText('Ramesh Kumar')).toBeInTheDocument();
     expect(batch.getByText('Kotputli Works')).toBeInTheDocument();
+    expect(batch.getByText('UltraTech')).toBeInTheDocument(); // company under plant
     expect(batch.getByText('1 / 25')).toBeInTheDocument();
 
     const un = within(await screen.findByTestId('dispatch-unassignable-row-t-uuid-1'));
     expect(un.getByText('DEV-9001')).toBeInTheDocument();
+    expect(un.getByText('Shree Cement')).toBeInTheDocument(); // company under plant
     expect(un.getByText('No coverage')).toBeInTheDocument();
   });
 });
