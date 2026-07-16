@@ -177,8 +177,11 @@ export interface DispatchTicketTrace {
   recStatus: string | null;
   /** seId → display name for every SE named in the trace (chosen + runners-up). */
   seNames: Record<string, string | null>;
-  /** Full ticket identity for the "why this SE" strip — read context without navigating away. */
-  identity: {
+  /**
+   * Full ticket identity for the "why this SE" strip — read context without navigating away.
+   * Optional: absent when served by a backend build predating the enrichment (version skew).
+   */
+  identity?: {
     deviceId: string | null;
     vehicleNo: string | null;
     plantName: string | null;

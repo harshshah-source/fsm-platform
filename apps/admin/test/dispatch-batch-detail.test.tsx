@@ -128,4 +128,22 @@ describe('Dispatch batch detail (Issue 123)', () => {
     // The degeneracy note is surfaced.
     expect(screen.getByText(/decided by precedence/)).toBeInTheDocument();
   });
+
+  it('renders the trace without crashing when identity is absent (older backend / version skew)', async () => {
+    const { identity: _omit, ...traceNoIdentity } = trace;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: RequestInfo | URL) => {
+        const u = String(url);
+        if (u.includes('/tickets/') && u.includes('/trace')) return json(traceNoIdentity);
+        return json(batch);
+      }),
+    );
+    renderPage();
+    const row = await screen.findByTestId('dispatch-assignment-row-t-uuid-1');
+    await userEvent.click(row);
+    // Precedence narrative still renders; the identity strip is simply omitted.
+    expect(await screen.findByText(/Chosen: Ramesh Kumar/)).toBeInTheDocument();
+    expect(screen.queryByText('Transporter')).toBeNull();
+  });
 });

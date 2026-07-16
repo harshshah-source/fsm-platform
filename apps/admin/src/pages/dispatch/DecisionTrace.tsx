@@ -12,16 +12,22 @@ import { POOL_EMPTY_LABEL, ordinal } from './format';
  */
 export function DecisionTraceView({ data }: { data: DispatchTicketTrace }) {
   const t = data.trace;
+  // `identity` may be absent when read from an older backend build (version skew) — guard so the
+  // trace still renders its precedence narrative rather than crashing.
   const id = data.identity;
   const name = (seId: string | null) => (seId ? (data.seNames[seId] ?? seId.slice(0, 8)) : '—');
   const dropEntries = Object.entries(t.dropCounts ?? {});
-  const idParts = [
-    id.deviceId && { label: 'Device', value: id.deviceId },
-    id.vehicleNo && { label: 'Vehicle', value: id.vehicleNo },
-    id.plantName && { label: 'Plant', value: id.plantName },
-    id.companyName && { label: 'Company', value: id.companyName },
-    id.transporterName && { label: 'Transporter', value: id.transporterName },
-  ].filter((p): p is { label: string; value: string } => Boolean(p));
+  const idParts = (
+    id
+      ? [
+          id.deviceId && { label: 'Device', value: id.deviceId },
+          id.vehicleNo && { label: 'Vehicle', value: id.vehicleNo },
+          id.plantName && { label: 'Plant', value: id.plantName },
+          id.companyName && { label: 'Company', value: id.companyName },
+          id.transporterName && { label: 'Transporter', value: id.transporterName },
+        ]
+      : []
+  ).filter((p): p is { label: string; value: string } => Boolean(p));
 
   return (
     <div className="space-y-3 text-sm">
