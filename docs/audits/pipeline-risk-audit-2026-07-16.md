@@ -228,6 +228,10 @@ detectability · owner.
 - **Blast radius:** small telemetry over-count for one run's window; self-corrects next run.
 - **Likelihood:** LOW both. **Detectability:** LOW (silent). **Owner:** unowned (new).
 
+> **Addendum 2026-07-17:** a departure blind spot NOT caught here was confirmed and quantified —
+> master sync never observes `DEPLOYED→UNDEPLOYED` (~37 % of FSM devices stale; 42.5 % of live-batch
+> devices undeployed at source) — see `deployment-lifecycle-investigation-2026-07-17.md` / issue #128.
+
 ---
 
 ## 3. Ranked list (blast × likelihood-after-activation × inverse-detectability)
