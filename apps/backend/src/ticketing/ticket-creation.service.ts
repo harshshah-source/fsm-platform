@@ -35,6 +35,10 @@ export class TicketCreationService {
         isInactive: true,
         eligibleForUptime: true,
         hasOpenFailureCycle: false,
+        // Departed devices (Issue 128) are never ticketed — a device sitting in a warehouse is not a
+        // field failure. The recompute already forces isInactive/eligibleForUptime false for them, so
+        // this is defence in depth: it closes the window between a departure and the next recompute.
+        isDeparted: false,
         // A Troubleshoot Ticket needs a plant + company; a device with no current fitment can't be ticketed.
         plantId: deactivatedPlantIds.length > 0 ? { not: null, notIn: deactivatedPlantIds } : { not: null },
         companyId: { not: null },

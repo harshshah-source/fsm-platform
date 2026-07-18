@@ -126,6 +126,31 @@ export function plantInScope(row: MstPlantRow, scope: MasterSyncScope): boolean 
   return inList(row.status, scope.plantStatuses);
 }
 
+// ── Deployment lifecycle (Issue 128) — the INSERT-SCOPE PIN ───────────────────────────────────────
+//
+// The master READ is widened to every `deployment_status` so FSM can observe a device LEAVING the
+// deployed fleet (before #128 the DEPLOYED-only read meant a departed device's mirror was frozen at
+// 'DEPLOYED' forever). Widening the read must NOT widen the CREATE: FSM mirrors only the OPERATIONAL
+// fleet, so a never-known UNDEPLOYED row is counted and dropped, never inserted. Otherwise `vehicles`
+// balloons from the ~21k operational fleet to the whole ~48.5k source catalog and every dashboard
+// total / fleet denominator silently changes meaning (operator decision, 2026-07-17).
+//
+// AutoPlant's vocabulary is dirty (measured 2026-07-17: UNDEPLOYED 32,892 · DEPLOYED 15,652 ·
+// MAINTENANCE 157 · ACTIVE 40 · 'DEPLOYED/UNDEPLOYED' 4), so this is an ALLOW-list, not a deny-list:
+// anything unrecognised is treated as non-operational (departed-equivalent) rather than silently
+// widening the operational fleet on a value nobody has reviewed.
+
+/** `deployment_status` values that mean "in the operational fleet" — the create scope + departure gate. */
+export const OPERATIONAL_DEPLOYMENT_STATUSES = ['DEPLOYED', 'ACTIVE'];
+
+/**
+ * True when a source `deployment_status` places the vehicle in FSM's operational fleet. Case- and
+ * whitespace-insensitive (matching `plantInScope`); null/blank/unknown ⇒ false (allow-list posture).
+ */
+export function isOperationalStatus(status: string | null | undefined): boolean {
+  return inList(status ?? null, OPERATIONAL_DEPLOYMENT_STATUSES);
+}
+
 // ── Entity maps ──
 
 export interface CompanyDefaults {

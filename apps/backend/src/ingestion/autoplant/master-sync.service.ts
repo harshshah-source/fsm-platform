@@ -1,8 +1,10 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import type { DeviceDepartureService } from '../../device-departure/device-departure.service';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MasterSyncRunService, type EntityStat, type MasterSyncOutcome } from './master-sync-run.service';
 import {
+  isOperationalStatus,
   mapCompany,
   mapDevice,
   mapPlant,
@@ -49,6 +51,11 @@ export interface MasterSyncResult {
   runId: bigint;
   status: MasterSyncOutcome;
   stats: Record<string, EntityStat>;
+}
+
+export interface MasterSyncOptions {
+  /** Override the departure absence-diff blast limiter for this run (Issue 128). */
+  maxAbsenceRatio?: number;
 }
 
 const emptyStat = (): EntityStat => ({ inserted: 0, updated: 0, skipped: 0 });
@@ -104,9 +111,15 @@ export class MasterSyncService {
     @Inject(PLANT_ZONE_RESOLVER) private readonly zoneResolver: PlantZoneResolver,
     @Optional() @Inject(MASTER_SYNC_SCOPE) private readonly scope: MasterSyncScope | null = null,
     @Optional() @Inject(MASTER_SYNC_COMPANY_DEFAULTS) private readonly companyDefaults: CompanyDefaults = {},
+    /**
+     * Device deployment lifecycle (Issue 128). Optional because the lifecycle pass is only meaningful
+     * against a source read that covers ALL deployment statuses — omitted, the sync mirrors exactly as
+     * before and marks no departures (never a silent half-application).
+     */
+    @Optional() private readonly departures: DeviceDepartureService | null = null,
   ) {}
 
-  async sync(): Promise<MasterSyncResult> {
+  async sync(options: MasterSyncOptions = {}): Promise<MasterSyncResult> {
     // Scope is anchored on mst_plant.status; ACTIVE is the documented baseline (§5.5), not a business
     // gate (that is the injected PlantZoneResolver, R6). Callers may narrow/widen the status set.
     const scope: MasterSyncScope = this.scope ?? { plantStatuses: ['ACTIVE'] };
@@ -118,6 +131,8 @@ export class MasterSyncService {
       transporters: emptyStat(),
       vehicles: emptyStat(),
       devices: emptyStat(),
+      // Issue 128 lifecycle counters: `inserted` = departures opened, `updated` = restores.
+      departures: emptyStat(),
     };
 
     // Itemised skip accounting (review A5): every skip site splits its counter per reason and
@@ -233,8 +248,18 @@ export class MasterSyncService {
         existingTransporters.has(key) ? stats.transporters.updated++ : stats.transporters.inserted++;
       });
 
-      // 4. Vehicles (from the tb_vehiclemaster master columns) — skip any whose plant/company is unsynced.
+      // 4. Vehicles — skip any whose plant/company is unsynced, then apply the Issue 128 INSERT-SCOPE
+      //    PIN. The read is widened to every deployment_status so departures can be OBSERVED (§128), but
+      //    the create scope must stay the OPERATIONAL fleet: a vehicle FSM has never seen, arriving
+      //    non-operational, is counted and dropped — never inserted. Mirroring the whole source catalog
+      //    would take `vehicles` ~21k → ~48k and change the meaning of every dashboard total.
+      //    A vehicle FSM ALREADY knows is always upserted regardless of status, so its `status` mirror
+      //    finally tells the truth (that update is exactly what the departure pass keys on).
       const vehicleMasters = await this.source.readVehicleMasters();
+      const existingVehicles = await this.existingKeys(
+        () => this.prisma.vehicle.findMany({ select: { vehicleNo: true } }),
+        (r) => r.vehicleNo,
+      );
       const vehicleIdByNo = new Map<string, bigint>();
       const vehiclePlans: ReturnType<typeof mapVehicle>[] = [];
       for (const v of vehicleMasters) {
@@ -244,13 +269,14 @@ export class MasterSyncService {
           skip('vehicles', v.vehicle_no.trim(), plantId == null ? 'PLANT_NOT_SYNCED' : 'COMPANY_NOT_SYNCED');
           continue;
         }
+        const vehicleNo = v.vehicle_no.trim();
+        if (!isOperationalStatus(v.deployment_status) && !existingVehicles.has(vehicleNo)) {
+          skip('vehicles', vehicleNo, 'NOT_DEPLOYED_NEVER_KNOWN'); // the pin — read, counted, not mirrored
+          continue;
+        }
         const transporterId = transporterIdBySource.get(String(toBigIntOrNull(v.transporter_id))) ?? null;
         vehiclePlans.push(mapVehicle(v, { plantId, companyId, transporterId }));
       }
-      const existingVehicles = await this.existingKeys(
-        () => this.prisma.vehicle.findMany({ select: { vehicleNo: true } }),
-        (r) => r.vehicleNo,
-      );
       const vehicleRows = await this.batchUpsert(vehiclePlans, (pl) =>
         this.prisma.vehicle.upsert({ where: pl.where, create: pl.create, update: pl.update, select: { vehicleId: true } }),
       );
@@ -260,28 +286,43 @@ export class MasterSyncService {
       });
 
       // 5. Devices — mirrored only when their vehicle synced this run (never orphan a fitment onto a null
-      //    vehicle because the plant/company was out of scope).
+      //    vehicle because the plant/company was out of scope). The insert-scope pin applies here too: a
+      //    never-known device newly fitted to a non-operational vehicle is not created either.
+      const existingDevices = await this.existingKeys(
+        () => this.prisma.device.findMany({ select: { deviceId: true } }),
+        (r) => r.deviceId,
+      );
       const devicePlans: NonNullable<ReturnType<typeof mapDevice>>[] = [];
       for (const v of vehicleMasters) {
         const currentVehicleId = vehicleIdByNo.get(v.vehicle_no.trim());
         const plan = currentVehicleId == null ? null : mapDevice(v, { currentVehicleId });
         if (!plan) {
           const deviceKey = String(v.device_id ?? '').trim() || v.vehicle_no.trim();
-          skip('devices', deviceKey, currentVehicleId == null ? 'VEHICLE_NOT_SYNCED' : 'NO_FITTED_DEVICE');
+          const reason = currentVehicleId != null
+            ? 'NO_FITTED_DEVICE'
+            : !isOperationalStatus(v.deployment_status) && !existingVehicles.has(v.vehicle_no.trim())
+              ? 'NOT_DEPLOYED_NEVER_KNOWN'
+              : 'VEHICLE_NOT_SYNCED';
+          skip('devices', deviceKey, reason);
+          continue;
+        }
+        if (!isOperationalStatus(v.deployment_status) && !existingDevices.has(plan.where.deviceId)) {
+          skip('devices', plan.where.deviceId, 'NOT_DEPLOYED_NEVER_KNOWN');
           continue;
         }
         devicePlans.push(plan);
       }
-      const existingDevices = await this.existingKeys(
-        () => this.prisma.device.findMany({ select: { deviceId: true } }),
-        (r) => r.deviceId,
-      );
       await this.batchUpsert(devicePlans, (pl) =>
         this.prisma.device.upsert({ where: pl.where, create: pl.create, update: pl.update, select: { deviceId: true } }),
       );
       devicePlans.forEach((pl) => {
         existingDevices.has(pl.where.deviceId) ? stats.devices.updated++ : stats.devices.inserted++;
       });
+
+      // 6. Deployment lifecycle (Issue 128) — mark departures / restores from the SAME read the mirror
+      //    was built from. Runs last: the mirror is already truthful, so this only opens/closes the
+      //    FSM-owned side rows and cancels the open work of devices that left the fleet.
+      await this.reconcileDepartures(runId, vehicleMasters, plantIdBySource, stats, options);
 
       await flushRejects();
       await this.runService.finishRun(runId, { status: 'SUCCESS', entityStats: stats });
@@ -293,6 +334,53 @@ export class MasterSyncService {
       await this.runService.finishRun(runId, { status: 'FAILED', entityStats: stats, error: message });
       this.logger.error(`Master sync ${runId} FAILED: ${message}`);
       throw e;
+    }
+  }
+
+  /**
+   * Drive the Issue 128 lifecycle pass from this run's read. Two inputs matter and both come from the
+   * read itself, so detection can never disagree with what was mirrored:
+   *
+   *  - `observed`: every device_id the read returned → its verbatim status. MEMBERSHIP is what
+   *    separates "observed non-operational" (trustworthy → depart) from "absent" (inferred → guarded).
+   *  - `syncedPlantIds`: the plants this run actually covered. Absence is only meaningful inside the
+   *    scope the read visited — without this bound, every FSM device under a non-AutoPlant plant (dev
+   *    seed rows, plants that fell out of ACTIVE scope) would be inferred MISSING_FROM_SOURCE.
+   *
+   * A lifecycle failure must not fail the mirror sync that already committed: it is logged and counted,
+   * never rethrown — the next run re-derives the same departures from the source (nothing is lost).
+   */
+  private async reconcileDepartures(
+    runId: bigint,
+    vehicleMasters: VehicleMasterMasterRow[],
+    plantIdBySource: Map<string, bigint>,
+    stats: Record<string, EntityStat>,
+    options: MasterSyncOptions,
+  ): Promise<void> {
+    if (!this.departures) return;
+    const observed = new Map<string, string | null>();
+    for (const v of vehicleMasters) {
+      const deviceId = String(v.device_id ?? '').trim();
+      if (deviceId !== '') observed.set(deviceId, v.deployment_status);
+    }
+    try {
+      const result = await this.departures.reconcile({
+        observed,
+        syncedPlantIds: [...plantIdBySource.values()],
+        runId,
+        maxAbsenceRatio: options.maxAbsenceRatio,
+      });
+      stats.departures.inserted = result.departed;
+      stats.departures.updated = result.restored;
+      if (Object.keys(result.skippedByReason).length > 0) {
+        stats.departures.skipped = Object.values(result.skippedByReason).reduce((a, b) => a + b, 0);
+        stats.departures.skippedByReason = result.skippedByReason;
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      stats.departures.skipped++;
+      stats.departures.skippedByReason = { ...stats.departures.skippedByReason, RECONCILE_FAILED: 1 };
+      this.logger.error(`Master sync ${runId}: departure reconcile failed (mirror is committed): ${message}`);
     }
   }
 

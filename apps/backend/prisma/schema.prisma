@@ -1534,6 +1534,9 @@ enum ClosureType {
   ZM_MANUAL_CLOSE
   OPERATIONS_HEAD_OVERRIDE_CLOSE
   CSM_ACTING_CLOSE
+  /// System close: the device left the deployed fleet (Issue 128). Distinct from
+  /// OPERATIONS_HEAD_OVERRIDE_CLOSE — no human triggered it, the master sync observed the departure.
+  DEVICE_UNDEPLOYED_CLOSE
 
   @@map("closure_type")
 }
@@ -1601,10 +1604,45 @@ model Device {
   tickets        Ticket[]
   pgiHistory     PgiHistory[]
   nonOpMarkings  NonOperationalMarking[]
+  departures     DeviceDeparture[]
 
   @@index([currentVehicleId])
   @@index([dealType])
   @@map("devices")
+}
+
+/// FSM-owned device deployment lifecycle (Issue 128) — the device-grain twin of
+/// {@link PlantDeactivation}. Master sync reads AutoPlant at ALL deployment statuses but CREATES only
+/// DEPLOYED/ACTIVE devices (the insert-scope pin); when a device FSM already knows leaves that scope —
+/// observed as a non-operational `deployment_status`, or absent from the source read entirely — the
+/// sync opens a row here rather than mutating or deleting the mirror. A row is the ACTIVE departure
+/// while `restoredAt` is null; re-deployment stamps it and the device resumes automatically. Never
+/// deleted: the history is the audit trail. The one-active-per-device partial unique is raw SQL
+/// (migration 20260717130000), same posture as plant_deactivations.
+model DeviceDeparture {
+  id                    BigInt    @id @default(autoincrement())
+  deviceId              String    @map("device_id")
+  /// VERBATIM AutoPlant status that caused the departure (UNDEPLOYED / MAINTENANCE / an unknown value
+  /// such as 'DEPLOYED/UNDEPLOYED'), or the sentinel MISSING_FROM_SOURCE when the device vanished.
+  observedStatus        String    @map("observed_status")
+  /// SOURCE_STATUS (observed — trustworthy) | ABSENT_FROM_READ (inferred — guard-railed in the sync).
+  reason                String
+  departedAt            DateTime  @default(now()) @map("departed_at") @db.Timestamptz(6)
+  detectedByRunId       BigInt?   @map("detected_by_run_id")
+  cancelledTicketsCount Int       @default(0) @map("cancelled_tickets_count")
+  restoredStatus        String?   @map("restored_status")
+  restoredAt            DateTime? @map("restored_at") @db.Timestamptz(6)
+  restoredByRunId       BigInt?   @map("restored_by_run_id")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  device     Device         @relation(fields: [deviceId], references: [deviceId])
+  detectedBy MasterSyncRun? @relation("DepartureDetectedBy", fields: [detectedByRunId], references: [runId])
+  restoredBy MasterSyncRun? @relation("DepartureRestoredBy", fields: [restoredByRunId], references: [runId])
+
+  @@index([deviceId])
+  @@index([detectedByRunId])
+  @@map("device_departures")
 }
 
 /// A vehicle carrying one or more devices (schema D2); the coordination anchor for plant, company,
@@ -1751,6 +1789,9 @@ model MasterSyncRun {
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  departuresDetected DeviceDeparture[] @relation("DepartureDetectedBy")
+  departuresRestored DeviceDeparture[] @relation("DepartureRestoredBy")
+
   @@map("master_sync_runs")
 }
 
@@ -1787,6 +1828,12 @@ model DeviceState {
   slaBucket           SlaBucket? @map("sla_bucket")
   eligibleForUptime   Boolean    @default(false) @map("eligible_for_uptime")
   hasOpenFailureCycle Boolean    @default(false) @map("has_open_failure_cycle")
+  /// Denormalised mirror of "this device has an ACTIVE {@link DeviceDeparture}" (Issue 128), derived by
+  /// DeviceStateService.recompute exactly as `isInactive` is derived from `latestGpsDatetime`. Exists so
+  /// every hot-path read (inactive / SLA / eligibility / dashboards / dispatch) stays a single predicate
+  /// rather than a join to the side table. A departed device is NOT broken: it is excluded from
+  /// `isInactive` / `slaBucket` / `eligibleForUptime`, not counted as a failure.
+  isDeparted          Boolean    @default(false) @map("is_departed")
   vehicleId           BigInt?    @map("vehicle_id")
   plantId             BigInt?    @map("plant_id")
   companyId           BigInt?    @map("company_id")
@@ -1799,6 +1846,7 @@ model DeviceState {
   @@index([plantId])
   @@index([companyId])
   @@index([eligibleForUptime])
+  @@index([isDeparted])
   @@map("device_states")
 }
 

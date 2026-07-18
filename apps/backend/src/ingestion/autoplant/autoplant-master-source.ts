@@ -1,3 +1,4 @@
+import { OPERATIONAL_DEPLOYMENT_STATUSES } from './master-mapping';
 import type { MasterSourceCounts } from './health.service';
 import type { MasterSyncSource } from './master-sync.service';
 import type {
@@ -45,8 +46,23 @@ export interface AutoPlantMasterSourceDeps {
   pageSize?: number;
   /** `mst_plant.status` values to read (SQL filter). Empty ⇒ no status filter. Default `['ACTIVE']`. */
   plantStatuses?: string[];
-  /** `mst_vehicle.deployment_status` values to read (SQL filter). Empty ⇒ no filter. Default `['DEPLOYED']`. */
+  /**
+   * `mst_vehicle.deployment_status` values to READ (SQL filter). Empty ⇒ no filter — the Issue 128
+   * production posture, so a device leaving the deployed fleet is still returned and its departure can
+   * be OBSERVED rather than inferred. Default `[]` (all statuses).
+   *
+   * This is the READ scope only. It is emphatically NOT the create scope: `MasterSyncService` applies
+   * the insert-scope pin (`isOperationalStatus`) so a never-known non-operational row is counted and
+   * dropped, never mirrored. Widening this list must never be read as widening what FSM stores.
+   */
   deploymentStatuses?: string[];
+  /**
+   * `deployment_status` values that count as the OPERATIONAL fleet for {@link countVehicleMasters} —
+   * the reconciliation counterpart of the insert-scope pin. Must match what the sync actually creates,
+   * or health reports permanent drift (FSM mirrors ~21k; an all-status count would read ~48.5k).
+   * Default: {@link OPERATIONAL_DEPLOYMENT_STATUSES}.
+   */
+  operationalStatuses?: string[];
 }
 
 /** Keep the first row per key, preserving order — dedup helper for the composite-PK plant fan-out. */
@@ -69,6 +85,7 @@ export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCoun
   private readonly pageSize: number;
   private readonly plantStatuses: string[];
   private readonly deploymentStatuses: string[];
+  private readonly operationalStatuses: string[];
 
   constructor(deps: AutoPlantMasterSourceDeps) {
     this.query = deps.query;
@@ -76,7 +93,10 @@ export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCoun
     this.widgetsSchema = deps.widgetsSchema;
     this.pageSize = Math.max(1, Math.min(99, deps.pageSize ?? 90));
     this.plantStatuses = deps.plantStatuses ?? ['ACTIVE'];
-    this.deploymentStatuses = deps.deploymentStatuses ?? ['DEPLOYED'];
+    // Default: read EVERY status (Issue 128) so departures are observable. The create scope is pinned
+    // separately in MasterSyncService — this list must never be mistaken for what FSM mirrors.
+    this.deploymentStatuses = deps.deploymentStatuses ?? [];
+    this.operationalStatuses = deps.operationalStatuses ?? OPERATIONAL_DEPLOYMENT_STATUSES;
   }
 
   /** Backtick-qualify a masters table with the configured schema (defence-in-depth against the default schema). */
@@ -155,12 +175,16 @@ export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCoun
     );
   }
 
-  /** In-scope vehicle-master rows under the same deployment filter (no join — a count needs no company). */
+  /**
+   * OPERATIONAL vehicle-master rows (no join — a count needs no company). Counts the create scope, not
+   * the read scope: since Issue 128 the read returns every status (~48.5k) while FSM only ever mirrors
+   * the operational fleet (~21k), so counting the read would report ~27k of permanent phantom drift.
+   */
   countVehicleMasters(): Promise<number> {
     return this.countOne(
       'COUNT(*)',
       this.table('mst_vehicle'),
-      this.inClause('deployment_status', this.deploymentStatuses),
+      this.inClause('deployment_status', this.operationalStatuses),
     );
   }
 

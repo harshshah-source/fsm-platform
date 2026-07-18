@@ -26,6 +26,10 @@ const DEFAULT_INACTIVITY_THRESHOLD_HOURS = 24;
  *     - `eligible_for_uptime` per the `eligibility_mode` setting (Issue 112): `pgi` = active PGI
  *       within the window; `all-deployed` = interim proxy off the vehicle deployment-status mirror.
  *       A CONFIRMED/ACTIVE Non-Op marking excludes the device in both modes.
+ *     - `is_departed` (Issue 128) from the FSM-owned `device_departures` side table; a departed device
+ *       is excluded from inactive / SLA / eligibility in BOTH eligibility modes. The exclusion is
+ *       explicit rather than left to the `all-deployed` status mirror alone, because it must also cover
+ *       the MISSING_FROM_SOURCE case (a vanished device_id whose mirror status nobody can refresh).
  *     - vehicle / plant / company / transporter denormalised off the device's current fitment.
  *
  * `has_open_failure_cycle` is owned by ticket creation and is deliberately left untouched here.
@@ -54,6 +58,15 @@ export class DeviceStateService {
     //    pass. The `derived` CTE computes clamped inactivity hours once; the SLA-bucket CASE is projected
     //    from SLA_BANDS so it stays in lockstep with classifySlaBucket.
     const bucketCase = Prisma.raw(slaBucketCaseSql('dr.hours'));
+    // A departed device (Issue 128) is NOT broken — it is in a warehouse. It must therefore leave the
+    // operational derivations entirely rather than age through the SLA bands: no inactivity, no bucket,
+    // no eligibility. `latest_gps_datetime` keeps updating if it still pings (it is raw observation,
+    // not a judgement), so a re-deployed device resumes with real history. Same exclusion shape as the
+    // Non-Op marking below: an EXISTS on the FSM-owned side table, keyed on the ACTIVE row.
+    const departedExists = Prisma.sql`EXISTS (
+      SELECT 1 FROM device_departures dd
+       WHERE dd.device_id = ds.device_id AND dd.restored_at IS NULL
+    )`;
     // Eligibility base per `eligibility_mode` (Issue 112 / review B7); the Non-Op exclusion below
     // applies in both modes. `all-deployed` reads the vehicle deployment-status mirror off the
     // already-joined current fitment — COALESCE so no fitment / null status is ineligible, not NULL.
@@ -71,15 +84,18 @@ export class DeviceStateService {
         SELECT ds.device_id,
           CASE WHEN ds.latest_gps_datetime IS NULL THEN NULL
                ELSE GREATEST(0, EXTRACT(EPOCH FROM (${now}::timestamptz - ds.latest_gps_datetime)) / 3600.0)
-          END AS hours
+          END AS hours,
+          ${departedExists} AS departed
         FROM device_states ds
       )
       UPDATE device_states ds SET
         inactivity_hours = dr.hours,
-        is_inactive = (dr.hours IS NOT NULL AND dr.hours >= ${threshold}),
-        sla_bucket = ${bucketCase},
+        is_departed = dr.departed,
+        is_inactive = (NOT dr.departed AND dr.hours IS NOT NULL AND dr.hours >= ${threshold}),
+        sla_bucket = CASE WHEN dr.departed THEN NULL ELSE ${bucketCase} END,
         eligible_for_uptime = (
-          ${eligibilityBase}
+          NOT dr.departed
+          AND ${eligibilityBase}
           AND NOT EXISTS (
             SELECT 1 FROM non_operational_markings n
              WHERE n.device_id = ds.device_id AND n.state::text IN ('CONFIRMED', 'ACTIVE')

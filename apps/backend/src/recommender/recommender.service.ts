@@ -107,6 +107,10 @@ export class RecommenderService {
         assignmentState: 'UNASSIGNED',
         // Deactivated plants (Issue 119) are skipped by dispatch — no SE is sent to a shut plant.
         plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
+        // Departed devices (Issue 128) likewise — no SE is sent to a device that left the fleet.
+        // Defence in depth: the departure pass already cancels these tickets, but this closes the
+        // window between a device departing and the next sync, and any ticket raced in after it.
+        device: { departures: { none: { restoredAt: null } } },
       },
       include: {
         company: { select: { companyTier: true, companyPriorityRank: true } },
@@ -434,6 +438,10 @@ export class RecommenderService {
         status: 'REQUESTED',
         assignmentState: 'UNASSIGNED',
         plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
+        // NOTE: deliberately NOT filtered on device departure (Issue 128), unlike the Troubleshoot
+        // selection above. An Install exists to bring a device INTO the fleet, so "not currently
+        // deployed at source" is its normal starting state — excluding it would block exactly the
+        // work that makes the device deployed.
       },
       include: { company: { select: { companyTier: true, companyPriorityRank: true } } },
     });

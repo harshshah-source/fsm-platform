@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from '../auth/auth.module';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
+import { DeviceDepartureModule } from '../device-departure/device-departure.module';
 import { DeviceStateModule } from '../device-state/device-state.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsModule } from '../settings/settings.module';
@@ -62,7 +63,16 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
   // the ingestion scheduler is this module's only cron user, and AppModule stays untouched.
   // TicketingModule supplies TicketCreationService to IntegrationSyncService (Issue 112 — the
   // pipeline's fourth stage). No cycle: Ticketing imports only Prisma + Audit.
-  imports: [AuthModule, DeviceStateModule, SettingsModule, TicketingModule, ScheduleModule.forRoot()],
+  // DeviceDepartureModule supplies DeviceDepartureService to MasterSyncService (Issue 128 — the
+  // lifecycle pass the widened read feeds). No cycle: it imports only Prisma.
+  imports: [
+    AuthModule,
+    DeviceDepartureModule,
+    DeviceStateModule,
+    SettingsModule,
+    TicketingModule,
+    ScheduleModule.forRoot(),
+  ],
   controllers: [IntegrationHealthController, IntegrationSyncController],
   providers: [
     AuthGuard,
@@ -100,7 +110,11 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
           // ap_masters, where tb_vehiclemaster does not exist.
           widgetsSchema: cfg.dbWidgets,
           plantStatuses: ['ACTIVE'],
-          deploymentStatuses: ['DEPLOYED'],
+          // Issue 128: READ every deployment status, so a device leaving the deployed fleet is
+          // OBSERVED rather than inferred (the DEPLOYED-only read is what froze departed devices at
+          // 'DEPLOYED' forever). The CREATE scope is unchanged and pinned in MasterSyncService —
+          // widening this list must never be read as widening what FSM mirrors.
+          deploymentStatuses: [],
         });
       },
       inject: [AutoPlantMysqlClient],

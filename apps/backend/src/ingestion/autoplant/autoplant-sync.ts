@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { DeviceDepartureService } from '../../device-departure/device-departure.service';
 import { DeviceStateService } from '../../device-state/device-state.service';
 import { seedOrgReferenceData } from '../../org/org-seed';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -53,7 +54,9 @@ async function main(): Promise<void> {
       // sync writes NULL device_type/imsi_no over good values (mapDevice mirrors both).
       widgetsSchema: cfg.dbWidgets,
       plantStatuses: ['ACTIVE'],
-      deploymentStatuses: ['DEPLOYED'],
+      // MUST match ingestion.module's wiring (Issue 128): read every deployment status so departures
+      // are observed. The create scope stays operational-only — pinned inside MasterSyncService.
+      deploymentStatuses: [],
     });
     const masterSync = new MasterSyncService(
       prisma,
@@ -61,10 +64,12 @@ async function main(): Promise<void> {
       source,
       new MappingTableZoneResolver(prisma),
       { plantStatuses: ['ACTIVE'] },
+      undefined,
+      new DeviceDepartureService(prisma),
     );
 
     // eslint-disable-next-line no-console
-    console.log('── master-sync (ACTIVE plants / DEPLOYED vehicles, paginated ≤ ' + CHUNK + ') …');
+    console.log('── master-sync (ACTIVE plants / all deployment statuses, paginated ≤ ' + CHUNK + ') …');
     const master = await masterSync.sync();
     // eslint-disable-next-line no-console
     console.log(`master-sync ${master.status}`, master.stats);
