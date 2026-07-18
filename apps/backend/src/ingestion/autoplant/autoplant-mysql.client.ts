@@ -19,7 +19,8 @@ export interface AutoPlantMysqlConfig {
   port: number;
   user: string;
   password: string;
-  /** `ap_widgets` — live telemetry (tb_vehiclemaster); the connection's DEFAULT schema. */
+  /** `ap_widgets` — live telemetry (tb_vehiclemaster); queried schema-qualified, NOT the connection
+   *  default (the production account has no grant on it — see `buildPoolOptions`). */
   dbWidgets: string;
   /** `ap_masters` — master data (mst_company/plant/vehicle/transporter); queried schema-qualified. */
   dbMasters: string;
@@ -85,8 +86,20 @@ export function buildPoolOptions(
     port: cfg.port,
     user: cfg.user,
     password: cfg.password,
-    // Default schema = ap_widgets (tb_vehiclemaster); ap_masters queries are schema-qualified.
-    database: cfg.dbWidgets,
+    // Default schema = the MASTERS schema. MySQL validates the default database at CONNECT time, so
+    // this must name a schema the account can actually reach; the master-sync pipeline reads ap_masters
+    // and is fully schema-qualified, so any valid default works.
+    //
+    // Every read of ap_widgets MUST be schema-qualified rather than leaning on this default — an
+    // unqualified `FROM tb_vehiclemaster` resolves to ap_masters, where it does not exist, and fails
+    // ER_NO_SUCH_TABLE (this broke snapshot runs 64–70 on 2026-07-14/15).
+    //
+    // 2026-07-17 correction: earlier comments here claimed ap_widgets "does not exist" on the
+    // production account / was "parked pending the telemetry-source grant". That is NOT true — a live
+    // read of `ap_widgets`.tb_vehiclemaster returns current telemetry (verified fresh to the same day),
+    // and both the snapshot reader and the master sync's device-identity join depend on it. The
+    // original connect failure was about the DEFAULT schema, not the grant.
+    database: cfg.dbMasters,
     ssl: cfg.ssl ? {} : undefined,
     connectionLimit: 4,
     waitForConnections: true,
@@ -139,7 +152,7 @@ export class AutoPlantMysqlClient implements OnModuleDestroy {
     }
     this.logger.log(
       `Opening AutoPlant MySQL pool ${cfg.user}@${cfg.host}:${cfg.port} ` +
-        `(default=${cfg.dbWidgets}, masters=${cfg.dbMasters}, ssl=${cfg.ssl})`,
+        `(default=${cfg.dbMasters}, widgets=${cfg.dbWidgets}, ssl=${cfg.ssl})`,
     );
     this.pool = mysql.createPool(buildPoolOptions(cfg));
     return this.pool;
@@ -174,9 +187,19 @@ export class AutoPlantMysqlClient implements OnModuleDestroy {
     return withQueryTimeout(this.execute<T>(sql, params), readQueryTimeoutMs(), sql);
   }
 
-  /** Connectivity probe: confirms the pool connects and the source table is readable. */
+  /**
+   * Connectivity probe: confirms the pool connects and the masters schema is readable, schema-qualified
+   * so it never leans on the connection default. `vehicleRows` = mst_vehicle count. Deliberately scoped
+   * to masters: it is the FK-ordered root of the sync, so a masters failure is the one that stops
+   * everything. (The widgets schema IS readable — see `buildPoolOptions`; `autoplant-ping.ts` probes it
+   * separately.)
+   */
   async ping(): Promise<{ ok: true; vehicleRows: number }> {
-    const rows = await this.query('SELECT COUNT(*) AS n FROM tb_vehiclemaster');
+    const cfg = readAutoPlantMysqlConfig();
+    if (!cfg) {
+      throw new Error('AutoPlant MySQL not configured — set the AUTOPLANT_MYSQL_* env before pinging.');
+    }
+    const rows = await this.query(`SELECT COUNT(*) AS n FROM \`${cfg.dbMasters}\`.mst_vehicle`);
     return { ok: true, vehicleRows: Number((rows[0] as { n?: number | string })?.n ?? 0) };
   }
 

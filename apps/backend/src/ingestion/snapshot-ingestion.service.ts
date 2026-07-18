@@ -14,7 +14,13 @@ export interface IngestChunkResult {
 
 /**
  * Writes raw telemetry chunks into `raw_device_snapshots` AND maintains `device_states.latest_gps_datetime`
- * incrementally from the same in-memory chunk (R4-A).
+ * + `device_states.trip_creation_datetime` incrementally from the same in-memory chunk (R4-A).
+ *
+ * `trip_creation_datetime` is here — on the 30-min telemetry tick — rather than in the daily master sync
+ * because it is live trip state: it tracks `active_trip_id`, and 18.4% of the DEPLOYED fleet changes it
+ * per day (measured 2026-07-17), so a daily mirror would be stale for ~2,600 vehicles at a time. It is
+ * per-device CURRENT state, so it belongs on the hot `device_states` row, not in the per-ping
+ * `raw_device_snapshots` journal (which is partitioned + retention-dropped).
  *
  * Chunk re-runs are idempotent: `createMany({ skipDuplicates: true })` emits
  * `INSERT … ON CONFLICT DO NOTHING`, and the `(device_id, gps_datetime)` UNIQUE means a re-processed
@@ -84,21 +90,36 @@ export class SnapshotIngestionService {
     now: Date,
   ): Promise<{ deviceStatesUpserted: number; unknownDevices: number }> {
     const maxByDevice = new Map<string, Date>();
+    const tripByDevice = new Map<string, Date>();
     for (const r of rows) {
       const cur = maxByDevice.get(r.deviceId);
       if (!cur || r.gpsDatetime > cur) maxByDevice.set(r.deviceId, r.gpsDatetime);
+      // Trip creation dedupes to the chunk-max independently of the ping watermark: trips are only ever
+      // created forward, so the newest stamp is the current trip. A null (no trip yet) never displaces a
+      // known one — same "never regress" rule the ping watermark follows.
+      const trip = r.tripCreationDatetime ?? null;
+      if (trip) {
+        const curTrip = tripByDevice.get(r.deviceId);
+        if (!curTrip || trip > curTrip) tripByDevice.set(r.deviceId, trip);
+      }
     }
     const deviceIds = [...maxByDevice.keys()];
     if (deviceIds.length === 0) return { deviceStatesUpserted: 0, unknownDevices: 0 };
     const timestamps = deviceIds.map((d) => maxByDevice.get(d)!);
+    const tripCreations = deviceIds.map((d) => tripByDevice.get(d) ?? null);
 
+    // `trip_creation_datetime` rides this existing statement — no second write, no extra round trip.
+    // GREATEST ignores NULLs in Postgres, so a chunk that carries no trip stamp for a device leaves the
+    // stored one intact rather than clearing it (a vehicle between trips must not lose its last trip).
     const deviceStatesUpserted = await this.prisma.$executeRaw(Prisma.sql`
-      INSERT INTO device_states (device_id, latest_gps_datetime, computed_at)
-      SELECT u.device_id, u.latest_gps, ${now}
-        FROM unnest(${deviceIds}::text[], ${timestamps}::timestamptz[]) AS u(device_id, latest_gps)
+      INSERT INTO device_states (device_id, latest_gps_datetime, trip_creation_datetime, computed_at)
+      SELECT u.device_id, u.latest_gps, u.trip_created, ${now}
+        FROM unnest(${deviceIds}::text[], ${timestamps}::timestamptz[], ${tripCreations}::timestamptz[])
+          AS u(device_id, latest_gps, trip_created)
         JOIN devices d ON d.device_id = u.device_id
       ON CONFLICT (device_id) DO UPDATE
         SET latest_gps_datetime = GREATEST(device_states.latest_gps_datetime, EXCLUDED.latest_gps_datetime),
+            trip_creation_datetime = GREATEST(device_states.trip_creation_datetime, EXCLUDED.trip_creation_datetime),
             computed_at = EXCLUDED.computed_at`);
 
     const unknownDevices = deviceIds.length - deviceStatesUpserted;

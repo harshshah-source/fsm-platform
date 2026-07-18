@@ -4,6 +4,7 @@ import {
   coerceNumeric,
   mapVehicleMasterRow,
   parseGpssignal,
+  parseTripCreation,
   type VehicleMasterRow,
 } from '../src/ingestion/autoplant/mapping';
 
@@ -128,5 +129,47 @@ describe('Phase 3 — mapVehicleMasterRow', () => {
 
   it('exposes the IST offset constant', () => {
     expect(AUTOPLANT_UTC_OFFSET_MIN).toBe(330);
+  });
+});
+
+/**
+ * TRIP_CREATION_DATETIME — the timezone asymmetry inside a single source row. `latest_gps_datetime` is a
+ * naive MySQL DATETIME in IST (+330); `TRIP_CREATION_DATETIME` is a MySQL TIMESTAMP the server has
+ * already converted into the session zone (UTC) before we see it. Mapping trip creation through the IST
+ * normalizer would silently shift every value 5.5h into the future — pinned here so it cannot regress.
+ */
+describe('Phase 3 — parseTripCreation (already-UTC TIMESTAMP, not IST)', () => {
+  it('reads the wall clock as UTC — NOT shifted by the IST offset', () => {
+    // Live-source shape (2026-07-17): server NOW() UTC 06:20:32, newest TRIP_CREATION 06:19:02.
+    expect(parseTripCreation('2026-07-17 06:19:02')?.toISOString()).toBe('2026-07-17T06:19:02.000Z');
+  });
+
+  it('does not apply AUTOPLANT_UTC_OFFSET_MIN (the 5.5h-shift regression)', () => {
+    const t = parseTripCreation('2026-07-13 08:36:27')!;
+    const istShifted = new Date('2026-07-13T08:36:27Z').getTime() - AUTOPLANT_UTC_OFFSET_MIN * 60_000;
+    expect(t.getTime()).not.toBe(istShifted);
+    expect(t.toISOString()).toBe('2026-07-13T08:36:27.000Z');
+  });
+
+  it('degrades to null for absent/blank/garbage instead of throwing (must never drop a real GPS ping)', () => {
+    expect(parseTripCreation(null)).toBeNull();
+    expect(parseTripCreation(undefined)).toBeNull();
+    expect(parseTripCreation('')).toBeNull();
+    expect(parseTripCreation('NULL')).toBeNull();
+    expect(parseTripCreation('not-a-timestamp')).toBeNull();
+  });
+
+  it('carries trip creation onto the mapped snapshot row, independently of the IST-normalized ping', () => {
+    const row = mapVehicleMasterRow(
+      { ...IMEI_ROW, TRIP_CREATION_DATETIME: '2026-07-02 04:30:00' },
+      { now: NOW },
+    );
+    // The ping is IST → shifted back 5.5h; the trip stamp is UTC → verbatim. Both from the same row.
+    expect(row?.gpsDatetime.toISOString()).toBe('2026-07-02T00:27:47.000Z');
+    expect(row?.tripCreationDatetime?.toISOString()).toBe('2026-07-02T04:30:00.000Z');
+  });
+
+  it('maps a row with no trip stamp at all to a null trip creation (13% of the source)', () => {
+    expect(mapVehicleMasterRow(WHEELSEYE_ROW, { now: NOW })?.tripCreationDatetime).toBeNull();
   });
 });

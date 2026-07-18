@@ -30,12 +30,24 @@ import type { SourceChunk, SourceReader, SourceSnapshotRow } from '../source-rea
  * boundary — no composite tiebreak is required.
  */
 
+// TRIP_CREATION_DATETIME rides this existing scan (no extra query, no extra pass): it is live
+// trip state, so the 30-min telemetry tick is its correct cadence — the daily master sync would
+// leave 18.4% of the DEPLOYED fleet stale. It lands on `device_states`, not `raw_device_snapshots`.
 const SELECT_COLS =
-  'device_id, latest_gps_datetime, latitude, longitude, speed, IGNITION_STATUS, DEVICE_TYPE, gpssignal';
+  'device_id, latest_gps_datetime, latitude, longitude, speed, IGNITION_STATUS, DEVICE_TYPE, ' +
+  'TRIP_CREATION_DATETIME, gpssignal';
 
 export interface AutoPlantSourceReaderDeps {
   /** Read-only query into `ap_widgets` (satisfied by `AutoPlantMysqlClient.query`). */
   query: <T>(sql: string, params?: readonly unknown[]) => Promise<T[]>;
+  /**
+   * The `ap_widgets` schema name (from `AutoPlantMysqlConfig.dbWidgets`) — used to schema-qualify
+   * `tb_vehiclemaster`. This MUST be passed in production: `tb_vehiclemaster` lives in `ap_widgets`,
+   * but the pool's default schema is `ap_masters` (masters is the connect-time-validated live consumer),
+   * so an unqualified `FROM tb_vehiclemaster` resolves to `ap_masters.tb_vehiclemaster` and every read
+   * fails `ER_NO_SUCH_TABLE`. Omitted only in unit tests that stub `query` and never touch a real schema.
+   */
+  widgetsSchema?: string;
   /** Injectable clock for the future-timestamp guard. */
   now?: () => Date;
   offsetMinutes?: number;
@@ -49,12 +61,17 @@ export function encodeDeviceCursor(deviceId: string): string {
 
 export class AutoPlantSourceReader implements SourceReader {
   private readonly query: AutoPlantSourceReaderDeps['query'];
+  private readonly from: string;
   private readonly now: () => Date;
   private readonly offsetMinutes: number;
   private readonly maxSkewMinutes: number | undefined;
 
   constructor(deps: AutoPlantSourceReaderDeps) {
     this.query = deps.query;
+    // Backtick-qualify the telemetry table with the configured widgets schema (defence-in-depth against
+    // the pool's default schema, which is `ap_masters`). Unqualified only when no schema is supplied —
+    // unit tests stubbing `query`; a real MySQL pool would then fail ER_NO_SUCH_TABLE against ap_masters.
+    this.from = deps.widgetsSchema ? `\`${deps.widgetsSchema}\`.tb_vehiclemaster` : 'tb_vehiclemaster';
     this.now = deps.now ?? (() => new Date());
     this.offsetMinutes = deps.offsetMinutes ?? AUTOPLANT_UTC_OFFSET_MIN;
     this.maxSkewMinutes = deps.maxSkewMinutes;
@@ -68,7 +85,7 @@ export class AutoPlantSourceReader implements SourceReader {
     const params = cursor === null ? [] : [cursor];
 
     const sql =
-      `SELECT ${SELECT_COLS} FROM tb_vehiclemaster ` +
+      `SELECT ${SELECT_COLS} FROM ${this.from} ` +
       `WHERE latest_gps_datetime IS NOT NULL AND device_id IS NOT NULL AND TRIM(device_id) <> ''${predicate} ` +
       `ORDER BY device_id LIMIT ${limit}`;
 

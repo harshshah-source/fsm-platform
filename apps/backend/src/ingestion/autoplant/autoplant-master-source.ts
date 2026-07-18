@@ -13,11 +13,15 @@ import type {
  * qualified with the configured `ap_masters` schema). Column names are the authoritative DESCRIBEs in
  * `docs/autoplant/` — not inferred from sample rows.
  *
- * Two facts the production schema forced:
+ * Three facts the production schema forced:
  *   • `mst_plant.master_plant_id` / `master_plant_code` are a DISTINCT parent reference (≠ the plant's
  *     own `plant_id`/`plant_code`) — those are what FSM mirrors as `master_plant_*`.
  *   • `mst_vehicle.company_id` is unreliable (0 in production); a vehicle's authoritative company is its
  *     plant's company, so `readVehicleMasters` resolves it via `LEFT JOIN mst_plant … p.company_id`.
+ *   • Device identity (`DEVICE_TYPE`, `IMSI_NO`) is not in `ap_masters` at all — it lives one schema
+ *     over on `ap_widgets.tb_vehiclemaster`, so `readVehicleMasters` reaches across the boundary for
+ *     it. Only STATIC attributes are taken from there; live trip/telemetry state stays on the
+ *     30-min snapshot path (see the note on `readVehicleMasters`).
  *
  * **Bounded reads (DBA "< 100 rows/query" cap).** Production is large (59k vehicles / 27k plants), and
  * the read-only account is capped at under 100 rows per query. Every read is therefore keyset-paginated
@@ -31,6 +35,12 @@ export interface AutoPlantMasterSourceDeps {
   query: <T>(sql: string, params?: readonly unknown[]) => Promise<T[]>;
   /** The `ap_masters` schema name (from `AutoPlantMysqlConfig.dbMasters`) — never hard-coded. */
   mastersSchema: string;
+  /**
+   * The `ap_widgets` schema name (from `AutoPlantMysqlConfig.dbWidgets`) — enables the device-identity
+   * enrichment join in `readVehicleMasters` (DEVICE_TYPE / IMSI_NO, which exist only there). Omit and
+   * the join is skipped and both columns read NULL: the shape unit tests use when they stub `query`.
+   */
+  widgetsSchema?: string;
   /** Rows per physical query — kept < 100 for the DBA cap. Default 90. */
   pageSize?: number;
   /** `mst_plant.status` values to read (SQL filter). Empty ⇒ no status filter. Default `['ACTIVE']`. */
@@ -55,6 +65,7 @@ function dedupBy<T>(rows: T[], keyOf: (row: T) => string): T[] {
 export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCounts {
   private readonly query: AutoPlantMasterSourceDeps['query'];
   private readonly mastersSchema: string;
+  private readonly widgetsSchema: string | undefined;
   private readonly pageSize: number;
   private readonly plantStatuses: string[];
   private readonly deploymentStatuses: string[];
@@ -62,6 +73,7 @@ export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCoun
   constructor(deps: AutoPlantMasterSourceDeps) {
     this.query = deps.query;
     this.mastersSchema = deps.mastersSchema;
+    this.widgetsSchema = deps.widgetsSchema;
     this.pageSize = Math.max(1, Math.min(99, deps.pageSize ?? 90));
     this.plantStatuses = deps.plantStatuses ?? ['ACTIVE'];
     this.deploymentStatuses = deps.deploymentStatuses ?? ['DEPLOYED'];
@@ -70,6 +82,11 @@ export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCoun
   /** Backtick-qualify a masters table with the configured schema (defence-in-depth against the default schema). */
   private table(name: string): string {
     return `\`${this.mastersSchema}\`.\`${name}\``;
+  }
+
+  /** Backtick-qualify the widgets telemetry table (device-identity enrichment source). */
+  private widgetsTable(name: string): string {
+    return `\`${this.widgetsSchema}\`.\`${name}\``;
   }
 
   /** Build an `IN (?, ?, …)` predicate for a status filter, or null when the filter is empty. */
@@ -185,21 +202,42 @@ export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCoun
 
   readVehicleMasters(): Promise<VehicleMasterMasterRow[]> {
     // Company via the plant (p.company_id) — mst_vehicle.company_id is 0/unreliable in production.
-    // device_type has no home in mst_vehicle (it lives on ap_widgets.tb_vehiclemaster.DEVICE_TYPE, a
-    // non-load-bearing enrichment) → NULL here; the Snapshot path still records it per-ping.
     // The plant join is a GROUP-BY-plant_id SUBQUERY (not a raw join): `mst_plant`'s composite PK
     // (plant_id, plant_code) would otherwise fan each vehicle out per plant_code — inflating the read
     // ~2× and making a vehicle's company nondeterministic (last plant_code's company wins). Keyset on
     // the natural PK v.vehicle_no; deployment scope pushed into SQL.
+    //
+    // DEVICE_TYPE / IMSI_NO have no home in `mst_vehicle` — they live across the schema boundary on
+    // `ap_widgets.tb_vehiclemaster`, so they are joined in here (this read previously hardcoded
+    // `NULL AS device_type`, which left devices.device_type NULL for the whole fleet — 0 of 20,935 on
+    // 2026-07-17 — while mapDevice dutifully mirrored the NULL back on every sync).
+    //
+    // The join is safe and free: `tb_vehiclemaster.vehicle_no` is the PK and verified unique on
+    // production (60,601 rows / 60,601 distinct), so it cannot fan a vehicle out; and it rides the
+    // SAME paged queries, so the DBA's <100-rows/query cap and the query count are both unchanged.
+    // Verified 2026-07-17: all 15,674 DEPLOYED vehicles match a widgets row (100% join coverage).
+    //
+    // Only STATIC device identity is taken from widgets here. `TRIP_CREATION_DATETIME` is deliberately
+    // NOT read on this path: it is current-trip state (18.4% of the DEPLOYED fleet changes it per day),
+    // so it rides the 30-min snapshot tick onto `device_states` instead — a daily sync would leave it
+    // ~2,600 vehicles/day stale. Keep the lifecycle split; do not "tidy" it back together.
+    //
+    // No enrichment when `widgetsSchema` is unset (unit tests stubbing `query`): both columns read NULL,
+    // exactly as before. When it IS set, a widgets outage fails the run rather than degrading it — that
+    // is deliberate. Since mapDevice MIRRORS these columns, a run that silently substituted NULLs would
+    // wipe device_type/imsi_no across the fleet; a failed run writes nothing and is visible in the ledger.
+    const enrich = this.widgetsSchema !== undefined;
     return this.pageAll<VehicleMasterMasterRow>({
       select:
         'v.vehicle_no AS vehicle_no, v.device_id AS device_id, v.plant_id AS plant_id, ' +
         'p.company_id AS company_id, v.transporter_id AS transporter_id, ' +
-        'v.deployment_status AS deployment_status, NULL AS device_type',
+        'v.deployment_status AS deployment_status, ' +
+        (enrich ? 'w.DEVICE_TYPE AS device_type, w.IMSI_NO AS imsi_no' : 'NULL AS device_type, NULL AS imsi_no'),
       from:
         `${this.table('mst_vehicle')} v LEFT JOIN ` +
         `(SELECT plant_id, MIN(company_id) AS company_id FROM ${this.table('mst_plant')} GROUP BY plant_id) p ` +
-        'ON p.plant_id = v.plant_id',
+        'ON p.plant_id = v.plant_id' +
+        (enrich ? ` LEFT JOIN ${this.widgetsTable('tb_vehiclemaster')} w ON w.vehicle_no = v.vehicle_no` : ''),
       where: this.inClause('v.deployment_status', this.deploymentStatuses),
       keyColumn: 'v.vehicle_no',
       keyOf: (r) => r.vehicle_no,

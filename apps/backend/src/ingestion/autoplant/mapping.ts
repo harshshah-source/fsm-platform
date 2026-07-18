@@ -1,4 +1,4 @@
-import { normalizeSourceRow, type RawSourceRow } from '../normalize';
+import { normalizeGpsTimestamp, normalizeSourceRow, type RawSourceRow } from '../normalize';
 import type { SourceSnapshotRow } from '../source-reader';
 
 /**
@@ -13,6 +13,22 @@ import type { SourceSnapshotRow } from '../source-reader';
 
 /** AutoPlant source timestamps are naive IST (+330). Kept as a named constant, configurable per §10. */
 export const AUTOPLANT_UTC_OFFSET_MIN = 330;
+
+/**
+ * `TRIP_CREATION_DATETIME` needs a ZERO offset, not `AUTOPLANT_UTC_OFFSET_MIN` — the two source
+ * timestamps do not share a timezone, despite sitting in the same row:
+ *
+ *   • `latest_gps_datetime` is a MySQL **DATETIME** — stored and returned as a naive wall clock the
+ *     server never converts, and AutoPlant writes it in IST. Hence the +330 normalization.
+ *   • `TRIP_CREATION_DATETIME` is a MySQL **TIMESTAMP** — stored as a UTC epoch and converted by the
+ *     SERVER into the session timezone on read. The AutoPlant session zone is UTC
+ *     (`@@system_time_zone` = UTC, `@@session.time_zone` = SYSTEM), so it arrives ALREADY in UTC.
+ *
+ * Verified against the live source 2026-07-17: server `NOW()` (UTC) 06:20:32 · newest
+ * TRIP_CREATION 06:19:02 · newest `latest_gps_datetime` 11:49:46 · real IST wall clock 11:50. Running
+ * trip creation through the IST normalizer would therefore shift every value 5.5h into the future.
+ */
+const TRIP_CREATION_UTC_OFFSET_MIN = 0;
 
 /** Default tolerance for a `latest_gps_datetime` ahead of `now` before it is treated as bogus (§6.6). */
 const DEFAULT_MAX_SKEW_MINUTES = 24 * 60;
@@ -31,6 +47,9 @@ export interface VehicleMasterRow {
   speed: number | null;
   IGNITION_STATUS: string | null;
   DEVICE_TYPE: string | null;
+  /** Creation time of the vehicle's current trip. Optional: absent when a caller (or an older
+   *  recorded fixture) selects only the original telemetry columns → maps to null. */
+  TRIP_CREATION_DATETIME?: string | null;
   gpssignal: unknown;
 }
 
@@ -78,6 +97,21 @@ export function parseGpssignal(raw: unknown): { mainsStatus: number | null; main
   return { mainsStatus: coerceMainsStatus(p.mainstatus), mainsVoltage: coerceNumeric(p.mainvoltage) };
 }
 
+/**
+ * Parse `TRIP_CREATION_DATETIME` (already-UTC wall clock, see {@link TRIP_CREATION_UTC_OFFSET_MIN}) to a
+ * true instant. Null-safe and NON-throwing by design: this is enrichment riding the telemetry path, so a
+ * blank or malformed trip stamp must degrade to null, never drop the row's actual GPS ping (contrast
+ * `normalizeGpsTimestamp`, which throws — a bad `gps_datetime` is not recoverable).
+ */
+export function parseTripCreation(v: string | null | undefined): Date | null {
+  if (isBlank(v)) return null;
+  try {
+    return normalizeGpsTimestamp(v!.trim(), TRIP_CREATION_UTC_OFFSET_MIN);
+  } catch {
+    return null;
+  }
+}
+
 export interface MapOptions {
   /** Injectable clock for the future-timestamp guard (defaults to real time). */
   now?: Date;
@@ -111,6 +145,8 @@ export function mapVehicleMasterRow(row: VehicleMasterRow, opts: MapOptions = {}
     speed: row.speed,
     ignitionStatus: isBlank(row.IGNITION_STATUS) ? null : row.IGNITION_STATUS!.trim(),
     deviceType: isBlank(row.DEVICE_TYPE) ? null : row.DEVICE_TYPE!.trim(),
+    // Already-UTC (TIMESTAMP), so it does NOT take `offsetMinutes` — see parseTripCreation.
+    tripCreationDatetime: parseTripCreation(row.TRIP_CREATION_DATETIME),
     mainsStatus,
     mainsVoltage,
     // Not present anywhere in ap_widgets — stay null (Technical Hints degrade gracefully).

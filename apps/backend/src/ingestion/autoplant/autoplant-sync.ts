@@ -49,6 +49,9 @@ async function main(): Promise<void> {
     const source = new AutoPlantMasterSource({
       query,
       mastersSchema: cfg.dbMasters,
+      // MUST match ingestion.module's wiring: without it the device-identity join is skipped and the
+      // sync writes NULL device_type/imsi_no over good values (mapDevice mirrors both).
+      widgetsSchema: cfg.dbWidgets,
       plantStatuses: ['ACTIVE'],
       deploymentStatuses: ['DEPLOYED'],
     });
@@ -83,6 +86,7 @@ async function main(): Promise<void> {
       const snapRuns = new SnapshotRunService(prisma);
       const reader = new AutoPlantSourceReader({
         query,
+        widgetsSchema: cfg.dbWidgets, // tb_vehiclemaster lives in ap_widgets; pool default is ap_masters
         offsetMinutes: process.env.AUTOPLANT_SOURCE_UTC_OFFSET_MIN
           ? Number(process.env.AUTOPLANT_SOURCE_UTC_OFFSET_MIN)
           : undefined,

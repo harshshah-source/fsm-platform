@@ -20,6 +20,17 @@ export interface SourceSnapshotRow {
    */
   deviceId: string;
   gpsDatetime: Date;
+  /**
+   * When the vehicle's CURRENT trip was created (`tb_vehiclemaster.TRIP_CREATION_DATETIME`), as a true
+   * UTC instant. Rides the telemetry path because it is live trip state, not master data — it tracks
+   * `active_trip_id` and 18.4% of the DEPLOYED fleet changes it daily (measured 2026-07-17). Null when
+   * the vehicle has never had a trip (~13% of the source).
+   *
+   * NOTE the timezone asymmetry vs `gpsDatetime`: this is a MySQL TIMESTAMP, which the server converts
+   * to the session zone on read (session = UTC), so it arrives ALREADY UTC and must NOT go through the
+   * IST(+330) normalizer that `latest_gps_datetime` (a naive DATETIME) needs. See `mapping.ts`.
+   */
+  tripCreationDatetime?: Date | null;
   lat?: number | null;
   lon?: number | null;
   mainsStatus?: number | null;

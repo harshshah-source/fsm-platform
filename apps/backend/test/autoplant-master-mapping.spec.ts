@@ -63,7 +63,10 @@ const VM_AP02TA2569: VehicleMasterMasterRow = {
   plant_id: 3038,
   company_id: 1015,
   transporter_id: 7216,
+  // device_type / imsi_no are joined in from ap_widgets.tb_vehiclemaster (mst_vehicle has neither).
+  // Real values for this vehicle, sampled from the live source 2026-07-17.
   device_type: 'V5',
+  imsi_no: '0404920694896515',
   deployment_status: 'DEPLOYED',
 };
 
@@ -213,5 +216,27 @@ describe('Phase 4 — mapDevice', () => {
   it('returns null for a vehicle row with no fitted device (blank / "NULL" device_id)', () => {
     expect(mapDevice({ ...VM_AP02TA2569, device_id: null }, { currentVehicleId: 1n })).toBeNull();
     expect(mapDevice({ ...VM_AP02TA2569, device_id: 'NULL' }, { currentVehicleId: 1n })).toBeNull();
+  });
+
+  it('mirrors imsi_no on both create and update (AutoPlant-authoritative, refreshes on a SIM swap)', () => {
+    const plan = mapDevice(VM_AP02TA2569, { currentVehicleId: 11n })!;
+    expect(plan.create).toMatchObject({ imsiNo: '0404920694896515' });
+    expect(plan.update).toMatchObject({ imsiNo: '0404920694896515' });
+  });
+
+  it("folds the source's ''/NA/NULL sentinels to null for device_type + imsi_no", () => {
+    // Real shape: DEVICE_TYPE is '' on ~11.9k source rows, IMSI_NO is NULL on ~9.9k.
+    const sparse = mapDevice({ ...VM_AP02TA2569, device_type: '', imsi_no: null }, { currentVehicleId: 11n })!;
+    expect(sparse.create.deviceType).toBeNull();
+    expect(sparse.create.imsiNo).toBeNull();
+    const sentinel = mapDevice({ ...VM_AP02TA2569, device_type: 'NA', imsi_no: 'NULL' }, { currentVehicleId: 11n })!;
+    expect(sentinel.create.deviceType).toBeNull();
+    expect(sentinel.create.imsiNo).toBeNull();
+  });
+
+  it('never sources trip state onto the device master (that is device_states, via the snapshot tick)', () => {
+    const plan = mapDevice(VM_AP02TA2569, { currentVehicleId: 11n })!;
+    expect(plan.create).not.toHaveProperty('tripCreationDatetime');
+    expect(plan.update).not.toHaveProperty('tripCreationDatetime');
   });
 });

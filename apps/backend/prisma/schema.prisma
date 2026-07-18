@@ -1587,6 +1587,10 @@ model Device {
   currentVehicleId BigInt?   @map("current_vehicle_id")
   dealType         DealType? @map("deal_type")
   deviceType       String?   @map("device_type")
+  /// AutoPlant `tb_vehiclemaster.IMSI_NO` — the fitted SIM's subscriber identity, mirrored by master
+  /// sync. Identity data, not telemetry: it moves only on a SIM swap. Distinct from `simId` (unused,
+  /// no writer) on purpose — an IMSI is not an ICCID/SIM id.
+  imsiNo           String?   @map("imsi_no")
   simId            String?   @map("sim_id")
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -1772,6 +1776,12 @@ model MasterSyncReject {
 model DeviceState {
   deviceId            String     @id @map("device_id")
   latestGpsDatetime   DateTime?  @map("latest_gps_datetime") @db.Timestamptz(6)
+  /// AutoPlant `tb_vehiclemaster.TRIP_CREATION_DATETIME` — when the vehicle's CURRENT trip was
+  /// created. Operational trip state, not master data (measured 2026-07-17: 18.4% of the DEPLOYED
+  /// fleet changes it per day, and it tracks `active_trip_id`), so it rides the 30-min telemetry tick
+  /// onto this hot row rather than the daily master sync, which would leave it up to 24h stale.
+  /// Maintained at ingest by `SnapshotIngestionService` alongside `latestGpsDatetime`.
+  tripCreationDatetime DateTime? @map("trip_creation_datetime") @db.Timestamptz(6)
   isInactive          Boolean    @default(false) @map("is_inactive")
   inactivityHours     Decimal?   @map("inactivity_hours") @db.Decimal(12, 4)
   slaBucket           SlaBucket? @map("sla_bucket")

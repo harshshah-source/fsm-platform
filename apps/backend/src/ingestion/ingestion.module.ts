@@ -95,6 +95,10 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
         return new AutoPlantMasterSource({
           query: ((sql, params) => client.query(sql, params)) as AutoPlantMasterSourceDeps['query'],
           mastersSchema: cfg.dbMasters,
+          // Enables the static device-identity enrichment join (DEVICE_TYPE / IMSI_NO live only in
+          // ap_widgets). Qualified for the same reason the snapshot reader is: the pool default is
+          // ap_masters, where tb_vehiclemaster does not exist.
+          widgetsSchema: cfg.dbWidgets,
           plantStatuses: ['ACTIVE'],
           deploymentStatuses: ['DEPLOYED'],
         });
@@ -132,10 +136,14 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
       // Real reader when AutoPlant is configured; mock (unset env ⇒ boots on the in-memory reader) otherwise.
       provide: SOURCE_READER,
       useFactory: (client: AutoPlantMysqlClient): SourceReader => {
-        if (readAutoPlantMysqlConfig() === null) return new InMemorySourceReader([]);
+        const cfg = readAutoPlantMysqlConfig();
+        if (cfg === null) return new InMemorySourceReader([]);
         const offsetEnv = process.env.AUTOPLANT_SOURCE_UTC_OFFSET_MIN;
         return new AutoPlantSourceReader({
           query: ((sql, params) => client.query(sql, params)) as AutoPlantSourceReaderDeps['query'],
+          // tb_vehiclemaster lives in ap_widgets; the pool default schema is ap_masters, so this must be
+          // qualified or every read fails ER_NO_SUCH_TABLE against ap_masters (regression, 2026-07-14).
+          widgetsSchema: cfg.dbWidgets,
           offsetMinutes: offsetEnv ? Number(offsetEnv) : undefined,
         });
       },

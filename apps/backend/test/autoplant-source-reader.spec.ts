@@ -102,6 +102,16 @@ describe('Phase 3 — AutoPlantSourceReader (single device-scan engine)', () => 
     expect(chunk.nextCursor).toBe(encodeDeviceCursor('DFUTURE')); // …but cursor rides the real last row
   });
 
+  it('schema-qualifies tb_vehiclemaster with the widgets schema when supplied (default schema is ap_masters)', async () => {
+    // Regression (2026-07-14): the pool's default schema is ap_masters, where tb_vehiclemaster does not
+    // exist. Production must qualify the read with the ap_widgets schema or every run fails ER_NO_SUCH_TABLE.
+    const q = fakeQuery([vm('D1', '2026-07-02 05:57:00')]);
+    const r = new AutoPlantSourceReader({ query: q.fn, now: () => NOW, widgetsSchema: 'ap_widgets' });
+    await r.readChunk(null, 10);
+    expect(q.calls[0].sql).toMatch(/FROM `ap_widgets`\.tb_vehiclemaster/i);
+    expect(q.calls[0].sql).not.toMatch(/FROM tb_vehiclemaster/i); // never leans on the default schema
+  });
+
   it('signals exhaustion with a null cursor on an empty source', async () => {
     const q = fakeQuery([]);
     const chunk = await reader(q).readChunk(null, 1000);

@@ -73,3 +73,58 @@ describe('Phase 4 — AutoPlantMasterSource', () => {
     expect(lastSql()).toContain('`ap_masters_replica`.`mst_company`');
   });
 });
+
+/**
+ * Device-identity enrichment (DEVICE_TYPE / IMSI_NO). These live one schema over on
+ * `ap_widgets.tb_vehiclemaster` — `mst_vehicle` has no such columns, which is why this read used to
+ * hardcode `NULL AS device_type` and left `devices.device_type` NULL for the entire fleet (0 of 20,935
+ * on 2026-07-17). Only STATIC identity is joined here: TRIP_CREATION_DATETIME is live trip state and
+ * must stay on the 30-min snapshot path, so it must NOT appear in this SQL.
+ */
+describe('Phase 4 — AutoPlantMasterSource device enrichment', () => {
+  const seen: string[] = [];
+  const query = async <T>(sql: string): Promise<T[]> => {
+    seen.push(sql);
+    return [] as T[];
+  };
+
+  beforeEach(() => {
+    seen.length = 0;
+  });
+
+  it('joins ap_widgets.tb_vehiclemaster on vehicle_no for DEVICE_TYPE + IMSI_NO', async () => {
+    const source = new AutoPlantMasterSource({ query, mastersSchema: 'ap_masters', widgetsSchema: 'ap_widgets' });
+    await source.readVehicleMasters();
+    const sql = seen[0];
+    expect(sql).toContain('LEFT JOIN `ap_widgets`.`tb_vehiclemaster` w ON w.vehicle_no = v.vehicle_no');
+    expect(sql).toContain('w.DEVICE_TYPE AS device_type');
+    expect(sql).toContain('w.IMSI_NO AS imsi_no');
+    // The stub this replaced — a regression here silently re-NULLs the whole fleet.
+    expect(sql).not.toContain('NULL AS device_type');
+  });
+
+  it('does NOT read trip state on the master path (lifecycle split: that rides the snapshot tick)', async () => {
+    const source = new AutoPlantMasterSource({ query, mastersSchema: 'ap_masters', widgetsSchema: 'ap_widgets' });
+    await source.readVehicleMasters();
+    expect(seen[0]).not.toContain('TRIP_CREATION_DATETIME');
+  });
+
+  it('honours the configured widgets schema name (not hard-coded)', async () => {
+    const source = new AutoPlantMasterSource({ query, mastersSchema: 'ap_masters', widgetsSchema: 'ap_widgets_replica' });
+    await source.readVehicleMasters();
+    expect(seen[0]).toContain('`ap_widgets_replica`.`tb_vehiclemaster`');
+  });
+
+  it('skips the join entirely when no widgets schema is configured (both columns read NULL)', async () => {
+    const source = new AutoPlantMasterSource({ query, mastersSchema: 'ap_masters' });
+    await source.readVehicleMasters();
+    expect(seen[0]).not.toContain('tb_vehiclemaster');
+    expect(seen[0]).toContain('NULL AS device_type, NULL AS imsi_no');
+  });
+
+  it('keeps the read paged under the DBA <100-rows/query cap even with the join', async () => {
+    const source = new AutoPlantMasterSource({ query, mastersSchema: 'ap_masters', widgetsSchema: 'ap_widgets' });
+    await source.readVehicleMasters();
+    expect(seen[0]).toMatch(/ORDER BY v\.vehicle_no LIMIT 90$/);
+  });
+});

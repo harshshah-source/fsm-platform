@@ -9,6 +9,7 @@ export interface DeviceView {
   dealType: DealType | null;
   currentVehicleId: string | null;
   deviceType: string | null;
+  imsiNo: string | null;
   simId: string | null;
 }
 
@@ -17,6 +18,8 @@ export interface DeviceListRow {
   deviceId: string;
   vehicleNo: string | null;
   deviceType: string | null;
+  /** Fitted SIM's subscriber identity (AutoPlant `IMSI_NO`), mirrored onto `devices` by master sync. */
+  imsiNo: string | null;
   dealType: DealType | null;
   plantName: string | null;
   zoneName: string | null;
@@ -24,6 +27,8 @@ export interface DeviceListRow {
   slaBucket: SlaBucket | null;
   /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
   latestGpsDatetime: string | null;
+  /** Creation time of the vehicle's current trip (UTC), maintained on the 30-min telemetry tick. */
+  tripCreationDatetime: string | null;
   isInactive: boolean;
   /** The device's latest live (not closed/failed) ticket, if any — the assignment context (Issue 122). */
   openTicketId: string | null;
@@ -118,6 +123,7 @@ function toView(d: {
   dealType: DealType | null;
   currentVehicleId: bigint | null;
   deviceType: string | null;
+  imsiNo: string | null;
   simId: string | null;
 }): DeviceView {
   return {
@@ -125,6 +131,7 @@ function toView(d: {
     dealType: d.dealType,
     currentVehicleId: d.currentVehicleId != null ? String(d.currentVehicleId) : null,
     deviceType: d.deviceType,
+    imsiNo: d.imsiNo,
     simId: d.simId,
   };
 }
@@ -172,9 +179,16 @@ export class DeviceService {
    * reads (a ZM sees only their own zone; CSM / Operations Head see all), with an optional free-text
    * search over device id / vehicle no / plant / company. Inactive devices sort first (most urgent).
    *
-   * Paginated (`limit`/`offset`): returns the requested window plus the full filtered `total` (a
-   * `COUNT(*) OVER()` over the pre-limit set), so the UI can page through the whole fleet — the list is
-   * far larger than one page (the top rows are always the longest-pending devices, never the whole set).
+   * Paginated (`limit`/`offset`): returns the requested window plus the full filtered `total`, so the
+   * UI can page through the whole fleet — the list is far larger than one page (the top rows are always
+   * the longest-pending devices, never the whole set).
+   *
+   * Two queries on purpose (performance, FE-22 follow-up): the page query sorts/limits the base joins
+   * FIRST (inner subquery) and only then attaches the two per-device LATERALs (latest live ticket, its
+   * batch assignment) — so the laterals run `limit` times, not once per device in the filtered set. The
+   * old single-query shape used `COUNT(*) OVER()`, which forced both laterals across all ~20k devices
+   * before the LIMIT could bite. The total comes from a separate lateral-free COUNT over the same
+   * filters (both run in one Promise.all; a count can never need the laterals — LEFT JOINs preserve rows).
    *
    * Filterable by `status` (active/inactive), `bucket` (a single SLA bucket), `zoneId` (a zone or the
    * `'UNZONED'` holding set) and `companyId`; ordered by `sort` (default longest-inactive first). All
@@ -187,46 +201,62 @@ export class DeviceService {
     const limit = opts.limit && opts.limit > 0 ? Math.min(opts.limit, 200) : 100;
     const offset = opts.offset && opts.offset > 0 ? opts.offset : 0;
 
-    const rows = await this.prisma.$queryRaw<
-      {
-        deviceId: string;
-        vehicleNo: string | null;
-        deviceType: string | null;
-        dealType: DealType | null;
-        plantName: string | null;
-        zoneName: string | null;
-        companyName: string | null;
-        slaBucket: SlaBucket | null;
-        latestGpsDatetime: Date | null;
-        isInactive: boolean;
-        openTicketId: string | null;
-        openTicketStatus: string | null;
-        assignmentState: string | null;
-        assignedSeName: string | null;
-        batchId: string | null;
-        batchStatus: string | null;
-        scheduleId: string | null;
-        total: number;
-      }[]
-    >(Prisma.sql`
-      SELECT ds.device_id AS "deviceId", v.vehicle_no AS "vehicleNo", d.device_type AS "deviceType",
-             d.deal_type AS "dealType", p.name AS "plantName", z.name AS "zoneName", c.name AS "companyName",
-             ds.sla_bucket AS "slaBucket", ds.latest_gps_datetime AS "latestGpsDatetime", ds.is_inactive AS "isInactive",
-             ot.ticket_id::text AS "openTicketId", ot.status::text AS "openTicketStatus",
-             ot.assignment_state::text AS "assignmentState",
-             asg.se_name AS "assignedSeName", asg.batch_id::text AS "batchId",
-             asg.batch_status::text AS "batchStatus", asg.schedule_id::text AS "scheduleId",
-             COUNT(*) OVER()::int AS "total"
+    // The base joins shared by both queries: filters/search/sort touch ds, v, p, z (via p) and c.
+    // `d` (devices) is only projected, never filtered on, and device_states.device_id is an FK to
+    // devices — so the page query joins it OUTSIDE the limit and the count skips it entirely.
+    const base = Prisma.sql`
       FROM device_states ds
-      JOIN devices d ON d.device_id = ds.device_id
       LEFT JOIN vehicles v ON v.vehicle_id = ds.vehicle_id
       LEFT JOIN plants p ON p.plant_id = ds.plant_id
       LEFT JOIN zones z ON z.zone_id = p.zone_id
       LEFT JOIN company_master c ON c.company_id = ds.company_id
+      WHERE 1=1 ${where}`;
+
+    const [countRows, rows] = await Promise.all([
+      this.prisma.$queryRaw<{ total: number }[]>(Prisma.sql`SELECT COUNT(*)::int AS total ${base}`),
+      this.prisma.$queryRaw<
+        {
+          deviceId: string;
+          vehicleNo: string | null;
+          deviceType: string | null;
+          imsiNo: string | null;
+          dealType: DealType | null;
+          plantName: string | null;
+          zoneName: string | null;
+          companyName: string | null;
+          slaBucket: SlaBucket | null;
+          latestGpsDatetime: Date | null;
+          tripCreationDatetime: Date | null;
+          isInactive: boolean;
+          openTicketId: string | null;
+          openTicketStatus: string | null;
+          assignmentState: string | null;
+          assignedSeName: string | null;
+          batchId: string | null;
+          batchStatus: string | null;
+          scheduleId: string | null;
+        }[]
+      >(Prisma.sql`
+      SELECT page.*, d.device_type AS "deviceType", d.imsi_no AS "imsiNo", d.deal_type AS "dealType",
+             ot.ticket_id::text AS "openTicketId", ot.status::text AS "openTicketStatus",
+             ot.assignment_state::text AS "assignmentState",
+             asg.se_name AS "assignedSeName", asg.batch_id::text AS "batchId",
+             asg.batch_status::text AS "batchStatus", asg.schedule_id::text AS "scheduleId"
+      FROM (
+        SELECT ds.device_id AS "deviceId", v.vehicle_no AS "vehicleNo", p.name AS "plantName",
+               z.name AS "zoneName", c.name AS "companyName", ds.sla_bucket AS "slaBucket",
+               ds.latest_gps_datetime AS "latestGpsDatetime", ds.is_inactive AS "isInactive",
+               ds.trip_creation_datetime AS "tripCreationDatetime",
+               ROW_NUMBER() OVER (ORDER BY ${orderBy}) AS rn
+        ${base}
+        ORDER BY ${orderBy}
+        LIMIT ${limit} OFFSET ${offset}
+      ) page
+      JOIN devices d ON d.device_id = page."deviceId"
       LEFT JOIN LATERAL (
         SELECT t.ticket_id, t.status, t.assignment_state
         FROM tickets t
-        WHERE t.device_id = ds.device_id
+        WHERE t.device_id = page."deviceId"
           AND t.status NOT IN ('CLOSED', 'CLOSED_AUTO_RECOVERY', 'CLOSED_NON_OPERATIONAL',
                                'FAILED_VERIFICATION', 'FAILED_ACTIVATION', 'FAILED_RECOVERY',
                                'RECEIVED_AT_WAREHOUSE')
@@ -243,18 +273,16 @@ export class DeviceService {
         ORDER BY bat.created_at DESC
         LIMIT 1
       ) asg ON true
-      WHERE 1=1 ${where}
-      ORDER BY ${orderBy}
-      LIMIT ${limit} OFFSET ${offset}`);
+      ORDER BY page.rn`),
+    ]);
 
-    // COUNT(*) OVER() is the full filtered size, identical on every row; an empty window means 0 matches.
-    const total = rows.length > 0 ? rows[0].total : 0;
     return {
-      total,
-      rows: rows.map(({ total: _total, ...r }) => ({
+      total: countRows[0]?.total ?? 0,
+      rows: rows.map(({ rn: _rn, ...r }: (typeof rows)[number] & { rn?: unknown }) => ({
         ...r,
         deviceId: String(r.deviceId),
         latestGpsDatetime: r.latestGpsDatetime ? r.latestGpsDatetime.toISOString() : null,
+        tripCreationDatetime: r.tripCreationDatetime ? r.tripCreationDatetime.toISOString() : null,
       })),
     };
   }

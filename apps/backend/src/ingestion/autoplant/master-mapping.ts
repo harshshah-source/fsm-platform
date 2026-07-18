@@ -88,7 +88,15 @@ export interface VehicleMasterMasterRow {
   plant_id: number | string | null;
   company_id: number | string | null;
   transporter_id: number | string | null;
+  /**
+   * Device hardware model (NVT3 / V5 / VT200L …). Identity, not telemetry: over 922k recorded pings
+   * spanning 2023-03→2026-07, only 91 of 24,173 devices (0.38%) ever changed it. Lives on
+   * `ap_widgets.tb_vehiclemaster`, so the source joins it in — `mst_vehicle` has no such column.
+   */
   device_type: string | null;
+  /** Fitted SIM's subscriber identity, from `ap_widgets.tb_vehiclemaster.IMSI_NO`. Same lifecycle as
+   *  `device_type` — set at fitment, moves only on a SIM swap. */
+  imsi_no: string | null;
   /** ACTIVE / DEPLOYED / UNDEPLOYED — mirrored verbatim onto `vehicles.status`. */
   deployment_status: string | null;
 }
@@ -266,12 +274,19 @@ export function mapDevice(
   fitment: { currentVehicleId: bigint | null },
 ): UpsertPlan<
   { deviceId: string },
-  { deviceId: string; deviceType: string | null; currentVehicleId: bigint | null },
-  { deviceType: string | null; currentVehicleId: bigint | null }
+  { deviceId: string; deviceType: string | null; imsiNo: string | null; currentVehicleId: bigint | null },
+  { deviceType: string | null; imsiNo: string | null; currentVehicleId: bigint | null }
 > | null {
   const deviceId = cleanStr(row.device_id);
   if (deviceId == null) return null; // vehicle with no fitted device — master-sync still records the vehicle
-  const mirrored = { deviceType: cleanStr(row.device_type), currentVehicleId: fitment.currentVehicleId };
+  // AutoPlant-authoritative device identity — mirrored, so it refreshes on re-sync (a re-fitted device
+  // legitimately changes model/SIM). `cleanStr` folds the source's ''/NA/NULL sentinels to null:
+  // DEVICE_TYPE is `''` on ~11.9k source rows and IMSI_NO is NULL on ~9.9k.
+  const mirrored = {
+    deviceType: cleanStr(row.device_type),
+    imsiNo: cleanStr(row.imsi_no),
+    currentVehicleId: fitment.currentVehicleId,
+  };
   return {
     where: { deviceId },
     create: { deviceId, ...mirrored },
