@@ -1,9 +1,10 @@
 # 128 — Device deployment lifecycle: FSM never observes departures (stale-DEPLOYED mirror)
 
-Status: ready-for-agent — **Slice 1 (mechanism + tests) DONE 2026-07-18** (commit `b9242da`,
-8/8 e2e green, tsc + regression clean; mechanism ACs below satisfied). **Slice 2 (dry-run backfill)
-held at the operator approval gate; Slice 3 (apply + verify + SYSTEM-STATE) after.** UI-parity ACs
-split to **#129** (fast-follow). **Decisions taken 2026-07-17**: (2a) Option A, widen the READ to all
+Status: DONE 2026-07-18 — mechanism `b9242da` (8/8 e2e); backfill applied by master-sync run 64
+(**5,523 departed · 4,552 tickets cancelled**) and verified (eligible 0→15,799 operational-only,
+departed excluded from inactive/SLA/eligibility, dispatch skips departed, fleet reconciles); before/
+after in `docs/SYSTEM-STATE-2026-07.md` §6; completion report
+`docs/progress/128-device-deployment-lifecycle.md`. **UI-parity ACs split to #129** (fast-follow). **Decisions taken 2026-07-17**: (2a) Option A, widen the READ to all
 statuses + absence-diff safety net, with the **insert scope pinned to DEPLOYED/ACTIVE** (widening
 the read must NOT widen the create); (2b) cancel open tickets with reason `DEVICE_UNDEPLOYED`;
 (2e) backfill dry-run first, operator approves the counts before the live pass. Built TDD,

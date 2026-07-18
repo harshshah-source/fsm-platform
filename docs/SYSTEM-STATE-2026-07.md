@@ -163,11 +163,11 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 
 | Table | Purpose | Constraints / writer status |
 |---|---|---|
-| `devices` | GPS unit registry; `deviceId` is the AutoPlant business string (leading-zero IMEIs) | `deal_type` NULL ⇒ OH manual tag (endpoint exists, #49); `device_type` **is written** by master sync (`master-mapping.ts:274` mirrors `tb_vehiclemaster.device_type`) — nullness in prod reflects source data, not a stub `[INFERRED from mapping code; live values unverified]` |
+| `devices` | GPS unit registry; `deviceId` is the AutoPlant business string (leading-zero IMEIs) | `deal_type` NULL ⇒ OH manual tag (endpoint exists, #49); `device_type` + `imsi_no` are written by master sync from an `ap_widgets.tb_vehiclemaster` join (see §3a). **Correction (2026-07-17):** the earlier claim here that `device_type` "is written" was wrong — `master-mapping.ts` mirrored it, but `autoplant-master-source.ts` fed it `NULL AS device_type`, so every sync wrote NULL (verified: 0 of 20,935 non-null). Fixed by the enrichment join; `imsi_no` added alongside |
 | `vehicles` | Fitment anchor → plant/company/transporter | `vehicle_no` unique; `status` mirrors AutoPlant deployment; transporter FK wired in migration `20260703120000` after nulling dangling values |
 | `transporters` | AutoPlant `mst_transporter` mirror | `sourceTransporterId` unique; written by master sync |
 | `raw_device_snapshots` | One row per ping — highest-volume table | **RANGE-partitioned daily** by `gps_datetime` (rebuilt in `20260706130000` — the original `20260619153000` declared PARTITION BY but only had a DEFAULT partition); PK `(id, gps_datetime)`; unique `(device_id, gps_datetime)` + `ON CONFLICT DO NOTHING` ⇒ idempotent chunk re-runs |
-| `device_states` | Derived hot row per device: inactivity hours, `sla_bucket` (stored), eligibility, denormalised vehicle/plant/company | CHECK `inactivity_hours >= 0`; recomputed set-based by `DeviceStateService`; **18,528 rows in dev DB** (INDEX.md:132) |
+| `device_states` | Derived hot row per device: inactivity hours, `sla_bucket` (stored), eligibility, denormalised vehicle/plant/company, `trip_creation_datetime` | CHECK `inactivity_hours >= 0`; recomputed set-based by `DeviceStateService`; **18,528 rows in dev DB** (INDEX.md:132). `trip_creation_datetime` (2026-07-17) is maintained at INGEST by `SnapshotIngestionService`, like `latest_gps_datetime` — it is live trip state (18.4%/day churn), not master data; see §3b |
 | `snapshot_runs` / `snapshot_run_chunks` | Ingestion run ledger + per-chunk retry; drives data-as-of banner | partial unique `snapshot_runs_one_in_flight (status) WHERE 'RUNNING'` |
 | `master_sync_runs` / `master_sync_rejects` | Master-sync ledger + itemised skip accounting (#97 Slice 4) | reject rows capped per run, best-effort writes |
 | `pgi_history` | SAP Post-Goods-Issue events feeding the `pgi` eligibility gate | **NO production writer** — read-only in `device-state.service.ts:64`; SAP feed external/deferred, rows must be seeded (schema:1830-1832). This emptiness is blocker B7 |
@@ -255,7 +255,7 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 ### 3a. AutoPlant master sync (#96)
 
 **Algorithm** (`master-sync.service.ts:79-95`): read `ap_masters` (`mst_company`/`mst_transporter`/
-`mst_plant`) + master columns of `ap_widgets.tb_vehiclemaster`; upsert into FSM Postgres keyed by
+`mst_vehicle`) + a device-identity join to `ap_widgets.tb_vehiclemaster`; upsert into FSM Postgres keyed by
 `source_*_id` in FK order companies → transporters → plants → vehicles → devices. **Plant-first
 derivation**: scope anchors on `mst_plant.status='ACTIVE'`; companies are *derived* (created only
 when an in-scope plant names them) — no company allow-list, no reliance on the dirty
@@ -269,6 +269,17 @@ when an in-scope plant names them) — no company allow-list, no reliance on the
   (`master-sync.service.ts:92-94`) — edits re-apply via `ZoneMappingService.reapply`, never re-sync.
 - **Skip accounting**: itemised per-reason counters + `master_sync_rejects` rows, capped 5,000/run,
   best-effort writes (`master-sync.service.ts:71-76,123-130`).
+- **Device-identity enrichment (2026-07-17)**: `readVehicleMasters` reaches across the schema boundary —
+  `LEFT JOIN ap_widgets.tb_vehiclemaster w ON w.vehicle_no = v.vehicle_no` — for `DEVICE_TYPE` +
+  `IMSI_NO` (neither exists in `ap_masters`; this read previously fed `NULL AS device_type`, which is why
+  `devices.device_type` was NULL fleet-wide). Free and fan-out-safe: `tb_vehiclemaster.vehicle_no` is the
+  PK and verified unique (60,601 rows / 60,601 distinct), 100% of DEPLOYED vehicles match, and it rides
+  the SAME paged queries — query count and the <100-row cap unchanged. **Only STATIC identity crosses this
+  join** (measured: 91 of 24,173 devices ever changed `device_type` across 922k pings = 0.38%).
+  `TRIP_CREATION_DATETIME` deliberately does NOT — it is live trip state and rides the snapshot tick
+  (§3b). A widgets outage now FAILS the master run rather than degrading it: since `mapDevice` mirrors
+  these columns, a run that substituted NULLs would wipe them fleet-wide, whereas a failed run writes
+  nothing and is visible in `master_sync_runs`.
 - **Batching**: reads ≤90 rows/query (DBA <100 cap); writes batched 500-row `$transaction`s
   (`UPSERT_BATCH_SIZE`, `master-sync.service.ts:56-63`).
 - **Guards**: `master_sync_runs` single-in-flight (409 `RUN_IN_PROGRESS`), stale-run reaper shared
@@ -298,6 +309,28 @@ finalize SUCCESS/PARTIAL/FAILED.
   `PARTITION_MAINTENANCE_ENABLED` (§2.9).
 - **UTC normalization**: `AUTOPLANT_SOURCE_UTC_OFFSET_MIN` env feeds the reader
   (`ingestion.module.ts`) — the AutoPlant session is known non-UTC (§5 env issues).
+- **Trip-creation enrichment (2026-07-17)**: the reader also selects `TRIP_CREATION_DATETIME` (no extra
+  query — same scan), and `SnapshotIngestionService` maintains `device_states.trip_creation_datetime`
+  in the SAME set-based `unnest`+`GREATEST` upsert as `latest_gps_datetime`. It lives here, not in the
+  daily master sync, because it is **live trip state**: measured 2026-07-17, 2,614 of 14,205 DEPLOYED
+  vehicles (18.4%) change it per DAY and it tracks `active_trip_id` — vs 0.2%/day for a genuine fitment
+  attribute (`device_installation_date`). A daily mirror would be stale for ~2,600 vehicles at a time.
+  It goes on the hot `device_states` row, NOT `raw_device_snapshots` (per-ping, partitioned, retention-
+  dropped) — it is current state, not a ping observation.
+  **Timezone trap:** the two source stamps in one row do NOT share a zone. `latest_gps_datetime` is a
+  naive MySQL DATETIME written in IST ⇒ normalize +330. `TRIP_CREATION_DATETIME` is a MySQL **TIMESTAMP**,
+  which the server converts to the session zone on read, and the AutoPlant session is **UTC**
+  (`@@system_time_zone`=UTC, `@@session.time_zone`=SYSTEM) ⇒ it arrives ALREADY UTC and takes offset **0**
+  (`mapping.ts parseTripCreation`). Applying the IST offset would shift every trip stamp by 5.5h. Pinned
+  by `test/autoplant-mapping.spec.ts`.
+- **Schema-qualification (mandatory)**: `AutoPlantSourceReader` reads
+  `` `<widgets>`.tb_vehiclemaster `` schema-qualified via the injected `widgetsSchema`
+  (`ingestion.module.ts` passes `cfg.dbWidgets`). The pool's **default schema is `ap_masters`**
+  (the connect-time-validated live-consumer schema — see `buildPoolOptions`), where
+  `tb_vehiclemaster` does not exist. An unqualified read therefore fails `ER_NO_SUCH_TABLE` on
+  the first chunk → run FAILED with zero chunks. **This caused every run 64–70 to fail (2026-07-14→15)
+  after the `default=ap_widgets`→`ap_masters` client change** (INDEX 2026-07-15 line); fixed by
+  qualifying the reader to match `ping()`/`AutoPlantMasterSource`.
 
 ### 3c. Device-state recompute (#05, R4-B set-based)
 
@@ -754,6 +787,39 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 > reversible via reactivate if the DB team overturns `docs/audits/shutdown-plants-2026-07-13.md`.
 > Verified: LIST endpoint shows 6; #121 export reports all 987 devices `plant_fsm_status=
 > deactivated`; all 6 rows survive a simulated master-sync mirror refresh (real sync VPN-blocked).
+
+> **Device deployment lifecycle backfill — 2026-07-18 (#128 Slice 1 landed + first live pass).** The
+> #128 departure mechanism (widened master read at every `deployment_status` + `device_departures`
+> side table, **insert scope pinned** to DEPLOYED/ACTIVE) was applied to the working FSM DB by
+> master-sync **run 64** — a *manual* `npm run autoplant:sync pipeline` at 03:28 UTC, **not** a cron:
+> `INGESTION_SCHEDULER_ENABLED=false`, no runs 65+, snapshot cadence irregular. One pass marked
+> **5,523 devices departed** (4,436 UNDEPLOYED + 1,079 MISSING_FROM_SOURCE + 8 MAINTENANCE; the
+> inferred absence path was 5.1% of the in-scope fleet, under the 10% guard) and **cancelled 4,552
+> open tickets** (`DEVICE_UNDEPLOYED_CLOSE`, #119 semantics), all audited (5,523 `DEVICE_DEPARTED`).
+> `vehicles.status` is now truthful: **16,766 DEPLOYED / 4,435 UNDEPLOYED / 40 ACTIVE / 8 MAINTENANCE**
+> (was 20,856 all-DEPLOYED). run 64's pipeline recompute had run via the standalone runner's settings
+> stub → pgi mode → `eligible_for_uptime` transiently **0** fleet-wide (a runner quirk, not a #128
+> regression; the DB setting is unchanged `all-deployed`); a corrective all-deployed recompute restored
+> the honest denominator. **Before (pre-#128, 2026-07-17) → after (2026-07-18):**
+>
+> | metric | before | after |
+> |---|---|---|
+> | mirrored devices | 20,925 | 21,322 |
+> | departed (active `device_departures`) | 0 | 5,523 |
+> | operational (non-departed) | 20,925 | 15,799 |
+> | `eligible_for_uptime` (all-deployed) | 20,925 (100% — gate a no-op) | 15,799 (operational only) |
+> | `is_inactive` | ~6,000 | 2,943 |
+> | open tickets on departed devices | ~3,700 (est) | 0 (4,552 cancelled) |
+>
+> Verification (2026-07-18): **0** departed devices are eligible / inactive / SLA-bucketed; eligible
+> (15,799) **exactly equals** operational; recommender Troubleshoot + ticket-creation exclude
+> active-departed (`device.departures none restoredAt:null` / `isDeparted:false`; INSTALL backlog
+> deliberately not filtered); dispatch has 0 open tickets on departed. Fleet reconciles:
+> operational + departed = 21,322 (the dashboards' inactive/SLA/eligible tallies already drop departed
+> via `is_inactive=false`/`sla_bucket=NULL`/`eligible=false`; the *raw* fleet total keeps them, so the
+> departed tally is surfaced separately → #129). Reversible (restore path + tickets closed-with-reason,
+> not deleted); idempotent (a re-run dry-run found 0 new departures). Dashboards shrinking to the true
+> operational fleet is the honest, correct outcome.
 
 ### 6.2 Env flags (all master switches default OFF; cron strings read once at boot)
 
