@@ -106,6 +106,17 @@ export interface DispatchAssignmentRow {
   companyName: string | null;
   vehicleNo: string | null;
   transporterName: string | null;
+  /**
+   * AutoPlant device context for the batch row (Inactive Duration / IMSI / Device Type / Trip Creation).
+   * Resolved through the ticket's existing `device` relation — device identity off `devices` (master
+   * sync), live state off `device_states` (30-min telemetry tick). All null for a ticket whose device
+   * is unlinked or not yet tracked.
+   */
+  deviceType: string | null;
+  imsiNo: string | null;
+  /** Last GPS ping — the UI derives Inactive Duration from this, exactly as the device list does. */
+  latestGpsDatetime: string | null;
+  tripCreationDatetime: string | null;
   plantId: string;
   seId: string;
   sortOrder: number;
@@ -436,6 +447,16 @@ export class DispatchTransparencyQueryService {
                 status: true,
                 company: { select: { name: true } },
                 vehicle: { select: { vehicleNo: true, transporter: { select: { name: true } } } },
+                // AutoPlant device context for the batch table. Rides the ticket's existing `device`
+                // relation (a required FK) + its optional hot state row, so this adds no query — the
+                // batch is already one bounded read of its own tickets.
+                device: {
+                  select: {
+                    deviceType: true,
+                    imsiNo: true,
+                    state: { select: { latestGpsDatetime: true, tripCreationDatetime: true } },
+                  },
+                },
               },
             },
           },
@@ -478,6 +499,10 @@ export class DispatchTransparencyQueryService {
           companyName: t.ticket.company?.name ?? null,
           vehicleNo: t.ticket.vehicle?.vehicleNo ?? null,
           transporterName: t.ticket.vehicle?.transporter?.name ?? null,
+          deviceType: t.ticket.device?.deviceType ?? null,
+          imsiNo: t.ticket.device?.imsiNo ?? null,
+          latestGpsDatetime: t.ticket.device?.state?.latestGpsDatetime?.toISOString() ?? null,
+          tripCreationDatetime: t.ticket.device?.state?.tripCreationDatetime?.toISOString() ?? null,
           plantId: batch.plantId.toString(),
           seId: batch.seId,
           sortOrder: t.sortOrder,

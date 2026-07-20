@@ -18,6 +18,8 @@ export interface DeviceListRow {
   deviceId: string;
   vehicleNo: string | null;
   deviceType: string | null;
+  /** Fitted SIM's subscriber identity (AutoPlant `IMSI_NO`). Optional: an older backend omits it. */
+  imsiNo?: string | null;
   dealType: 'RECURRING' | 'ONE_TIME' | null;
   plantName: string | null;
   zoneName: string | null;
@@ -25,6 +27,8 @@ export interface DeviceListRow {
   slaBucket: string | null;
   /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
   latestGpsDatetime: string | null;
+  /** Creation time of the vehicle's current trip (UTC ISO). Optional: an older backend omits it. */
+  tripCreationDatetime?: string | null;
   isInactive: boolean;
   /** The device's latest live ticket, if any — the assignment context (Issue 122). */
   openTicketId?: string | null;
@@ -84,6 +88,7 @@ export interface DeviceView {
   dealType: 'RECURRING' | 'ONE_TIME' | null;
   currentVehicleId: string | null;
   deviceType: string | null;
+  imsiNo?: string | null;
   simId: string | null;
 }
 

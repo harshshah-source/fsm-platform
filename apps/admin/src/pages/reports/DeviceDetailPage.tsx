@@ -18,6 +18,7 @@ import { BarChartCard, ChartCard, type BarDatum } from '../../components/charts'
 import { DataTable, EmptyState, ExportMenu, FilterBar, FilterSelect, PageHeader, type Column } from '../../components/data';
 import { Badge, Button, Field, Input, SectionCard } from '../../components/ui';
 import { PlantName, SLABadge } from '../../components/domain';
+import { formatDateTimeWithYear } from '../../lib/datetime';
 import { formatInactiveDuration } from '../../lib/inactiveDuration';
 import { exportTable, type ExportFormat } from '../../lib/exportFile';
 import { formatPlantDisplayName } from '../../lib/plantNames';
@@ -206,6 +207,14 @@ export function DeviceDetailPage() {
       render: (r) => <span className="font-medium text-ink-strong tabular-nums">{r.deviceId}</span>,
     },
     { key: 'vehicleNo', header: 'Vehicle Number', render: (r) => r.vehicleNo ?? '—' },
+    // AutoPlant device identity, mirrored onto `devices` by the daily master sync. Both are sparse at
+    // source (Device Type ~93%, IMSI ~85% of the deployed fleet), so "—" is a normal reading here.
+    { key: 'deviceType', header: 'Device Type', render: (r) => r.deviceType ?? '—' },
+    {
+      key: 'imsiNo',
+      header: 'IMSI No',
+      render: (r) => (r.imsiNo ? <span className="tabular-nums">{r.imsiNo}</span> : '—'),
+    },
     { key: 'companyName', header: 'Company Name', render: (r) => r.companyName ?? '—' },
     { key: 'plantName', header: 'Plant Name', render: (r) => (r.plantName ? <PlantName code={r.plantName} /> : '—') },
     { key: 'zoneName', header: 'Zone', render: (r) => r.zoneName ?? '—' },
@@ -216,6 +225,11 @@ export function DeviceDetailPage() {
       render: (r) => (
         <span className="tabular-nums text-ink">{formatInactiveDuration(r.latestGpsDatetime) ?? '—'}</span>
       ),
+    },
+    {
+      key: 'tripCreationDatetime',
+      header: 'Trip Creation Date Time',
+      render: (r) => <span className="tabular-nums text-ink">{formatDateTimeWithYear(r.tripCreationDatetime)}</span>,
     },
     {
       key: 'slaBucket',
@@ -250,16 +264,24 @@ export function DeviceDetailPage() {
 
   // Flat export of the current (filtered) device page — CSV / Excel / PDF (Issue 122), no dependency.
   const exportDevices = (format: ExportFormat) => {
+    // Mirrors the visible columns (Issue 122 export contract) — the new AutoPlant fields included, so a
+    // download matches what the operator is looking at. Inactive Duration is exported as the elapsed
+    // string the table shows, not the raw ping, for the same reason.
     const headers = [
-      'Device ID', 'Vehicle Number', 'Company', 'Plant', 'Zone', 'SLA Bucket',
+      'Device ID', 'Vehicle Number', 'Device Type', 'IMSI No', 'Company', 'Plant', 'Zone',
+      'Inactive Duration', 'Trip Creation Date Time', 'SLA Bucket',
       'Assignment', 'Assigned SE', 'Open Ticket', 'Batch',
     ];
     const body = rows.map((r) => [
       r.deviceId,
       r.vehicleNo ?? '',
+      r.deviceType ?? '',
+      r.imsiNo ?? '',
       r.companyName ?? '',
       r.plantName ? formatPlantDisplayName(r.plantName) : '',
       r.zoneName ?? '',
+      formatInactiveDuration(r.latestGpsDatetime) ?? '',
+      r.tripCreationDatetime ? formatDateTimeWithYear(r.tripCreationDatetime) : '',
       r.slaBucket ?? 'ACTIVE',
       r.assignmentState ?? '',
       r.assignedSeName ?? '',

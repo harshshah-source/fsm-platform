@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import { apiDispatchBatchDetail, type DispatchAssignmentRow, type DispatchBatchDetail } from '../../api/dispatch-runs';
 import { DataTable, EmptyState, ErrorState, FilterBar, FilterSelect, PageHeader, SearchInput, type Column } from '../../components/data';
 import { Badge } from '../../components/ui';
+import { formatDateTimeWithYear } from '../../lib/datetime';
+import { formatInactiveDuration } from '../../lib/inactiveDuration';
 import { TracePanel } from './DecisionTrace';
 
 /**
@@ -59,11 +61,38 @@ export function DispatchBatchDetailPage() {
       header: 'Vehicle No.',
       render: (r) => (r.vehicleNo ? <span className="font-mono text-xs">{r.vehicleNo}</span> : <span className="text-ink-muted">—</span>),
     },
+    // AutoPlant device context (Device Type / IMSI from the master mirror; Inactive Duration + Trip
+    // Creation from the 30-min telemetry tick). Sparse at source, so "—" is a normal reading.
+    {
+      key: 'deviceType',
+      header: 'Device Type',
+      render: (r) => r.deviceType ?? <span className="text-ink-muted">—</span>,
+    },
+    {
+      key: 'imsiNo',
+      header: 'IMSI No',
+      render: (r) => (r.imsiNo ? <span className="font-mono text-xs tabular-nums">{r.imsiNo}</span> : <span className="text-ink-muted">—</span>),
+    },
     { key: 'company', header: 'Company', render: (r) => r.companyName ?? <span className="text-ink-muted">—</span> },
     {
       key: 'transporter',
       header: 'Transporter',
       render: (r) => (r.transporterName ? r.transporterName : <span className="text-ink-muted">—</span>),
+    },
+    {
+      key: 'inactiveDuration',
+      header: 'Inactive Duration',
+      align: 'right',
+      // Same derivation as the device list — one shared helper, so the two surfaces can never disagree.
+      render: (r) => {
+        const d = formatInactiveDuration(r.latestGpsDatetime);
+        return d ? <span className="tabular-nums">{d}</span> : <span className="text-ink-muted">—</span>;
+      },
+    },
+    {
+      key: 'tripCreation',
+      header: 'Trip Creation Date Time',
+      render: (r) => <span className="tabular-nums">{formatDateTimeWithYear(r.tripCreationDatetime)}</span>,
     },
     { key: 'rank', header: 'Rank', align: 'right', render: (r) => (r.rank == null ? '—' : `#${r.rank}`) },
     {

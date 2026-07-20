@@ -203,6 +203,44 @@ describe('Dispatch batch detail (Issue 123)', () => {
     expect(screen.getByRole('link', { name: /Dispatch runs/ })).toHaveAttribute('href', '/dispatch-runs');
   });
 
+  it('shows the AutoPlant device columns — Inactive Duration, IMSI, Device Type, Trip Creation', async () => {
+    renderPage();
+    const row = within(await screen.findByTestId('dispatch-assignment-row-t-uuid-1'));
+    expect(row.getByText('V5')).toBeInTheDocument();
+    expect(row.getByText('0404920694896515')).toBeInTheDocument();
+    // Derived from latestGpsDatetime by the same helper the device list uses (26h → "1d 2h").
+    expect(row.getByText('1d 2h')).toBeInTheDocument();
+    // Trip creation carries its year — these stamps run back to 2023 on the live source.
+    expect(row.getByText(/13 Jul 2026/)).toBeInTheDocument();
+  });
+
+  it('degrades each device column to "—" when the source has no value for it', async () => {
+    renderPage();
+    const row = within(await screen.findByTestId('dispatch-assignment-row-t-uuid-2'));
+    // Device Type, IMSI, Inactive Duration, Trip Creation — all absent on this row.
+    expect(row.getAllByText('—')).toHaveLength(4);
+    expect(row.getByText('DEV-9002')).toBeInTheDocument(); // the row itself still renders
+  });
+
+  it('renders the device columns when the backend omits them entirely (version skew)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        json({
+          ...batch,
+          rows: batch.rows.map(
+            ({ deviceType: _dt, imsiNo: _i, latestGpsDatetime: _g, tripCreationDatetime: _t, ...rest }) => rest,
+          ),
+        }),
+      ),
+    );
+    renderPage();
+    // The table must render rather than blank out — the new columns simply read "—".
+    const row = within(await screen.findByTestId('dispatch-assignment-row-t-uuid-1'));
+    expect(row.getByText('DEV-9001')).toBeInTheDocument();
+    expect(row.getByText('RJ14-GA-1234')).toBeInTheDocument();
+  });
+
   it('renders the trace without crashing when identity is absent (older backend / version skew)', async () => {
     const { identity: _omit, ...traceNoIdentity } = trace;
     vi.stubGlobal(

@@ -123,6 +123,15 @@ export interface DispatchAssignmentRow {
   companyName: string | null;
   vehicleNo: string | null;
   transporterName: string | null;
+  /**
+   * AutoPlant device context. Optional: absent when served by a backend build predating the enrichment
+   * (version skew) — the columns then render "—" rather than blanking the table.
+   */
+  deviceType?: string | null;
+  imsiNo?: string | null;
+  /** Last GPS ping; Inactive Duration is derived from it (same rule as the device list). */
+  latestGpsDatetime?: string | null;
+  tripCreationDatetime?: string | null;
   plantId: string;
   seId: string;
   sortOrder: number;

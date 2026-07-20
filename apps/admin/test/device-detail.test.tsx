@@ -177,3 +177,42 @@ describe('Device Detail (FE-22)', () => {
     );
   });
 });
+
+/**
+ * AutoPlant enrichment columns. Inactive Duration already existed here (derived client-side from
+ * `latestGpsDatetime`) and is deliberately reused rather than recomputed; Device Type / IMSI No / Trip
+ * Creation are the new ones. Device Type was previously carried in the payload but never surfaced as a
+ * column — and was NULL for the whole fleet until the master-sync source stopped stubbing it.
+ */
+describe('Device Detail — AutoPlant enrichment columns', () => {
+  beforeEach(() => stub());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('renders Device Type, IMSI No and Trip Creation on the list row', async () => {
+    renderPage();
+    const row = within(await screen.findByTestId('dev-row-900'));
+    expect(row.getByText('AIS-140')).toBeInTheDocument();
+    expect(row.getByText('0404920694896515')).toBeInTheDocument();
+    expect(row.getByText(/13 Jul 2026/)).toBeInTheDocument();
+  });
+
+  it('keeps the pre-existing Inactive Duration column (derived, not recomputed)', async () => {
+    renderPage();
+    expect(await screen.findByRole('columnheader', { name: 'Inactive Duration' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Device Type' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'IMSI No' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Trip Creation Date Time' })).toBeInTheDocument();
+  });
+
+  it('degrades to "—" when a device has no IMSI / device type / trip (sparse at source)', async () => {
+    stub((u) =>
+      u.includes('/devices') && !u.includes('/devices/900') && !u.includes('filter-options')
+        ? json({ rows: [{ ...list[0], deviceType: null, imsiNo: null, tripCreationDatetime: null }], total: 1 })
+        : undefined,
+    );
+    renderPage();
+    const row = within(await screen.findByTestId('dev-row-900'));
+    expect(row.getAllByText('—').length).toBeGreaterThanOrEqual(3);
+    expect(row.getByText('RJ-14-AA')).toBeInTheDocument(); // row still renders
+  });
+});
