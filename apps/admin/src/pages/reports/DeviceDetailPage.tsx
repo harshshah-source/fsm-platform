@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   apiDeviceCycles,
   apiDeviceDowntimeTrend,
@@ -62,6 +62,9 @@ export function DeviceDetailPage() {
   // zone / bucket / status. Read those once as the initial filter values.
   const [searchParams] = useSearchParams();
   const initialStatus = searchParams.get('status');
+  // The search box is debounced: `searchInput` follows every keystroke, `search` (what the list
+  // query uses) settles 300ms after typing stops — one backend query per pause, not per key.
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<DeviceSort>('LONGEST_INACTIVE');
   const [status, setStatus] = useState<DeviceStatusFilter>(
@@ -91,6 +94,12 @@ export function DeviceDetailPage() {
   useEffect(() => {
     apiDeviceFilterOptions().then(setOptions).catch(() => {});
   }, []);
+
+  // Debounce the search keystrokes into the query value.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   // Any change to the query (search / sort / filters) restarts at page 1 — a stale offset could land
   // past a now-smaller result set.
@@ -159,6 +168,14 @@ export function DeviceDetailPage() {
     setShowSummary(false);
   };
 
+  // The detail block renders BELOW the (long) device table — scroll it into view on selection, or a
+  // row click reads as "nothing happened" (operator report, 2026-07-15). Optional-chained: jsdom has
+  // no scrollIntoView.
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (selectedId) detailRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [selectedId]);
+
   const tag = async (dt: 'RECURRING' | 'ONE_TIME') => {
     if (!selectedId) return;
     try {
@@ -213,6 +230,19 @@ export function DeviceDetailPage() {
         <span className="flex flex-col gap-0.5">
           <AssignmentBadge state={r.assignmentState} />
           {r.assignedSeName && <span className="text-xs text-ink-muted">{r.assignedSeName}</span>}
+          {r.openTicketId && (
+            <Link
+              to={`/tickets/${r.openTicketId}`}
+              data-testid={`row-ticket-link-${r.deviceId}`}
+              title="Open this ticket in Ticket Operations"
+              // Row click selects the device inline; the link must not also re-select on its way out.
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex w-fit items-center gap-1 font-mono text-xs font-medium text-info hover:underline"
+            >
+              #{r.openTicketId.slice(0, 8)}
+              <span aria-hidden>→</span>
+            </Link>
+          )}
         </span>
       ),
     },
@@ -282,7 +312,7 @@ export function DeviceDetailPage() {
 
       <div className="mb-4 max-w-md">
         <Field label="Search devices" htmlFor="device-search">
-          <Input id="device-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Device, vehicle, company or plant…" />
+          <Input id="device-search" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Device, vehicle, company or plant…" />
         </Field>
       </div>
 
@@ -396,7 +426,7 @@ export function DeviceDetailPage() {
       </ChartCard>
 
       {selected && (
-        <>
+        <div ref={detailRef}>
           <SectionCard
             title={
               <span className="flex items-center justify-between gap-3">
@@ -447,9 +477,15 @@ export function DeviceDetailPage() {
                     </span>
                   )}
                   {selected.openTicketId && (
-                    <span className="font-mono text-xs text-ink-muted">
+                    <Link
+                      to={`/tickets/${selected.openTicketId}`}
+                      data-testid="open-ticket-link"
+                      title="Open this ticket in Ticket Operations"
+                      className="inline-flex items-center gap-1 rounded-md border border-line bg-surface-card px-2 py-0.5 font-mono text-xs font-medium text-info transition-colors hover:border-info/40 hover:bg-info-bg"
+                    >
                       Ticket #{selected.openTicketId.slice(0, 8)}
-                    </span>
+                      <span aria-hidden>→</span>
+                    </Link>
                   )}
                 </div>
               ) : (
@@ -512,7 +548,7 @@ export function DeviceDetailPage() {
               <EmptyState message="No monthly downtime history." />
             )}
           </ChartCard>
-        </>
+        </div>
       )}
     </section>
   );

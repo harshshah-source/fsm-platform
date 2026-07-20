@@ -15,7 +15,7 @@ const OH: SessionView = { user_id: 'oh', role: 'OPERATIONS_HEAD', zone_id: null,
 const ZM: SessionView = { user_id: 'zm', role: 'ZONAL_MANAGER', zone_id: 1, acted_as_role: null };
 
 const list = [
-  { deviceId: '900', vehicleNo: 'RJ-14-AA', deviceType: 'AIS-140', dealType: null, plantName: 'ACP-9106', zoneName: 'West', companyName: 'UltraTech', slaBucket: 'CRITICAL', latestGpsDatetime: '2026-06-01T00:00:00.000Z', isInactive: true },
+  { deviceId: '900', vehicleNo: 'RJ-14-AA', deviceType: 'AIS-140', imsiNo: '0404920694896515', dealType: null, plantName: 'ACP-9106', zoneName: 'West', companyName: 'UltraTech', slaBucket: 'CRITICAL', latestGpsDatetime: '2026-06-01T00:00:00.000Z', tripCreationDatetime: '2026-07-13T08:36:27.000Z', isInactive: true, openTicketId: 'ec20cefb-7481-481d-81dc-09c7c58d3aa3', openTicketStatus: 'OPEN', assignmentState: 'FORMALLY_ASSIGNED', assignedSeName: 'Ravi K', batchId: '84', batchStatus: 'ACTIVE', scheduleId: '48' },
 ];
 const cycles = {
   deviceId: '900',
@@ -114,6 +114,16 @@ describe('Device Detail (FE-22)', () => {
     fireEvent.click(await screen.findByTestId('dev-row-900'));
     await screen.findByTestId('device-stats');
     expect(screen.queryByTestId('deal-type-recurring')).toBeNull();
+  });
+
+  it('renders a per-row ticket link straight to Ticket Operations (operator report 2026-07-15)', async () => {
+    stub();
+    renderPage(OH);
+    const link = await screen.findByTestId('row-ticket-link-900');
+    expect(link).toHaveAttribute('href', '/tickets/ec20cefb-7481-481d-81dc-09c7c58d3aa3');
+    // The link must not trigger the row's inline-select handler on its way out.
+    fireEvent.click(link);
+    expect(screen.queryByTestId('device-stats')).toBeNull();
   });
 
   it('queries the device list endpoint on search', async () => {

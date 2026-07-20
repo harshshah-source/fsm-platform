@@ -5,8 +5,10 @@ import { apiComponentRequestsByTicket, type ComponentRequestRow } from '../../ap
 import { apiManualCloseRecovery } from '../../api/recovery';
 import { apiTicketDetail, apiTicketForms, type TicketDetail, type TicketForm } from '../../api/tickets';
 import { apiTicketVerification, type TicketVerification } from '../../api/verification';
-import { Button } from '../../components/ui';
+import { Badge, Button, type BadgeTone } from '../../components/ui';
+import { IconClose } from '../../components/ui/icons';
 import { Modal } from '../../components/overlay/Modal';
+import { StatusPill, TierBadge } from '../../components/domain';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 import { BucketBadge, InlineBadges } from './ticketBadges';
 
@@ -17,18 +19,37 @@ const TABS: TabId[] = ['Overview', 'Lifecycle', 'Forms', 'Verification', 'Compon
 
 // Every tab now renders real data; no stub tabs remain.
 
-const CR_STATUS_CLASS: Record<string, string> = {
-  REQUESTED: 'bg-amber-100 text-amber-800',
-  APPROVED: 'bg-blue-100 text-blue-800',
-  SHIPPED: 'bg-violet-100 text-violet-800',
-  RECEIVED: 'bg-green-100 text-green-800',
-  REJECTED: 'bg-rose-100 text-rose-800',
+const CR_STATUS_TONE: Record<string, BadgeTone> = {
+  REQUESTED: 'warning',
+  APPROVED: 'info',
+  SHIPPED: 'verified',
+  RECEIVED: 'success',
+  REJECTED: 'critical',
 };
+
+/** Shared shell for the per-item cards (component requests / form submissions). */
+const ITEM_CARD =
+  'rounded-md border border-line bg-surface-raised p-3 transition-shadow duration-200 hover:shadow-card';
+
+/** Timeline entry — brand dot + connecting rail, used by Lifecycle and Assignment History. */
+function TimelineItem({ title, meta }: { title: string; meta: string }) {
+  return (
+    <li className="relative pb-1 pl-5 last:pb-0">
+      <span
+        aria-hidden
+        className="absolute left-0 top-1 h-2.5 w-2.5 rounded-full border-2 border-brand-600 bg-surface-card"
+      />
+      <span aria-hidden className="absolute bottom-0 left-[4px] top-4 w-px bg-line-strong" />
+      <div className="text-sm font-semibold text-ink-strong">{title}</div>
+      <div className="text-xs text-ink-muted">{meta}</div>
+    </li>
+  );
+}
 
 /**
  * Ticket Detail Drawer (Issue 07, `/tickets/:ticketId`). Slides in over the list (the list stays
  * mounted via its parent route). Overview + Lifecycle render real data from `/api/tickets/:id`; the
- * remaining tabs are graceful stubs that fill in as their owning issues land.
+ * remaining tabs lazy-load their data when opened.
  */
 export function TicketDetailDrawer() {
   const { ticketId } = useParams();
@@ -107,27 +128,37 @@ export function TicketDetailDrawer() {
   return (
     <aside
       aria-label="Ticket detail"
-      className="ml-4 w-96 shrink-0 border-l bg-white p-4 shadow-lg"
+      className="animate-drawer-in sticky top-[5.25rem] ml-4 flex max-h-[calc(100vh-6.25rem)] w-96 shrink-0 flex-col self-start overflow-hidden rounded-card border border-line bg-surface-card shadow-floating"
     >
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Ticket detail</h3>
+      {/* Header — eyebrow + ticket id + live status, on a raised band. */}
+      <div className="flex items-start justify-between gap-3 border-b border-line bg-surface-raised px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink-caps">
+            Ticket detail
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <h3 className="font-mono text-sm font-semibold text-ink-strong">
+              #{ticketId ? ticketId.slice(0, 8) : '—'}
+            </h3>
+            {ticket && <StatusPill status={ticket.status} />}
+          </div>
+        </div>
         <button
           type="button"
           onClick={() => navigate('/tickets')}
           aria-label="Close ticket detail"
-          className="rounded border px-2 py-0.5 text-sm"
+          className="rounded-full border border-line bg-surface-card p-1.5 text-ink-muted transition-colors hover:border-line-strong hover:bg-surface-sunken hover:text-ink-strong"
         >
-          ✕
+          <IconClose className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      {error && (
-        <p role="alert" className="text-sm text-red-700">
-          {error}
-        </p>
-      )}
-
-      <div role="tablist" aria-label="Ticket detail tabs" className="mb-3 flex flex-wrap gap-1 border-b text-sm">
+      {/* Tab pills. */}
+      <div
+        role="tablist"
+        aria-label="Ticket detail tabs"
+        className="flex flex-wrap gap-1 border-b border-line px-3 py-2"
+      >
         {TABS.map((t) => (
           <button
             key={t}
@@ -135,221 +166,251 @@ export function TicketDetailDrawer() {
             type="button"
             aria-selected={tab === t}
             onClick={() => setTab(t)}
-            className={`px-2 py-1 ${tab === t ? 'border-b-2 border-slate-800 font-medium' : 'text-slate-500'}`}
+            className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors duration-150 ${
+              tab === t
+                ? 'bg-chrome-900 text-chrome-text shadow-card'
+                : 'text-ink-muted hover:bg-surface-sunken hover:text-ink-strong'
+            }`}
           >
             {t}
           </button>
         ))}
       </div>
 
-      {!ticket && !error && <p className="text-sm text-slate-500">Loading…</p>}
+      {/* Scrollable body — header + tabs stay pinned. */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {error && (
+          <p role="alert" className="rounded-md border border-critical/30 bg-critical-bg px-3 py-2 text-sm text-critical">
+            {error}
+          </p>
+        )}
 
-      {ticket && (
-        <div role="tabpanel">
-          {tab === 'Overview' && (
-            <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-sm">
-              <dt className="text-slate-500">Device</dt>
-              <dd className="font-medium">{ticket.deviceId}</dd>
-              {ticket.vehicleNo && (
-                <>
-                  <dt className="text-slate-500">Vehicle</dt>
-                  <dd className="font-mono text-xs">{ticket.vehicleNo}</dd>
-                </>
-              )}
-              <dt className="text-slate-500">Work type</dt>
-              <dd>{ticket.workType}</dd>
-              <dt className="text-slate-500">Status</dt>
-              <dd>{ticket.status}</dd>
-              <dt className="text-slate-500">Company</dt>
-              <dd>
-                {ticket.companyName ?? `#${ticket.companyId}`}{' '}
-                <span className="text-xs text-slate-400">({ticket.companyTier})</span>
-              </dd>
-              <dt className="text-slate-500">Plant</dt>
-              <dd>{ticket.plantName ? formatPlantDisplayName(ticket.plantName) : `#${ticket.plantId}`}</dd>
-              {/* Live assignment context (Issue 122b): who holds the ticket, and through which batch. */}
-              <dt className="text-slate-500">Assigned SE</dt>
-              <dd data-testid="drawer-assigned-se">
-                {ticket.assignmentState === 'FORMALLY_ASSIGNED' ? (
-                  <span>
-                    <span className="font-medium">{ticket.assignedSeName ?? ticket.assignedSeId ?? '—'}</span>
-                    {ticket.overridden && (
-                      <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
-                        OVERRIDDEN
-                      </span>
-                    )}
-                    {ticket.batchId && (
-                      <span className="block text-xs text-slate-400">
-                        Batch #{ticket.batchId}
-                        {ticket.scheduleId ? ` · Schedule #${ticket.scheduleId}` : ''}
-                      </span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-amber-700">Unassigned</span>
+        {!ticket && !error && (
+          <div aria-label="Loading" className="flex flex-col gap-2">
+            <p className="sr-only">Loading…</p>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-4 animate-pulse rounded bg-surface-sunken" style={{ width: `${88 - i * 14}%` }} />
+            ))}
+          </div>
+        )}
+
+        {ticket && (
+          <div role="tabpanel">
+            {tab === 'Overview' && (
+              <dl className="grid grid-cols-[6.5rem_1fr] items-baseline gap-x-3 gap-y-2.5 text-sm">
+                <dt className="text-xs text-ink-muted">Device</dt>
+                <dd className="font-semibold text-ink-strong">{ticket.deviceId}</dd>
+                {ticket.vehicleNo && (
+                  <>
+                    <dt className="text-xs text-ink-muted">Vehicle</dt>
+                    <dd className="font-mono text-xs text-ink">{ticket.vehicleNo}</dd>
+                  </>
                 )}
-              </dd>
-              <dt className="text-slate-500">Inactive for</dt>
-              <dd>
-                <BucketBadge bucket={ticket.slaBucket} latestGpsDatetime={ticket.latestGpsDatetime} />
-              </dd>
-              <dt className="text-slate-500">Created</dt>
-              <dd className="text-xs">{new Date(ticket.createdAt).toLocaleString()}</dd>
-              <dt className="text-slate-500">Flags</dt>
-              <dd>
-                <InlineBadges ticket={ticket} />
-              </dd>
-            </dl>
-          )}
-
-          {/* Manual close (web-only exception path) for an open Recovery Ticket — ZM / OH / CSM-acting.
-              The backend stamps the closure_type by acting role + full audit (Issue 37 AC#2/#3). */}
-          {tab === 'Overview' &&
-            isManager &&
-            ticket.workType === 'RECOVERY' &&
-            !RECOVERY_TERMINAL.has(ticket.status) && (
-              <button
-                type="button"
-                data-testid="recovery-manual-close"
-                onClick={() => setRecoveryCloseOpen(true)}
-                className="mt-4 rounded border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50"
-              >
-                Manually close Recovery Ticket
-              </button>
+                <dt className="text-xs text-ink-muted">Work type</dt>
+                <dd className="text-ink">{ticket.workType}</dd>
+                <dt className="text-xs text-ink-muted">Status</dt>
+                <dd>
+                  <StatusPill status={ticket.status} />
+                </dd>
+                <dt className="text-xs text-ink-muted">Company</dt>
+                <dd className="text-ink">
+                  {ticket.companyName ?? `#${ticket.companyId}`}{' '}
+                  <TierBadge tier={ticket.companyTier} className="ml-0.5 align-middle" />
+                </dd>
+                <dt className="text-xs text-ink-muted">Plant</dt>
+                <dd className="text-ink">
+                  {ticket.plantName ? formatPlantDisplayName(ticket.plantName) : `#${ticket.plantId}`}
+                </dd>
+                {/* Live assignment context (Issue 122b): who holds the ticket, and through which batch. */}
+                <dt className="text-xs text-ink-muted">Assigned SE</dt>
+                <dd data-testid="drawer-assigned-se">
+                  {ticket.assignmentState === 'FORMALLY_ASSIGNED' ? (
+                    <span>
+                      <span className="font-semibold text-ink-strong">
+                        {ticket.assignedSeName ?? ticket.assignedSeId ?? '—'}
+                      </span>
+                      {ticket.overridden && (
+                        <Badge tone="info" className="ml-1.5 align-middle">
+                          Overridden
+                        </Badge>
+                      )}
+                      {ticket.batchId && (
+                        <span className="block text-xs text-ink-muted">
+                          Batch #{ticket.batchId}
+                          {ticket.scheduleId ? ` · Schedule #${ticket.scheduleId}` : ''}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="font-medium text-warning">Unassigned</span>
+                  )}
+                </dd>
+                <dt className="text-xs text-ink-muted">Inactive for</dt>
+                <dd>
+                  <BucketBadge bucket={ticket.slaBucket} latestGpsDatetime={ticket.latestGpsDatetime} />
+                </dd>
+                <dt className="text-xs text-ink-muted">Created</dt>
+                <dd className="text-xs text-ink">{new Date(ticket.createdAt).toLocaleString()}</dd>
+                <dt className="text-xs text-ink-muted">Flags</dt>
+                <dd>
+                  <InlineBadges ticket={ticket} />
+                </dd>
+              </dl>
             )}
 
-          {tab === 'Lifecycle' && (
-            <ol className="flex flex-col gap-2 text-sm">
-              {ticket.lifecycle.length === 0 && <li className="text-slate-500">No transitions yet.</li>}
-              {ticket.lifecycle.map((e, i) => (
-                <li key={i} className="border-l-2 border-slate-200 pl-2">
-                  <div className="font-medium">{e.toState}</div>
-                  <div className="text-xs text-slate-500">
-                    {e.fromState ? `from ${e.fromState} · ` : ''}
-                    {e.actorRole ?? 'system'} · {new Date(e.at).toLocaleString()}
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-
-          {tab === 'Components' && (
-            <div className="flex flex-col gap-3 text-sm">
-              {ticket.failureCycleState === 'WAITING_COMPONENT' && (
-                <div
-                  data-testid="waiting-component-badge"
-                  className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+            {/* Manual close (web-only exception path) for an open Recovery Ticket — ZM / OH / CSM-acting.
+                The backend stamps the closure_type by acting role + full audit (Issue 37 AC#2/#3). */}
+            {tab === 'Overview' &&
+              isManager &&
+              ticket.workType === 'RECOVERY' &&
+              !RECOVERY_TERMINAL.has(ticket.status) && (
+                <button
+                  type="button"
+                  data-testid="recovery-manual-close"
+                  onClick={() => setRecoveryCloseOpen(true)}
+                  className="mt-4 rounded-md border border-critical/30 px-2.5 py-1.5 text-xs font-medium text-critical transition-colors hover:bg-critical-bg"
                 >
-                  WAITING_COMPONENT — primary SLA paused
-                  {ticket.waitingComponentSince
-                    ? ` since ${new Date(ticket.waitingComponentSince).toLocaleString()}`
-                    : ''}
-                </div>
+                  Manually close Recovery Ticket
+                </button>
               )}
 
-              {components === null && <p className="text-slate-500">Loading…</p>}
-              {components !== null && components.length === 0 && (
-                <p className="text-slate-400">No component requests on this ticket.</p>
-              )}
-              {components?.map((c) => (
-                <div key={c.requestId} data-testid={`cr-${c.requestId}`} className="rounded border p-2">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="font-medium">{c.componentName ?? 'Component'}</span>
-                    <span className={`rounded px-2 py-0.5 text-xs ${CR_STATUS_CLASS[c.status] ?? 'bg-slate-100 text-slate-700'}`}>
-                      {c.status}
-                    </span>
+            {tab === 'Lifecycle' && (
+              <ol className="flex flex-col text-sm">
+                {ticket.lifecycle.length === 0 && (
+                  <li className="text-ink-muted">No transitions yet.</li>
+                )}
+                {ticket.lifecycle.map((e, i) => (
+                  <TimelineItem
+                    key={i}
+                    title={e.toState}
+                    meta={`${e.fromState ? `from ${e.fromState} · ` : ''}${e.actorRole ?? 'system'} · ${new Date(e.at).toLocaleString()}`}
+                  />
+                ))}
+              </ol>
+            )}
+
+            {tab === 'Components' && (
+              <div className="flex flex-col gap-3 text-sm">
+                {ticket.failureCycleState === 'WAITING_COMPONENT' && (
+                  <div
+                    data-testid="waiting-component-badge"
+                    className="rounded-md border border-warning/30 bg-warning-bg px-3 py-2 text-xs font-medium text-warning"
+                  >
+                    WAITING_COMPONENT — primary SLA paused
+                    {ticket.waitingComponentSince
+                      ? ` since ${new Date(ticket.waitingComponentSince).toLocaleString()}`
+                      : ''}
                   </div>
-                  {c.status === 'SHIPPED' && (
-                    <div className="text-xs text-slate-600">
-                      Shipped to {c.deliveryDestination ?? '—'}
-                      {c.trackingRef ? ` · tracking ${c.trackingRef}` : ''}
+                )}
+
+                {components === null && <p className="text-ink-muted">Loading…</p>}
+                {components !== null && components.length === 0 && (
+                  <p className="text-ink-muted">No component requests on this ticket.</p>
+                )}
+                {components?.map((c) => (
+                  <div key={c.requestId} data-testid={`cr-${c.requestId}`} className={ITEM_CARD}>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="font-semibold text-ink-strong">{c.componentName ?? 'Component'}</span>
+                      <Badge tone={CR_STATUS_TONE[c.status] ?? 'neutral'}>{c.status}</Badge>
                     </div>
-                  )}
-                  {c.status === 'REJECTED' && c.rejectionReason && (
-                    <div className="text-xs text-rose-700">Rejected: {c.rejectionReason}</div>
-                  )}
-                  <div className="mt-1 text-xs text-slate-400">{c.ageDays}d old</div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {tab === 'Forms' && (
-            <div className="flex flex-col gap-3 text-sm">
-              {forms === null && <p className="text-slate-500">Loading…</p>}
-              {forms !== null && forms.length === 0 && (
-                <p className="text-slate-400">No troubleshoot forms submitted on this ticket yet.</p>
-              )}
-              {forms?.map((f) => (
-                <div key={f.submissionId} data-testid={`form-${f.submissionId}`} className="rounded border p-2">
-                  <div className="mb-1 flex items-center justify-between">
-                    <span className="font-medium">{f.rootCauseCategory}</span>
-                    <span className="text-xs text-slate-400">{new Date(f.submittedAt).toLocaleString()}</span>
+                    {c.status === 'SHIPPED' && (
+                      <div className="text-xs text-ink">
+                        Shipped to {c.deliveryDestination ?? '—'}
+                        {c.trackingRef ? ` · tracking ${c.trackingRef}` : ''}
+                      </div>
+                    )}
+                    {c.status === 'REJECTED' && c.rejectionReason && (
+                      <div className="text-xs text-critical">Rejected: {c.rejectionReason}</div>
+                    )}
+                    <div className="mt-1 text-xs text-ink-muted">{c.ageDays}d old</div>
                   </div>
-                  {f.rootCauseSubcategory && (
-                    <div className="text-xs text-slate-600">Subcategory: {f.rootCauseSubcategory}</div>
-                  )}
-                  {f.actionTakenCategory && (
-                    <div className="text-xs text-slate-600">Action: {f.actionTakenCategory}</div>
-                  )}
-                  {f.diagnosisNotes && <div className="mt-1 text-xs text-slate-700">{f.diagnosisNotes}</div>}
-                  {f.componentUnavailable && (
-                    <div className="mt-1 text-xs text-amber-700">Component unavailable at submission</div>
-                  )}
-                  <div className="mt-1 text-xs text-slate-400">by {f.seId}</div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
 
-          {tab === 'Verification' && (
-            <div data-testid="verification-panel" className="flex flex-col gap-2 text-sm">
-              {verification === null && <p className="text-slate-500">Loading…</p>}
-              {verification?.run === null && verification !== null && (
-                <p className="text-slate-400">No verification run for this ticket yet.</p>
-              )}
-              {verification?.run && (
-                <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1">
-                  <dt className="text-slate-500">Outcome</dt>
-                  <dd className="font-medium">{verification.run.badge}</dd>
-                  <dt className="text-slate-500">Phase</dt>
-                  <dd>{verification.run.phase}</dd>
-                  <dt className="text-slate-500">Pings received</dt>
-                  <dd>{verification.run.pingsReceivedCount}</dd>
-                  {verification.run.fraudFlag && (
-                    <>
-                      <dt className="text-slate-500">Fraud flag</dt>
-                      <dd className="text-rose-700">
-                        Yes
-                        {verification.run.firstPingDistanceMeters != null
-                          ? ` · Δ${verification.run.firstPingDistanceMeters}m`
-                          : ''}
-                      </dd>
-                    </>
-                  )}
-                </dl>
-              )}
-            </div>
-          )}
-
-          {tab === 'Assignment History' && (
-            <div data-testid="assignment-history-panel" className="flex flex-col gap-2 text-sm">
-              {assignmentEvents.length === 0 && (
-                <p className="text-slate-400">No assignment or override actions recorded.</p>
-              )}
-              {assignmentEvents.map((e, i) => (
-                <div key={i} className="border-l-2 border-slate-200 pl-2">
-                  <div className="font-medium">{e.reasonCode ?? e.toState}</div>
-                  <div className="text-xs text-slate-500">
-                    {e.actorRole ?? 'system'}
-                    {e.actedAsRole ? ` (acting ${e.actedAsRole})` : ''} · {new Date(e.at).toLocaleString()}
+            {tab === 'Forms' && (
+              <div className="flex flex-col gap-3 text-sm">
+                {forms === null && <p className="text-ink-muted">Loading…</p>}
+                {forms !== null && forms.length === 0 && (
+                  <p className="text-ink-muted">No troubleshoot forms submitted on this ticket yet.</p>
+                )}
+                {forms?.map((f) => (
+                  <div key={f.submissionId} data-testid={`form-${f.submissionId}`} className={ITEM_CARD}>
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="font-semibold text-ink-strong">{f.rootCauseCategory}</span>
+                      <span className="text-xs text-ink-muted">{new Date(f.submittedAt).toLocaleString()}</span>
+                    </div>
+                    {f.rootCauseSubcategory && (
+                      <div className="text-xs text-ink">Subcategory: {f.rootCauseSubcategory}</div>
+                    )}
+                    {f.actionTakenCategory && (
+                      <div className="text-xs text-ink">Action: {f.actionTakenCategory}</div>
+                    )}
+                    {f.diagnosisNotes && <div className="mt-1 text-xs text-ink">{f.diagnosisNotes}</div>}
+                    {f.componentUnavailable && (
+                      <div className="mt-1 text-xs font-medium text-warning">
+                        Component unavailable at submission
+                      </div>
+                    )}
+                    <div className="mt-1 text-xs text-ink-muted">by {f.seId}</div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+
+            {tab === 'Verification' && (
+              <div data-testid="verification-panel" className="flex flex-col gap-2 text-sm">
+                {verification === null && <p className="text-ink-muted">Loading…</p>}
+                {verification?.run === null && verification !== null && (
+                  <p className="text-ink-muted">No verification run for this ticket yet.</p>
+                )}
+                {verification?.run && (
+                  <dl className="grid grid-cols-[6.5rem_1fr] items-baseline gap-x-3 gap-y-2.5">
+                    <dt className="text-xs text-ink-muted">Outcome</dt>
+                    <dd>
+                      <Badge tone={verification.run.fraudFlag ? 'critical' : 'verified'}>
+                        {verification.run.badge}
+                      </Badge>
+                    </dd>
+                    <dt className="text-xs text-ink-muted">Phase</dt>
+                    <dd className="text-ink">{verification.run.phase}</dd>
+                    <dt className="text-xs text-ink-muted">Pings received</dt>
+                    <dd className="font-semibold text-ink-strong">{verification.run.pingsReceivedCount}</dd>
+                    {verification.run.fraudFlag && (
+                      <>
+                        <dt className="text-xs text-ink-muted">Fraud flag</dt>
+                        <dd className="font-medium text-critical">
+                          Yes
+                          {verification.run.firstPingDistanceMeters != null
+                            ? ` · Δ${verification.run.firstPingDistanceMeters}m`
+                            : ''}
+                        </dd>
+                      </>
+                    )}
+                  </dl>
+                )}
+              </div>
+            )}
+
+            {tab === 'Assignment History' && (
+              <div data-testid="assignment-history-panel" className="text-sm">
+                {assignmentEvents.length === 0 && (
+                  <p className="text-ink-muted">No assignment or override actions recorded.</p>
+                )}
+                <ol className="flex flex-col">
+                  {assignmentEvents.map((e, i) => (
+                    <TimelineItem
+                      key={i}
+                      title={e.reasonCode ?? e.toState}
+                      meta={`${e.actorRole ?? 'system'}${e.actedAsRole ? ` (acting ${e.actedAsRole})` : ''} · ${new Date(e.at).toLocaleString()}`}
+                    />
+                  ))}
+                </ol>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* FE-09 AC#3 — the recovery manual-close reason capture is a Modal (was window.prompt). */}
       <Modal
