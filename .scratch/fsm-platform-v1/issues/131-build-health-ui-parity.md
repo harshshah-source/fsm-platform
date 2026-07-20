@@ -1,6 +1,6 @@
 # 131 — #130 build-health UI parity: recompute history table + dispatch-run-detail stale-build badge
 
-Status: ready-for-agent
+Status: DONE (2026-07-20)
 Type: AFK
 
 > Fast-follow to [#130](./130-stale-code-write-guard.md) Slice 2 (L3 attribution + L5 canary, backend
@@ -57,22 +57,38 @@ detail view). Neither view exists as a routable page yet in a state safe to edit
 
 ## Acceptance criteria
 
-- [ ] An OpsHead-only **integration-health page** (routed, nav entry) renders the **last-N recompute
+- [x] An OpsHead-only **integration-health page** (routed, nav entry) renders the **last-N recompute
       history** as a table: computed-at, counts (eligible/inactive/departed/total), trigger, build
       fingerprint, and the swing delta — rows with `swing: true` visually highlighted (the operator
-      should be able to spot the run-65-shaped anomaly at a glance).
+      should be able to spot the run-65-shaped anomaly at a glance). _(`BuildHealthPage.tsx`, routed
+      at `/build-health`, "Admin" nav group, `DataTable` `rowActive`+`activeVariant="danger"` for
+      swing rows.)_
   - Also show `runtimeLock` (current build version/fingerprint) and the master-sync/snapshot
-    `build.staleBuild` flags inline (superset of what `BuildHealthNotice` already summarizes).
-- [ ] **Dispatch run detail** renders a stale-build badge ("ran under build v_x_, current v_y_") when
+    `build.staleBuild` flags inline (superset of what `BuildHealthNotice` already summarizes). _(done)_
+- [x] **Dispatch run detail** renders a stale-build badge ("ran under build v_x_, current v_y_") when
       `run.buildVersion < runtimeLock.version`. Requires `dispatch-transparency-query.service.ts` (or
       its successor once the 07-17 WIP is resolved) to select `buildVersion`/`buildFingerprint` on the
-      run-detail read, and the FE run-detail page/component to render the badge.
-- [ ] `BuildHealthNotice` (already shipped) either stays as the summary alert or is superseded by a
+      run-detail read, and the FE run-detail page/component to render the badge. _(new
+      `runBuildStamp()` private method on `DispatchTransparencyQueryService.getRunDetail` — the row
+      was already fetched via `include`, just not surfaced; FE badge on `DispatchRunDetailPage.tsx`.)_
+- [x] `BuildHealthNotice` (already shipped) either stays as the summary alert or is superseded by a
       link into the new integration-health page — operator's call at build time, not a re-litigation
-      of the Slice 2 decision.
-- [ ] New tests only (backend read enrichment if the query needs a new field selected; FE page +
+      of the Slice 2 decision. _(Kept as the alert; added a "View details →" link into
+      `/build-health`.)_
+- [x] New tests only (backend read enrichment if the query needs a new field selected; FE page +
       badge render). No changes to `runtime_lock`, `device_state_recomputes`, or the health-service
-      logic — this issue is display-only, per the #130 Slice 2 boundary.
+      logic — this issue is display-only, per the #130 Slice 2 boundary. _(Confirmed — no edits to
+      either table or to `health.service.ts`; `BuildHealthPage.tsx` reads the existing
+      `apiIntegrationHealth()` client unchanged.)_
+
+## Build summary (2026-07-20)
+
+3 new files (`BuildHealthPage.tsx`, `build-health-page.test.tsx`,
+`dispatch-run-detail-build-stamp.e2e-spec.ts`), 6 modified (`AppRoutes.tsx`, `nav.ts`,
+`BuildHealthNotice.tsx`, `dispatch-runs.ts` API client, `DispatchRunDetailPage.tsx`,
+`dispatch-transparency-query.service.ts`). 12 new tests green (3 backend build-stamp, 5 FE badge/nav,
+4 FE page); wider regression sweep 48/48 green (23 admin + 25 backend); both apps `tsc --noEmit`
+clean. No new backend computation — both surfaces read data #130 Slice 2 already produces.
 
 ## Non-goals
 

@@ -68,11 +68,22 @@ export interface ConfigSnapshot {
   scheduler: { businessSweepsEnabled: boolean; dispatchCron: string };
 }
 
+/** #131 — the run's build attribution against the current runtime-lock high-water mark. Null for a
+ * historical run predating #130 (no build columns stamped). */
+export interface DispatchRunBuildStamp {
+  buildVersion: string;
+  buildFingerprint: string;
+  staleBuild: boolean;
+  currentVersion: string;
+  currentFingerprint: string;
+}
+
 export interface DispatchRunDetail extends Omit<DispatchRunListRow, 'zones'> {
   actorUserId: string | null;
   configSnapshot: ConfigSnapshot;
   /** Per-zone cards — a ZM sees only their own. */
   zones: DispatchRunZoneCard[];
+  build: DispatchRunBuildStamp | null;
 }
 
 export interface DispatchBatchRow {

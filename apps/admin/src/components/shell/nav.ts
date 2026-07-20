@@ -117,6 +117,7 @@ export function buildNav(role: string): NavGroup[] {
         { label: 'CSM Backup Share', to: '/reports/csm-approval-share', icon: IconShare },
         { label: 'Plant Deactivations', to: '/plant-deactivations', icon: IconBoxAlert },
         { label: 'Exports', to: '/exports', icon: IconClipboard },
+        { label: 'Build Health', to: '/build-health', icon: IconActivity },
         { label: 'Settings', to: '/settings', icon: IconSettings },
       ],
     });

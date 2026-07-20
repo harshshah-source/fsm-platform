@@ -38,12 +38,27 @@ export interface DispatchRunZoneCard {
   error: string | null;
 }
 
+/**
+ * #131 — the run's build attribution against the current runtime-lock high-water mark, the same
+ * shape `AutoPlantHealthService` uses for `masterSync.build`/`snapshot.build` (#130 L3), plus the
+ * current version/fingerprint the badge needs to render "ran under build vX, current vY" without a
+ * second request. Null for a historical run predating #130 (no build columns stamped).
+ */
+export interface DispatchRunBuildStamp {
+  buildVersion: string;
+  buildFingerprint: string;
+  staleBuild: boolean;
+  currentVersion: string;
+  currentFingerprint: string;
+}
+
 export interface DispatchRunDetail extends Omit<DispatchRunListRow, 'zones'> {
   actorUserId: string | null;
   /** The config that actually applied — frozen at run start, not today's values. */
   configSnapshot: Record<string, unknown>;
   /** Per-zone cards (a ZM sees only their own). Replaces the list row's numeric `zones` count. */
   zones: DispatchRunZoneCard[];
+  build: DispatchRunBuildStamp | null;
 }
 
 export interface DispatchBatchRow {
@@ -287,6 +302,30 @@ export class DispatchTransparencyQueryService {
       errorCount: zoneCards.filter((z) => z.error !== null).length,
       configSnapshot: (run.configSnapshot as Record<string, unknown>) ?? {},
       zones: zoneCards,
+      build: await this.runBuildStamp(run.buildVersion, run.buildFingerprint),
+    };
+  }
+
+  /**
+   * #131 — the run's build stamp against the current `runtime_lock` high-water mark. Null when the
+   * run predates #130 (no build columns stamped) or the lock has no row yet (fresh/unattributed DB).
+   */
+  private async runBuildStamp(
+    buildVersion: bigint | null,
+    buildFingerprint: string | null,
+  ): Promise<DispatchRunBuildStamp | null> {
+    if (buildVersion == null || buildFingerprint == null) return null;
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ version: string; fingerprint: string }>>(
+      `SELECT version::text AS version, fingerprint FROM runtime_lock WHERE id = 1`,
+    );
+    const lock = rows[0];
+    if (!lock) return null;
+    return {
+      buildVersion: buildVersion.toString(),
+      buildFingerprint,
+      staleBuild: buildVersion < BigInt(lock.version),
+      currentVersion: lock.version,
+      currentFingerprint: lock.fingerprint,
     };
   }
 

@@ -49,6 +49,7 @@ const detail = {
       error: null,
     },
   ],
+  build: null,
 };
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -93,5 +94,43 @@ describe('Dispatch run detail (Issue 123)', () => {
     const config = within(await screen.findByTestId('config-in-effect'));
     expect(config.getByText('Default weighting (not overridden)')).toBeInTheDocument();
     expect(config.getByText(/Default ×1.25 \(not overridden\)/)).toBeInTheDocument();
+  });
+
+  it('#131 — renders the stale-build badge when the run predates the current lock version', async () => {
+    renderWith({
+      ...detail,
+      build: {
+        buildVersion: '100',
+        buildFingerprint: 'stalesha',
+        staleBuild: true,
+        currentVersion: '200',
+        currentFingerprint: 'currentsha',
+      },
+    });
+
+    const badge = await screen.findByTestId('stale-build-badge');
+    expect(badge).toHaveTextContent(/ran under build v100/i);
+    expect(badge).toHaveTextContent(/current v200/i);
+  });
+
+  it('#131 — no badge when the run is on the current build', async () => {
+    renderWith({
+      ...detail,
+      build: {
+        buildVersion: '200',
+        buildFingerprint: 'currentsha',
+        staleBuild: false,
+        currentVersion: '200',
+        currentFingerprint: 'currentsha',
+      },
+    });
+    await screen.findByTestId('config-in-effect');
+    expect(screen.queryByTestId('stale-build-badge')).not.toBeInTheDocument();
+  });
+
+  it('#131 — no badge for a historical run with no build stamp (version skew)', async () => {
+    renderWith({ ...detail, build: null });
+    await screen.findByTestId('config-in-effect');
+    expect(screen.queryByTestId('stale-build-badge')).not.toBeInTheDocument();
   });
 });

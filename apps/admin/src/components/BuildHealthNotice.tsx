@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { apiIntegrationHealth, type IntegrationHealthView } from '../api/integrationHealth';
 import { useAuth } from '../auth/AuthProvider';
 import { onIngestionComplete } from '../pages/dashboard/ingestionEvents';
@@ -10,8 +11,8 @@ import { onIngestionComplete } from '../pages/dashboard/ingestionEvents';
  * device-state recompute's eligibility swung beyond the semantic-canary threshold. Warns only —
  * it never blocks; healthy state renders nothing so the banner stays quiet.
  *
- * The full last-N recompute history table and the dispatch-run-detail badge are a fast-follow (they
- * need the currently-uncommitted dispatch/routing surface) — see the #130 UI follow-up in INDEX.
+ * Stays as the quick summary alert (per #131's own AC, kept rather than superseded) with a link into
+ * the routed Build Health page (#131) for the full last-N recompute history + per-run detail.
  */
 export function BuildHealthNotice() {
   const { session } = useAuth();
@@ -58,6 +59,9 @@ export function BuildHealthNotice() {
           build or config change before trusting it.
         </span>
       )}
+      <Link to="/build-health" className="font-semibold underline hover:no-underline">
+        View details →
+      </Link>
     </div>
   );
 }

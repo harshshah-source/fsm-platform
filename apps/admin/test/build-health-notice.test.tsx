@@ -1,5 +1,5 @@
 import type { SessionView } from '@fsm/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../src/auth/AuthProvider';
@@ -68,6 +68,14 @@ describe('#130 BuildHealthNotice', () => {
     renderFor(oh);
     const alert = await screen.findByRole('alert', { name: /build health/i });
     expect(alert).toHaveTextContent(/swung beyond the canary/i);
+  });
+
+  it('#131 — links into the Build Health page for the full drill-down', async () => {
+    stubHealth({ ...healthy, recomputes: [{ swing: true, staleBuild: false }] });
+    renderFor(oh);
+    const alert = await screen.findByRole('alert', { name: /build health/i });
+    const link = within(alert).getByRole('link', { name: /view details/i });
+    expect(link).toHaveAttribute('href', '/build-health');
   });
 
   it('renders nothing when everything is healthy', async () => {

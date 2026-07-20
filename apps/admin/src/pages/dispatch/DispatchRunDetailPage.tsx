@@ -60,6 +60,22 @@ export function DispatchRunDetailPage() {
         }
       />
 
+      {/* #131 — a run produced by a build below the current lock: the run-65-shaped warning sign
+          (a stale process may still have been writing when this ran). Never blocks, just flags it. */}
+      {detail?.build?.staleBuild && (
+        <div
+          role="alert"
+          data-testid="stale-build-badge"
+          className="mb-4 flex items-center gap-2 rounded-md border border-warning/30 bg-warning-bg px-3 py-2 text-sm text-warning"
+        >
+          <span className="font-semibold">Stale build:</span>
+          <span>
+            ran under build v{detail.build.buildVersion} ({detail.build.buildFingerprint}), current v
+            {detail.build.currentVersion} ({detail.build.currentFingerprint}).
+          </span>
+        </div>
+      )}
+
       {error && <ErrorState message={error} onRetry={load} />}
 
       {detail && (

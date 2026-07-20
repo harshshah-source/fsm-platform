@@ -32,6 +32,7 @@ import { SettingsPage } from './pages/settings/SettingsPage';
 import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { ExportsPage } from './pages/exports/ExportsPage';
 import { PlantDeactivationsPage } from './pages/admin/PlantDeactivationsPage';
+import { BuildHealthPage } from './pages/admin/BuildHealthPage';
 import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
 import { FleetDirectoryPage } from './pages/reports/FleetDirectoryPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
@@ -208,6 +209,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['OPERATIONS_HEAD']}>
                 <PlantDeactivationsPage />
+              </RoleRoute>
+            }
+          />
+          {/* Build Health — Operations Head only (Issue 131, #130 L3/L5 drill-down). */}
+          <Route
+            path="/build-health"
+            element={
+              <RoleRoute roles={['OPERATIONS_HEAD']}>
+                <BuildHealthPage />
               </RoleRoute>
             }
           />
