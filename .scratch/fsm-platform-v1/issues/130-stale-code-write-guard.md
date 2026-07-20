@@ -71,7 +71,70 @@ Type: AFK (design signed off 2026-07-20; all five open decisions taken — see "
   via `db push` / from-zero harnesses); compare only rows with `finished_at IS NOT NULL AND
   rolled_back_at IS NULL` against the bundled `prisma/migrations/*` directory names.
 
-## The four layers
+## Add-ups ruled 2026-07-20 (operator proposals 1–3, authority delegated)
+
+1. **Status-authority documentation — ACCEPTED as the "Data-model authority" section below; two
+   specifics REJECTED.** (a) No enum widening: `vehicles.status` is a nullable `String`
+   (schema.prisma:1660) mirroring the source **verbatim**, and post-#128 a vehicle FSM already
+   knows is upserted regardless of status, so the mirror already tells the truth
+   (`master-sync.service.ts:256-257`). Pinning an enum would make the sync brittle to a new
+   AutoPlant value — a novel status must be *observed as non-operational* (the current fail-safe
+   via the `OPERATIONAL_DEPLOYMENT_STATUSES` allow-list, `master-mapping.ts:143-151`), not crash
+   the mirror write. (b) No `NEVER_DEPLOYED` value: never-deployed devices have **no FSM row at
+   all** by the #128 insert-scope pin (read ≠ create; `vehicles` would balloon ~21k→~48k) — a
+   status value for rows that must not exist would silently reopen that decision. (c) The wording
+   "`vehicles.status` IS the single source for status truth" is **inverted for safety-critical
+   gates**: a mirror scalar is exactly the class of derived state run 65 corrupted; L2's whole
+   point is that dangerous writes re-read the temporal ledger. The corrected hierarchy is below.
+2. **Migration offline-safety — principle ACCEPTED (and made explicit below); mechanism
+   REJECTED.** There is no "migration 023" (migrations are timestamp-named), and with `status`
+   staying TEXT there is no enum migration at all. The valid core — **no migration ever performs
+   network I/O or requires AutoPlant; data corrections are separate idempotent, dry-run-gated,
+   rerunnable scripts** (the #128 backfill pattern) — is repo convention and is now stated as a
+   hard rule in "Migration policy". "Infer the enum from distinct values already in the DB" is
+   rejected outright: data-derived DDL makes the schema **environment-dependent** (dev/test/prod
+   would diverge), which is precisely the skew L4 exists to refuse.
+3. **Eligible-count canary — ACCEPTED, upgraded to L5.** Two corrections to the proposal:
+   (a) alert on swings in **both directions**, not just drops — the run-65 signature was a *rise*
+   (departed devices re-entering eligibility, ~15,799 → ~21k); the run-64 stub artifact was the
+   drop (→ 0). (b) Store the baseline as a small **`device_state_recomputes` ledger** (one row
+   per recompute: counts + build stamp), not a single previous-value cell — this simultaneously
+   closes a real hole in L3: the recompute is the very write that caused the incident and was the
+   only pipeline stage with **no run ledger** (`master_sync_runs`/`snapshot_runs`/`dispatch_runs`
+   exist; recompute had nothing). Canary **warns, never blocks**: legitimate >5% swings exist
+   (#119 deactivations departed 3,620; the #128 backfill 5,523) and hard-fail on true corruption
+   already belongs to the L2 invariant.
+
+## Data-model authority (design property — binding on all future status work)
+
+Three tiers, from source-of-truth downward:
+
+1. **`device_departures`** — FSM's lifecycle ledger; **the** authority for "is this device
+   operationally departed", since when, why (`observed_status` verbatim, incl. the
+   `MISSING_FROM_SOURCE` sentinel that no mirror scalar can represent), and what run did it.
+   Safety-critical gates (ticket creation, recommender, recompute derivation) re-read it (L2).
+2. **`vehicles.status`** — the verbatim last-observed AutoPlant `deployment_status` mirror for
+   vehicles FSM knows (kept TEXT; already updated on every sync regardless of status,
+   `master-sync.service.ts:256-257`). Authoritative for "what did AutoPlant last say", feeds the
+   `all-deployed` eligibility base and display — **never** a safety gate by itself.
+3. **`device_states.is_departed`** — derived cache of tier 1 for fast operational filtering
+   (dashboards, cheap predicates); recomputed via EXISTS (`device-state.service.ts:66-69`);
+   trusted only where being stale is harmless.
+
+**Rule for future status work:** a new AutoPlant status value arrives as a *verbatim observation*
+and defaults to non-operational; making it operational means updating
+`OPERATIONAL_DEPLOYMENT_STATUSES` (`master-mapping.ts:143`) **and** its consumers (departure
+gate + `all-deployed` eligibility base, `device-state.service.ts:73-75`) in the same change —
+never one without the others.
+
+## Migration policy (hard rule, restated from repo convention)
+
+Migrations are offline-safe DDL only: no network I/O, no AutoPlant dependency, no data-derived
+DDL, runnable in CI/test/offline dev from zero. Anything needing live data or the source system
+is a separate idempotent, rerunnable, dry-run-gated script (#128 backfill pattern). #130's own
+migrations (`runtime_lock`, ledger columns, `device_state_recomputes`) are all pure DDL.
+
+## The five layers
 
 | Layer | Guarantee | Fires | Catches |
 |---|---|---|---|
@@ -79,6 +142,7 @@ Type: AFK (design signed off 2026-07-20; all five open decisions taken — see "
 | **L4 migration-skew refusal** | App bundle and applied `_prisma_migrations` must match | Same preamble, before L1 | `migrate deploy` ran but app not upgraded (or vice-versa) — invisible to L1's integer |
 | **L2 defensive writes** | Dangerous mutations re-read source-of-truth, not flags | Every write | A stale/racing writer that somehow got past L1 |
 | **L3 ledger build-stamp + badge** | Every run attributed to a build; stale runs render a warning | Run creation + admin render | Detectability — any slip-through becomes loud after the fact |
+| **L5 semantic canary** | An eligible-count swing > threshold between recomputes is loud | Every recompute + health page | Semantic corruption from *any* cause — stale code, env-mismatch, wrong `DATABASE_URL`, bad config — that no version check can see |
 
 ## L1 — build-fingerprint version lock
 
@@ -136,6 +200,21 @@ Same preamble, ordered `validateBootConfig → L4 (schema) → L1 (version; reco
   build v_x_, current v_y_"). Per the surfacing rule this slice **includes the admin UI**
   (integration-health page + dispatch run detail), not just the API.
 
+## L5 — semantic canary + recompute ledger
+
+- New table `device_state_recomputes` (pure DDL): `recompute_id BIGSERIAL PK | computed_at
+  TIMESTAMPTZ | eligible_count INT | inactive_count INT | departed_count INT | total_count INT |
+  build_version BIGINT | build_fingerprint TEXT | trigger TEXT` (trigger: `api` / `cron` /
+  `autoplant-sync` / `test`). `DeviceStateService.recompute` appends one row per run — this is
+  also the missing L3 attribution for the exact write class that caused the incident.
+- After appending, compare `eligible_count` against the previous row: relative change
+  > threshold (setting `recompute_canary_threshold_pct`, default **5**, both directions; skipped
+  when the previous baseline is 0/absent) → one LOUD warn-level log line naming both counts, both
+  build fingerprints, and the delta — **never a throw/block** (hard-fail on true corruption is
+  L2's invariant; legitimate mass events like #119/#128 must not halt the pipeline).
+- Surfaced on the integration-health page (same slice as the L3 badge): last-N recompute history
+  with counts + build, swing rows highlighted with the warning.
+
 ## Rejected alternatives (for the record)
 
 Restart-on-deploy discipline (July 19 *was* a discipline failure; can't cover scripts);
@@ -156,6 +235,9 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
       exact corrupt state (active `device_departures` row + `is_departed=false`) yields **zero**
       tickets from `createForInactiveEligible` and a recompute-invariant throw.
 - [ ] Ledger rows stamped; stale-run badge renders on integration-health + dispatch run detail.
+- [ ] L5: every recompute appends a `device_state_recomputes` row (counts + build stamp); a
+      > threshold swing in either direction logs the loud warning and highlights on the health
+      page; a legitimate mass event warns but never blocks; threshold read from settings.
 - [ ] Read-only tools (`autoplant:ping`, `autoplant:departure-dryrun`) warn, never refuse.
 - [ ] Scheduler flags and `eligibility_mode` untouched.
 
@@ -164,8 +246,10 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
 1. **Slice 1 — L1 + L4 (boot refusals).** build-info loader + stamp script + build-script chain,
    `runtime_lock` migration, `assertBuildNotStale` (version + skew), `PrismaService.onModuleInit`
    hook + `warnOnly`, main.ts early assert, reset CLI. Tests: matrix, race, messages, skew, CLI audit.
-2. **Slice 2 — L3 (attribution).** Ledger columns + stamping + health/transparency exposure +
-   admin badge UI (parity in-slice).
+2. **Slice 2 — L3 + L5 (attribution + canary).** Ledger columns + stamping,
+   `device_state_recomputes` table + append + swing warning, health/transparency exposure +
+   admin badge/canary UI (parity in-slice).
 3. **Slice 3 — L2 (defensive writes).** Ticket-creation source-of-truth re-read, recompute
    invariant transaction, recommender regression-lock test.
-4. **Slice 4 — July-19 simulation regression test** (cross-cutting L1+L2).
+4. **Slice 4 — July-19 simulation regression test** (cross-cutting L1+L2; assert the L5 row for
+   the simulated stale recompute carries the stale build stamp and trips the canary).
