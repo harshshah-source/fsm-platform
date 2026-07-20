@@ -1,6 +1,6 @@
 # 130 — Stale-code-write guard: version lock + migration-skew refusal + defensive writes + run attribution
 
-Status: ready-for-agent
+Status: DONE (2026-07-20 — all 4 slices landed; UI parity partial, split to #131)
 Type: AFK (design signed off 2026-07-20; all five open decisions taken — see "Decisions taken")
 
 > Root incident: **2026-07-19 run 65** — a process holding pre-#128 code connected to the post-#128
@@ -242,9 +242,11 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
 - [x] Old-dist simulation: build-info resolving to `{0,'unstamped'}` refuses against a stamped DB;
       source-run (vitest) self-stamps from git and boots a fresh test DB. _(Slice 1 — verified end-to-end via `npm run build` + compiled `require`)_
 - [x] `runtime-lock:reset` lowers the lock only with `--yes`, writes the audit row. _(Slice 1)_
-- [ ] **July-19 simulation regression test**: seed lock at N; assert build < N refuses; assert the
+- [x] **July-19 simulation regression test**: seed lock at N; assert build < N refuses; assert the
       exact corrupt state (active `device_departures` row + `is_departed=false`) yields **zero**
-      tickets from `createForInactiveEligible` and a recompute-invariant throw.
+      tickets from `createForInactiveEligible` and a recompute-invariant throw. _(Slice 4 —
+      `test/run-65-simulation.e2e-spec.ts`, one coherent scenario reusing a consistent CURRENT/STALE
+      build identity across all four assertions incl. the L5 ledger row's `staleBuild`+`swing` flags.)_
 - [x] Ledger rows stamped (all 3 run tables); stale-run flag exposed on `/api/integration/health`
       (`staleBuild` per freshness + per recompute). _(Slice 2 — API done; the routed **integration-health
       page** table + **dispatch-run-detail** badge render deferred to [#131](./131-build-health-ui-parity.md),
@@ -288,5 +290,15 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
    rollback-and-throw, verified genuine rollback end-to-end). 39/39 new/regression tests green (10
    files); Slices 1+2's 47 re-verified green (no regression); wider sweep (ticket-creation/
    recommender/dispatch consumers) 25/25 green; `tsc --noEmit` clean; full `build` chain clean.
-4. **Slice 4 — July-19 simulation regression test** (cross-cutting L1+L2; assert the L5 row for
-   the simulated stale recompute carries the stale build stamp and trips the canary).
+4. **✅ Slice 4 — July-19 simulation regression test. DONE 2026-07-20.** One cohesive scenario
+   (`test/run-65-simulation.e2e-spec.ts`) reusing a consistent CURRENT (v200) / STALE (v100) build
+   identity pair across all four assertions: L1 refuses the stale build from booting; L2
+   ticket-creation yields zero tickets for the corrupted state (already-written, as it was in the
+   real incident); L2's recompute invariant trips on the same corrupted state; L5's ledger row for
+   the simulated stale recompute (eligible 15,799→21,000 — the real swing shape, departed devices
+   re-entering eligibility) is flagged both `staleBuild` and `swing` via the real
+   `AutoPlantHealthService.check()` path. 4/4 new tests green; full Slice 1–4 combined sweep 75/75
+   green (17 files); both apps `tsc --noEmit` clean; full backend `build` chain clean.
+   **#130 is now DONE** — all 4 slices landed; UI parity (recompute-history table +
+   dispatch-run-detail badge) partial by operator decision, split to
+   [#131](./131-build-health-ui-parity.md).
