@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Outlet, useMatch, useNavigate } from 'react-router-dom';
 import { apiTicketsList, type TicketFilters, type TicketRow } from '../../api/tickets';
-import { apiDeviceFilterOptions } from '../../api/devices';
+import { apiDeviceFilterOptions, type DeviceFilterOptions } from '../../api/devices';
 import {
   DataTable,
   EmptyState,
@@ -43,19 +43,46 @@ function ageDays(iso: string): number {
  */
 export function TicketsPage() {
   const navigate = useNavigate();
+  // The ticket whose Detail Drawer is open (row click or a deep link from Device Detail). Its list
+  // row is highlighted + scrolled into view so the drawer and the table stay visibly connected.
+  const activeTicketId = useMatch('/tickets/:ticketId')?.params.ticketId ?? null;
   const [filters, setFilters] = useState<TicketFilters>({});
   const [rows, setRows] = useState<TicketRow[]>([]);
-  const [companies, setCompanies] = useState<{ companyId: number; name: string }[]>([]);
+  const [options, setOptions] = useState<DeviceFilterOptions>({
+    zones: [],
+    companies: [],
+    plants: [],
+    hasUnzoned: false,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Company dropdown source (Issue 122 — replaces the free-text company-ID box). Manager-scoped list
-  // of companies present in the caller's fleet; failure just leaves the dropdown empty.
+  // Company + plant dropdown source (Issue 122 — replaces the free-text company-ID box). Manager-scoped
+  // list of companies/plants present in the caller's fleet; failure just leaves the dropdowns empty.
   useEffect(() => {
     apiDeviceFilterOptions()
-      .then((o) => setCompanies(o.companies ?? []))
+      .then(setOptions)
       .catch(() => undefined);
   }, []);
+
+  // The plant dropdown follows the company pick — only that company's plants list, de-duplicated when
+  // unscoped (a plant serving several companies appears once per company in `options.plants`).
+  const dedupedPlants = useMemo(() => {
+    const all = options.plants ?? [];
+    const scoped = filters.companyId ? all.filter((p) => String(p.companyId) === filters.companyId) : all;
+    const seen = new Set<number>();
+    return scoped.filter((p) => (seen.has(p.plantId) ? false : (seen.add(p.plantId), true)));
+  }, [options.plants, filters.companyId]);
+
+  // Drop a selected plant that no longer belongs to the picked company. Skips until options load, so a
+  // deep-linked plant isn't cleared by the empty first render.
+  useEffect(() => {
+    if (!filters.plantId || !filters.companyId || (options.plants ?? []).length === 0) return;
+    const stillValid = (options.plants ?? []).some(
+      (p) => String(p.plantId) === filters.plantId && String(p.companyId) === filters.companyId,
+    );
+    if (!stillValid) setFilters((f) => ({ ...f, plantId: undefined }));
+  }, [filters.companyId, filters.plantId, options.plants]);
 
   const load = useCallback(() => {
     let alive = true;
@@ -254,19 +281,20 @@ export function TicketsPage() {
           </FilterSelect>
           <FilterSelect aria-label="Company" value={filters.companyId ?? ''} onChange={set('companyId')}>
             <option value="">All companies</option>
-            {companies.map((c) => (
+            {(options.companies ?? []).map((c) => (
               <option key={c.companyId} value={String(c.companyId)}>
                 {c.name}
               </option>
             ))}
           </FilterSelect>
-          <SearchInput
-            aria-label="Plant name or ID"
-            placeholder="Plant name or ID"
-            value={filters.plant ?? ''}
-            onChange={set('plant')}
-            className="w-40"
-          />
+          <FilterSelect aria-label="Plant" value={filters.plantId ?? ''} onChange={set('plantId')}>
+            <option value="">All plants</option>
+            {dedupedPlants.map((p) => (
+              <option key={p.plantId} value={String(p.plantId)}>
+                {formatPlantDisplayName(p.name)}
+              </option>
+            ))}
+          </FilterSelect>
         </FilterBar>
 
         <DataTable
@@ -279,6 +307,8 @@ export function TicketsPage() {
           onRetry={load}
           stickyHeader
           onRowClick={(t) => navigate(`/tickets/${t.ticketId}`)}
+          rowActive={activeTicketId ? (t) => t.ticketId === activeTicketId : undefined}
+          activeVariant="danger"
           empty={
             <EmptyState
               icon={<IconTicket />}

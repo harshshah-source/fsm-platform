@@ -1,7 +1,7 @@
 import type { SessionView } from '@fsm/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../src/auth/AuthProvider';
 import { TicketsPage } from '../src/pages/tickets/TicketsPage';
@@ -81,6 +81,27 @@ describe('Ticket List (Issue 07 AC#1/#2)', () => {
     expect(within(bodyRows[0]).getByTestId('bucket-CRITICAL')).toBeInTheDocument();
     expect(within(bodyRows[0]).getByTestId('badge-REPEAT')).toBeInTheDocument();
     expect(within(bodyRows[1]).getByTestId('badge-AUTO_RECOVERY')).toBeInTheDocument();
+  });
+
+  it('highlights the deep-linked ticket row when /tickets/:ticketId is open', async () => {
+    stubList();
+    render(
+      <AuthProvider initialSession={zm}>
+        <MemoryRouter initialEntries={['/tickets/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb']}>
+          <Routes>
+            <Route path="/tickets" element={<TicketsPage />}>
+              <Route path=":ticketId" element={<div data-testid="drawer-stub" />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+
+    const table = within(await screen.findByRole('table', { name: /tickets/i }));
+    const bodyRows = table.getAllByRole('row').slice(1);
+    // The open ticket's row is marked current (highlight); the other row is not.
+    expect(bodyRows[1]).toHaveAttribute('aria-current', 'true');
+    expect(bodyRows[0]).not.toHaveAttribute('aria-current');
   });
 
   it('refetches when a filter changes', async () => {
