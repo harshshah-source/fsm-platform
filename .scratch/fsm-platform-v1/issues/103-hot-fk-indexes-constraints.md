@@ -7,6 +7,13 @@ Type: AFK
 > has no index on `tickets.device_id` or `tickets.vehicle_id`; the `audit_logs` composite leads with
 > `acted_as_role` (NULL for native actions) and does not serve the ZM-performance monthly query
 > keyed on `actor_role, created_at`.
+>
+> **2026-07-14 — `tickets(device_id)` leg landed** as the composite
+> `tickets(device_id, created_at DESC)` (migration `20260714130000_tickets_device_created_idx`),
+> hotfixing the Device Detail page's 86-second list query (the latest-live-ticket LATERAL seq-scanned
+> tickets once per device; measured 86s → 0.4s at 20k devices / 19k tickets). Do not re-add a plain
+> `tickets(device_id)` — the composite covers it. Still open here: `tickets(vehicle_id)`,
+> `audit_logs(actor_role, created_at)`, the remaining partial uniques, and the `CONCURRENTLY` note.
 
 ## What to build
 

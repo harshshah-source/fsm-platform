@@ -33,6 +33,14 @@ export interface SeedSummary {
 
 const DEFAULT_CAPACITY = 25;
 
+/** Real ZM names for the four compass zones (canonical Title-Case names per the zones case-insensitive-unique migration). */
+const ZM_NAME_BY_ZONE: Record<string, string> = {
+  east: 'Suvo Nath',
+  north: 'Harsh Raghav',
+  south: 'Alla Lokesh',
+  west: 'Kalpesh Isame',
+};
+
 /** Split `items` into `n` contiguous chunks, biggest-first, each non-empty while items remain. */
 function chunk<T>(items: T[], n: number): T[][] {
   const out: T[][] = Array.from({ length: n }, () => []);
@@ -47,12 +55,15 @@ export async function seedMockEngineers(prisma: PrismaClient, plans: ZoneSeedPla
     const zoneId = plan.zoneId;
     const cap = plan.dailyCapacity ?? DEFAULT_CAPACITY;
 
-    // 1) ZM for the zone (upsert by stable email) + point the zone at it.
+    // 1) ZM for the zone (upsert by stable email) + point the zone at it. Name resolves off the
+    //    zone's own name so the four compass zones get their real ZM, not a generic mock label.
+    const zone = await prisma.zone.findUnique({ where: { zoneId } });
+    const zmName = ZM_NAME_BY_ZONE[zone?.name.toLowerCase() ?? ''] ?? `ZM Zone ${zoneId} (mock)`;
     const zm = await prisma.user.upsert({
       where: { email: `zm-z${zoneId}@mock.fsm` },
-      update: {},
+      update: { name: zmName },
       create: {
-        name: `ZM Zone ${zoneId} (mock)`,
+        name: zmName,
         role: 'ZONAL_MANAGER',
         zoneId,
         phone: `+9198${zoneId}000000`,
@@ -61,7 +72,6 @@ export async function seedMockEngineers(prisma: PrismaClient, plans: ZoneSeedPla
       },
     });
     summary.zms++;
-    const zone = await prisma.zone.findUnique({ where: { zoneId } });
     if (zone && zone.zonalManagerUserId == null) {
       await prisma.zone.update({ where: { zoneId }, data: { zonalManagerUserId: zm.userId } });
     }
