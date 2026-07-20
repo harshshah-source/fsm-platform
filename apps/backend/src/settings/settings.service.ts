@@ -40,6 +40,11 @@ export const SETTINGS_DEFAULTS: Record<string, { value: unknown; description: st
     description:
       'Uptime/ticket eligibility gate: "pgi" (canonical — active PGI within 15 days) or "all-deployed" (interim proxy while the SAP PGI feed is unbuilt — current fitment on an ACTIVE/DEPLOYED vehicle counts). Non-Op exclusion applies in both modes.',
   },
+  recompute_canary_threshold_pct: {
+    value: 5,
+    description:
+      '#130 L5 semantic canary: a relative eligible-count swing beyond this percent between consecutive device_states recomputes (either direction) logs a LOUD warning. Warns only — never blocks the pipeline.',
+  },
 };
 
 @Injectable()

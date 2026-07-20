@@ -105,7 +105,7 @@ async function main(): Promise<void> {
 
       // eslint-disable-next-line no-console
       console.log('\n── device-state recompute …');
-      const ds = await new DeviceStateService(prisma, settingsStub).recompute();
+      const ds = await new DeviceStateService(prisma, settingsStub).recompute(new Date(), 'autoplant-sync');
       // eslint-disable-next-line no-console
       console.log(`device-state upserted ${ds.upserted}`);
     } else {

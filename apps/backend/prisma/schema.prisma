@@ -622,6 +622,9 @@ model DispatchRun {
   recommended       Int                @default(0)
   unassignable      Int                @default(0)
   configSnapshot    Json               @map("config_snapshot")
+  // #130 L3 — build that produced this run (nullable/additive; stamped at creation from build-info).
+  buildVersion      BigInt?            @map("build_version")
+  buildFingerprint  String?            @map("build_fingerprint")
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1221,6 +1224,9 @@ model SnapshotRun {
   cursor     String?
   dataAsOf   DateTime?      @map("data_as_of") @db.Timestamptz(6)
   chunkStats Json?          @map("chunk_stats") @db.JsonB
+  // #130 L3 — build that produced this run (nullable/additive; stamped at creation from build-info).
+  buildVersion     BigInt?  @map("build_version")
+  buildFingerprint String?  @map("build_fingerprint")
   createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1786,6 +1792,9 @@ model MasterSyncRun {
   status      String    @default("RUNNING")
   entityStats Json?     @map("entity_stats") @db.JsonB
   error       String?
+  // #130 L3 — build that produced this run (nullable/additive; stamped at creation from build-info).
+  buildVersion     BigInt?  @map("build_version")
+  buildFingerprint String?  @map("build_fingerprint")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1793,6 +1802,28 @@ model MasterSyncRun {
   departuresRestored DeviceDeparture[] @relation("DepartureRestoredBy")
 
   @@map("master_sync_runs")
+}
+
+/// #130 L5 — one row per DeviceStateService.recompute: the operational counts it produced + the
+/// build that ran it + what triggered it. This is BOTH the semantic canary's baseline (an
+/// eligible-count swing beyond the threshold between consecutive rows is loud) AND the run-ledger
+/// the recompute never had — the exact write class that corrupted state in the 2026-07-19 incident,
+/// previously the only pipeline stage with no attribution.
+model DeviceStateRecompute {
+  recomputeId      BigInt   @id @default(autoincrement()) @map("recompute_id")
+  computedAt       DateTime @default(now()) @map("computed_at") @db.Timestamptz(6)
+  eligibleCount    Int      @map("eligible_count")
+  inactiveCount    Int      @map("inactive_count")
+  departedCount    Int      @map("departed_count")
+  totalCount       Int      @map("total_count")
+  buildVersion     BigInt?  @map("build_version")
+  buildFingerprint String?  @map("build_fingerprint")
+  // What drove the recompute: api | cron | autoplant-sync | test.
+  trigger          String
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([computedAt(sort: Desc)])
+  @@map("device_state_recomputes")
 }
 
 /// Itemised master-sync skip accounting (Issue 97 Slice 4 / review A5) — one row per skipped source

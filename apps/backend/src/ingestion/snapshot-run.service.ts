@@ -1,4 +1,5 @@
 import { ConflictException, Injectable } from '@nestjs/common';
+import { buildStampFields } from '../build-info/run-stamp';
 import { PrismaService } from '../prisma/prisma.service';
 import { readStaleRunMs } from './stale-run';
 
@@ -48,7 +49,7 @@ export class SnapshotRunService {
         if (!locked[0]?.locked) {
           throw runInProgress();
         }
-        return tx.snapshotRun.create({ data: { status: 'RUNNING' } });
+        return tx.snapshotRun.create({ data: { status: 'RUNNING', ...buildStampFields() } });
       });
       return { runId: run.runId };
     } catch (e) {

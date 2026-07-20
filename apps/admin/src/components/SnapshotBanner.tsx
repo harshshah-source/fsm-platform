@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiSnapshotLatest, type SnapshotLatestView } from '../api/snapshots';
 import { useAuth } from '../auth/AuthProvider';
 import { onIngestionComplete } from '../pages/dashboard/ingestionEvents';
+import { BuildHealthNotice } from './BuildHealthNotice';
 
 /**
  * The Snapshot freshness banner (Issue 04 AC#5/#6). Rides the top of every admin page: it shows
@@ -51,46 +52,48 @@ export function SnapshotBanner() {
     };
   }, [session, refresh]);
 
-  // Hidden when logged out (e.g. the login page) or before the first read resolves.
-  if (!session || !view) return null;
+  // Hidden when logged out (e.g. the login page). The OpsHead build-health notice self-gates and
+  // only renders on a real warning, so it rides alongside the snapshot line without disturbing it.
+  if (!session) return null;
 
-  const failed = view.latest?.status === 'FAILED';
-  const stuck = isStuck(view);
-
-  if (failed || stuck) {
-    const reason = failed ? 'last run failed' : 'last run is stuck / overdue';
-    return (
-      <div
-        role="alert"
-        aria-label="Snapshot status"
-        className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-6 py-2 text-sm text-red-800"
-      >
-        <span className="font-semibold">Snapshot alert:</span>
-        <span>{reason}.</span>
-        {view.dataAsOf && (
-          <span className="text-red-700">
-            Showing data as of <time dateTime={view.dataAsOf}>{formatTimestamp(view.dataAsOf)}</time>{' '}
-            — may be stale.
-          </span>
-        )}
-      </div>
-    );
-  }
+  const failed = view?.latest?.status === 'FAILED';
+  const stuck = view ? isStuck(view) : false;
 
   return (
-    <div
-      role="status"
-      aria-label="Snapshot status"
-      className="flex items-center gap-2 border-b bg-slate-50 px-6 py-2 text-sm text-slate-600"
-    >
-      <span className="font-medium text-slate-700">Snapshot:</span>
-      {view.dataAsOf ? (
-        <span>
-          data as of <time dateTime={view.dataAsOf}>{formatTimestamp(view.dataAsOf)}</time>
-        </span>
-      ) : (
-        <span>no successful snapshot yet</span>
-      )}
-    </div>
+    <>
+      <BuildHealthNotice />
+      {view &&
+        (failed || stuck ? (
+          <div
+            role="alert"
+            aria-label="Snapshot status"
+            className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-6 py-2 text-sm text-red-800"
+          >
+            <span className="font-semibold">Snapshot alert:</span>
+            <span>{failed ? 'last run failed' : 'last run is stuck / overdue'}.</span>
+            {view.dataAsOf && (
+              <span className="text-red-700">
+                Showing data as of <time dateTime={view.dataAsOf}>{formatTimestamp(view.dataAsOf)}</time> — may be
+                stale.
+              </span>
+            )}
+          </div>
+        ) : (
+          <div
+            role="status"
+            aria-label="Snapshot status"
+            className="flex items-center gap-2 border-b bg-slate-50 px-6 py-2 text-sm text-slate-600"
+          >
+            <span className="font-medium text-slate-700">Snapshot:</span>
+            {view.dataAsOf ? (
+              <span>
+                data as of <time dateTime={view.dataAsOf}>{formatTimestamp(view.dataAsOf)}</time>
+              </span>
+            ) : (
+              <span>no successful snapshot yet</span>
+            )}
+          </div>
+        ))}
+    </>
   );
 }

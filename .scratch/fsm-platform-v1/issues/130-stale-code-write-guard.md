@@ -234,10 +234,16 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
 - [ ] **July-19 simulation regression test**: seed lock at N; assert build < N refuses; assert the
       exact corrupt state (active `device_departures` row + `is_departed=false`) yields **zero**
       tickets from `createForInactiveEligible` and a recompute-invariant throw.
-- [ ] Ledger rows stamped; stale-run badge renders on integration-health + dispatch run detail.
-- [ ] L5: every recompute appends a `device_state_recomputes` row (counts + build stamp); a
+- [x] Ledger rows stamped (all 3 run tables); stale-run flag exposed on `/api/integration/health`
+      (`staleBuild` per freshness + per recompute). _(Slice 2 — API done; the routed **integration-health
+      page** table + **dispatch-run-detail** badge render deferred to [#131](./131-build-health-ui-parity.md),
+      entangled 07-17 WIP, not an external-integration blocker. A minimal OpsHead alert
+      (`BuildHealthNotice`) ships in-slice on the global banner.)_
+- [x] L5: every recompute appends a `device_state_recomputes` row (counts + build stamp); a
       > threshold swing in either direction logs the loud warning and highlights on the health
       page; a legitimate mass event warns but never blocks; threshold read from settings.
+      _(Slice 2 — warn line + ledger done; "highlights on the health page" table is [#131](./131-build-health-ui-parity.md),
+      API already returns `swing`/`swingPct` per row.)_
 - [x] Read-only tools (`autoplant:ping`, `autoplant:departure-dryrun`) warn, never refuse. _(Slice 1 — dryrun now warnOnly; `autoplant:ping` never constructs PrismaService)_
 - [x] Scheduler flags and `eligibility_mode` untouched. _(Slice 1 — verified: no edits to either)_
 
@@ -250,9 +256,19 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
    36/36 targeted tests green (5 specs); `npm run build` chain + `tsc --noEmit` clean; guard validated
    against sample full-AppModule e2e boots. Compiled-run `{0,'unstamped'}` (no git fallback) verified
    end-to-end. Commit + push per the plan; INDEX session-log line added.
-2. **Slice 2 — L3 + L5 (attribution + canary).** Ledger columns + stamping,
-   `device_state_recomputes` table + append + swing warning, health/transparency exposure +
-   admin badge/canary UI (parity in-slice).
+2. **✅ Slice 2 — L3 + L5 (attribution + canary). DONE 2026-07-20.** `build_version`/`build_fingerprint`
+   columns on `master_sync_runs`/`snapshot_runs`/`dispatch_runs` + stamped at creation from build-info;
+   `device_state_recomputes` ledger (migration `20260720130000`) appended on every recompute (counts +
+   build + `trigger`: api/cron/autoplant-sync/test, correctly threaded through the real callers);
+   `evaluateRecomputeCanary` pure decision (>`recompute_canary_threshold_pct` setting, default 5, both
+   directions, skips on absent/0 baseline) wired into `DeviceStateService.recompute` — LOUD warn, never
+   throws. `GET /api/integration/health` exposes `runtimeLock`, per-freshness `build.staleBuild`, and
+   `recomputes[]` (last-10, swing-flagged). Admin: OpsHead-gated `BuildHealthNotice` on the global
+   banner (new/clean file — zero edits to the uncommitted 07-17 working tree). **UI parity partial by
+   operator decision**: the full recompute-history table + dispatch-run-detail badge need files
+   entangled in that unrelated uncommitted WIP → split to [#131](./131-build-health-ui-parity.md).
+   68 new/regression targeted tests green; Slice 1's 36 re-verified green (no regression); both apps
+   `tsc --noEmit` clean; full backend `build` chain clean.
 3. **Slice 3 — L2 (defensive writes).** Ticket-creation source-of-truth re-read, recompute
    invariant transaction, recommender regression-lock test.
 4. **Slice 4 — July-19 simulation regression test** (cross-cutting L1+L2; assert the L5 row for

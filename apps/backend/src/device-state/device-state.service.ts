@@ -1,11 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { buildStampFields } from '../build-info/run-stamp';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { DEFAULT_PGI_WINDOW_DAYS, parseEligibilityMode } from './eligibility';
+import { evaluateRecomputeCanary } from './recompute-canary';
 import { slaBucketCaseSql } from './sla-bucket';
 
 const DEFAULT_INACTIVITY_THRESHOLD_HOURS = 24;
+const DEFAULT_CANARY_THRESHOLD_PCT = 5;
+
+/** What drove a recompute — recorded on the ledger row for attribution (#130 L5). */
+export type RecomputeTrigger = 'api' | 'cron' | 'autoplant-sync' | 'test';
 
 /**
  * DeviceStateService — derives every `device_states` row from time + reference data (schema D5).
@@ -36,13 +42,15 @@ const DEFAULT_INACTIVITY_THRESHOLD_HOURS = 24;
  */
 @Injectable()
 export class DeviceStateService {
+  private readonly logger = new Logger(DeviceStateService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
   ) {}
 
   /** Recompute `device_states` for all known devices (set-based; no telemetry scan). `now` injectable. */
-  async recompute(now: Date = new Date()): Promise<{ upserted: number }> {
+  async recompute(now: Date = new Date(), trigger: RecomputeTrigger = 'api'): Promise<{ upserted: number }> {
     const threshold =
       (await this.settings.get<number>('inactivity_threshold_hours')) ??
       DEFAULT_INACTIVITY_THRESHOLD_HOURS;
@@ -111,6 +119,61 @@ export class DeviceStateService {
       LEFT JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id
       WHERE ds.device_id = dr.device_id`);
 
+    // #130 L5 — append the recompute ledger row (attribution the incident's write class never had) and
+    // run the semantic canary. Counts come from the just-updated device_states in one FILTER pass.
+    await this.recordRecomputeAndCanary(now, trigger);
+
     return { upserted };
+  }
+
+  /**
+   * #130 L5 — ledger + canary. Reads the operational counts, compares the eligible count against the
+   * previous ledger row (relative swing > threshold, either direction → one LOUD warn), then appends
+   * this recompute's row. WARNS, never throws: hard-failing true corruption is L2's recompute invariant.
+   */
+  private async recordRecomputeAndCanary(now: Date, trigger: RecomputeTrigger): Promise<void> {
+    const [counts] = await this.prisma.$queryRaw<
+      Array<{ total: bigint; eligible: bigint; inactive: bigint; departed: bigint }>
+    >(Prisma.sql`
+      SELECT count(*) AS total,
+             count(*) FILTER (WHERE eligible_for_uptime) AS eligible,
+             count(*) FILTER (WHERE is_inactive) AS inactive,
+             count(*) FILTER (WHERE is_departed) AS departed
+      FROM device_states`);
+    const total = Number(counts.total);
+    const eligible = Number(counts.eligible);
+    const inactive = Number(counts.inactive);
+    const departed = Number(counts.departed);
+
+    // Read the previous baseline BEFORE inserting this run's row.
+    const previous = await this.prisma.deviceStateRecompute.findFirst({
+      orderBy: { computedAt: 'desc' },
+      select: { eligibleCount: true, buildFingerprint: true },
+    });
+
+    const stamp = buildStampFields();
+    await this.prisma.deviceStateRecompute.create({
+      data: {
+        computedAt: now,
+        eligibleCount: eligible,
+        inactiveCount: inactive,
+        departedCount: departed,
+        totalCount: total,
+        trigger,
+        ...stamp,
+      },
+    });
+
+    const thresholdPct =
+      (await this.settings.get<number>('recompute_canary_threshold_pct')) ?? DEFAULT_CANARY_THRESHOLD_PCT;
+    const verdict = evaluateRecomputeCanary(previous?.eligibleCount, eligible, thresholdPct);
+    if (verdict?.breached) {
+      this.logger.warn(
+        `[recompute-canary] eligible-count swing ${verdict.deltaPct.toFixed(1)}% exceeds ±${thresholdPct}%: ` +
+          `${previous!.eligibleCount} (build ${previous!.buildFingerprint ?? 'unknown'}) → ` +
+          `${eligible} (build ${stamp.buildFingerprint}). Trigger=${trigger}. ` +
+          `Investigate a possible stale build / env mismatch / config change before trusting this recompute.`,
+      );
+    }
   }
 }

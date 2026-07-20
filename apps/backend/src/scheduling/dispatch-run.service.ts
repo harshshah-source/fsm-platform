@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { buildStampFields } from '../build-info/run-stamp';
 import { Prisma } from '../generated/prisma/client';
 import type { DispatchRunStatus, DispatchRunTrigger } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -80,6 +81,7 @@ export class DispatchRunService {
         actorRole: opts.actorRole ?? null,
         startedAt: now,
         configSnapshot: await this.captureConfigSnapshot(),
+        ...buildStampFields(),
       },
     });
     await this.audit.record({

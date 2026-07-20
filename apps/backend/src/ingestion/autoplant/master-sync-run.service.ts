@@ -1,4 +1,5 @@
 import { ConflictException, Injectable } from '@nestjs/common';
+import { buildStampFields } from '../../build-info/run-stamp';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ORPHANED_RUN_ERROR, readStaleRunMs } from '../stale-run';
@@ -56,7 +57,7 @@ export class MasterSyncRunService {
         if (!locked[0]?.locked) {
           throw runInProgress();
         }
-        return tx.masterSyncRun.create({ data: { status: 'RUNNING' } });
+        return tx.masterSyncRun.create({ data: { status: 'RUNNING', ...buildStampFields() } });
       });
       return { runId: run.runId };
     } catch (e) {

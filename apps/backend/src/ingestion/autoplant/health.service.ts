@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { evaluateRecomputeCanary } from '../../device-state/recompute-canary';
 import { PrismaService } from '../../prisma/prisma.service';
+
+/** How many recent recompute-ledger rows the health surface returns (#130 L5). */
+const RECOMPUTE_HISTORY_LIMIT = 10;
+const DEFAULT_CANARY_THRESHOLD_PCT = 5;
 
 /**
  * The minimal slice of `AutoPlantMysqlClient` the health surface needs — kept as an interface so the
@@ -19,6 +24,15 @@ export interface IntegrationSourceHealth {
   error?: string;
 }
 
+/** #130 L3 — the build that produced a run, and whether it is below the current lock high-water mark. */
+export interface RunBuildStamp {
+  /** BigInt serialized as a string (no BigInt in the JSON payload). */
+  buildVersion: string | null;
+  buildFingerprint: string | null;
+  /** True when this run's build_version is below the current runtime_lock version (a stale-build run). */
+  staleBuild: boolean;
+}
+
 export interface FreshnessHealth {
   /** High-water instant of the last good run (master: `finished_at`; snapshot: `data_as_of`). */
   lastAt: Date | null;
@@ -26,6 +40,33 @@ export interface FreshnessHealth {
   lastStatus: string | null;
   /** Whole minutes between `lastAt` and now; null when there is no good run yet. */
   ageMinutes: number | null;
+  /** #130 L3 — build attribution of the most recent run (null when it predates stamping). */
+  build: RunBuildStamp | null;
+}
+
+/** #130 — the database's current build high-water mark, for the FE to render "current build vX". */
+export interface RuntimeLockHealth {
+  version: string | null;
+  fingerprint: string | null;
+}
+
+/** #130 L5 — one recompute-ledger row for the health history, with the canary swing flag resolved. */
+export interface RecomputeLedgerEntry {
+  recomputeId: string;
+  computedAt: Date;
+  eligibleCount: number;
+  inactiveCount: number;
+  departedCount: number;
+  totalCount: number;
+  buildVersion: string | null;
+  buildFingerprint: string | null;
+  trigger: string;
+  /** Build below the current lock — this recompute ran under a stale build. */
+  staleBuild: boolean;
+  /** Relative eligible swing vs the previous (older) row; null for the oldest row in the window. */
+  swingPct: number | null;
+  /** True when |swingPct| exceeds the canary threshold — the row the operator should investigate. */
+  swing: boolean;
 }
 
 /**
@@ -63,6 +104,10 @@ export interface IntegrationHealth {
   masterSync: FreshnessHealth;
   snapshot: FreshnessHealth;
   reconciliation: ReconciliationHealth;
+  /** #130 — current build high-water mark, for stale-run comparison in the UI. */
+  runtimeLock: RuntimeLockHealth;
+  /** #130 L5 — last-N recompute ledger rows (counts + build + swing), newest first. */
+  recomputes: RecomputeLedgerEntry[];
   checkedAt: Date;
 }
 
@@ -94,13 +139,76 @@ export class AutoPlantHealthService {
   ) {}
 
   async check(now: Date = new Date()): Promise<IntegrationHealth> {
+    // #130 — the lock version is the reference for every stale-build comparison below.
+    const lock = await this.runtimeLock();
+    const lockVersion = lock.version != null ? Number(lock.version) : null;
     return {
       source: await this.sourceHealth(),
-      masterSync: await this.masterSyncHealth(now),
-      snapshot: await this.snapshotHealth(now),
+      masterSync: await this.masterSyncHealth(now, lockVersion),
+      snapshot: await this.snapshotHealth(now, lockVersion),
       reconciliation: await this.reconciliationHealth(),
+      runtimeLock: lock,
+      recomputes: await this.recomputeHistory(lockVersion),
       checkedAt: now,
     };
+  }
+
+  /** #130 — the database's current build high-water mark (raw: runtime_lock is not a Prisma model). */
+  private async runtimeLock(): Promise<RuntimeLockHealth> {
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ version: string | null; fingerprint: string | null }>>(
+      `SELECT version::text AS version, fingerprint FROM runtime_lock WHERE id = 1`,
+    );
+    return { version: rows[0]?.version ?? null, fingerprint: rows[0]?.fingerprint ?? null };
+  }
+
+  /** #130 L3 — a run's build stamp + whether it is below the lock high-water mark. */
+  private buildStamp(
+    buildVersion: bigint | null,
+    buildFingerprint: string | null,
+    lockVersion: number | null,
+  ): RunBuildStamp {
+    return {
+      buildVersion: buildVersion != null ? buildVersion.toString() : null,
+      buildFingerprint: buildFingerprint ?? null,
+      staleBuild: buildVersion != null && lockVersion != null && Number(buildVersion) < lockVersion,
+    };
+  }
+
+  /**
+   * #130 L5 — last-N recompute ledger rows (newest first), each with the canary swing flag resolved
+   * against its immediately-older neighbour and a staleBuild flag against the lock. This is the
+   * attribution + swing history the integration-health page renders.
+   */
+  private async recomputeHistory(lockVersion: number | null): Promise<RecomputeLedgerEntry[]> {
+    const thresholdPct =
+      (await this.prisma.systemSetting
+        .findUnique({ where: { key: 'recompute_canary_threshold_pct' } })
+        .then((s) => (typeof s?.value === 'number' ? s.value : undefined))) ?? DEFAULT_CANARY_THRESHOLD_PCT;
+
+    const rows = await this.prisma.deviceStateRecompute.findMany({
+      orderBy: { computedAt: 'desc' },
+      take: RECOMPUTE_HISTORY_LIMIT,
+    });
+
+    return rows.map((row, i) => {
+      // The previous (older) row in the window is the next index (rows are newest-first).
+      const previous = rows[i + 1];
+      const verdict = previous ? evaluateRecomputeCanary(previous.eligibleCount, row.eligibleCount, thresholdPct) : null;
+      return {
+        recomputeId: row.recomputeId.toString(),
+        computedAt: row.computedAt,
+        eligibleCount: row.eligibleCount,
+        inactiveCount: row.inactiveCount,
+        departedCount: row.departedCount,
+        totalCount: row.totalCount,
+        buildVersion: row.buildVersion != null ? row.buildVersion.toString() : null,
+        buildFingerprint: row.buildFingerprint ?? null,
+        trigger: row.trigger,
+        staleBuild: row.buildVersion != null && lockVersion != null && Number(row.buildVersion) < lockVersion,
+        swingPct: verdict ? verdict.deltaPct : null,
+        swing: verdict?.breached ?? false,
+      };
+    });
   }
 
   /**
@@ -166,9 +274,12 @@ export class AutoPlantHealthService {
     return Math.max(0, Math.round((now.getTime() - from.getTime()) / 60_000));
   }
 
-  private async masterSyncHealth(now: Date): Promise<FreshnessHealth> {
+  private async masterSyncHealth(now: Date, lockVersion: number | null): Promise<FreshnessHealth> {
     const [latest, lastGood] = await Promise.all([
-      this.prisma.masterSyncRun.findFirst({ orderBy: { runId: 'desc' }, select: { status: true } }),
+      this.prisma.masterSyncRun.findFirst({
+        orderBy: { runId: 'desc' },
+        select: { status: true, buildVersion: true, buildFingerprint: true },
+      }),
       this.prisma.masterSyncRun.findFirst({
         where: { status: { in: ['SUCCESS', 'PARTIAL'] }, finishedAt: { not: null } },
         orderBy: { runId: 'desc' },
@@ -176,12 +287,20 @@ export class AutoPlantHealthService {
       }),
     ]);
     const lastAt = lastGood?.finishedAt ?? null;
-    return { lastAt, lastStatus: latest?.status ?? null, ageMinutes: this.ageMinutes(lastAt, now) };
+    return {
+      lastAt,
+      lastStatus: latest?.status ?? null,
+      ageMinutes: this.ageMinutes(lastAt, now),
+      build: latest ? this.buildStamp(latest.buildVersion, latest.buildFingerprint, lockVersion) : null,
+    };
   }
 
-  private async snapshotHealth(now: Date): Promise<FreshnessHealth> {
+  private async snapshotHealth(now: Date, lockVersion: number | null): Promise<FreshnessHealth> {
     const [latest, lastGood] = await Promise.all([
-      this.prisma.snapshotRun.findFirst({ orderBy: { runId: 'desc' }, select: { status: true } }),
+      this.prisma.snapshotRun.findFirst({
+        orderBy: { runId: 'desc' },
+        select: { status: true, buildVersion: true, buildFingerprint: true },
+      }),
       this.prisma.snapshotRun.findFirst({
         where: { dataAsOf: { not: null } },
         orderBy: { runId: 'desc' },
@@ -189,6 +308,11 @@ export class AutoPlantHealthService {
       }),
     ]);
     const lastAt = lastGood?.dataAsOf ?? null;
-    return { lastAt, lastStatus: latest?.status ?? null, ageMinutes: this.ageMinutes(lastAt, now) };
+    return {
+      lastAt,
+      lastStatus: latest?.status ?? null,
+      ageMinutes: this.ageMinutes(lastAt, now),
+      build: latest ? this.buildStamp(latest.buildVersion, latest.buildFingerprint, lockVersion) : null,
+    };
   }
 }

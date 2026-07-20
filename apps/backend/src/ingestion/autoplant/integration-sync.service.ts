@@ -75,7 +75,9 @@ export class IntegrationSyncService {
 
     const snap = outcome.value;
     this.logger.log(`telemetry tick: snapshot ${snap.runId} ${snap.status} (${snap.inserted} pings)`);
-    const deviceState = await this.deviceState.recompute();
+    // #130 L5 — this path is the @Cron-driven telemetry tick (integration-scheduler.service.ts);
+    // stamp the ledger row 'cron' for accurate attribution (runPipeline below stays the 'api' default).
+    const deviceState = await this.deviceState.recompute(new Date(), 'cron');
     this.logger.log(`telemetry tick: device-state recompute upserted ${deviceState.upserted}`);
     const tickets = await this.ticketCreation.createForInactiveEligible();
     this.logger.log(`telemetry tick: ticket-create created ${tickets.created}`);
