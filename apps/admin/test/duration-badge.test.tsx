@@ -24,9 +24,9 @@ describe('Issue 3 — DurationBadge', () => {
     expect(badge).not.toHaveTextContent(/critical/i);
   });
 
-  it('falls back to the bucket label when no timestamp is available', () => {
+  it('falls back to the bucket label (its inactivity range) when no timestamp is available', () => {
     render(<DurationBadge bucket="SEVERE" latestGpsDatetime={null} />);
-    expect(screen.getByTestId('bucket-SEVERE')).toHaveTextContent('Severe');
+    expect(screen.getByTestId('bucket-SEVERE')).toHaveTextContent('3–5d');
   });
 
   it('renders nothing for an ACTIVE (null) bucket', () => {

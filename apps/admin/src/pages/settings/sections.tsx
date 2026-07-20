@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import * as org from '../../api/org';
-import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
+import { BUCKET_CLASS, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
 import { cn } from '../../lib/cn';
 import type { Role } from '@fsm/shared';
 
@@ -57,11 +57,10 @@ export function SlaRulesTable() {
           {SLA_BUCKETS.map((b) => (
             <li key={b} className="flex items-center justify-between gap-3 text-sm">
               <span className="flex items-center gap-2">
-                <span className={cn('inline-block min-w-28 rounded-full px-2 py-0.5 text-center text-xs font-semibold', BUCKET_CLASS[b])}>
-                  {BUCKET_LABEL[b]}
+                {/* Label IS the inactivity range, derived from the shared SLA_BANDS thresholds. */}
+                <span className={cn('inline-block min-w-28 rounded-full px-2 py-0.5 text-center text-xs font-semibold tabular-nums', BUCKET_CLASS[b])}>
+                  {BUCKET_RANGE_LABEL[b]}
                 </span>
-                {/* Inactivity range derived from the shared SLA_BANDS thresholds (never hardcoded). */}
-                <span className="text-xs font-medium tabular-nums text-ink">{BUCKET_RANGE_LABEL[b]}</span>
               </span>
               <span className="text-xs text-ink-muted">severity {SLA_BUCKETS.length - SLA_BUCKETS.indexOf(b)} / {SLA_BUCKETS.length}</span>
             </li>

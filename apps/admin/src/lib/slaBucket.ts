@@ -58,37 +58,31 @@ export function sumCriticalPlusDevices(zones: ReadonlyArray<{ byBucket: Record<s
   return zones.reduce((sum, z) => sum + criticalPlusCount(z.byBucket), 0);
 }
 
-export const BUCKET_LABEL: Record<SlaBucket, string> = {
-  LONG_PENDING: 'Long Pending',
-  VERY_SEVERE: 'Very Severe',
-  SEVERE: 'Severe',
-  HIGH_CRITICAL: 'High Critical',
-  CRITICAL: 'Critical',
-  RISK: 'Risk',
-  EARLY_RISK: 'Early Risk',
-  WARNING: 'Warning',
-};
-
 /**
- * Human inactivity-range label per bucket (e.g. `4–8h`, `24–48h`, `3–5d`, `7d+`), DERIVED from the
+ * Human inactivity-range label per bucket (e.g. `4–8Hr`, `24–48Hr`, `3–5d`, `7d+`), DERIVED from the
  * shared `SLA_BANDS` boundaries — the exact same array the backend classifier uses to bucket a device.
  * Because the ranges are computed here rather than hardcoded, the Settings SLA legend, dashboard cards,
  * overview tables and the device table can never drift from how devices are actually classified;
  * changing a threshold in `@fsm/shared` updates them all at once. Sub-3-day bands read in hours, 3-day+
  * bands in days; the top band (LONG_PENDING) is open-ended (`7d+`). THE single source for these strings
- * (Change #2 — no page may hardcode its own SLA range text).
+ * (no page may hardcode its own SLA range text).
  */
 export const BUCKET_RANGE_LABEL: Record<SlaBucket, string> = buildBucketRangeLabels();
 
 /**
- * Combined `Label (range)` descriptor per bucket, e.g. `Critical (24–48h)` — the canonical bucket
- * label everywhere the taxonomy itself is shown (dashboard cards, SLA distribution, overview-column
- * headers, bucket filters, the device-table SLA column). Composed from the same `BUCKET_LABEL` +
- * `BUCKET_RANGE_LABEL` pair, so label and range never drift apart.
+ * The operator-facing SLA bucket label. Per the product-owner request the taxonomy is presented as its
+ * inactivity RANGE (e.g. `24–48Hr`, `7d+`) rather than a severity word — so the visible label IS the
+ * range. The underlying enum (`CRITICAL`, `LONG_PENDING`, …) and all classification logic are
+ * unchanged; only the presentation differs, and it stays sourced from the single `BUCKET_RANGE_LABEL`
+ * mapping so no surface can drift.
  */
-export const BUCKET_LABEL_RANGE: Record<SlaBucket, string> = Object.fromEntries(
-  SLA_BUCKETS.map((b) => [b, `${BUCKET_LABEL[b]} (${BUCKET_RANGE_LABEL[b]})`]),
-) as Record<SlaBucket, string>;
+export const BUCKET_LABEL: Record<SlaBucket, string> = BUCKET_RANGE_LABEL;
+
+/**
+ * Combined descriptor per bucket. With the label now already the range, this is the same range string
+ * — retained as a named export so the surfaces that asked for `Label (range)` keep working unchanged.
+ */
+export const BUCKET_LABEL_RANGE: Record<SlaBucket, string> = BUCKET_RANGE_LABEL;
 
 function buildBucketRangeLabels(): Record<SlaBucket, string> {
   const labels = {} as Record<SlaBucket, string>;
@@ -102,9 +96,9 @@ function buildBucketRangeLabels(): Record<SlaBucket, string> {
 }
 
 // Compact range text. Bands whose lower bound is ≥ 3 days read in days (`3–5d`, `7d+`); shorter bands
-// read in hours (`4–8h` … `48–72h`), matching the operator-facing severity table.
+// read in hours (`4–8Hr` … `48–72Hr`), matching the operator-facing severity table.
 function formatBucketRange(lowerHours: number, upperHours: number): string {
-  const unit: 'h' | 'd' = lowerHours >= 72 ? 'd' : 'h';
+  const unit: 'Hr' | 'd' = lowerHours >= 72 ? 'd' : 'Hr';
   const toUnit = (h: number) => (unit === 'd' ? h / 24 : h);
   if (!Number.isFinite(upperHours)) return `${toUnit(lowerHours)}${unit}+`;
   return `${toUnit(lowerHours)}–${toUnit(upperHours)}${unit}`;

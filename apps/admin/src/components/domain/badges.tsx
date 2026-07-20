@@ -7,8 +7,8 @@ import { Badge, type BadgeTone } from '../ui/Badge';
 /**
  * Colour-coded SLA bucket pill. Single source of colour/label is `lib/slaBucket`. Keeps the historical
  * `data-testid="bucket-<BUCKET>"` so existing ticket tests stay green. Null bucket (ACTIVE) renders
- * nothing. Pass `showRange` where the taxonomy itself is on display (the device-table SLA column) to
- * render `Label (range)` — e.g. `Critical (24–48h)` — from the shared mapping (Change #2).
+ * nothing. The visible label is the bucket's inactivity range (e.g. `24–48Hr`, `7d+`); `showRange` is
+ * retained for callers but resolves to the same range text now that the label already is the range.
  */
 export function SLABadge({
   bucket,

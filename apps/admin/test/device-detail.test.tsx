@@ -75,8 +75,8 @@ describe('Device Detail (FE-22)', () => {
     expect(row).toHaveTextContent(/UltraTech/); // Company Name
     expect(row).toHaveTextContent(/ACP-9106/); // Plant Name (short code shown verbatim)
     expect(row).toHaveTextContent(/West/); // Zone
-    // Change #2 — the SLA bucket carries its real inactivity range from the shared mapping.
-    expect(within(row).getByTestId('bucket-CRITICAL')).toHaveTextContent('Critical (24–48h)');
+    // The SLA bucket carries its real inactivity range from the shared mapping (the range is the label).
+    expect(within(row).getByTestId('bucket-CRITICAL')).toHaveTextContent('24–48Hr');
     fireEvent.click(row);
     const stats = await screen.findByTestId('device-stats');
     expect(stats).toHaveTextContent(/120/); // total downtime hours
