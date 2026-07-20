@@ -259,6 +259,44 @@ type RawTrendRow = {
   deficitMode: boolean;
 };
 
+/** Canonical work-type order (CONTEXT WorkType) — the mix zero-fills the full set. */
+export const WORK_TYPES = ['TROUBLESHOOT', 'INSTALL', 'RECOVERY'] as const;
+export type WorkTypeKey = (typeof WORK_TYPES)[number];
+
+/**
+ * Verification-outcome buckets, canonical order. `PENDING` is a run whose `outcome` is still null
+ * (verification in flight) — the reference panel shows it as its own row.
+ */
+export const VERIFY_OUTCOME_KEYS = ['CLOSED', 'CLOSED_AUTO_RECOVERY', 'PARTIAL_RECOVERY', 'FAILED_VERIFICATION', 'FAILED_ACTIVATION', 'PENDING'] as const;
+export type VerifyOutcomeKey = (typeof VERIFY_OUTCOME_KEYS)[number];
+
+/** Shared day-range + dimension filters for the two Issue-90 distribution reports. */
+export interface DistributionFilters {
+  from?: string; // YYYY-MM-DD (inclusive); defaults to 29 days before `to`
+  to?: string; // YYYY-MM-DD (inclusive); defaults to today
+  zoneId?: number | null;
+  companyId?: number | null;
+  plantId?: number | null;
+}
+
+export interface WorkTypeMixReport {
+  from: string;
+  to: string;
+  total: number;
+  filters: { zoneId: number | null; companyId: number | null; plantId: number | null };
+  rows: { workType: WorkTypeKey; count: number; pct: number }[];
+}
+
+export interface VerificationOutcomesReport {
+  from: string;
+  to: string;
+  total: number;
+  /** Runs in the window carrying the fraud flag — a cross-cutting count, not an outcome bucket. */
+  fraudFlagged: number;
+  filters: { zoneId: number | null; companyId: number | null; plantId: number | null };
+  rows: { outcome: VerifyOutcomeKey; count: number; pct: number }[];
+}
+
 /**
  * Reports read surface (Issue 39). `fleetUptime` serves the Fleet Uptime % report purely from
  * `device_downtime_summary_monthly` (the aggregation worker's output) — never raw telemetry or
@@ -471,6 +509,77 @@ export class ReportsService {
     return { fromMonth: fromStart.toISOString().slice(0, 10), toMonth: toStart.toISOString().slice(0, 10), zoneId: opts.zoneId ?? null, rows, trend };
   }
 
+  /**
+   * Work-type mix (Issue 90): ticket counts per work type over a `created_at` day range (default the
+   * last 30 days), zero-filled over the full WorkType set. Direct aggregation over `tickets` — a
+   * single indexed count, no summary table needed at this cardinality. A ZONAL_MANAGER is pinned to
+   * their own zone (via the ticket's plant); CSM / Operations Head see all zones and may filter one.
+   */
+  async workTypeMix(scope: ReportScope, opts: DistributionFilters = {}, now: Date = new Date()): Promise<WorkTypeMixReport> {
+    const { fromDay, toEnd, meta } = dayWindow(opts, now);
+    const filters = this.distributionFilters(scope, opts, Prisma.sql`t.company_id`, Prisma.sql`t.plant_id`);
+
+    const rows = await this.prisma.$queryRaw<{ workType: string; count: number }[]>(Prisma.sql`
+      SELECT t.work_type::text AS "workType", COUNT(*)::int AS count
+      FROM tickets t
+      JOIN plants p ON p.plant_id = t.plant_id
+      WHERE t.created_at >= ${fromDay} AND t.created_at < ${toEnd} ${filters.sql}
+      GROUP BY t.work_type`);
+
+    const counts = new Map(rows.map((r) => [r.workType, r.count]));
+    const total = rows.reduce((s, r) => s + r.count, 0);
+    return {
+      ...meta,
+      total,
+      filters: filters.echo,
+      rows: WORK_TYPES.map((workType) => ({ workType, count: counts.get(workType) ?? 0, pct: ratePct(counts.get(workType) ?? 0, total) })),
+    };
+  }
+
+  /**
+   * Verification-outcome distribution (Issue 90): run counts per outcome over a `started_at` day range
+   * (default the last 30 days), zero-filled over the outcome set plus `PENDING` (outcome still null).
+   * `fraudFlagged` counts flagged runs across the same window — a cross-cutting signal, not a bucket.
+   * Same scoping as `workTypeMix` (zone comes via the run's ticket's plant).
+   */
+  async verificationOutcomes(scope: ReportScope, opts: DistributionFilters = {}, now: Date = new Date()): Promise<VerificationOutcomesReport> {
+    const { fromDay, toEnd, meta } = dayWindow(opts, now);
+    const filters = this.distributionFilters(scope, opts, Prisma.sql`t.company_id`, Prisma.sql`t.plant_id`);
+
+    const rows = await this.prisma.$queryRaw<{ outcome: string; count: number; fraudFlagged: number }[]>(Prisma.sql`
+      SELECT COALESCE(vr.outcome::text, 'PENDING') AS outcome, COUNT(*)::int AS count,
+             COUNT(*) FILTER (WHERE vr.fraud_flag)::int AS "fraudFlagged"
+      FROM verification_runs vr
+      JOIN tickets t ON t.ticket_id = vr.ticket_id
+      JOIN plants p ON p.plant_id = t.plant_id
+      WHERE vr.started_at >= ${fromDay} AND vr.started_at < ${toEnd} ${filters.sql}
+      GROUP BY COALESCE(vr.outcome::text, 'PENDING')`);
+
+    const counts = new Map(rows.map((r) => [r.outcome, r.count]));
+    const total = rows.reduce((s, r) => s + r.count, 0);
+    return {
+      ...meta,
+      total,
+      fraudFlagged: rows.reduce((s, r) => s + r.fraudFlagged, 0),
+      filters: filters.echo,
+      rows: VERIFY_OUTCOME_KEYS.map((outcome) => ({ outcome, count: counts.get(outcome) ?? 0, pct: ratePct(counts.get(outcome) ?? 0, total) })),
+    };
+  }
+
+  /** ZM-pinned zone + optional company/plant filters shared by the two distribution reports. */
+  private distributionFilters(scope: ReportScope, opts: DistributionFilters, companyCol: Prisma.Sql, plantCol: Prisma.Sql) {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : (opts.zoneId ?? null);
+    const sql = Prisma.join(
+      [
+        restrictZone != null ? Prisma.sql`AND p.zone_id = ${BigInt(restrictZone)}` : Prisma.empty,
+        opts.companyId != null ? Prisma.sql`AND ${companyCol} = ${BigInt(opts.companyId)}` : Prisma.empty,
+        opts.plantId != null ? Prisma.sql`AND ${plantCol} = ${BigInt(opts.plantId)}` : Prisma.empty,
+      ],
+      ' ',
+    );
+    return { sql, echo: { zoneId: restrictZone ?? null, companyId: opts.companyId ?? null, plantId: opts.plantId ?? null } };
+  }
+
   private queryGroups(groupBy: FleetUptimeGroupBy, monthStart: Date, zoneFilter: Prisma.Sql): Promise<RawGroupRow[]> {
     const select = Prisma.sql`
       COUNT(*)::int AS "deviceCount",
@@ -627,8 +736,29 @@ function parseDay(day: string): Date {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day ?? '');
   if (!m) throw new BadRequestException({ code: 'INVALID_DAY', hint: 'expected YYYY-MM-DD' });
   const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
-  if (Number.isNaN(dt.getTime())) throw new BadRequestException({ code: 'INVALID_DAY', hint: 'expected YYYY-MM-DD' });
+  // Date.UTC silently rolls over out-of-range parts (2026-13-01 → 2027-01-01) — reject those too.
+  if (Number.isNaN(dt.getTime()) || dt.getUTCMonth() !== Number(m[2]) - 1 || dt.getUTCDate() !== Number(m[3])) {
+    throw new BadRequestException({ code: 'INVALID_DAY', hint: 'expected YYYY-MM-DD' });
+  }
   return dt;
+}
+
+/**
+ * Resolve a `DistributionFilters` day range: inclusive `from`/`to` days, `to` defaulting to today and
+ * `from` to 29 days earlier (a 30-day window). `toEnd` is the exclusive upper bound for timestamptz
+ * comparison. `meta` carries the echoed ISO day strings for the response.
+ */
+function dayWindow(opts: { from?: string; to?: string }, now: Date): { fromDay: Date; toEnd: Date; meta: { from: string; to: string } } {
+  const toDay = parseDay(opts.to ?? defaultDay(now));
+  const fromDay = opts.from !== undefined ? parseDay(opts.from) : new Date(toDay.getTime() - 29 * 86_400_000);
+  if (toDay.getTime() < fromDay.getTime()) {
+    throw new BadRequestException({ code: 'INVALID_RANGE', hint: 'from must be ≤ to' });
+  }
+  return {
+    fromDay,
+    toEnd: new Date(toDay.getTime() + 86_400_000),
+    meta: { from: fromDay.toISOString().slice(0, 10), to: toDay.toISOString().slice(0, 10) },
+  };
 }
 
 /** `sum/count` rounded to a whole number of seconds, or null when there is no sample. */

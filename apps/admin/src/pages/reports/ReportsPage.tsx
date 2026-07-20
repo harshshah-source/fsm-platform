@@ -3,8 +3,14 @@ import {
   apiFleetUptime,
   apiFleetUptimeTrend,
   apiSoftInactiveTrend,
+  apiVerificationOutcomes,
+  apiWorkTypeMix,
   type FleetUptimeReport,
   type SoftInactiveTrend,
+  type VerificationOutcomesReport,
+  type VerifyOutcomeKey,
+  type WorkTypeKey,
+  type WorkTypeMixReport,
 } from '../../api/reports';
 import { apiZoneOverview, type ZoneOverviewRow } from '../../api/dashboard';
 import {
@@ -15,12 +21,27 @@ import {
   type Column,
   type Metric,
 } from '../../components/data';
-import { BarChartCard, ChartCard, ReportGrid, TrendChart, type BarDatum, type TrendDatum } from '../../components/charts';
+import { BarChartCard, BarList, CHART, ChartCard, ReportGrid, TrendChart, type BarDatum, type BarListItem, type TrendDatum } from '../../components/charts';
 import { Button } from '../../components/ui';
 import { SLA_BUCKETS, BUCKET_LABEL, BUCKET_HEX, type SlaBucket } from '../../lib/slaBucket';
 
 /** Buckets counted as "Critical+" — CRITICAL severity and worse (CONTEXT SLA Bucket table). */
 const CRITICAL_PLUS: SlaBucket[] = ['LONG_PENDING', 'VERY_SEVERE', 'SEVERE', 'HIGH_CRITICAL', 'CRITICAL'];
+
+const WORK_TYPE_LABEL: Record<WorkTypeKey, string> = {
+  TROUBLESHOOT: 'Troubleshoot',
+  INSTALL: 'Install',
+  RECOVERY: 'Recovery',
+};
+
+const OUTCOME_LABEL: Record<VerifyOutcomeKey, string> = {
+  CLOSED: 'Verified / Passed',
+  CLOSED_AUTO_RECOVERY: 'Auto-recovered',
+  PARTIAL_RECOVERY: 'Partial recovery',
+  FAILED_VERIFICATION: 'Failed verification',
+  FAILED_ACTIVATION: 'Failed activation',
+  PENDING: 'Pending',
+};
 
 /**
  * Reports landing (FE-21, ref 21). The operational reporting surface: a 6-up KPI MetricStrip, the
@@ -39,12 +60,19 @@ export function ReportsPage() {
   const [zones, setZones] = useState<ZoneOverviewRow[] | null>(null);
   const [softInactive, setSoftInactive] = useState<SoftInactiveTrend | null>(null);
   const [softInactiveGated, setSoftInactiveGated] = useState(false);
+  const [workMix, setWorkMix] = useState<WorkTypeMixReport | null>(null);
+  const [outcomes, setOutcomes] = useState<VerificationOutcomesReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [asOf, setAsOf] = useState<Date | null>(null);
 
   const load = useCallback(() => {
     setError(null);
     apiFleetUptime({ groupBy: 'zone' })
-      .then(setFleet)
+      .then((r) => {
+        setFleet(r);
+        setAsOf(new Date());
+      })
       .catch(() => setError('Failed to load the Fleet Uptime report'));
     apiFleetUptimeTrend(6)
       .then(setUptimeTrend)
@@ -55,6 +83,12 @@ export function ReportsPage() {
     apiSoftInactiveTrend({ days: 14 })
       .then(setSoftInactive)
       .catch(() => setSoftInactiveGated(true));
+    apiWorkTypeMix()
+      .then(setWorkMix)
+      .catch(() => {});
+    apiVerificationOutcomes()
+      .then(setOutcomes)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -97,6 +131,20 @@ export function ReportsPage() {
     [fleet],
   );
 
+  // Work-type mix keeps all three types (the taxonomy is the story); outcome buckets drop the
+  // zero-count rows (six mostly-empty bars read as noise), matching the reference panel.
+  const workMixBars: BarListItem[] = useMemo(
+    () => (workMix?.rows ?? []).map((r) => ({ label: WORK_TYPE_LABEL[r.workType], value: r.count })),
+    [workMix],
+  );
+  const outcomeBars: BarListItem[] = useMemo(
+    () =>
+      (outcomes?.rows ?? [])
+        .filter((r) => r.count > 0)
+        .map((r) => ({ label: OUTCOME_LABEL[r.outcome], value: r.count })),
+    [outcomes],
+  );
+
   const softInactiveSeries: TrendDatum[] = useMemo(() => {
     if (!softInactive) return [];
     const byCapture = new Map<string, number>();
@@ -130,6 +178,19 @@ export function ReportsPage() {
     }));
   }, [zones, fleet]);
 
+  /** Client-side CSV of the zone-breakdown table — what's on screen is what exports. */
+  const exportCsv = () => {
+    const header = 'Zone,Inactive w/ work,Critical+,Fleet Uptime %';
+    const lines = breakdown.map((r) => [r.zoneName, r.inactive, r.criticalPlus, r.uptimePct ?? ''].join(','));
+    const blob = new Blob([[header, ...lines].join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reports-zone-breakdown-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const columns: Column<ZoneBreakdownRow>[] = [
     { key: 'zone', header: 'Zone', render: (r) => r.zoneName },
     { key: 'inactive', header: 'Inactive w/ work', align: 'right', render: (r) => r.inactive },
@@ -149,11 +210,36 @@ export function ReportsPage() {
         title="Reports"
         subtitle="Operational reporting — SLA performance, ticket throughput, fleet uptime and recovery rates. Long-range views read summary tables, never raw multi-year scans. Zone-scoped for ZM, cross-zone for CSM / Operations Head."
         actions={
-          <Button variant="secondary" disabled title="CSV export — backend endpoint pending">
+          <Button
+            variant="secondary"
+            disabled={breakdown.length === 0}
+            title="Download the zone breakdown as CSV"
+            onClick={exportCsv}
+          >
             Export
           </Button>
         }
       />
+
+      {/* Scope meta strip (reference header band): scoped zones + data-as-of stamp. */}
+      <div
+        data-testid="reports-meta"
+        className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-card px-3 py-2 text-xs"
+      >
+        <span className="font-semibold uppercase tracking-wider text-ink-caps">Scope</span>
+        {(zones ?? []).map((z) => (
+          <span
+            key={z.zoneId}
+            className="rounded-full border border-info/30 bg-info-bg px-2 py-0.5 font-medium uppercase tracking-wide text-info"
+          >
+            {z.zoneName}
+          </span>
+        ))}
+        {zones !== null && zones.length === 0 && <span className="text-ink-muted">No zones in scope</span>}
+        <span className="ml-auto text-ink-muted">
+          {asOf ? `Data as of ${asOf.toLocaleString()}` : 'Loading…'}
+        </span>
+      </div>
 
       {error && (
         <div
@@ -206,10 +292,28 @@ export function ReportsPage() {
 
       <ReportGrid>
         <ChartCard title="Work type mix">
-          <EmptyState message="Ticket work-type mix — backend summary endpoint pending (→ #90)." />
+          {workMix && workMix.total > 0 ? (
+            <div data-testid="work-type-mix">
+              <BarList items={workMixBars} color={CHART.info} />
+              <p className="mt-3 text-xs text-ink-muted">
+                {workMix.total} tickets · {workMix.from} → {workMix.to}
+              </p>
+            </div>
+          ) : (
+            <EmptyState message="No tickets created in the window." />
+          )}
         </ChartCard>
         <ChartCard title="Verification outcomes">
-          <EmptyState message="Verification outcome distribution — backend summary endpoint pending (→ #90)." />
+          {outcomes && outcomes.total > 0 ? (
+            <div data-testid="verification-outcomes">
+              <BarList items={outcomeBars} color={CHART.success} />
+              <p className="mt-3 text-xs text-ink-muted">
+                {outcomes.total} runs · {outcomes.fraudFlagged} fraud-flagged · {outcomes.from} → {outcomes.to}
+              </p>
+            </div>
+          ) : (
+            <EmptyState message="No verification runs in the window." />
+          )}
         </ChartCard>
       </ReportGrid>
 

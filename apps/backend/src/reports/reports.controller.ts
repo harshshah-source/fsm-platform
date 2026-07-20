@@ -5,7 +5,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { FleetUptimeAggregationService, type FleetUptimeAggregationResult } from './fleet-uptime-aggregation.service';
-import { type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SoftInactiveTrend, type SystemEfficiencyReport, type ZmScorecardReport, ReportsService } from './reports.service';
+import { type DistributionFilters, type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SoftInactiveTrend, type SystemEfficiencyReport, type VerificationOutcomesReport, type WorkTypeMixReport, type ZmScorecardReport, ReportsService } from './reports.service';
 import { type RootCauseAggregationResult, RootCauseAnalyticsAggregationService } from './root-cause-aggregation.service';
 import { type SoftInactiveRecomputeResult, SoftInactiveCountService } from './soft-inactive-count.service';
 import { type SystemEfficiencyAggregationResult, SystemEfficiencyAggregationService } from './system-efficiency-aggregation.service';
@@ -151,6 +151,34 @@ export class ReportsController {
     );
   }
 
+  /** Work-type mix — ticket counts per work type over a day range (Issue 90; ZM zone-scoped). */
+  @Get('work-type-mix')
+  @Roles(...MANAGER_ROLES)
+  workTypeMix(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zoneId') zoneId?: string,
+    @Query('companyId') companyId?: string,
+    @Query('plantId') plantId?: string,
+  ): Promise<WorkTypeMixReport> {
+    return this.reports.workTypeMix({ role: user.role, zoneId: user.zone_id }, parseDistribution(from, to, zoneId, companyId, plantId));
+  }
+
+  /** Verification-outcome distribution over a day range (Issue 90; ZM zone-scoped). */
+  @Get('verification-outcomes')
+  @Roles(...MANAGER_ROLES)
+  verificationOutcomes(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('zoneId') zoneId?: string,
+    @Query('companyId') companyId?: string,
+    @Query('plantId') plantId?: string,
+  ): Promise<VerificationOutcomesReport> {
+    return this.reports.verificationOutcomes({ role: user.role, zoneId: user.zone_id }, parseDistribution(from, to, zoneId, companyId, plantId));
+  }
+
   /** Recompute a day's efficiency summary on demand (Operations Head). Cron-wired daily when scheduling lands. */
   @Post('efficiency/recompute')
   @HttpCode(200)
@@ -158,6 +186,17 @@ export class ReportsController {
   recomputeEfficiency(@Query('day') day?: string): Promise<SystemEfficiencyAggregationResult> {
     return this.systemEfficiency.computeDay(dayToDate(day ?? currentDay()));
   }
+}
+
+/** Shared query parsing for the two Issue-90 distribution endpoints. */
+function parseDistribution(from?: string, to?: string, zoneId?: string, companyId?: string, plantId?: string): DistributionFilters {
+  return {
+    from,
+    to,
+    zoneId: parseOptInt(zoneId, 'zoneId'),
+    companyId: parseOptInt(companyId, 'companyId'),
+    plantId: parseOptInt(plantId, 'plantId'),
+  };
 }
 
 /** Parse an optional integer query param, rejecting non-numeric input. */

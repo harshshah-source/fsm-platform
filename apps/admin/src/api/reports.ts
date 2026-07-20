@@ -94,6 +94,32 @@ export const apiSoftInactiveTrend = (params: { days?: number } = {}) => {
   return get<SoftInactiveTrend>(`/reports/soft-inactive-trend${qs ? `?${qs}` : ''}`);
 };
 
+// ---- Work-type mix + Verification outcomes (Issue 90) ---------------------------
+
+export type WorkTypeKey = 'TROUBLESHOOT' | 'INSTALL' | 'RECOVERY';
+export type VerifyOutcomeKey = 'CLOSED' | 'CLOSED_AUTO_RECOVERY' | 'PARTIAL_RECOVERY' | 'FAILED_VERIFICATION' | 'FAILED_ACTIVATION' | 'PENDING';
+
+export interface WorkTypeMixReport {
+  from: string;
+  to: string;
+  total: number;
+  filters: { zoneId: number | null; companyId: number | null; plantId: number | null };
+  rows: { workType: WorkTypeKey; count: number; pct: number }[];
+}
+
+export interface VerificationOutcomesReport {
+  from: string;
+  to: string;
+  total: number;
+  fraudFlagged: number;
+  filters: { zoneId: number | null; companyId: number | null; plantId: number | null };
+  rows: { outcome: VerifyOutcomeKey; count: number; pct: number }[];
+}
+
+/** Both endpoints default to the trailing 30-day window when `from`/`to` are omitted. */
+export const apiWorkTypeMix = () => get<WorkTypeMixReport>('/reports/work-type-mix');
+export const apiVerificationOutcomes = () => get<VerificationOutcomesReport>('/reports/verification-outcomes');
+
 // ---- Root Cause Analytics (Issue 41, FE-23) ------------------------------------
 
 export interface RootCauseSlice {
