@@ -35,7 +35,9 @@ async function main(): Promise<void> {
   }
 
   const client = new AutoPlantMysqlClient();
-  const prisma = new PrismaService();
+  // #130 — a read-only diagnostic must never be blocked by the version lock it may be run to inspect:
+  // warnOnly evaluates the guard and WARNs on a stale/skewed build, but never writes or throws.
+  const prisma = new PrismaService({ warnOnly: true });
   await prisma.onModuleInit();
 
   try {

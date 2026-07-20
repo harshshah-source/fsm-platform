@@ -3,12 +3,13 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/stamp-build-info.mjs",
     "start": "node -r dotenv/config dist/main.js dotenv_config_path=.env",
     "seed": "node -r dotenv/config dist/seed.js dotenv_config_path=.env",
     "autoplant:ping": "node -r dotenv/config dist/ingestion/autoplant/autoplant-ping.js dotenv_config_path=.env",
     "autoplant:sync": "node -r dotenv/config dist/ingestion/autoplant/autoplant-sync.js dotenv_config_path=.env",
     "autoplant:departure-dryrun": "node -r dotenv/config dist/ingestion/autoplant/autoplant-departure-dryrun.js dotenv_config_path=.env",
+    "runtime-lock:reset": "node -r dotenv/config dist/build-info/runtime-lock-reset.js dotenv_config_path=.env",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

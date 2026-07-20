@@ -1,6 +1,16 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, Optional, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client';
+import { assertRuntimeBuildGuards } from '../build-info/boot-guard';
+
+export interface PrismaServiceOptions {
+  /**
+   * #130 — read-only tools (autoplant:ping, departure-dryrun, runtime-lock:reset) construct the
+   * service in warnOnly mode: the boot guard evaluates and WARNs on a stale/skewed build but never
+   * writes the lock and never throws, so a diagnostic never gets blocked by the lock it inspects.
+   */
+  warnOnly?: boolean;
+}
 
 /**
  * Single Prisma connection for the process, tied to the Nest lifecycle. Prisma 7 has no
@@ -10,7 +20,10 @@ import { PrismaClient } from '../generated/prisma/client';
  */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
-  constructor() {
+  private readonly logger = new Logger(PrismaService.name);
+  private readonly warnOnly: boolean;
+
+  constructor(@Optional() options: PrismaServiceOptions = {}) {
     super({
       adapter: new PrismaPg({
         connectionString: process.env.DATABASE_URL,
@@ -23,10 +36,18 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         options: '-c timezone=UTC',
       }),
     });
+    this.warnOnly = options.warnOnly ?? false;
   }
 
   async onModuleInit(): Promise<void> {
     await this.$connect();
+    // #130 — structural build guard: refuse a stale/skewed build BEFORE any query runs. Living here
+    // (not in main.ts) means every entrypoint — the Nest app and hand-constructed scripts alike —
+    // runs it, so no future one-off writer can bypass it. Read-only tools pass warnOnly.
+    await assertRuntimeBuildGuards(this, {
+      warnOnly: this.warnOnly,
+      warn: (message) => this.logger.warn(message),
+    });
   }
 
   async onModuleDestroy(): Promise<void> {

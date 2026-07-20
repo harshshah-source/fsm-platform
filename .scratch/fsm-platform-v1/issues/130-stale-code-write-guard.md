@@ -225,12 +225,12 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
 
 ## Acceptance criteria
 
-- [ ] Full version-compare matrix tested (no row / upgrade / restart / clean-clean refuse /
-      dirty takeover / stale refuse), incl. concurrent-boot race and the exact refuse message.
-- [ ] Migration-skew refusal both directions + `_prisma_migrations`-absent skip.
-- [ ] Old-dist simulation: build-info resolving to `{0,'unstamped'}` refuses against a stamped DB;
-      source-run (vitest) self-stamps from git and boots a fresh test DB.
-- [ ] `runtime-lock:reset` lowers the lock only with `--yes`, writes the audit row.
+- [x] Full version-compare matrix tested (no row / upgrade / restart / clean-clean refuse /
+      dirty takeover / stale refuse), incl. concurrent-boot race and the exact refuse message. _(Slice 1)_
+- [x] Migration-skew refusal both directions + `_prisma_migrations`-absent skip. _(Slice 1)_
+- [x] Old-dist simulation: build-info resolving to `{0,'unstamped'}` refuses against a stamped DB;
+      source-run (vitest) self-stamps from git and boots a fresh test DB. _(Slice 1 — verified end-to-end via `npm run build` + compiled `require`)_
+- [x] `runtime-lock:reset` lowers the lock only with `--yes`, writes the audit row. _(Slice 1)_
 - [ ] **July-19 simulation regression test**: seed lock at N; assert build < N refuses; assert the
       exact corrupt state (active `device_departures` row + `is_departed=false`) yields **zero**
       tickets from `createForInactiveEligible` and a recompute-invariant throw.
@@ -238,14 +238,18 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
 - [ ] L5: every recompute appends a `device_state_recomputes` row (counts + build stamp); a
       > threshold swing in either direction logs the loud warning and highlights on the health
       page; a legitimate mass event warns but never blocks; threshold read from settings.
-- [ ] Read-only tools (`autoplant:ping`, `autoplant:departure-dryrun`) warn, never refuse.
-- [ ] Scheduler flags and `eligibility_mode` untouched.
+- [x] Read-only tools (`autoplant:ping`, `autoplant:departure-dryrun`) warn, never refuse. _(Slice 1 — dryrun now warnOnly; `autoplant:ping` never constructs PrismaService)_
+- [x] Scheduler flags and `eligibility_mode` untouched. _(Slice 1 — verified: no edits to either)_
 
 ## Build plan (TDD, commit + push per slice, one INDEX session-log line per slice)
 
-1. **Slice 1 — L1 + L4 (boot refusals).** build-info loader + stamp script + build-script chain,
-   `runtime_lock` migration, `assertBuildNotStale` (version + skew), `PrismaService.onModuleInit`
-   hook + `warnOnly`, main.ts early assert, reset CLI. Tests: matrix, race, messages, skew, CLI audit.
+1. **✅ Slice 1 — L1 + L4 (boot refusals). DONE 2026-07-20.** build-info loader + stamp script +
+   build-script chain, `runtime_lock` migration (`20260720120000`), `assertBuildNotStale` (version +
+   skew) under `pg_advisory_xact_lock`, `PrismaService.onModuleInit` hook + `@Optional() warnOnly`,
+   `main.ts` early assert, `runtime-lock:reset` CLI, `autoplant:departure-dryrun` switched to warnOnly.
+   36/36 targeted tests green (5 specs); `npm run build` chain + `tsc --noEmit` clean; guard validated
+   against sample full-AppModule e2e boots. Compiled-run `{0,'unstamped'}` (no git fallback) verified
+   end-to-end. Commit + push per the plan; INDEX session-log line added.
 2. **Slice 2 — L3 + L5 (attribution + canary).** Ledger columns + stamping,
    `device_state_recomputes` table + append + swing warning, health/transparency exposure +
    admin badge/canary UI (parity in-slice).
