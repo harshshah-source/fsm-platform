@@ -177,18 +177,29 @@ Same preamble, ordered `validateBootConfig → L4 (schema) → L1 (version; reco
 - App bundles migration not applied → refuse (run `migrate deploy` first).
 - Exact match → proceed. `_prisma_migrations` absent → warn + skip (test/dev DB).
 
-## L2 — defensive writes (source-of-truth at write time)
+## L2 — defensive writes (source-of-truth at write time) — ✅ DONE 2026-07-20 (Slice 3)
 
-- **Ticket creation (THE gap)**: replace `isDeparted: false` (`ticket-creation.service.ts:41`)
-  with `device: { departures: { none: { restoredAt: null } } }` — the identical shape the
-  recommender already uses (`recommender.service.ts:113`). Keep the `isInactive`/eligibility flag
-  filters (they only ever *reduce* candidates; the departure re-read is the safety-critical one).
-- **Recommender**: already safe — add a regression-lock test so the source-of-truth re-read can't
-  silently regress to a flag.
-- **Recompute invariant (decision 4)**: wrap the recompute UPDATE + assertion in one transaction —
-  after the UPDATE, `COUNT(*)` of devices having an active `device_departures` row yet showing
-  `is_departed = false OR is_inactive OR eligible_for_uptime OR sla_bucket IS NOT NULL` must be 0;
-  nonzero → throw → rollback. (The machine-checkable form of the invariant hand-verified 07-19.)
+- **✅ Ticket creation (THE gap, fixed)**: `isDeparted: false` (`ticket-creation.service.ts:41`)
+  replaced with `device: { departures: { none: { restoredAt: null } } }` — the identical shape the
+  recommender already uses (`recommender.service.ts:113`). TDD RED reproduced the exact run-65
+  vulnerability first (a device with an active `device_departures` row but a stale `is_departed:
+  false` got ticketed under the old gate); GREEN with the ledger re-read. New
+  `test/ticket-creation-departed-source-of-truth.e2e-spec.ts` (2 tests: excludes the stale-flag
+  departed device, still tickets a genuinely-eligible control device — no over-exclusion).
+- **✅ Recommender — regression-lock test added**: already safe (pre-existing ledger re-read,
+  unchanged); `test/recommender-departed-source-of-truth.e2e-spec.ts` pins it — proven non-tautological
+  by temporarily reverting the query to `device: { state: { isDeparted: false } } }` and confirming the
+  test fails (`ticketsConsidered` 2 not 1), then reverting (0 net diff on `recommender.service.ts`).
+- **✅ Recompute invariant (decision 4, built)**: the recompute UPDATE and the invariant assertion run
+  in one transaction (`DeviceStateService.recompute` → `this.prisma.$transaction`); a nonzero
+  `assertDepartureInvariant` count (`device-state/departure-invariant.ts`) throws inside the
+  transaction → Prisma rolls back the UPDATE atomically → `recompute()` rejects (rollback-and-throw,
+  not log-and-alert). Tested at two levels: `test/departure-invariant.e2e-spec.ts` (3 tests — the
+  isolated assertion catches a seeded violation, passes a correct state, passes with no active
+  departures) plus a one-time manual end-to-end verification (temporarily forced `is_departed = false`
+  in the real UPDATE, confirmed `recompute()` itself rejects AND the device_states row is provably
+  unchanged — genuine rollback, not a bare propagated throw — then reverted; not kept as a permanent
+  test since it requires breaking real SQL to trigger).
 
 ## L3 — ledger build-stamp + transparency badge
 
@@ -269,7 +280,13 @@ scripts serve no endpoint). Only the version lock checks *version*, before *any*
    entangled in that unrelated uncommitted WIP → split to [#131](./131-build-health-ui-parity.md).
    68 new/regression targeted tests green; Slice 1's 36 re-verified green (no regression); both apps
    `tsc --noEmit` clean; full backend `build` chain clean.
-3. **Slice 3 — L2 (defensive writes).** Ticket-creation source-of-truth re-read, recompute
-   invariant transaction, recommender regression-lock test.
+3. **✅ Slice 3 — L2 (defensive writes). DONE 2026-07-20.** Ticket-creation source-of-truth re-read
+   (THE run-65 gap, `ticket-creation.service.ts:41` → `device: { departures: { none: { restoredAt:
+   null } } } }`, TDD RED reproduced the vulnerability first); recommender regression-lock test
+   (proven non-tautological by a temporary break/revert); recompute invariant transaction
+   (`departure-invariant.ts` + `DeviceStateService.recompute` wrapped in `$transaction`,
+   rollback-and-throw, verified genuine rollback end-to-end). 39/39 new/regression tests green (10
+   files); Slices 1+2's 47 re-verified green (no regression); wider sweep (ticket-creation/
+   recommender/dispatch consumers) 25/25 green; `tsc --noEmit` clean; full `build` chain clean.
 4. **Slice 4 — July-19 simulation regression test** (cross-cutting L1+L2; assert the L5 row for
    the simulated stale recompute carries the stale build stamp and trips the canary).

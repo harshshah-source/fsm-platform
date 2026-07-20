@@ -3,6 +3,7 @@ import { buildStampFields } from '../build-info/run-stamp';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
+import { assertDepartureInvariant } from './departure-invariant';
 import { DEFAULT_PGI_WINDOW_DAYS, parseEligibilityMode } from './eligibility';
 import { evaluateRecomputeCanary } from './recompute-canary';
 import { slaBucketCaseSql } from './sla-bucket';
@@ -87,40 +88,49 @@ export class DeviceStateService {
                AND ${now}::timestamptz - (p.pgi_date::timestamp AT TIME ZONE 'UTC')
                      <= make_interval(days => ${DEFAULT_PGI_WINDOW_DAYS})
           )`;
-    const upserted = await this.prisma.$executeRaw(Prisma.sql`
-      WITH derived AS (
-        SELECT ds.device_id,
-          CASE WHEN ds.latest_gps_datetime IS NULL THEN NULL
-               ELSE GREATEST(0, EXTRACT(EPOCH FROM (${now}::timestamptz - ds.latest_gps_datetime)) / 3600.0)
-          END AS hours,
-          ${departedExists} AS departed
-        FROM device_states ds
-      )
-      UPDATE device_states ds SET
-        inactivity_hours = dr.hours,
-        is_departed = dr.departed,
-        is_inactive = (NOT dr.departed AND dr.hours IS NOT NULL AND dr.hours >= ${threshold}),
-        sla_bucket = CASE WHEN dr.departed THEN NULL ELSE ${bucketCase} END,
-        eligible_for_uptime = (
-          NOT dr.departed
-          AND ${eligibilityBase}
-          AND NOT EXISTS (
-            SELECT 1 FROM non_operational_markings n
-             WHERE n.device_id = ds.device_id AND n.state::text IN ('CONFIRMED', 'ACTIVE')
-          )
-        ),
-        vehicle_id = v.vehicle_id,
-        plant_id = v.plant_id,
-        company_id = v.company_id,
-        transporter_id = v.transporter_id,
-        computed_at = ${now}
-      FROM derived dr
-      JOIN devices d ON d.device_id = dr.device_id
-      LEFT JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id
-      WHERE ds.device_id = dr.device_id`);
+    // #130 L2 decision 4 — the UPDATE and the recompute invariant assertion run in ONE transaction: a
+    // violation (a device with an active departure somehow still shown operational — the run-65 shape)
+    // throws, which rolls back the UPDATE atomically rather than committing corrupted state
+    // (rollback-and-throw, not log-and-alert; L5's canary below warns on softer swings elsewhere).
+    const upserted = await this.prisma.$transaction(async (tx) => {
+      const count = await tx.$executeRaw(Prisma.sql`
+        WITH derived AS (
+          SELECT ds.device_id,
+            CASE WHEN ds.latest_gps_datetime IS NULL THEN NULL
+                 ELSE GREATEST(0, EXTRACT(EPOCH FROM (${now}::timestamptz - ds.latest_gps_datetime)) / 3600.0)
+            END AS hours,
+            ${departedExists} AS departed
+          FROM device_states ds
+        )
+        UPDATE device_states ds SET
+          inactivity_hours = dr.hours,
+          is_departed = dr.departed,
+          is_inactive = (NOT dr.departed AND dr.hours IS NOT NULL AND dr.hours >= ${threshold}),
+          sla_bucket = CASE WHEN dr.departed THEN NULL ELSE ${bucketCase} END,
+          eligible_for_uptime = (
+            NOT dr.departed
+            AND ${eligibilityBase}
+            AND NOT EXISTS (
+              SELECT 1 FROM non_operational_markings n
+               WHERE n.device_id = ds.device_id AND n.state::text IN ('CONFIRMED', 'ACTIVE')
+            )
+          ),
+          vehicle_id = v.vehicle_id,
+          plant_id = v.plant_id,
+          company_id = v.company_id,
+          transporter_id = v.transporter_id,
+          computed_at = ${now}
+        FROM derived dr
+        JOIN devices d ON d.device_id = dr.device_id
+        LEFT JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id
+        WHERE ds.device_id = dr.device_id`);
+      await assertDepartureInvariant(tx);
+      return count;
+    });
 
     // #130 L5 — append the recompute ledger row (attribution the incident's write class never had) and
-    // run the semantic canary. Counts come from the just-updated device_states in one FILTER pass.
+    // run the semantic canary. Only reached if the transaction above committed. Counts come from the
+    // just-updated device_states in one FILTER pass.
     await this.recordRecomputeAndCanary(now, trigger);
 
     return { upserted };

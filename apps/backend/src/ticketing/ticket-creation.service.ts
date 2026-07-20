@@ -36,9 +36,14 @@ export class TicketCreationService {
         eligibleForUptime: true,
         hasOpenFailureCycle: false,
         // Departed devices (Issue 128) are never ticketed — a device sitting in a warehouse is not a
-        // field failure. The recompute already forces isInactive/eligibleForUptime false for them, so
-        // this is defence in depth: it closes the window between a departure and the next recompute.
-        isDeparted: false,
+        // field failure. #130 L2: re-reads the `device_departures` ledger directly — the IDENTICAL
+        // shape the recommender already uses (`recommender.service.ts:113`) — instead of trusting the
+        // derived `is_departed` flag. The 2026-07-19 run-65 incident is exactly why: a stale-code
+        // recompute cleared `is_departed` fleet-wide while the ledger still held the active departure,
+        // and the flag-only gate opened for every departed device. The derived flag stays a useful fast
+        // filter elsewhere (dashboards, cheap predicates) — this write path is safety-critical, so it
+        // re-reads the source of truth instead.
+        device: { departures: { none: { restoredAt: null } } },
         // A Troubleshoot Ticket needs a plant + company; a device with no current fitment can't be ticketed.
         plantId: deactivatedPlantIds.length > 0 ? { not: null, notIn: deactivatedPlantIds } : { not: null },
         companyId: { not: null },
