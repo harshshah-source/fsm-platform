@@ -5,9 +5,34 @@ import { SLABadge } from '../../components/domain';
 import { criticalOnlyCount, SLA_BUCKETS, type SlaBucket } from '../../lib/slaBucket';
 import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
 
+/** The FSM holding-zone name (mirrors the backend `UNZONED_ZONE_NAME`); it has no assigned ZM. */
+const UNZONED_ZONE_NAME = 'UNZONED';
+
 /** Worst (most-severe non-zero) bucket in a zone — `SLA_BUCKETS` is in descending severity order. */
 function worstBucket(byBucket: Record<string, number>): SlaBucket | null {
   return SLA_BUCKETS.find((b) => (byBucket[b] ?? 0) > 0) ?? null;
+}
+
+/**
+ * Compact inline uptime meter — a small filled bar plus the percentage in text, colour-graded by health
+ * (≥95% good, ≥85% watch, else critical). Sized to sit inside the existing row height (no table growth).
+ */
+function UptimeMeter({ pct }: { pct: number }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const tone =
+    clamped >= 95
+      ? { bar: 'bg-success', text: 'text-success' }
+      : clamped >= 85
+        ? { bar: 'bg-warning', text: 'text-warning' }
+        : { bar: 'bg-critical', text: 'text-critical' };
+  return (
+    <span className="flex items-center justify-end gap-2" title={`Fleet uptime ${clamped.toFixed(2)}% this month`}>
+      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-sunken" aria-hidden>
+        <span className={`block h-full rounded-full ${tone.bar}`} style={{ width: `${clamped}%` }} />
+      </span>
+      <span className={`w-12 text-right tabular-nums font-semibold ${tone.text}`}>{clamped.toFixed(1)}%</span>
+    </span>
+  );
 }
 
 /**
@@ -19,7 +44,14 @@ function worstBucket(byBucket: Record<string, number>): SlaBucket | null {
  * band (matching the KPI). Both the Critical count and the whole row are click-throughs to the device
  * list — the count deep-links to that zone's inactive CRITICAL devices, the row to the whole zone.
  */
-export function ScorecardTable({ rows }: { rows: ZoneOverviewRow[] }) {
+export function ScorecardTable({
+  rows,
+  zoneUptime,
+}: {
+  rows: ZoneOverviewRow[];
+  /** Per-zone current-month uptime %, keyed by zoneId (BE-39 Fleet Uptime report). */
+  zoneUptime?: Map<string, number>;
+}) {
   const navigate = useNavigate();
 
   // Deep-link into the Device Detail list (`/reports/device`), pre-filtered from the clicked cell/row.
@@ -40,14 +72,17 @@ export function ScorecardTable({ rows }: { rows: ZoneOverviewRow[] }) {
     {
       key: 'zm',
       header: 'Zonal Manager',
+      // UNZONED is a holding zone with no real ZM — show "NA" rather than the mock seed label.
       render: (r) =>
-        r.zonalManagerName ? (
+        r.zoneName === UNZONED_ZONE_NAME ? (
+          <span className="text-ink-muted">NA</span>
+        ) : r.zonalManagerName ? (
           <span className="text-ink">{r.zonalManagerName}</span>
         ) : (
           <span className="text-ink-muted">—</span>
         ),
       sortable: true,
-      sortValue: (r) => r.zonalManagerName ?? '',
+      sortValue: (r) => (r.zoneName === UNZONED_ZONE_NAME ? '' : (r.zonalManagerName ?? '')),
     },
     {
       key: 'total',
@@ -94,6 +129,24 @@ export function ScorecardTable({ rows }: { rows: ZoneOverviewRow[] }) {
         const w = worstBucket(r.byBucket);
         return w ? <SLABadge bucket={w} /> : <span className="text-ink-muted">—</span>;
       },
+    },
+    {
+      key: 'uptime',
+      header: 'Fleet Uptime',
+      align: 'right',
+      render: (r) => {
+        const pct = zoneUptime?.get(r.zoneId);
+        return pct != null ? (
+          <span data-testid="scorecard-uptime">
+            <UptimeMeter pct={pct} />
+          </span>
+        ) : (
+          <span className="text-ink-muted">—</span>
+        );
+      },
+      sortable: true,
+      // Zones without a computed uptime sort to the bottom (−1) rather than jumping to the top as 0.
+      sortValue: (r) => zoneUptime?.get(r.zoneId) ?? -1,
     },
   ];
 

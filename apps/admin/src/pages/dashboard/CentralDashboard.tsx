@@ -13,7 +13,7 @@ import type { DashboardData } from './ZmDashboard';
  * pan-zone KPI strip, the cross-zone Escalation Queue, the Zone Performance Scorecard, and the
  * Company/Plant overview — all over the existing role-scoped aggregations (CSM receives every zone).
  */
-export function CentralDashboard({ zones, companyPlants, critical, actions, fleetUptime, error }: DashboardData) {
+export function CentralDashboard({ zones, companyPlants, critical, actions, fleetUptime, zoneUptime, error }: DashboardData) {
   const metrics: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
     const escalations = critical.reduce((s, g) => s + g.tickets.length, 0);
@@ -72,7 +72,7 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
       </section>
 
       <EscalationQueueList groups={critical} />
-      <ScorecardTable rows={zones} />
+      <ScorecardTable rows={zones} zoneUptime={zoneUptime} />
       <CompanyPlantTable rows={companyPlants} />
     </div>
   );

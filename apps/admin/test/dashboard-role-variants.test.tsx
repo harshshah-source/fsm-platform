@@ -62,12 +62,11 @@ afterEach(() => {
 });
 
 describe('FE-07 role-variant dashboards', () => {
-  it('Operations Head sees the Pan-India Fleet Command variant (KPIs + efficiency + distribution + scorecard)', async () => {
+  it('Operations Head sees the Pan-India Fleet Command variant (KPIs + distribution + scorecard)', async () => {
     stubFetch();
     renderHome(opsHead);
 
     expect(await screen.findByText('Pan-India Fleet Command')).toBeInTheDocument();
-    expect(screen.getByText(/auto-dispatch system efficiency/i)).toBeInTheDocument();
     expect(screen.getByText(/sla bucket distribution/i)).toBeInTheDocument();
     expect(screen.getByRole('table', { name: /zone performance scorecard/i })).toBeInTheDocument();
     // Not the ZM variant.

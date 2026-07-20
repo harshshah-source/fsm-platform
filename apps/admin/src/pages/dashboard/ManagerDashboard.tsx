@@ -38,6 +38,8 @@ export function ManagerDashboard() {
   const [actions, setActions] = useState<ActionRequiredCard[]>([]);
   const [fleet, setFleet] = useState<FleetSummary | null>(null);
   const [fleetUptime, setFleetUptime] = useState<number | null>(null);
+  // Per-zone current-month uptime %, keyed by zoneId — feeds the Scorecard's Fleet Uptime column.
+  const [zoneUptime, setZoneUptime] = useState<Map<string, number>>(new Map());
   const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,7 +66,11 @@ export function ManagerDashboard() {
     // Current-month Fleet Uptime % for the hero card (BE-39). Left at "—" until the monthly summary is
     // computed (report reports 0 eligible devices) or on a backend without the endpoint.
     apiFleetUptime({ groupBy: 'zone' })
-      .then((r) => alive && r?.fleet?.eligibleDeviceCount > 0 && setFleetUptime(r.fleet.uptimePct))
+      .then((r) => {
+        if (!alive || !r) return;
+        if (r.fleet?.eligibleDeviceCount > 0) setFleetUptime(r.fleet.uptimePct);
+        if (r.rows) setZoneUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct])));
+      })
       .catch(() => undefined);
     // Zone-SE list feeds the Critical Queue assign picker; failure just leaves it empty.
     apiZoneEngineers()
@@ -98,7 +104,11 @@ export function ManagerDashboard() {
       .then((f) => typeof f?.devices === 'number' && setFleet(f))
       .catch(() => undefined);
     apiFleetUptime({ groupBy: 'zone' })
-      .then((r) => r?.fleet?.eligibleDeviceCount > 0 && setFleetUptime(r.fleet.uptimePct))
+      .then((r) => {
+        if (!r) return;
+        if (r.fleet?.eligibleDeviceCount > 0) setFleetUptime(r.fleet.uptimePct);
+        if (r.rows) setZoneUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct])));
+      })
       .catch(() => undefined);
   }, []);
 
@@ -109,6 +119,7 @@ export function ManagerDashboard() {
     actions,
     fleet,
     fleetUptime,
+    zoneUptime,
     engineers,
     error,
     onAssigned: refreshCritical,

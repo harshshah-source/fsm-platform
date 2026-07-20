@@ -15,11 +15,11 @@ import type { DashboardData } from './ZmDashboard';
  * the SLA Bucket Distribution heat-ramp, the Zone Performance Scorecard, and the Company/Plant overview
  * — all over the existing all-zone aggregations (no new endpoint).
  *
- * Documented omission (DESIGN-SYSTEM §9.2): the Auto-Dispatch System Efficiency row has no backend
- * source until the System Efficiency report (BE-42, surfaced by FE-24). Its cards render the reference
- * chrome with "—" placeholders rather than fabricated figures.
+ * The Auto-Dispatch System Efficiency row (Auto-Dispatch Rate / Manual Intervention / On-Time Dispatch /
+ * Avg Resolution) is removed pending a real backend source (System Efficiency report, BE-42) — no
+ * placeholder chrome in the meantime.
  */
-export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, error, onDataRefetch }: DashboardData) {
+export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zoneUptime, error, onDataRefetch }: DashboardData) {
   const navigate = useNavigate();
   // Bumped when a manual ingestion run completes AND its data refetch has resolved — the roll trigger
   // for the KPI odometers (keyed on completion, not on a value diff).
@@ -58,18 +58,10 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, err
     ];
   }, [zones, fleet, fleetUptime, lastRunAt, navigate]);
 
-  // Auto-Dispatch efficiency — gated on BE-42 / FE-24; reference chrome, no fabricated values.
-  const efficiency: Metric[] = [
-    { label: 'Auto-Dispatch Rate', value: '—', hint: 'System Efficiency (BE-42)', tone: 'success' },
-    { label: 'Manual Intervention', value: '—', hint: 'System Efficiency (BE-42)', tone: 'warning' },
-    { label: 'On-Time Dispatch', value: '—', hint: 'System Efficiency (BE-42)', tone: 'info' },
-    { label: 'Avg Resolution', value: '—', hint: 'System Efficiency (BE-42)', tone: 'neutral' },
-  ];
-
   return (
     <div>
-      {/* Hero top section (docs/ui/hero-ref.jpg): 3 KPIs each side of the truck, the efficiency
-          strip riding over its lower edge. Same cards/testIds as the old flat strips. */}
+      {/* Hero top section (docs/ui/hero-ref.jpg): 3 KPIs each side of the truck. Same cards/testIds
+          as the old flat strips. */}
       <DashboardHero
         title="Pan-India Fleet Command"
         actions={
@@ -82,9 +74,6 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, err
         }
         left={kpis.slice(0, 3)}
         right={kpis.slice(3, 6)}
-        bottom={efficiency}
-        bottomHeading="Auto-Dispatch System Efficiency"
-        bottomHeadingId="auto-dispatch-heading"
       />
       {error && (
         <p role="alert" className="mb-4 text-sm text-critical">
@@ -106,7 +95,7 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, err
         </div>
       </section>
 
-      <ScorecardTable rows={zones} />
+      <ScorecardTable rows={zones} zoneUptime={zoneUptime} />
       <CompanyPlantTable rows={companyPlants} />
     </div>
   );

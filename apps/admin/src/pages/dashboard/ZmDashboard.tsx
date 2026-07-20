@@ -27,6 +27,8 @@ export interface DashboardData {
   fleet: FleetSummary | null;
   /** Current-month fleet uptime % (BE-39 Fleet Uptime report); null until loaded / no computed data. */
   fleetUptime: number | null;
+  /** Per-zone current-month uptime %, keyed by zoneId — powers the Scorecard's Fleet Uptime column. */
+  zoneUptime?: Map<string, number>;
   engineers: ZoneEngineer[];
   error: string | null;
   onAssigned: () => void;
