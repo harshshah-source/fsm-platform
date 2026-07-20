@@ -135,6 +135,30 @@ describe('Issue 122 — enriched reads', () => {
     expect(t.batchId).toBe(String(batchId));
     expect(t.scheduleId).toBe(String(scheduleId));
     expect(t.overridden).toBe(false);
+    // No dispatch run behind this fixture's schedule (ZM_MANUAL / pre-ledger shape) — the field is
+    // still present, and null is what tells the Batch column to name the batch without linking it.
+    expect(t.runId).toBeNull();
+  });
+
+  it('carries the schedule\'s dispatch run id alongside the batch id', async () => {
+    // `runId` is the ticket row's link to the dispatch ledger (the run behind its schedule). The Batch
+    // column addresses the batch by `batchId` alone; `runId` carries the run context for the drill-down.
+    const run = await prisma.dispatchRun.create({
+      data: { trigger: 'MANUAL', status: 'SUCCESS', configSnapshot: {} },
+    });
+    await prisma.workSchedule.update({ where: { scheduleId }, data: { runId: run.runId } });
+    try {
+      const token = await login('ops.head@fsm.test');
+      const res = await request(app.getHttpServer())
+        .get(`/api/tickets?q=${vehicleNo}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(res.body[0].runId).toBe(String(run.runId));
+      expect(res.body[0].batchId).toBe(String(batchId));
+    } finally {
+      await prisma.workSchedule.update({ where: { scheduleId }, data: { runId: null } });
+      await prisma.dispatchRun.delete({ where: { runId: run.runId } });
+    }
   });
 
   it('filters tickets by plant name text and by universal q (device id)', async () => {

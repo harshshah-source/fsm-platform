@@ -18,16 +18,20 @@ const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_H
 
 /**
  * Batch-Assignment transparency drill-down (`/api/dispatch-runs/*`): runs list → run detail
- * (config-in-effect panel + per-zone cards) → zone batches → assignment rows → per-ticket decision
- * trace. Manager-roled; a ZONAL_MANAGER is zone-clamped at every level (list totals and run-detail
- * cards are filtered to their zone).
+ * (config-in-effect panel + per-zone cards) → zone batches → per-ticket decision trace. Manager-roled;
+ * a ZONAL_MANAGER is zone-clamped at every level (list totals and run-detail cards are filtered to
+ * their zone).
+ *
+ * Batch detail is deliberately NOT here: a batch is addressed by its own id at `GET /api/batches/:id`
+ * (BatchesController), because most live batches have no `run_id` and a run-scoped path left them
+ * unreachable. The zone drill-down links out to that route.
  *
  * Foreign-zone reads differ by route, and the docstring states each one's ACTUAL behavior rather
  * than promising a uniform rule the platform prevents:
  *   - zone detail (`/:runId/zones/:zoneId`) — the global {@link ZoneScopeGuard} (#99) rejects a ZM's
  *     cross-zone `:zoneId` with 403 ZONE_SCOPE_VIOLATION, the platform-standard zone-scope response;
- *   - batch (`/:runId/batches/:batchId`) and trace (`/:runId/tickets/:ticketId/trace`) — no `:zoneId`
- *     param, so the guard doesn't fire; the service-level zone clamp returns 404 instead.
+ *   - trace (`/:runId/tickets/:ticketId/trace`) — no `:zoneId` param, so the guard doesn't fire; the
+ *     service-level zone clamp returns 404 instead.
  */
 @Controller('dispatch-runs')
 @UseGuards(AuthGuard, RoleGuard)
@@ -59,18 +63,6 @@ export class DispatchRunsController {
   ): Promise<DispatchZoneDetail> {
     const detail = await this.query.getZoneDetail(parseId(runId), parseId(zoneId), this.scope(user));
     if (!detail) throw new NotFoundException({ code: 'DISPATCH_RUN_ZONE_NOT_FOUND' });
-    return detail;
-  }
-
-  @Get(':runId/batches/:batchId')
-  @Roles(...MANAGER_ROLES)
-  async batchDetail(
-    @CurrentUser() user: AccessTokenClaims,
-    @Param('runId') runId: string,
-    @Param('batchId') batchId: string,
-  ): Promise<DispatchBatchDetail> {
-    const detail = await this.query.getBatchDetail(parseId(runId), parseId(batchId), this.scope(user));
-    if (!detail) throw new NotFoundException({ code: 'DISPATCH_BATCH_NOT_FOUND' });
     return detail;
   }
 

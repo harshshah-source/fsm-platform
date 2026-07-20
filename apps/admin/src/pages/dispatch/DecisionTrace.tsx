@@ -32,7 +32,10 @@ export function DecisionTraceView({ data }: { data: DispatchTicketTrace }) {
   return (
     <div className="space-y-3 text-sm">
       {idParts.length > 0 && (
-        <div className="flex flex-wrap gap-x-5 gap-y-1 rounded-md border border-line bg-surface-card px-3 py-2">
+        <div
+          data-testid="trace-identity"
+          className="flex flex-wrap gap-x-5 gap-y-1 rounded-md border border-line bg-surface-card px-3 py-2"
+        >
           {idParts.map((p) => (
             <span key={p.label} className="text-xs">
               <span className="font-semibold uppercase tracking-wider text-ink-caps">{p.label} </span>

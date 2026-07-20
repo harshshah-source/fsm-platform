@@ -317,6 +317,14 @@ describe('/api/dispatch-runs (e2e)', () => {
       poolEmptyReason: 'NO_COVERAGE',
       companyName,
     });
+    // Change-request 2026-07: per-plant fleet stats for every dispatched plant, keyed by plantId.
+    const dispatchedPlantId = res.body.batches[0].plantId;
+    expect(res.body.plantStats[dispatchedPlantId]).toMatchObject({
+      totalDevices: expect.any(Number),
+      inactiveDevices: expect.any(Number),
+      assignedDevices: expect.any(Number),
+      unassignedDevices: expect.any(Number),
+    });
   });
 
   it('ZM foreign zone detail is 403 (global ZoneScopeGuard, not the service clamp)', async () => {
@@ -334,7 +342,7 @@ describe('/api/dispatch-runs (e2e)', () => {
   it('batch detail: assignment rows with rank, score, status', async () => {
     const token = await login('ops.head@fsm.test');
     const res = await request(app.getHttpServer())
-      .get(`/api/dispatch-runs/${runId}/batches/${zmBatchId}`)
+      .get(`/api/batches/${zmBatchId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(res.body.seId).toBe(seZm);
@@ -359,9 +367,50 @@ describe('/api/dispatch-runs (e2e)', () => {
   it('ZM cannot read a foreign zone batch', async () => {
     const token = await login('zm.north@fsm.test');
     await request(app.getHttpServer())
-      .get(`/api/dispatch-runs/${runId}/batches/${otherBatchId}`)
+      .get(`/api/batches/${otherBatchId}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
+  });
+
+  it('batch detail resolves a batch whose schedule has NO dispatch run (pre-ledger / ZM_MANUAL)', async () => {
+    // `work_schedules.run_id` is nullable, and on real data most live batches have none — they predate
+    // the ledger or came from the manual path. A batch is addressed by its own id, so it must resolve
+    // regardless, reporting `runId: null` rather than 404ing out of the drill-down.
+    await prisma.workSchedule.updateMany({ where: { runId }, data: { runId: null } });
+    try {
+      const token = await login('ops.head@fsm.test');
+      const res = await request(app.getHttpServer())
+        .get(`/api/batches/${zmBatchId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+      expect(res.body.batchId).toBe(zmBatchId.toString());
+      expect(res.body.runId).toBeNull();
+      expect(res.body.seId).toBe(seZm);
+      // The tickets still render; only the run-keyed trace is unavailable.
+      expect(res.body.rows).toHaveLength(1);
+      expect(res.body.rows[0].hasTrace).toBe(false);
+    } finally {
+      await prisma.workSchedule.updateMany({ where: { runId: null, seId: { in: [seZm, seOther] } }, data: { runId } });
+    }
+  });
+
+  it('a ZM is still zone-clamped on a run-less batch', async () => {
+    // The zone clamp must hang off the schedule's zone, not the run — losing it on the run-less path
+    // would open foreign-zone batches to a ZM.
+    await prisma.workSchedule.updateMany({ where: { runId }, data: { runId: null } });
+    try {
+      const token = await login('zm.north@fsm.test');
+      await request(app.getHttpServer())
+        .get(`/api/batches/${otherBatchId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(404);
+      await request(app.getHttpServer())
+        .get(`/api/batches/${zmBatchId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+    } finally {
+      await prisma.workSchedule.updateMany({ where: { runId: null, seId: { in: [seZm, seOther] } }, data: { runId } });
+    }
   });
 
   it('per-ticket trace: precedence-led decision record, ZM-readable in own zone', async () => {

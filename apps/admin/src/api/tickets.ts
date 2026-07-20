@@ -16,6 +16,8 @@ export interface TicketRow {
   companyName?: string | null;
   /** Vehicle registration number — the operator-facing vehicle identity. */
   vehicleNo?: string | null;
+  /** Transporter operating the vehicle (per-vehicle-per-ticket); null when unlinked or not yet mirrored. */
+  transporterName?: string | null;
   companyTier: string;
   assignmentState: string;
   /** The SE holding the ticket's active day-plan batch (null while UNASSIGNED). */
@@ -23,6 +25,9 @@ export interface TicketRow {
   assignedSeName?: string | null;
   batchId?: string | null;
   scheduleId?: string | null;
+  /** Dispatch run behind the batch's schedule — with `batchId`, links to the batch-assignment page.
+   * Null when the schedule predates the dispatch ledger. */
+  runId?: string | null;
   /** True when the assignment was ZM-overridden (batch or schedule OVERRIDDEN). */
   overridden?: boolean;
   slaBucket: string | null;

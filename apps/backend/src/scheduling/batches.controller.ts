@@ -2,6 +2,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Get,
   HttpCode,
   NotFoundException,
   Param,
@@ -13,17 +14,42 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
+import { DispatchTransparencyQueryService, type DispatchBatchDetail } from './dispatch-transparency-query.service';
 import { OverrideService, type OverrideCommand, type OverrideOutcome } from './override.service';
 
+const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
+
 /**
- * The `/api/batches/*` ZM override surface (Issue 13a, LLD §5.4). One endpoint dispatches every
- * override action to the engine; each commits immediately and flips the batch to OVERRIDDEN. Manager-
- * roled and zone-scoped (the engine resolves scope and returns NOT_FOUND for out-of-zone batches).
+ * The `/api/batches/*` surface. The ZM override endpoint (Issue 13a, LLD §5.4) dispatches every
+ * override action to the engine; each commits immediately and flips the batch to OVERRIDDEN. The
+ * transparency read (Issue 123) resolves a batch BY ITS OWN ID — the run is derived, not required,
+ * because most live batches have no `run_id` at all. Both are manager-roled and zone-scoped (a ZM
+ * gets NOT_FOUND for an out-of-zone batch).
  */
 @Controller('batches')
 @UseGuards(AuthGuard, RoleGuard)
 export class BatchesController {
-  constructor(private readonly override: OverrideService) {}
+  constructor(
+    private readonly override: OverrideService,
+    private readonly query: DispatchTransparencyQueryService,
+  ) {}
+
+  @Get(':batchId')
+  @Roles(...MANAGER_ROLES)
+  async batchDetail(
+    @CurrentUser() user: AccessTokenClaims,
+    @Param('batchId') batchId: string,
+  ): Promise<DispatchBatchDetail> {
+    let id: bigint;
+    try {
+      id = BigInt(batchId);
+    } catch {
+      throw new NotFoundException({ code: 'DISPATCH_BATCH_NOT_FOUND' });
+    }
+    const detail = await this.query.getBatchDetail(id, { role: user.role, zoneId: user.zone_id });
+    if (!detail) throw new NotFoundException({ code: 'DISPATCH_BATCH_NOT_FOUND' });
+    return detail;
+  }
 
   @Post(':id/override')
   @HttpCode(200)

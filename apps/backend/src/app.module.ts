@@ -57,6 +57,7 @@ import { SchedulingModule } from './scheduling/scheduling.module';
 import { BusinessSweepSchedulerModule } from './scheduling/business-sweep-scheduler.module';
 import { SchedulesController } from './scheduling/schedules.controller';
 import { BatchesController } from './scheduling/batches.controller';
+import { DispatchRunsController } from './scheduling/dispatch-runs.controller';
 import { IntradayUpdatesController } from './scheduling/intraday-updates.controller';
 import { IntradayModule } from './intraday/intraday.module';
 import { CrossZoneModule } from './cross-zone/cross-zone.module';
@@ -140,6 +141,7 @@ import { ZonesController } from './zones/zones.controller';
     InstallController,
     SchedulesController,
     BatchesController,
+    DispatchRunsController,
     IntradayUpdatesController,
     SharedPoolController,
     SePlannerController,

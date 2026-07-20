@@ -23,6 +23,9 @@ export interface TicketView {
   vehicleId: string | null;
   /** Vehicle registration number (`vehicles.vehicle_no`) — the operator-facing identity. */
   vehicleNo: string | null;
+  /** Transporter operating the vehicle (`vehicles.transporter → transporters.name`). Null when the
+   * vehicle is unlinked or its transporter has not been mirrored from AutoPlant yet. */
+  transporterName: string | null;
   plantId: string;
   /** Plant display name (may be an AutoPlant short code — the UI formats it). */
   plantName: string | null;
@@ -36,6 +39,9 @@ export interface TicketView {
   /** Active batch / schedule the ticket sits in (null while UNASSIGNED). */
   batchId: string | null;
   scheduleId: string | null;
+  /** Dispatch run that produced the batch's schedule — links to the batch-assignment drill-down. Null
+   * when the schedule predates the dispatch ledger (run_id is nullable). */
+  runId: string | null;
   /** True when the assignment was ZM-overridden (batch or schedule status OVERRIDDEN). */
   overridden: boolean;
   slaBucket: SlaBucket | null;
@@ -129,12 +135,12 @@ const SEVERITY_RANK = Prisma.sql`CASE ds.sla_bucket
 const SELECT_COLUMNS = Prisma.sql`
   t.ticket_id::text AS "ticketId", t.work_type::text AS "workType", t.status::text AS "status",
   t.failure_cycle_id::text AS "failureCycleId", t.device_id::text AS "deviceId",
-  t.vehicle_id::text AS "vehicleId", v.vehicle_no AS "vehicleNo",
+  t.vehicle_id::text AS "vehicleId", v.vehicle_no AS "vehicleNo", tr.name AS "transporterName",
   t.plant_id::text AS "plantId", p.name AS "plantName",
   t.company_id::text AS "companyId", c.name AS "companyName",
   t.company_tier::text AS "companyTier", t.assignment_state::text AS "assignmentState",
   asg.se_id::text AS "assignedSeId", asg.se_name AS "assignedSeName",
-  asg.batch_id::text AS "batchId", asg.schedule_id::text AS "scheduleId",
+  asg.batch_id::text AS "batchId", asg.schedule_id::text AS "scheduleId", asg.run_id::text AS "runId",
   COALESCE(asg.batch_status = 'OVERRIDDEN' OR asg.schedule_status = 'OVERRIDDEN', false) AS "overridden",
   ds.sla_bucket::text AS "slaBucket", ds.latest_gps_datetime AS "latestGpsDatetime",
   t.repeat_failure AS "repeatFailure",
@@ -155,9 +161,10 @@ const FROM_JOINS = Prisma.sql`
   JOIN plants p ON p.plant_id = t.plant_id
   LEFT JOIN company_master c ON c.company_id = t.company_id
   LEFT JOIN vehicles v ON v.vehicle_id = t.vehicle_id
+  LEFT JOIN transporters tr ON tr.transporter_id = v.transporter_id
   LEFT JOIN LATERAL (
     SELECT pba.batch_id, pba.status AS batch_status, pba.se_id, u.name AS se_name,
-           ws.schedule_id, ws.status AS schedule_status
+           ws.schedule_id, ws.status AS schedule_status, ws.run_id
     FROM batch_assignment_tickets bat
     JOIN plant_batch_assignments pba ON pba.batch_id = bat.batch_id
     JOIN work_schedules ws ON ws.schedule_id = pba.schedule_id
@@ -175,6 +182,7 @@ type RawRow = {
   deviceId: string;
   vehicleId: string | null;
   vehicleNo: string | null;
+  transporterName: string | null;
   plantId: string;
   plantName: string | null;
   companyId: string;
@@ -185,6 +193,7 @@ type RawRow = {
   assignedSeName: string | null;
   batchId: string | null;
   scheduleId: string | null;
+  runId: string | null;
   overridden: boolean;
   slaBucket: SlaBucket | null;
   latestGpsDatetime: Date | null;
@@ -204,6 +213,7 @@ const toView = (r: RawRow): TicketView => ({
   deviceId: r.deviceId,
   vehicleId: r.vehicleId,
   vehicleNo: r.vehicleNo,
+  transporterName: r.transporterName,
   plantId: r.plantId,
   plantName: r.plantName,
   companyId: r.companyId,
@@ -214,6 +224,7 @@ const toView = (r: RawRow): TicketView => ({
   assignedSeName: r.assignedSeName,
   batchId: r.batchId,
   scheduleId: r.scheduleId,
+  runId: r.runId,
   overridden: r.overridden,
   slaBucket: r.slaBucket,
   latestGpsDatetime: r.latestGpsDatetime ? r.latestGpsDatetime.toISOString() : null,

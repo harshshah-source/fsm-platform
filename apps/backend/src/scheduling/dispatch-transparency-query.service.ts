@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ZmScope } from './zm-schedule-query.service';
 
@@ -76,11 +77,26 @@ export interface DispatchUnassignableRow {
   dropCounts: Record<string, number>;
 }
 
+/**
+ * Fleet context for a plant that received dispatch in this zone — the same device-health / assignment
+ * signals the Company/Plant Overview shows, so a manager reads a plant's standing without leaving the
+ * run. Device counts come from `device_states`; assigned/unassigned are the plant's tickets by
+ * `assignment_state`. Keyed by plantId on the zone detail (not per batch — a plant-level value).
+ */
+export interface PlantDeviceStats {
+  totalDevices: number;
+  inactiveDevices: number;
+  assignedDevices: number;
+  unassignedDevices: number;
+}
+
 export interface DispatchZoneDetail {
   runId: string;
   zone: DispatchRunZoneCard;
   batches: DispatchBatchRow[];
   unassignable: DispatchUnassignableRow[];
+  /** plantId → fleet device stats for every plant dispatched in this zone. */
+  plantStats: Record<string, PlantDeviceStats>;
 }
 
 export interface DispatchAssignmentRow {
@@ -108,7 +124,9 @@ export interface DispatchAssignmentRow {
 }
 
 export interface DispatchBatchDetail {
-  runId: string;
+  /** The run behind the batch's schedule. Null for pre-ledger / ZM_MANUAL schedules — the batch is
+   * addressed by its own id, so it still resolves; only the run-keyed trace is unavailable. */
+  runId: string | null;
   batchId: string;
   scheduleId: string;
   zoneId: string;
@@ -290,6 +308,9 @@ export class DispatchTransparencyQueryService {
       orderBy: { seId: 'asc' },
     });
 
+    const plantIds = [...new Set(schedules.flatMap((s) => s.batches.map((b) => b.plantId)))];
+    const plantStats = await this.plantDeviceStats(plantIds);
+
     const batches: DispatchBatchRow[] = schedules.flatMap((s) => {
       const used = s.batches.reduce((n, b) => n + b.tickets.length, 0);
       return s.batches.map((b) => ({
@@ -347,15 +368,61 @@ export class DispatchTransparencyQueryService {
       },
       batches,
       unassignable,
+      plantStats,
     };
   }
 
-  async getBatchDetail(runId: bigint, batchId: bigint, scope: ZmScope): Promise<DispatchBatchDetail | null> {
+  /**
+   * Fleet device stats for the given plants (device totals + inactive from `device_states`; assigned /
+   * unassigned from the plants' tickets by `assignment_state`) — the plant-standing context surfaced on
+   * the zone's companies-and-plants overview. One grouped query each; empty in ⇒ empty out.
+   */
+  private async plantDeviceStats(plantIds: bigint[]): Promise<Record<string, PlantDeviceStats>> {
+    if (plantIds.length === 0) return {};
+    const ids = Prisma.join(plantIds);
+    const devices = await this.prisma.$queryRaw<{ plantId: string; total: number; inactive: number }[]>(Prisma.sql`
+      SELECT ds.plant_id::text AS "plantId",
+             COUNT(*)::int AS "total",
+             COUNT(*) FILTER (WHERE ds.is_inactive)::int AS "inactive"
+      FROM device_states ds
+      WHERE ds.plant_id IN (${ids})
+      GROUP BY ds.plant_id`);
+    const assign = await this.prisma.$queryRaw<{ plantId: string; assigned: number; unassigned: number }[]>(Prisma.sql`
+      SELECT t.plant_id::text AS "plantId",
+             COUNT(*) FILTER (WHERE t.assignment_state = 'FORMALLY_ASSIGNED')::int AS "assigned",
+             COUNT(*) FILTER (WHERE t.assignment_state = 'UNASSIGNED')::int AS "unassigned"
+      FROM tickets t
+      WHERE t.plant_id IN (${ids})
+      GROUP BY t.plant_id`);
+
+    const stats: Record<string, PlantDeviceStats> = {};
+    const at = (plantId: string) =>
+      (stats[plantId] ??= { totalDevices: 0, inactiveDevices: 0, assignedDevices: 0, unassignedDevices: 0 });
+    for (const d of devices) {
+      const s = at(d.plantId);
+      s.totalDevices = d.total;
+      s.inactiveDevices = d.inactive;
+    }
+    for (const a of assign) {
+      const s = at(a.plantId);
+      s.assignedDevices = a.assigned;
+      s.unassignedDevices = a.unassigned;
+    }
+    return stats;
+  }
+
+  /**
+   * A batch addressed by its own id — NOT via its run. Most live batches carry no `run_id` (their
+   * schedule predates the ledger, or came from the manual path), and a run-scoped lookup left those
+   * unreachable from every drill-down. The run is derived from the schedule and reported for the
+   * breadcrumb + trace reads; the ZM clamp hangs off the schedule's zone, which every batch has.
+   */
+  async getBatchDetail(batchId: bigint, scope: ZmScope): Promise<DispatchBatchDetail | null> {
     const zoneClamp = this.zmZone(scope);
     const batch = await this.prisma.plantBatchAssignment.findFirst({
-      where: { batchId, schedule: { runId, ...(zoneClamp !== null ? { zoneId: zoneClamp } : {}) } },
+      where: { batchId, ...(zoneClamp !== null ? { schedule: { zoneId: zoneClamp } } : {}) },
       include: {
-        schedule: { select: { scheduleId: true, zoneId: true } },
+        schedule: { select: { scheduleId: true, zoneId: true, runId: true } },
         plant: { select: { name: true } },
         engineer: { select: { user: { select: { name: true } } } },
         tickets: {
@@ -377,6 +444,9 @@ export class DispatchTransparencyQueryService {
     });
     if (!batch) return null;
 
+    // `runId: null` reads as `run_id IS NULL`, which is exactly right: a run-less schedule's
+    // recommendations are themselves run-less, so the rank/status still resolve for pre-ledger rows.
+    const runId = batch.schedule.runId;
     const ticketIds = batch.tickets.map((t) => t.ticket.ticketId);
     const recs = await this.prisma.recommendation.findMany({
       where: { runId, ticketId: { in: ticketIds } },
@@ -391,7 +461,7 @@ export class DispatchTransparencyQueryService {
     const recByTicket = new Map(recs.map((r) => [r.ticketId, r]));
 
     return {
-      runId: runId.toString(),
+      runId: runId?.toString() ?? null,
       batchId: batch.batchId.toString(),
       scheduleId: batch.schedule.scheduleId.toString(),
       zoneId: batch.schedule.zoneId.toString(),

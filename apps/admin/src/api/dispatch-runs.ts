@@ -100,11 +100,21 @@ export interface DispatchUnassignableRow {
   dropCounts: Record<string, number>;
 }
 
+/** Fleet device stats for a plant dispatched in a zone — device totals/inactive + assignment split. */
+export interface PlantDeviceStats {
+  totalDevices: number;
+  inactiveDevices: number;
+  assignedDevices: number;
+  unassignedDevices: number;
+}
+
 export interface DispatchZoneDetail {
   runId: string;
   zone: DispatchRunZoneCard;
   batches: DispatchBatchRow[];
   unassignable: DispatchUnassignableRow[];
+  /** plantId → fleet device stats for every plant dispatched in this zone. */
+  plantStats: Record<string, PlantDeviceStats>;
 }
 
 export interface DispatchAssignmentRow {
@@ -127,7 +137,9 @@ export interface DispatchAssignmentRow {
 }
 
 export interface DispatchBatchDetail {
-  runId: string;
+  /** The run behind the batch's schedule — null for pre-ledger / ZM_MANUAL schedules. The batch still
+   * resolves (it is addressed by its own id); only the run-keyed decision trace is unavailable. */
+  runId: string | null;
   batchId: string;
   scheduleId: string;
   zoneId: string;
@@ -198,8 +210,8 @@ export const apiDispatchRunDetail = (runId: string) => get<DispatchRunDetail>(`/
 export const apiDispatchZoneDetail = (runId: string, zoneId: string) =>
   get<DispatchZoneDetail>(`/dispatch-runs/${runId}/zones/${zoneId}`);
 
-export const apiDispatchBatchDetail = (runId: string, batchId: string) =>
-  get<DispatchBatchDetail>(`/dispatch-runs/${runId}/batches/${batchId}`);
+/** A batch is addressed by its own id, not via its run — most live batches have no `run_id`. */
+export const apiDispatchBatchDetail = (batchId: string) => get<DispatchBatchDetail>(`/batches/${batchId}`);
 
 export const apiDispatchTicketTrace = (runId: string, ticketId: string) =>
   get<DispatchTicketTrace>(`/dispatch-runs/${runId}/tickets/${ticketId}/trace`);

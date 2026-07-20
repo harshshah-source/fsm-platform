@@ -111,8 +111,10 @@ export function AppRoutes() {
               </RoleRoute>
             }
           />
+          {/* A batch is addressed by its own id, NOT under a run: most live batches have no run_id
+              (pre-ledger / ZM_MANUAL), and a run-scoped path left them unreachable. */}
           <Route
-            path="/dispatch-runs/:runId/batches/:batchId"
+            path="/batches/:batchId"
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <DispatchBatchDetailPage />
