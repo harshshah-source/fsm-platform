@@ -49,10 +49,13 @@ mode, a one-line reason, and the supporting fact in human terms — e.g. *"Catch
 devices we track in your zone are currently quiet, above the level where the system switches to
 Catch-up."* No numbers presented as knobs; no percentage/threshold vocabulary.
 
-**OH + CSM dashboards — cross-zone (visibility).** A compact all-zones overview (one row/chip per
-zone) showing each zone's current mode at a glance, so an OH can see which zones are in Catch-up
-without opening each. Read-only; clicking a zone may deep-link to that zone's existing dashboard/queue
-(reuse existing navigation — do not invent a new drill-down).
+**OH + CSM dashboards — cross-zone (visibility).** A **sortable table**, one row per zone, showing each
+zone's current mode at a glance, so an OH can order the zones (worst-first) and see which are in Catch-up
+without opening each. Read-only. (**Table, not a chip strip:** the dashboard band is ~200px tall — a
+strip fits ~5 zones and wraps/overflows beyond that; a table row-per-zone reads cleanly at 5 zones today
+and scales past 5 with growth headroom, and a sortable header supports triage.) Rows are non-interactive:
+there is no existing per-zone OH route to deep-link into, and the issue says reuse existing navigation
+rather than invent a drill-down.
 
 ## Backend — a thin read seam (not plumbing)
 
@@ -82,8 +85,8 @@ The engine is not touched. We expose the signal it already computes.
       rendered string. Unit-tested.
 - [ ] ZM own-zone mode card — placed per the reference dashboard chrome (see Surfacing rule); matches
       the card/section style of its neighbours, no redesign. Renders honestly when counts are 0/absent.
-- [ ] OH + CSM cross-zone mode overview (one row/chip per zone). Reuses the existing zone list; a zone
-      row deep-links via existing navigation (no new page).
+- [ ] OH + CSM cross-zone mode **table** (sortable header row; one row per zone). Reuses the existing
+      zone list; rows non-interactive (no per-zone OH route to deep-link into).
 - [ ] Tests: the card shows the plain label + reason (and never the raw enum/threshold words); the OH
       overview lists every zone with its mode; an empty/zero state renders without crashing.
 
@@ -92,7 +95,9 @@ The engine is not touched. We expose the signal it already computes.
 1. **Backend read seam** — expose mode + counts (`operatingModeForZone`/`operatingModes`) +
    `GET /api/dashboard/operating-mode`, ZM-clamped / OH-all, + tests. Ships nothing visible; unblocks 2–3.
 2. **ZM own-zone visibility card** — the plain-language card on the ZM dashboard + the mapping util + tests.
-3. **OH/CSM cross-zone overview** — the all-zones mode strip on the OH/CSM dashboards + tests.
+3. **OH/CSM cross-zone table** — the all-zones sortable mode table on the OH/CSM dashboards + tests.
+   (Table, not a chip strip — ~200px dashboard band fits ~5 zones; a table scales past 5 with growth
+   headroom and a sortable header supports worst-first triage.)
 
 (2 and 3 both consume 1; either can ship first after 1. Each slice is independently test-green and
 tsc-clean per the repo's per-slice TDD report format.)
