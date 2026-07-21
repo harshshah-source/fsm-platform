@@ -509,7 +509,9 @@ POSTs) drive identical code paths with no cron.
 **Backend**: HS256 JWT `{user_id, role, zone_id}`, 15-min access (`token.service.ts:19`), 30-day
 single-use rotating refresh with reuse detection (`refresh-token-store.ts:15-32`) — but both stores
 are **in-memory** (`user-store.ts`), so every restart drops all sessions and users; DB-seeded users
-cannot log in (#91). ~~`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret~~ **closed by #98
+cannot log in (#91). The dev seed now carries **one ZM per operational zone** — `zm.north`/`zm.south`/
+`zm.east`/`zm.west` (zones 1–4) — plus the OH/CSM/WM/SE accounts (#133, 2026-07-20); the guard chain
+clamps each ZM to their `zone_id`. ~~`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret~~ **closed by #98
 (done 2026-07-12, 4 slices `25a46d4`…`55183e6`): fail-fast boot config (no JWT fallback), public
 liveness/readiness probes, graceful shutdown + fatal bootstrap guard, global exception filter with
 error correlation ids (pino swap deliberately not adopted — Nest Logger retained).**

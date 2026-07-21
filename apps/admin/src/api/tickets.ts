@@ -14,6 +14,8 @@ export interface TicketRow {
   plantName?: string | null;
   companyId: string;
   companyName?: string | null;
+  zoneId?: string | null;
+  zoneName?: string | null;
   /** Vehicle registration number — the operator-facing vehicle identity. */
   vehicleNo?: string | null;
   /** Transporter operating the vehicle (per-vehicle-per-ticket); null when unlinked or not yet mirrored. */

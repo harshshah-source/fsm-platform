@@ -133,6 +133,33 @@ interface ZoneScope {
   zoneId: number | null;
 }
 
+/** Fleet-activity trend ranges (Issue 134). MAX = all history we have. */
+export type ActivityTrendRange = '1D' | '7D' | '1M' | '1Y' | 'MAX';
+/** Bucket granularity chosen per range so the point count stays bounded. */
+export type ActivityTrendBucket = 'hour' | 'day' | 'month';
+
+export interface ActivityTrendPoint {
+  /** UTC-truncated bucket start, `YYYY-MM-DD HH:MM:SS` (matches Postgres `timestamp::text`). */
+  bucket: string;
+  /** Inactive-device stock (eligible-inactive) — the last snapshot in the bucket, or the live count
+   *  for the current bucket; null when neither exists (no history yet — the sparse-data case). */
+  inactive: number | null;
+  /** TROUBLESHOOT tickets CREATED in the bucket (flow). */
+  troubleshoot: number;
+  /** INSTALL tickets CREATED in the bucket (flow). */
+  installation: number;
+}
+
+export interface ActivityTrendReport {
+  range: ActivityTrendRange;
+  from: string;
+  to: string;
+  bucket: ActivityTrendBucket;
+  /** Resolved scope: a ZM's own zone, an OH/CSM's requested zone, or null for pan-India. */
+  zoneId: number | null;
+  points: ActivityTrendPoint[];
+}
+
 type GroupedRow = { zoneId: string; zoneName: string; slaBucket: string; count: number };
 
 type CompanyPlantGroupedRow = {
@@ -451,4 +478,156 @@ export class DashboardService {
         AND fc.sla_paused_at < ${cutoff} ${zoneFilter}`);
     return rows[0]?.n ?? 0;
   }
+
+  /**
+   * Fleet-activity trend (Issue 134): three time series — inactive-device stock, TROUBLESHOOT tickets
+   * created, INSTALL tickets created — bucketed by hour/day/month over the requested range. A ZM is
+   * clamped to their own zone; an OH/CSM may pass `zoneId` (zone-wise) or omit it (pan-India). The
+   * inactive series reads `soft_inactive_count_history` (twice-daily snapshots), topping the current
+   * bucket up with the live count; troubleshoot/installation are grouped over `tickets.created_at`.
+   * Buckets with no ticket activity read 0; buckets with no inactive snapshot read null (sparse data).
+   */
+  async activityTrend(
+    scope: ZoneScope,
+    opts: { range: ActivityTrendRange; zoneId: number | null },
+    now: Date = new Date(),
+  ): Promise<ActivityTrendReport> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : opts.zoneId;
+    const unit = bucketForRange(opts.range);
+    const unitLit = Prisma.raw(`'${unit}'`); // whitelist-derived; safe to inline (must match DISTINCT ON)
+
+    const ticketZone = restrictZone !== null ? Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+    const histZone = restrictZone !== null ? Prisma.sql`AND h.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+    const dsZone = restrictZone !== null ? Prisma.sql`AND p.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+
+    const from =
+      opts.range === 'MAX'
+        ? (await this.earliestActivity(ticketZone, histZone)) ?? windowStart('1Y', now)
+        : windowStart(opts.range, now);
+
+    // TROUBLESHOOT / INSTALL tickets created per bucket.
+    const ticketRows = await this.prisma.$queryRaw<{ bucket: string; workType: string; count: number }[]>(Prisma.sql`
+      SELECT date_trunc(${unitLit}, t.created_at AT TIME ZONE 'UTC')::text AS "bucket",
+             t.work_type::text AS "workType", COUNT(*)::int AS "count"
+      FROM tickets t
+      JOIN plants p ON p.plant_id = t.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      WHERE t.created_at >= ${from} AND t.work_type IN ('TROUBLESHOOT', 'INSTALL')
+        ${ticketZone} ${EXCLUDE_DEACTIVATED_PLANTS}
+      GROUP BY 1, t.work_type`);
+
+    // Inactive stock: the last snapshot per zone per bucket, summed across the zones in scope.
+    const histRows = await this.prisma.$queryRaw<{ bucket: string; inactive: number }[]>(Prisma.sql`
+      WITH snap AS (
+        SELECT DISTINCT ON (h.zone_id, date_trunc(${unitLit}, h.captured_at AT TIME ZONE 'UTC'))
+               date_trunc(${unitLit}, h.captured_at AT TIME ZONE 'UTC') AS b,
+               h.zone_id, h.soft_inactive_count AS cnt
+        FROM soft_inactive_count_history h
+        WHERE h.captured_at >= ${from} ${histZone}
+        ORDER BY h.zone_id, date_trunc(${unitLit}, h.captured_at AT TIME ZONE 'UTC'), h.captured_at DESC
+      )
+      SELECT b::text AS "bucket", SUM(cnt)::int AS "inactive"
+      FROM snap GROUP BY b`);
+
+    // Live inactive count (same eligible-inactive definition as the snapshot) for the current bucket.
+    const liveRows = await this.prisma.$queryRaw<{ inactive: number }[]>(Prisma.sql`
+      SELECT COUNT(*) FILTER (WHERE ds.is_inactive = true AND ds.eligible_for_uptime = true)::int AS "inactive"
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      WHERE true ${dsZone} ${EXCLUDE_DEACTIVATED_PLANTS}`);
+    const liveInactive = liveRows[0]?.inactive ?? 0;
+
+    const troubleshootByBucket = new Map<string, number>();
+    const installByBucket = new Map<string, number>();
+    for (const r of ticketRows) {
+      (r.workType === 'INSTALL' ? installByBucket : troubleshootByBucket).set(r.bucket, r.count);
+    }
+    const inactiveByBucket = new Map(histRows.map((r) => [r.bucket, r.inactive]));
+    // The current bucket's live value wins over any earlier snapshot in the same bucket.
+    inactiveByBucket.set(pgTimestamp(truncateUtc(now, unit)), liveInactive);
+
+    const points: ActivityTrendPoint[] = enumerateBuckets(from, now, unit).map((d) => {
+      const key = pgTimestamp(d);
+      return {
+        bucket: key,
+        inactive: inactiveByBucket.has(key) ? inactiveByBucket.get(key)! : null,
+        troubleshoot: troubleshootByBucket.get(key) ?? 0,
+        installation: installByBucket.get(key) ?? 0,
+      };
+    });
+
+    return {
+      range: opts.range,
+      from: from.toISOString(),
+      to: now.toISOString(),
+      bucket: unit,
+      zoneId: restrictZone,
+      points,
+    };
+  }
+
+  /** Earliest ticket/snapshot timestamp in scope — the MAX-range lower bound; null when there is none. */
+  private async earliestActivity(ticketZone: Prisma.Sql, histZone: Prisma.Sql): Promise<Date | null> {
+    const rows = await this.prisma.$queryRaw<{ earliest: Date | null }[]>(Prisma.sql`
+      SELECT LEAST(
+        (SELECT MIN(t.created_at) FROM tickets t
+           JOIN plants p ON p.plant_id = t.plant_id
+           JOIN zones z ON z.zone_id = p.zone_id
+           WHERE t.work_type IN ('TROUBLESHOOT', 'INSTALL') ${ticketZone} ${EXCLUDE_DEACTIVATED_PLANTS}),
+        (SELECT MIN(h.captured_at) FROM soft_inactive_count_history h WHERE true ${histZone})
+      ) AS "earliest"`);
+    return rows[0]?.earliest ?? null;
+  }
+}
+
+// ---- Activity-trend bucketing helpers (Issue 134) ---------------------------------------------
+
+/** The bucket granularity for a range — coarser for longer windows so the point count stays sane. */
+function bucketForRange(range: ActivityTrendRange): ActivityTrendBucket {
+  switch (range) {
+    case '1D':
+      return 'hour';
+    case '7D':
+    case '1M':
+      return 'day';
+    case '1Y':
+    case 'MAX':
+      return 'month';
+  }
+}
+
+/** The lower bound for a fixed range, relative to `now`. */
+function windowStart(range: Exclude<ActivityTrendRange, 'MAX'> | '1Y', now: Date): Date {
+  const day = 86_400_000;
+  const back: Record<string, number> = { '1D': day, '7D': 7 * day, '1M': 30 * day, '1Y': 365 * day };
+  return new Date(now.getTime() - (back[range] ?? 7 * day));
+}
+
+/** Truncate a Date to a UTC bucket start (hour / day / month). */
+function truncateUtc(d: Date, unit: ActivityTrendBucket): Date {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  if (unit === 'month') return new Date(Date.UTC(y, m, 1));
+  if (unit === 'day') return new Date(Date.UTC(y, m, d.getUTCDate()));
+  return new Date(Date.UTC(y, m, d.getUTCDate(), d.getUTCHours()));
+}
+
+/** `YYYY-MM-DD HH:MM:SS` in UTC — matches Postgres `date_trunc(...)::text` so the maps key-match. */
+function pgTimestamp(d: Date): string {
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+/** Every bucket start from `from` to `to` (inclusive) at the given granularity; capped defensively. */
+function enumerateBuckets(from: Date, to: Date, unit: ActivityTrendBucket): Date[] {
+  const out: Date[] = [];
+  let cur = truncateUtc(from, unit);
+  const end = truncateUtc(to, unit);
+  for (let guard = 0; cur.getTime() <= end.getTime() && guard < 5000; guard++) {
+    out.push(cur);
+    cur =
+      unit === 'month'
+        ? new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1))
+        : new Date(cur.getTime() + (unit === 'hour' ? 3_600_000 : 86_400_000));
+  }
+  return out;
 }

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
+import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
 import { EscalationQueueList } from './EscalationQueueList';
@@ -13,7 +14,7 @@ import type { DashboardData } from './ZmDashboard';
  * pan-zone KPI strip, the cross-zone Escalation Queue, the Zone Performance Scorecard, and the
  * Company/Plant overview — all over the existing role-scoped aggregations (CSM receives every zone).
  */
-export function CentralDashboard({ zones, companyPlants, critical, actions, fleetUptime, zoneUptime, error }: DashboardData) {
+export function CentralDashboard({ zones, companyPlants, critical, actions, fleetUptime, zoneUptime, plantUptime, error }: DashboardData) {
   const metrics: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
     const escalations = critical.reduce((s, g) => s + g.tickets.length, 0);
@@ -56,6 +57,9 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
         </p>
       )}
 
+      {/* Inactive vs Troubleshoot vs Installation over time (Issue 134) — Pan-India / Zone-wise. */}
+      <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone />
+
       {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),
           over the cross-zone rows the CSM already receives. Rendered above the Escalation Queue —
           the queue can run to thousands of rows, and the fleet picture must stay above the fold. */}
@@ -73,7 +77,7 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
 
       <EscalationQueueList groups={critical} />
       <ScorecardTable rows={zones} zoneUptime={zoneUptime} />
-      <CompanyPlantTable rows={companyPlants} />
+      <CompanyPlantTable rows={companyPlants} plantUptime={plantUptime} />
     </div>
   );
 }

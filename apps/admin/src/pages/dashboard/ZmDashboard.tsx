@@ -13,8 +13,8 @@ import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
+import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
-import { CriticalQueue } from './CriticalQueue';
 import { DashboardHero } from './DashboardHero';
 import { ZoneOverviewTable } from './ZoneOverviewTable';
 
@@ -29,6 +29,8 @@ export interface DashboardData {
   fleetUptime: number | null;
   /** Per-zone current-month uptime %, keyed by zoneId — powers the Scorecard's Fleet Uptime column. */
   zoneUptime?: Map<string, number>;
+  /** Per-plant current-month uptime %, keyed by plantId — Company/Plant Overview Fleet Uptime % (Issue 135). */
+  plantUptime?: Map<string, number>;
   engineers: ZoneEngineer[];
   error: string | null;
   onAssigned: () => void;
@@ -44,13 +46,11 @@ export interface DashboardData {
 export function ZmDashboard({
   zones,
   companyPlants,
-  critical,
   actions,
   fleet,
   fleetUptime,
-  engineers,
+  plantUptime,
   error,
-  onAssigned,
 }: DashboardData) {
   const navigate = useNavigate();
   // KPI strip derived from already-loaded data. Uptime comes from the Fleet Uptime report (BE-39). The
@@ -110,6 +110,11 @@ export function ZmDashboard({
           {error}
         </p>
       )}
+
+      {/* Inactive vs Troubleshoot vs Installation over time (Issue 134), scoped to the ZM's own zone
+          (the backend clamps) — between the KPI hero and the SLA Bucket Distribution. */}
+      <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone={false} />
+
       <ActionRequiredPanel cards={actions} />
 
       {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),
@@ -127,8 +132,7 @@ export function ZmDashboard({
       </section>
 
       <ZoneOverviewTable rows={zones} />
-      <CompanyPlantTable rows={companyPlants} />
-      <CriticalQueue groups={critical} engineers={engineers} onAssigned={onAssigned} />
+      <CompanyPlantTable rows={companyPlants} plantUptime={plantUptime} />
     </div>
   );
 }

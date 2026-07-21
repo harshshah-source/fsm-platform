@@ -40,6 +40,8 @@ export function ManagerDashboard() {
   const [fleetUptime, setFleetUptime] = useState<number | null>(null);
   // Per-zone current-month uptime %, keyed by zoneId — feeds the Scorecard's Fleet Uptime column.
   const [zoneUptime, setZoneUptime] = useState<Map<string, number>>(new Map());
+  // Per-plant current-month uptime %, keyed by plantId — Company/Plant Overview Fleet Uptime % (Issue 135).
+  const [plantUptime, setPlantUptime] = useState<Map<string, number>>(new Map());
   const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +73,11 @@ export function ManagerDashboard() {
         if (r.fleet?.eligibleDeviceCount > 0) setFleetUptime(r.fleet.uptimePct);
         if (r.rows) setZoneUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct])));
       })
+      .catch(() => undefined);
+    // Per-plant uptime for the Company/Plant Overview Fleet Uptime % column (Issue 135); empty until
+    // the monthly summary is computed, or on a backend without the endpoint (column stays "—").
+    apiFleetUptime({ groupBy: 'plant' })
+      .then((r) => alive && r?.rows && setPlantUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct]))))
       .catch(() => undefined);
     // Zone-SE list feeds the Critical Queue assign picker; failure just leaves it empty.
     apiZoneEngineers()
@@ -110,6 +117,9 @@ export function ManagerDashboard() {
         if (r.rows) setZoneUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct])));
       })
       .catch(() => undefined);
+    apiFleetUptime({ groupBy: 'plant' })
+      .then((r) => r?.rows && setPlantUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct]))))
+      .catch(() => undefined);
   }, []);
 
   const data: DashboardData = {
@@ -120,6 +130,7 @@ export function ManagerDashboard() {
     fleet,
     fleetUptime,
     zoneUptime,
+    plantUptime,
     engineers,
     error,
     onAssigned: refreshCritical,

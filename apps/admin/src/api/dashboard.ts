@@ -113,3 +113,36 @@ export const apiCompanyPlantOverview = (params: { companyId?: string; plantId?: 
 export const apiCriticalQueue = () => get<CriticalQueueGroup[]>('/dashboard/critical-queue');
 
 export const apiActionRequired = () => get<ActionRequiredCard[]>('/dashboard/action-required');
+
+// ---- Fleet-activity trend (Issue 134) ------------------------------------------
+
+export type ActivityTrendRange = '1D' | '7D' | '1M' | '1Y' | 'MAX';
+export type ActivityTrendBucket = 'hour' | 'day' | 'month';
+
+export interface ActivityTrendPoint {
+  /** UTC-truncated bucket start, `YYYY-MM-DD HH:MM:SS`. */
+  bucket: string;
+  /** Inactive-device stock; null when no snapshot exists for the bucket (sparse history). */
+  inactive: number | null;
+  troubleshoot: number;
+  installation: number;
+}
+
+export interface ActivityTrendReport {
+  range: ActivityTrendRange;
+  from: string;
+  to: string;
+  bucket: ActivityTrendBucket;
+  /** Resolved scope: the ZM's zone, an OH/CSM's chosen zone, or null for pan-India. */
+  zoneId: number | null;
+  points: ActivityTrendPoint[];
+}
+
+/** Inactive-device stock vs Troubleshoot vs Installation over time. Omit `zoneId` for pan-India;
+ *  a ZM is clamped to their own zone server-side regardless of what is passed. */
+export const apiActivityTrend = (params: { range: ActivityTrendRange; zoneId?: string | number }) => {
+  const q = new URLSearchParams();
+  q.set('range', params.range);
+  if (params.zoneId !== undefined && params.zoneId !== '') q.set('zoneId', String(params.zoneId));
+  return get<ActivityTrendReport>(`/dashboard/activity-trend?${q.toString()}`);
+};

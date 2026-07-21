@@ -20,10 +20,27 @@ interface StoredUser extends AuthenticatedUser {
 @Injectable()
 export class InMemoryUserStore {
   private readonly users: StoredUser[] = [
+    // One ZM per operational zone (Issue 133). Zone ids follow org-seed SEED_ZONES order:
+    // North=1, South=2, East=3, West=4 (UNZONED=5 has no manager account).
     seedUser('zm.north@fsm.test', 'correct-password', {
       userId: '11111111-1111-1111-1111-111111111111',
       role: 'ZONAL_MANAGER',
       zoneId: 1,
+    }),
+    seedUser('zm.south@fsm.test', 'correct-password', {
+      userId: '11111111-1111-1111-1111-111111111112',
+      role: 'ZONAL_MANAGER',
+      zoneId: 2,
+    }),
+    seedUser('zm.east@fsm.test', 'correct-password', {
+      userId: '11111111-1111-1111-1111-111111111113',
+      role: 'ZONAL_MANAGER',
+      zoneId: 3,
+    }),
+    seedUser('zm.west@fsm.test', 'correct-password', {
+      userId: '11111111-1111-1111-1111-111111111114',
+      role: 'ZONAL_MANAGER',
+      zoneId: 4,
     }),
     seedUser('se.north@fsm.test', 'correct-password', {
       userId: '22222222-2222-2222-2222-222222222222',

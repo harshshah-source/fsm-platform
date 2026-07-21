@@ -53,6 +53,7 @@ describe('Dashboard filters (Issue 06 AC#2/#3)', () => {
 
     await userEvent.type(screen.getByLabelText(/search company, plant or id/i), 'Globex');
     expect(table().queryByText('Acme')).not.toBeInTheDocument();
-    expect(table().getByText('Globex')).toBeInTheDocument();
+    // Matched company auto-expands; "Globex" now shows on its company row and its plant row (Issue 135).
+    expect(table().getAllByText('Globex').length).toBeGreaterThan(0);
   });
 });

@@ -32,6 +32,8 @@ export interface TicketView {
   companyId: string;
   companyName: string | null;
   companyTier: CompanyTier;
+  zoneId: string | null;
+  zoneName: string | null;
   assignmentState: AssignmentState;
   /** The SE holding the ticket's active day-plan batch (null while UNASSIGNED). */
   assignedSeId: string | null;
@@ -138,6 +140,7 @@ const SELECT_COLUMNS = Prisma.sql`
   t.vehicle_id::text AS "vehicleId", v.vehicle_no AS "vehicleNo", tr.name AS "transporterName",
   t.plant_id::text AS "plantId", p.name AS "plantName",
   t.company_id::text AS "companyId", c.name AS "companyName",
+  p.zone_id::text AS "zoneId", z.name AS "zoneName",
   t.company_tier::text AS "companyTier", t.assignment_state::text AS "assignmentState",
   asg.se_id::text AS "assignedSeId", asg.se_name AS "assignedSeName",
   asg.batch_id::text AS "batchId", asg.schedule_id::text AS "scheduleId", asg.run_id::text AS "runId",
@@ -159,6 +162,7 @@ const FROM_JOINS = Prisma.sql`
   LEFT JOIN device_states ds ON ds.device_id = t.device_id
   LEFT JOIN failure_cycles fc ON fc.cycle_id = t.failure_cycle_id
   JOIN plants p ON p.plant_id = t.plant_id
+  LEFT JOIN zones z ON z.zone_id = p.zone_id
   LEFT JOIN company_master c ON c.company_id = t.company_id
   LEFT JOIN vehicles v ON v.vehicle_id = t.vehicle_id
   LEFT JOIN transporters tr ON tr.transporter_id = v.transporter_id
@@ -187,6 +191,8 @@ type RawRow = {
   plantName: string | null;
   companyId: string;
   companyName: string | null;
+  zoneId: string | null;
+  zoneName: string | null;
   companyTier: CompanyTier;
   assignmentState: AssignmentState;
   assignedSeId: string | null;
@@ -218,6 +224,8 @@ const toView = (r: RawRow): TicketView => ({
   plantName: r.plantName,
   companyId: r.companyId,
   companyName: r.companyName,
+  zoneId: r.zoneId,
+  zoneName: r.zoneName,
   companyTier: r.companyTier,
   assignmentState: r.assignmentState,
   assignedSeId: r.assignedSeId,

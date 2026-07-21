@@ -4,6 +4,7 @@ import { DateRangeChips, RollingNumber, type Metric } from '../../components/dat
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
 import { sumCriticalDevices } from '../../lib/slaBucket';
+import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
 import { onIngestionComplete } from './ingestionEvents';
@@ -19,7 +20,7 @@ import type { DashboardData } from './ZmDashboard';
  * Avg Resolution) is removed pending a real backend source (System Efficiency report, BE-42) — no
  * placeholder chrome in the meantime.
  */
-export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zoneUptime, error, onDataRefetch }: DashboardData) {
+export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zoneUptime, plantUptime, error, onDataRefetch }: DashboardData) {
   const navigate = useNavigate();
   // Bumped when a manual ingestion run completes AND its data refetch has resolved — the roll trigger
   // for the KPI odometers (keyed on completion, not on a value diff).
@@ -81,6 +82,13 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
         </p>
       )}
 
+      {/* Inactive vs Troubleshoot vs Installation over time (Issue 134) — between the KPI hero and the
+          SLA Bucket Distribution. OH may switch Pan-India / Zone-wise + pick a zone. */}
+      <ActivityTrendSection
+        zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))}
+        canSelectZone
+      />
+
       <section aria-labelledby="sla-distribution-heading" className="mb-8">
         <h3
           id="sla-distribution-heading"
@@ -96,7 +104,7 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
       </section>
 
       <ScorecardTable rows={zones} zoneUptime={zoneUptime} />
-      <CompanyPlantTable rows={companyPlants} />
+      <CompanyPlantTable rows={companyPlants} plantUptime={plantUptime} />
     </div>
   );
 }

@@ -53,14 +53,20 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
   return [...byCompany.values()];
 }
 
-// company + plant + inactive/total + inactive % + SLA spread + expander (Critical folded into SLA Spread).
-const COLSPAN = 6;
+// company + tier + plants + plant + inactive/total + SLA spread + fleet uptime % (Issue 135).
+const COLSPAN = 7;
 
 /** Inactive devices as a percentage of the fleet at that entity (inactive / total devices). One
  *  decimal; degrades to a dash when the denominator is unknown so it never renders `NaN%`. */
 function inactivePct(inactive: number, total: number | null | undefined): string {
   if (typeof total !== 'number' || !Number.isFinite(total) || total <= 0) return '—';
   return `${((inactive / total) * 100).toFixed(1)}%`;
+}
+
+/** Fleet Uptime % for one plant — one decimal, or a dash when the monthly summary has no value yet
+ *  (the report is empty until an OH recompute runs — Issue 135). */
+function fmtUptime(pct: number | null | undefined): string {
+  return typeof pct === 'number' && Number.isFinite(pct) ? `${pct.toFixed(1)}%` : '—';
 }
 
 type AssignmentFilter = '' | 'FORMALLY_ASSIGNED' | 'UNASSIGNED';
@@ -103,7 +109,14 @@ function SlaSpread({ byBucket }: { byBucket: Record<string, number> }) {
  * needs NO horizontal scrolling. A universal search + assignment-state filter scope the tree and the
  * drill-down; the download exports the whole filtered view as CSV / Excel / PDF.
  */
-export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
+export function CompanyPlantTable({
+  rows,
+  plantUptime,
+}: {
+  rows: CompanyPlantRow[];
+  /** Per-plant current-month Fleet Uptime %, keyed by plantId (Issue 135); `—` shown when absent. */
+  plantUptime?: Map<string, number>;
+}) {
   const [search, setSearch] = useState('');
   const [assignment, setAssignment] = useState<AssignmentFilter>('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('');
@@ -201,20 +214,23 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
     }
   };
 
-  // Download the current filtered view — one flat row per plant.
+  // Download the current filtered view — one flat row per plant (Issue 135: + Plants + Fleet Uptime %).
   const exportOverview = (format: ExportFormat) => {
+    const plantsByCompany = new Map(companies.map((g) => [g.companyId, g.plants.length]));
     const chosen = companies.flatMap((g) => g.plants);
     const headers = [
-      'Company', 'Tier', 'Plant', 'Total inactive', 'Total devices', 'Inactive %', 'Critical',
-      ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b]),
+      'Company', 'Tier', 'Plants', 'Plant', 'Total inactive', 'Total devices', 'Inactive %',
+      'Fleet Uptime %', 'Critical', ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b]),
     ];
     const body = chosen.map((r) => [
       r.companyName,
       r.companyTier,
+      plantsByCompany.get(r.companyId) ?? '',
       formatPlantDisplayName(r.plantName),
       r.totalInactive,
       r.totalDevices,
       inactivePct(r.totalInactive, r.totalDevices),
+      fmtUptime(plantUptime?.get(r.plantId)),
       criticalOnlyCount(r.byBucket),
       ...SLA_BUCKETS.map((b) => r.byBucket[b] ?? 0),
     ]);
@@ -267,11 +283,12 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900">
               <th className={th}>Company</th>
+              <th className={th}>Tier</th>
+              <th className={cn(th, 'text-right')}>Plants</th>
               <th className={th}>Plant</th>
               <th className={cn(th, 'text-right')}>Inactive / Total</th>
-              <th className={cn(th, 'text-right')}>Inactive %</th>
               <th className={th}>SLA Spread</th>
-              <th className={cn(th, 'text-right')}>Devices</th>
+              <th className={cn(th, 'text-right')}>Fleet Uptime %</th>
             </tr>
           </thead>
           <tbody>
@@ -299,18 +316,15 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
                           className={cn('h-4 w-4 shrink-0 text-ink-muted transition-transform', open && 'rotate-90')}
                         />
                         <span className="min-w-0 truncate">{co.companyName}</span>
-                        <TierBadge tier={co.companyTier} className="ml-1 shrink-0 align-middle" />
-                        <span className="ml-1 shrink-0 text-xs font-normal text-ink-muted">
-                          {co.plants.length} plant{co.plants.length === 1 ? '' : 's'}
-                        </span>
                       </span>
                     </td>
+                    <td className="px-4 py-2.5">
+                      <TierBadge tier={co.companyTier} />
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-ink">{co.plants.length}</td>
                     <td className="px-4 py-2.5 text-ink-muted">—</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-ink">
                       {formatInactiveOfTotal(co.totalInactive, co.totalDevices)}
-                    </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-ink-muted">
-                      {inactivePct(co.totalInactive, co.totalDevices)}
                     </td>
                     <td className="px-4 py-2.5">
                       <SlaSpread byBucket={co.byBucket} />
@@ -321,8 +335,23 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
                   {open &&
                     co.plants.map((p) => (
                       <Fragment key={p.plantId}>
-                        <tr className="border-b border-line last:border-b-0">
-                          <td className="px-4 py-2.5 pl-10 text-ink-muted">—</td>
+                        {/* The whole plant row is the toggle for its device sub-table (Issue 135) — no
+                            separate "View devices" button. Keyboard-operable like the ticket rows. */}
+                        <tr
+                          onClick={() => togglePlant(p.plantId)}
+                          tabIndex={0}
+                          aria-expanded={openPlant === p.plantId}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              void togglePlant(p.plantId);
+                            }
+                          }}
+                          className="cursor-pointer border-b border-line last:border-b-0 hover:bg-surface-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50"
+                        >
+                          <td className="px-4 py-2.5 pl-10 text-xs text-ink-muted">{co.companyName}</td>
+                          <td className="px-4 py-2.5" />
+                          <td className="px-4 py-2.5" />
                           <td className="px-4 py-2.5 text-ink">
                             <PlantName code={p.plantName} />
                           </td>
@@ -332,24 +361,14 @@ export function CompanyPlantTable({ rows }: { rows: CompanyPlantRow[] }) {
                           >
                             {formatInactiveOfTotal(p.totalInactive, p.totalDevices)}
                           </td>
-                          <td
-                            data-testid="plant-inactive-pct"
-                            className="px-4 py-2.5 text-right tabular-nums text-ink-muted"
-                          >
-                            {inactivePct(p.totalInactive, p.totalDevices)}
-                          </td>
                           <td className="px-4 py-2.5">
                             <SlaSpread byBucket={p.byBucket} />
                           </td>
-                          <td className="px-4 py-2.5 text-right">
-                            <button
-                              type="button"
-                              onClick={() => togglePlant(p.plantId)}
-                              aria-expanded={openPlant === p.plantId}
-                              className="whitespace-nowrap text-xs font-medium text-brand-700 hover:underline"
-                            >
-                              {openPlant === p.plantId ? 'Hide devices' : 'View devices'}
-                            </button>
+                          <td
+                            data-testid="plant-fleet-uptime"
+                            className="px-4 py-2.5 text-right tabular-nums text-ink-muted"
+                          >
+                            {fmtUptime(plantUptime?.get(p.plantId))}
                           </td>
                         </tr>
                         {openPlant === p.plantId && (
@@ -435,10 +454,16 @@ function OpenDeviceTickets({
   }, [tickets, filter, sort]);
 
   const exportTickets = (format: ExportFormat) => {
-    const headers = ['Device', 'Vehicle No.', 'Transporter', 'Assignment', 'SE', 'Batch', 'SLA', 'Status'];
+    const headers = [
+      'Device', 'Vehicle No.', 'Zone', 'Company', 'Plant', 'Transporter', 'Assignment', 'SE', 'Batch', 'SLA',
+      'Status',
+    ];
     const body = view.map((d) => [
       d.deviceId,
       d.vehicleNo ?? '',
+      d.zoneName ?? '',
+      d.companyName ?? '',
+      d.plantName ? formatPlantDisplayName(d.plantName) : '',
       d.transporterName ?? '',
       d.assignmentState === 'FORMALLY_ASSIGNED' ? 'Assigned' : 'Unassigned',
       d.assignedSeName ?? '',
@@ -522,6 +547,9 @@ function OpenDeviceTickets({
             <tr className="border-b border-chrome-700 bg-chrome-900 text-left text-[11px] uppercase tracking-wider text-white">
               <th className={th}>Device</th>
               <th className={th}>Vehicle No.</th>
+              <th className={th}>Zone</th>
+              <th className={th}>Company</th>
+              <th className={th}>Plant</th>
               <th className={th}>Transporter</th>
               <th className={th}>Assignment</th>
               <th className={th}>Batch</th>
@@ -557,6 +585,11 @@ function OpenDeviceTickets({
                   {d.deviceId}
                 </td>
                 <td className={`${cellPad} font-mono text-xs text-ink`}>{d.vehicleNo ?? '—'}</td>
+                <td className={`${cellPad} text-xs text-ink`}>{d.zoneName ?? '—'}</td>
+                <td className={`${cellPad} text-xs text-ink`}>{d.companyName ?? '—'}</td>
+                <td className={`${cellPad} text-xs text-ink`}>
+                  {d.plantName ? formatPlantDisplayName(d.plantName) : '—'}
+                </td>
                 <td className={`${cellPad} text-xs text-ink`}>{d.transporterName ?? '—'}</td>
                 <td className={cellPad}>
                   {d.assignmentState === 'FORMALLY_ASSIGNED' ? (

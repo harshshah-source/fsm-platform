@@ -112,8 +112,8 @@ describe('Company/Plant Overview (Issue 06 AC#3 / Issue 122)', () => {
     const plantRow = table.getByText('Yard-1').closest('tr')!;
     expect(within(plantRow).getByTestId('bucket-CRITICAL')).toHaveTextContent('2');
 
-    // Drill the plant down to its open device tickets (the third level).
-    await userEvent.click(within(plantRow).getByRole('button', { name: /devices/i }));
+    // Drill the plant down to its open device tickets (Issue 135: the whole plant row is the toggle).
+    await userEvent.click(plantRow);
     expect(await screen.findByText(/5005/)).toBeInTheDocument();
   });
 
@@ -145,7 +145,8 @@ describe('Company/Plant Overview (Issue 06 AC#3 / Issue 122)', () => {
     const table = within(screen.getByRole('table', { name: /company\/plant overview/i }));
     await userEvent.click(table.getByText('Acme Logistics'));
     const plantRow = table.getByText('Yard-1').closest('tr')!;
-    await userEvent.click(within(plantRow).getByRole('button', { name: /devices/i }));
+    // Issue 135: the plant row itself opens the device sub-table (the "View devices" button is gone).
+    await userEvent.click(plantRow);
   };
 
   it('links an assigned device ticket to the batch it belongs to', async () => {
@@ -194,7 +195,8 @@ describe('Company/Plant Overview (Issue 06 AC#3 / Issue 122)', () => {
     // appearance only follows the debounced `/tickets?q=` lookup resolving, unlike Acme's disappearance
     // (which is immediate either way and would make the assertion pass before the lookup completes).
     expect(await table.findByText('Yard-2')).toBeInTheDocument();
-    expect(table.getByText('Globex Freight')).toBeInTheDocument();
+    // Globex now appears on its company row AND (Issue 135) on its expanded plant row's Company cell.
+    expect(table.getAllByText('Globex Freight').length).toBeGreaterThan(0);
     expect(table.queryByText('Acme Logistics')).not.toBeInTheDocument();
   });
 });
