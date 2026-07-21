@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
+import { ZoneOperatingModeTable } from '../../components/dashboard/ZoneOperatingModeTable';
 import { Badge } from '../../components/ui';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
@@ -59,6 +60,11 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
 
       {/* Inactive vs Troubleshoot vs Installation over time (Issue 134) — Pan-India / Zone-wise. */}
       <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone />
+
+      {/* Cross-zone operating mode (Issue 136) — every zone's Catch-up / Steady status, sortable. */}
+      <div className="mb-8">
+        <ZoneOperatingModeTable />
+      </div>
 
       {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),
           over the cross-zone rows the CSM already receives. Rendered above the Escalation Queue —

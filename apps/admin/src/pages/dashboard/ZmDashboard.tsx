@@ -10,6 +10,7 @@ import type {
 import type { ZoneEngineer } from '../../api/schedules';
 import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
+import { ZoneOperatingModeCard } from '../../components/dashboard/ZoneOperatingModeCard';
 import { Badge } from '../../components/ui';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
@@ -114,6 +115,11 @@ export function ZmDashboard({
       {/* Inactive vs Troubleshoot vs Installation over time (Issue 134), scoped to the ZM's own zone
           (the backend clamps) — between the KPI hero and the SLA Bucket Distribution. */}
       <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone={false} />
+
+      {/* Zone operating mode (Issue 136) — plain-language "Catch-up / Steady" + why, for this ZM's zone. */}
+      <div className="mb-8">
+        <ZoneOperatingModeCard />
+      </div>
 
       <ActionRequiredPanel cards={actions} />
 

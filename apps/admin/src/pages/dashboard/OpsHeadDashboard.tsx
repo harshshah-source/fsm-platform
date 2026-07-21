@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DateRangeChips, RollingNumber, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
+import { ZoneOperatingModeTable } from '../../components/dashboard/ZoneOperatingModeTable';
 import { Badge } from '../../components/ui';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActivityTrendSection } from './ActivityTrendSection';
@@ -88,6 +89,11 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
         zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))}
         canSelectZone
       />
+
+      {/* Cross-zone operating mode (Issue 136) — every zone's Catch-up / Steady status, sortable. */}
+      <div className="mb-8">
+        <ZoneOperatingModeTable />
+      </div>
 
       <section aria-labelledby="sla-distribution-heading" className="mb-8">
         <h3
