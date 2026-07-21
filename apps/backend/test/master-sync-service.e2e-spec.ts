@@ -168,6 +168,10 @@ describe('Phase 4 — MasterSyncService (plant-first)', () => {
     expect(vehicle?.status).toBe('DEPLOYED');
     const device = await prisma.device.findUnique({ where: { deviceId: DEV } });
     expect(device?.currentVehicleId).toBe(vehicle!.vehicleId);
+
+    // Raw source-catalog size: every distinct fitted device_id the read observed (the "Total Devices"
+    // dashboard number). One vehicle row carries one device here.
+    expect(result.stats.devices.observed).toBe(1);
   });
 
   it('re-sync is idempotent and preserves FSM-owned columns while refreshing mirrored ones', async () => {

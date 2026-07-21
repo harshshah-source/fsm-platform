@@ -295,6 +295,17 @@ export class MasterSyncService {
       // 5. Devices — mirrored only when their vehicle synced this run (never orphan a fitment onto a null
       //    vehicle because the plant/company was out of scope). The insert-scope pin applies here too: a
       //    never-known device newly fitted to a non-operational vehicle is not created either.
+      //
+      //    First record the RAW SOURCE CATALOG size: every distinct fitted device_id the widened read
+      //    returned, regardless of deployment status / plant scope / mirror outcome. This is the
+      //    dashboard "Total Devices" number — the operational fleet FSM actually mirrors is a subset.
+      const sourceDeviceIds = new Set<string>();
+      for (const v of vehicleMasters) {
+        const id = String(v.device_id ?? '').trim();
+        if (id !== '') sourceDeviceIds.add(id);
+      }
+      stats.devices.observed = sourceDeviceIds.size;
+
       const existingDevices = await this.existingKeys(
         () => this.prisma.device.findMany({ select: { deviceId: true } }),
         (r) => r.deviceId,

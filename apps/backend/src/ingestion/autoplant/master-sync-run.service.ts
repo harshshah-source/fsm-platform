@@ -13,6 +13,14 @@ export interface EntityStat {
   skipped: number;
   /** Itemised split of `skipped` per reason code (Issue 97 Slice 4 / review A5). */
   skippedByReason?: Record<string, number>;
+  /**
+   * Distinct source rows OBSERVED for this entity in the widened read — the raw AutoPlant catalog
+   * size, independent of what mirrored/skipped. Populated for `devices` (every fitted `device_id`
+   * the sync saw, across all deployment statuses) so the dashboard can show a "Total Devices"
+   * (source catalog) count alongside the mirrored operational fleet. Optional: only entities that
+   * choose to report it set it.
+   */
+  observed?: number;
 }
 
 /** Thrown (as 409) when a master sync is requested while one is already in flight. */

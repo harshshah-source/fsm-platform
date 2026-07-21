@@ -113,7 +113,10 @@ describe('Issue 122b — fleet summary + plant filter + multi-plant assign', () 
     // Absolute values depend on the shared dev DB — assert shape + that our seed is included.
     expect(res.body.companies).toBeGreaterThanOrEqual(1);
     expect(res.body.plants).toBeGreaterThanOrEqual(2);
-    expect(res.body.devices).toBeGreaterThanOrEqual(2);
+    expect(res.body.devices).toBeGreaterThanOrEqual(2); // Active Fleet — departed devices excluded.
+    // Total Devices (raw AutoPlant catalog) — null until a master sync records `entity_stats.devices.observed`.
+    expect(res.body).toHaveProperty('sourceDevices');
+    expect(res.body.sourceDevices === null || typeof res.body.sourceDevices === 'number').toBe(true);
   });
 
   it('fleet-directory lists the seeded company and plants by name with device counts', async () => {

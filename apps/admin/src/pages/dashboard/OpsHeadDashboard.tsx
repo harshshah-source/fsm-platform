@@ -1,16 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DateRangeChips, RollingNumber, type Metric } from '../../components/data';
+import { RollingNumber, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { ZoneOperatingModeTable } from '../../components/dashboard/ZoneOperatingModeTable';
-import { Badge } from '../../components/ui';
-import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
 import { onIngestionComplete } from './ingestionEvents';
 import { ScorecardTable } from './ScorecardTable';
 import type { DashboardData } from './ZmDashboard';
+function CompanyPlantCard({ companies, plants, onCompaniesClick, onPlantsClick }: { companies: React.ReactNode; plants: React.ReactNode; onCompaniesClick: () => void; onPlantsClick: () => void }) {
+  return (
+    <div className="relative overflow-hidden rounded-card border border-white/60 bg-gradient-to-br from-info/15 to-surface-card/75 p-4 shadow-card backdrop-blur-md before:absolute before:inset-y-0 before:left-0 before:w-1 before:rounded-l-card before:bg-info">
+      <div className="grid grid-cols-2 divide-x divide-line/70 pl-1.5">
+        <button type="button" data-testid="kpi-companies" onClick={onCompaniesClick} className="pr-3 text-left focus-ring">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">Companies</div>
+          <div className="mt-1 text-2xl font-bold tracking-tight text-ink-strong">{companies}</div>
+          <div className="mt-0.5 text-xs text-ink-muted">pan-India</div>
+        </button>
+        <button type="button" data-testid="kpi-plants" onClick={onPlantsClick} className="pl-3 text-left focus-ring">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">Plants</div>
+          <div className="mt-1 text-2xl font-bold tracking-tight text-ink-strong">{plants}</div>
+          <div className="mt-0.5 text-xs text-ink-muted">with tracked devices</div>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Pan-India Fleet Command (FE-07, reference 04). The Operations-Head view: a dense pan-zone KPI strip,
@@ -38,9 +54,6 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
 
   const kpis: Metric[] = useMemo(() => {
     const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
-    // Strictly the CRITICAL band (Issue 122) — same zone-overview source as the scorecard's Critical
-    // column, so KPI == scorecard column sum by construction. Worse bands stay in the SLA distribution.
-    const criticalDevices = sumCriticalDevices(zones);
     const roll = (value: number) => <RollingNumber value={value} runToken={lastRunAt} />;
     // The Action-Required card was replaced by the fleet counts (Issue 122b).
     return [
@@ -53,10 +66,14 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
         testId: 'kpi-uptime',
       },
       { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
-      { label: 'Critical Devices', value: roll(criticalDevices), hint: 'pan-India, CRITICAL band', tone: 'critical', testId: 'kpi-critical' },
-      { label: 'Companies', value: fleet ? roll(fleet.companies) : '—', hint: 'pan-India', tone: 'info', testId: 'kpi-companies', onClick: () => navigate('/reports/fleet?tab=companies') },
-      { label: 'Plants', value: fleet ? roll(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants', onClick: () => navigate('/reports/fleet?tab=plants') },
-      { label: 'Devices', value: fleet ? roll(fleet.devices) : '—', hint: 'tracked fleet', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
+      { label: 'Active Fleet', value: fleet ? roll(fleet.devices) : '—', hint: 'deployed devices', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
+      {
+        label: 'Total Devices',
+        value: fleet && fleet.sourceDevices != null ? roll(fleet.sourceDevices) : '—',
+        hint: 'AutoPlant catalog · pan-India',
+        tone: 'info',
+        testId: 'kpi-total-devices',
+      },
     ];
   }, [zones, fleet, fleetUptime, lastRunAt, navigate]);
 
@@ -66,16 +83,25 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
           as the old flat strips. */}
       <DashboardHero
         title="Pan-India Fleet Command"
-        actions={
-          <>
-            <Badge tone="success" dot>
-              Snapshot Healthy
-            </Badge>
-            <DateRangeChips />
-          </>
+        left={kpis.slice(0, 2)}
+        right={[
+          {
+            label: 'Fleet directory',
+            value: (
+              <CompanyPlantCard
+                companies={fleet ? <RollingNumber value={fleet.companies} runToken={lastRunAt} /> : '—'}
+                plants={fleet ? <RollingNumber value={fleet.plants} runToken={lastRunAt} /> : '—'}
+                onCompaniesClick={() => navigate('/reports/fleet?tab=companies')}
+                onPlantsClick={() => navigate('/reports/fleet?tab=plants')}
+              />
+            ),
+          },
+          kpis[2],
+          kpis[3],
+        ]}
+        centerBelow={
+          <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone compact />
         }
-        left={kpis.slice(0, 3)}
-        right={kpis.slice(3, 6)}
       />
       {error && (
         <p role="alert" className="mb-4 text-sm text-critical">
@@ -83,12 +109,6 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
         </p>
       )}
 
-      {/* Inactive vs Troubleshoot vs Installation over time (Issue 134) — between the KPI hero and the
-          SLA Bucket Distribution. OH may switch Pan-India / Zone-wise + pick a zone. */}
-      <ActivityTrendSection
-        zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))}
-        canSelectZone
-      />
 
       {/* Cross-zone operating mode (Issue 136) — every zone's Catch-up / Steady status, sortable. */}
       <div className="mb-8">
@@ -114,3 +134,4 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
     </div>
   );
 }
+

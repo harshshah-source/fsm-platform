@@ -42,7 +42,7 @@ beforeEach(() => {
     const u = String(url);
     if (u.includes('/schedules/assign-plants') && init?.method === 'POST')
       return json({ seId: 'se-1', assigned: 3, alreadyAssigned: 0, perPlant: [{ plantId: '100', assigned: 2, openUnassigned: 2 }, { plantId: '101', assigned: 1, openUnassigned: 1 }] });
-    if (u.includes('/dashboard/fleet-summary')) return json({ companies: 42, plants: 1180, devices: 19301 });
+    if (u.includes('/dashboard/fleet-summary')) return json({ companies: 42, plants: 1180, devices: 19301, sourceDevices: 54210 });
     if (u.includes('/dashboard/fleet-directory'))
       return json({
         companies: [{ companyId: '7', name: 'UltraTech', tier: 'PLATINUM', plantCount: 2, deviceCount: 120 }],
@@ -77,7 +77,9 @@ describe('Issue 122b — fleet KPI cards', () => {
     // The OH strip renders values through the RollingNumber odometer (plain digits, no grouping).
     expect(await screen.findByTestId('kpi-companies')).toHaveTextContent('42');
     expect(screen.getByTestId('kpi-plants')).toHaveTextContent('1180');
-    expect(screen.getByTestId('kpi-devices')).toHaveTextContent('19301');
+    expect(screen.getByTestId('kpi-devices')).toHaveTextContent('19301'); // Active Fleet (deployed)
+    // Total Devices — the raw AutoPlant source catalog, pan-India (odometer digits, no grouping).
+    expect(screen.getByTestId('kpi-total-devices')).toHaveTextContent('54210');
     // The Action-Required KPI card is gone from the strip (the panel below is a ZM-view feature).
     expect(screen.queryByText(/^action required$/i)).toBeNull();
   });

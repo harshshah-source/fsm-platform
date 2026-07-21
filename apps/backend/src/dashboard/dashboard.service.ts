@@ -61,7 +61,19 @@ export interface CriticalQueueGroup {
 export interface FleetSummary {
   companies: number;
   plants: number;
+  /**
+   * The ACTIVE (deployed) fleet in scope: mirrored devices whose deployment is live (`is_departed =
+   * false`). Departed devices linger in `device_states` but are excluded here so this is the fleet
+   * FSM is actually tracking. Rendered as the "Active Fleet" KPI.
+   */
   devices: number;
+  /**
+   * The RAW AUTOPLANT device catalog size from the last successful master sync — every fitted
+   * `device_id` the source read observed, all deployment statuses, pan-India (NOT scope-filtered:
+   * the source read is not zone-attributed, and non-operational devices are never mirrored). Null
+   * until a master sync has recorded it. Rendered as the "Total Devices" KPI on the OH dashboard.
+   */
+  sourceDevices: number | null;
 }
 
 /** One company in the Fleet Directory (Issue 122b KPI click-through). */
@@ -237,9 +249,12 @@ export class DashboardService {
   }
 
   /**
-   * Headline fleet counts (Issue 122b KPI cards): distinct companies, distinct plants, and tracked
-   * devices in the caller's scope. Derived from `device_states` (the tracked fleet — consistent with
-   * every other dashboard read), same ZM zone scoping, deactivated plants excluded.
+   * Headline fleet counts (Issue 122b KPI cards): distinct companies, distinct plants, and the ACTIVE
+   * (deployed) device fleet in the caller's scope, plus the pan-India source-catalog total. The
+   * companies/plants/devices figures are derived from `device_states` (same ZM zone scoping,
+   * deactivated plants excluded); `devices` excludes departed devices so it is the live operational
+   * fleet. `sourceDevices` is the raw AutoPlant catalog size from the last successful master sync —
+   * pan-India by nature, so it is NOT scope-filtered (see {@link sourceDeviceTotal}).
    */
   async fleetSummary(scope: ZoneScope): Promise<FleetSummary> {
     const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
@@ -249,11 +264,29 @@ export class DashboardService {
     const rows = await this.prisma.$queryRaw<{ companies: number; plants: number; devices: number }[]>(Prisma.sql`
       SELECT COUNT(DISTINCT ds.company_id)::int AS "companies",
              COUNT(DISTINCT ds.plant_id)::int AS "plants",
-             COUNT(*)::int AS "devices"
+             COUNT(*) FILTER (WHERE ds.is_departed = false)::int AS "devices"
       FROM device_states ds
       JOIN plants p ON p.plant_id = ds.plant_id
       WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}`);
-    return rows[0] ?? { companies: 0, plants: 0, devices: 0 };
+    const base = rows[0] ?? { companies: 0, plants: 0, devices: 0 };
+    return { ...base, sourceDevices: await this.sourceDeviceTotal() };
+  }
+
+  /**
+   * The raw AutoPlant device-catalog size recorded by the most recent SUCCESSFUL master sync
+   * (`entity_stats -> 'devices' -> 'observed'`) — every fitted `device_id` the source read saw,
+   * across all deployment statuses. This is the "Total Devices" KPI; the mirrored operational fleet
+   * ({@link fleetSummary} `devices`) is a subset of it. Null until a sync has recorded the counter
+   * (older runs, or a fresh DB), which the UI renders as "—".
+   */
+  private async sourceDeviceTotal(): Promise<number | null> {
+    const rows = await this.prisma.$queryRaw<{ observed: number | null }[]>(Prisma.sql`
+      SELECT (entity_stats -> 'devices' ->> 'observed')::int AS "observed"
+      FROM master_sync_runs
+      WHERE status = 'SUCCESS' AND entity_stats -> 'devices' ->> 'observed' IS NOT NULL
+      ORDER BY finished_at DESC NULLS LAST
+      LIMIT 1`);
+    return rows[0]?.observed ?? null;
   }
 
   /**

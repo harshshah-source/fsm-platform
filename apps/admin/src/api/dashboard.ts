@@ -72,7 +72,11 @@ export interface ActionRequiredCard {
 export interface FleetSummary {
   companies: number;
   plants: number;
+  /** ACTIVE (deployed) fleet in scope — departed devices excluded. Rendered as "Active Fleet". */
   devices: number;
+  /** Raw AutoPlant device-catalog total from the last master sync (pan-India). Null until recorded;
+   *  rendered as "Total Devices" on the OH dashboard. */
+  sourceDevices: number | null;
 }
 
 /** One company / plant row in the Fleet Directory (the Companies/Plants KPI click-through). */
