@@ -5,6 +5,22 @@ import { PrismaService } from '../prisma/prisma.service';
 /** The Recommender's operating mode, switched off the Soft Inactive Count (CONTEXT §5). */
 export type RecommenderMode = 'DEFICIT' | 'PREVENTIVE';
 
+/**
+ * One zone's live operating mode + the counts that decide it (Issue 136 read seam). `mode` is the
+ * SAME enum `modeForZone` feeds the recommender — this is a legibility surface, not a new signal.
+ * **The `mode` enum must never be rendered to a user**; the admin FE maps it to plain language
+ * ("Catch-up"/"Steady") in one util. Counts are exposed so the UI can state a human reason.
+ */
+export interface ZoneOperatingMode {
+  zoneId: string;
+  zoneName: string;
+  mode: RecommenderMode;
+  /** Eligible devices in the zone currently silent (`is_inactive` AND `eligible_for_uptime`). */
+  silentCount: number;
+  /** Eligible devices in the zone (`eligible_for_uptime`) — the denominator behind the switch. */
+  eligibleCount: number;
+}
+
 /** Default deficit-mode threshold: Soft Inactive Count > 2% × eligible device count (CONTEXT §5). */
 export const DEFAULT_DEFICIT_THRESHOLD_PCT = 0.02;
 
@@ -48,6 +64,44 @@ export class SoftInactiveCountService {
       WHERE p.zone_id = ${zoneId}`);
     const r = rows[0] ?? { softInactive: 0, eligible: 0 };
     return this.isDeficit(r.softInactive, r.eligible) ? 'DEFICIT' : 'PREVENTIVE';
+  }
+
+  /**
+   * Live operating mode + supporting counts for one zone, or every zone (Issue 136 read seam). Same
+   * per-zone counting and `isDeficit` decision as {@link modeForZone} — deliberately mirrored so the
+   * displayed mode is provably the one the recommender reads (pinned by the e2e fidelity test). Counts
+   * come straight from `device_states`; **no** deactivated-plant filter, because the recommender's own
+   * mode (`modeForZone`) does not apply one — a legibility surface must show the real signal, not a
+   * prettier variant. LEFT JOINs from `zones` so a zone with no plants/devices still returns a row
+   * (eligible 0 → PREVENTIVE, no divide-by-zero). Reads live, never `soft_inactive_count_history`.
+   */
+  async operatingModes(zoneId?: bigint): Promise<ZoneOperatingMode[]> {
+    const rows = await this.prisma.$queryRaw<
+      { zoneId: string; zoneName: string; softInactive: number; eligible: number }[]
+    >(Prisma.sql`
+      SELECT z.zone_id::text AS "zoneId",
+        z.name AS "zoneName",
+        COUNT(*) FILTER (WHERE ds.is_inactive = true AND ds.eligible_for_uptime = true)::int AS "softInactive",
+        COUNT(*) FILTER (WHERE ds.eligible_for_uptime = true)::int AS "eligible"
+      FROM zones z
+      LEFT JOIN plants p ON p.zone_id = z.zone_id
+      LEFT JOIN device_states ds ON ds.plant_id = p.plant_id
+      ${zoneId === undefined ? Prisma.empty : Prisma.sql`WHERE z.zone_id = ${zoneId}`}
+      GROUP BY z.zone_id, z.name
+      ORDER BY z.zone_id`);
+    return rows.map((r) => ({
+      zoneId: r.zoneId,
+      zoneName: r.zoneName,
+      mode: this.isDeficit(r.softInactive, r.eligible) ? 'DEFICIT' : 'PREVENTIVE',
+      silentCount: r.softInactive,
+      eligibleCount: r.eligible,
+    }));
+  }
+
+  /** Live operating mode + counts for a single zone (Issue 136); null if the zone does not exist. */
+  async operatingModeForZone(zoneId: bigint): Promise<ZoneOperatingMode | null> {
+    const [row] = await this.operatingModes(zoneId);
+    return row ?? null;
   }
 
   /** Snapshot every zone's Soft Inactive Count into history (a twice-daily capture). */

@@ -11,6 +11,7 @@ import { RoleGuard } from './common/guards/role.guard';
 import { ZoneScopeGuard } from './common/guards/zone-scope.guard';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DashboardController } from './dashboard/dashboard.controller';
+import { OperatingModeController } from './dashboard/operating-mode.controller';
 import { ReportsModule } from './reports/reports.module';
 import { ReportsController } from './reports/reports.controller';
 import { DevicesModule } from './devices/devices.module';
@@ -146,6 +147,7 @@ import { ZonesController } from './zones/zones.controller';
     SharedPoolController,
     SePlannerController,
     DashboardController,
+    OperatingModeController,
     ReportsController,
     SoftStateController,
     VerificationController,
