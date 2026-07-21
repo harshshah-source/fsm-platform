@@ -32,8 +32,21 @@ export class CandidateSelectionService {
       .filter((c) => c.coverageType === 'MULTI_PLANT')
       .map((c) => ({ seId: c.seId, coverageType: 'MULTI_PLANT' as const }));
 
+    // The FLOATING leg re-validates identity against `engineer_master` LIVE (Issue 138). The
+    // `plant_eligible_floating_se` MV is a territory-geometry index only — its definition joins
+    // plants × engineer_territory_coverage and cannot express `coverage_type` / `is_active`, and it is
+    // refreshed only on territory edits (never on an SE coverage-type flip or deactivate via
+    // /engineers/manage). Trusting it alone would resurrect a now-DEDICATED or inactive SE as a floating
+    // candidate. Joining the source table here makes the leg correct regardless of MV freshness.
     const floatingRows = await this.prisma.$queryRaw<{ se_id: string }[]>(
-      Prisma.sql`SELECT se_id FROM plant_eligible_floating_se WHERE plant_id = ${plantId} ORDER BY se_id ASC`,
+      Prisma.sql`
+        SELECT pefs.se_id
+        FROM plant_eligible_floating_se pefs
+        JOIN engineer_master em ON em.engineer_id = pefs.se_id
+        WHERE pefs.plant_id = ${plantId}
+          AND em.coverage_type = 'FLOATING'
+          AND em.is_active = true
+        ORDER BY pefs.se_id ASC`,
     );
     const floating = floatingRows.map((r) => ({ seId: r.se_id, coverageType: 'FLOATING' as const }));
 

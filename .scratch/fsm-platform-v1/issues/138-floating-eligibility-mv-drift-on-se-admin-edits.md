@@ -1,7 +1,37 @@
 # 138 — FLOATING-SE eligibility MV drifts on internal SE/plant admin edits (recommender dispatches on stale coverage)
 
-Status: needs-triage
+Status: ready-for-agent
 Type: backend defect (latent — floating leg dormant on dev; mechanism proven live)
+
+## Triage (2026-07-21) — sliced; Slice 1 in progress
+
+Triaged `ready-for-agent`. The fix splits along the two independent drift sources:
+
+- **Slice 1 (in progress this session) — live source-of-truth re-filter (closes AC#1).** In
+  `candidate-selection.service.ts` the FLOATING leg JOINs `engineer_master` and keeps only
+  `coverage_type='FLOATING' AND is_active=true`. This makes the coverage-type-flip and deactivate drift
+  correct **regardless of MV freshness** — the MV becomes a pure territory-geometry index and identity is
+  always read live. Isolated to one file (`candidate-selection.service.ts`), which is clean in the
+  working tree (the concurrent NEW-A1 change to `recommender.service.ts` is untouched). TDD at the
+  `orderedCandidatesForPlant` seam.
+- **Slice 2 (follow-up) — geometry-side freshness (AC#2).** Refresh the MV on plant create/relocate +
+  district re-parent through one `refreshEligibility()` seam. Not needed for AC#1; separate PR.
+- **Slice 3 (follow-up) — periodic backstop (AC#3).** Nightly `REFRESH … CONCURRENTLY` business-sweep
+  tick; also heals the post-commit-refresh orphan leg. Separate PR.
+
+Rationale: Slice 1 is the highest-value, lowest-risk cut — it fully closes the *undefended* headline leg
+(coverage-type flip) and the is_active leg without depending on MV refresh, and touches only a clean file.
+
+### Slice 1 — DONE 2026-07-21 (TDD)
+
+`candidate-selection.service.ts` FLOATING leg now `JOIN engineer_master … WHERE coverage_type='FLOATING'
+AND is_active=true`, so a stale MV row can no longer resurrect a now-DEDICATED or deactivated SE.
+RED→GREEN at the `orderedCandidatesForPlant` seam (`candidate-selection-coverage-drift.e2e-spec.ts`,
+3 tests): control (active FLOATING SE is a candidate), then a coverage-type flip to DEDICATED and a
+deactivate — each **without** an MV refresh — must drop the SE. RED reproduced both (stale MV still
+returned the SE); GREEN after the join. Regression: 47 recommender/candidate/floating/territory + 52
+dispatch tests green, backend `tsc` clean. Slices 2 (geometry refresh) + 3 (periodic backstop) remain
+open on this issue.
 
 > Source: `docs/audits/pattern-tracing-audit-2026-07-21.md` **NEW-A3** (headline), reframed after the
 > correction that SE data is FSM-internal admin data (entered via `/engineers/manage` →
@@ -111,9 +141,9 @@ Because the inputs are FSM-internal, prefer a **source-of-truth re-check** over 
 
 ## Acceptance criteria (draft — triage owns)
 
-- [ ] The recommender never returns a floating candidate whose current `engineer_master.coverage_type ≠
+- [x] The recommender never returns a floating candidate whose current `engineer_master.coverage_type ≠
       FLOATING` or `is_active = false`, proven by a test that flips coverage-type/active **without** a
-      territory edit and asserts the SE drops from the pool.
+      territory edit and asserts the SE drops from the pool. **(Slice 1, done 2026-07-21.)**
 - [ ] A newly-created plant (or a district/location change) yields correct floating candidates without
       requiring an unrelated territory edit.
 - [ ] The MV refresh has a periodic backstop (no permanent staleness if a post-commit refresh is lost).
