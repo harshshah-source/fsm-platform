@@ -4,6 +4,7 @@ import { CommonKitService } from './common-kit.service';
 import { CompaniesService } from './companies.service';
 import { GeographyService } from './geography.service';
 import { PlantEligibleFloatingSeService } from './plant-eligible-floating-se.service';
+import { PlantEligibilityRefreshScheduler } from './plant-eligibility-refresh-scheduler.service';
 import { PlantsService } from './plants.service';
 import { ScoringWeightsService } from './scoring-weights.service';
 import { SeCoverageService } from './se-coverage.service';
@@ -33,7 +34,17 @@ const services = [
 
 @Module({
   imports: [AuditModule],
-  providers: services,
+  providers: [
+    ...services,
+    // The periodic MV-refresh scheduler (Issue 138 slice 3). Factory-provided — like
+    // DispatchSchedulerService — so its optional `config` param reads the environment rather than being
+    // DI-resolved. Its `@Cron` is discovered by the global ScheduleModule explorer.
+    {
+      provide: PlantEligibilityRefreshScheduler,
+      useFactory: (eligibility: PlantEligibleFloatingSeService) => new PlantEligibilityRefreshScheduler(eligibility),
+      inject: [PlantEligibleFloatingSeService],
+    },
+  ],
   exports: services,
 })
 export class OrgModule {}

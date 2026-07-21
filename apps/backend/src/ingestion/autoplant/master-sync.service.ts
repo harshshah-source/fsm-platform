@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { DeviceDepartureService } from '../../device-departure/device-departure.service';
+import type { PlantEligibleFloatingSeService } from '../../org/plant-eligible-floating-se.service';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MasterSyncRunService, type EntityStat, type MasterSyncOutcome } from './master-sync-run.service';
@@ -117,6 +118,12 @@ export class MasterSyncService {
      * before and marks no departures (never a silent half-application).
      */
     @Optional() private readonly departures: DeviceDepartureService | null = null,
+    /**
+     * Floating-SE eligibility MV (Issue 138 slice 2). Optional because master-sync must run in contexts
+     * that don't wire the org module (tests, minimal boots); omitted, the sync mirrors exactly as before
+     * and the MV is left to the periodic backstop (slice 3) / the next run.
+     */
+    @Optional() private readonly floatingEligibility: PlantEligibleFloatingSeService | null = null,
   ) {}
 
   async sync(options: MasterSyncOptions = {}): Promise<MasterSyncResult> {
@@ -327,6 +334,10 @@ export class MasterSyncService {
       await flushRejects();
       await this.runService.finishRun(runId, { status: 'SUCCESS', entityStats: stats });
       this.logger.log(`Master sync ${runId} SUCCESS ${JSON.stringify(stats)}`);
+      // 7. Floating-SE eligibility MV (Issue 138 slice 2) — plants/districts (its geometry inputs) just
+      //    changed, so a stale MV would give the Recommender wrong floating coverage for new/relocated
+      //    plants. Refreshed AFTER the mirror committed; best-effort like the departure pass.
+      await this.refreshFloatingEligibility(runId);
       return { runId, status: 'SUCCESS', stats };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -334,6 +345,21 @@ export class MasterSyncService {
       await this.runService.finishRun(runId, { status: 'FAILED', entityStats: stats, error: message });
       this.logger.error(`Master sync ${runId} FAILED: ${message}`);
       throw e;
+    }
+  }
+
+  /**
+   * Best-effort refresh of `plant_eligible_floating_se` after a successful master sync (Issue 138
+   * slice 2). A refresh failure is logged and swallowed — it must never fail the mirror sync that
+   * already committed; the periodic backstop (slice 3) or the next run heals a missed refresh.
+   */
+  private async refreshFloatingEligibility(runId: bigint): Promise<void> {
+    if (!this.floatingEligibility) return;
+    try {
+      await this.floatingEligibility.refresh();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      this.logger.error(`Master sync ${runId}: floating-eligibility MV refresh failed (mirror committed): ${message}`);
     }
   }
 

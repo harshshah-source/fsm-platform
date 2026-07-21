@@ -1,7 +1,13 @@
 # 138 — FLOATING-SE eligibility MV drifts on internal SE/plant admin edits (recommender dispatches on stale coverage)
 
-Status: ready-for-agent
+Status: done
 Type: backend defect (latent — floating leg dormant on dev; mechanism proven live)
+
+> **DONE 2026-07-21** — all three slices landed (TDD). Slice 1: floating leg re-checks
+> `coverage_type`/`is_active` live (`candidate-selection.service.ts`). Slice 2: master-sync refreshes
+> the MV after a successful run (`master-sync.service.ts`, best-effort `@Optional()` collaborator).
+> Slice 3: `PlantEligibilityRefreshScheduler` periodic backstop (`src/org/`, beside DispatchScheduler,
+> in `OrgModule`). See the per-slice notes below.
 
 ## Triage (2026-07-21) — sliced; Slice 1 in progress
 
@@ -14,10 +20,34 @@ Triaged `ready-for-agent`. The fix splits along the two independent drift source
   always read live. Isolated to one file (`candidate-selection.service.ts`), which is clean in the
   working tree (the concurrent NEW-A1 change to `recommender.service.ts` is untouched). TDD at the
   `orderedCandidatesForPlant` seam.
-- **Slice 2 (follow-up) — geometry-side freshness (AC#2).** Refresh the MV on plant create/relocate +
-  district re-parent through one `refreshEligibility()` seam. Not needed for AC#1; separate PR.
-- **Slice 3 (follow-up) — periodic backstop (AC#3).** Nightly `REFRESH … CONCURRENTLY` business-sweep
-  tick; also heals the post-commit-refresh orphan leg. Separate PR.
+- **Slice 2 — geometry-side freshness (AC#2). DONE.** Investigation reframed the seam: there is **no
+  interactive** writer of MV geometry (`plants.service.ts` create sets only name+zone → never
+  floating-eligible; `zone-mapping` only writes `zone_id`, which the MV doesn't use). The **only** bulk
+  writer of `plants.district_id`/`location` is **master-sync**. So the refresh hooks the master-sync run
+  boundary: `master-sync.service.ts` now calls `PlantEligibleFloatingSeService.refresh()` after a SUCCESS
+  run, as a best-effort `@Optional()` collaborator (mirrors the Issue-128 departure pass — a refresh
+  failure is logged and swallowed, never fails the committed mirror). `OrgModule` imported into
+  `IngestionModule` (cycle-safe: org→audit only).
+- **Slice 3 — periodic backstop (AC#3). DONE.** New `PlantEligibilityRefreshScheduler` (`src/org/`) — a
+  standalone `@Cron` that `REFRESH`es the MV, gated by `BUSINESS_SWEEPS_ENABLED` (the same gate as the
+  dispatch it feeds), default `30 4 * * *` (before the 05:00 dispatch), env-overridable via
+  `PLANT_ELIGIBILITY_REFRESH_CRON`. **Design:** it sits *beside* the #108 business sweeps rather than as
+  an 11th collaborator on `BusinessSweepSchedulerService` — the same reasoning `DispatchSchedulerService`
+  already follows — so it added no ripple to that scheduler's 6 construction sites. Registered as a
+  factory provider in `OrgModule`. This also heals the Pattern-2 post-commit-refresh orphan (a lost
+  territory-edit refresh is picked up on the next tick).
+
+### Slices 2 & 3 — DONE 2026-07-21 (TDD)
+
+- Slice 3: `plant-eligibility-refresh-scheduler.e2e-spec.ts` (6 tests — config default/override, refresh
+  when enabled, dormant when off, throw→ERROR never escapes cron, single-in-flight guard, cron
+  registration). Mirrors `dispatch-scheduler.e2e-spec.ts`.
+- Slice 2: `master-sync-eligibility-refresh.e2e-spec.ts` (3 tests — refresh called once on SUCCESS;
+  refresh failure swallowed (sync still SUCCESS); no-op/no-throw when the collaborator is absent).
+- Regression: 154 tests green across candidate/floating/territory/recommender/dispatch/integration/
+  ingestion/wiring + the new suites; backend `tsc` clean. (One unrelated **pre-existing** failure,
+  `integration-reconciliation` SQL-shape, is an Issue-128 operational-vs-deployment status test
+  divergence in code this change never touches — left alone per concurrent-tree discipline.)
 
 Rationale: Slice 1 is the highest-value, lowest-risk cut — it fully closes the *undefended* headline leg
 (coverage-type flip) and the is_active leg without depending on MV refresh, and touches only a clean file.
@@ -144,9 +174,10 @@ Because the inputs are FSM-internal, prefer a **source-of-truth re-check** over 
 - [x] The recommender never returns a floating candidate whose current `engineer_master.coverage_type ≠
       FLOATING` or `is_active = false`, proven by a test that flips coverage-type/active **without** a
       territory edit and asserts the SE drops from the pool. **(Slice 1, done 2026-07-21.)**
-- [ ] A newly-created plant (or a district/location change) yields correct floating candidates without
-      requiring an unrelated territory edit.
-- [ ] The MV refresh has a periodic backstop (no permanent staleness if a post-commit refresh is lost).
+- [x] A newly-created plant (or a district/location change) yields correct floating candidates without
+      requiring an unrelated territory edit. **(Slice 2 — master-sync post-run refresh, done 2026-07-21.)**
+- [x] The MV refresh has a periodic backstop (no permanent staleness if a post-commit refresh is lost).
+      **(Slice 3 — `PlantEligibilityRefreshScheduler`, done 2026-07-21.)**
 
 ## Dependencies / notes
 

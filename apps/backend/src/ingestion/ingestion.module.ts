@@ -5,6 +5,7 @@ import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { DeviceDepartureModule } from '../device-departure/device-departure.module';
 import { DeviceStateModule } from '../device-state/device-state.module';
+import { OrgModule } from '../org/org.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsModule } from '../settings/settings.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
@@ -71,6 +72,9 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
     DeviceStateModule,
     SettingsModule,
     TicketingModule,
+    // OrgModule supplies PlantEligibleFloatingSeService to MasterSyncService (Issue 138 slice 2 — the
+    // post-sync MV refresh). No cycle: OrgModule imports only AuditModule.
+    OrgModule,
     ScheduleModule.forRoot(),
   ],
   controllers: [IntegrationHealthController, IntegrationSyncController],
