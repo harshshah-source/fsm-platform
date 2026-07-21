@@ -1,5 +1,5 @@
 import type { SessionView } from '@fsm/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../src/auth/AuthProvider';
 import { ZoneOperatingModeCard } from '../src/components/dashboard/ZoneOperatingModeCard';
@@ -63,6 +63,16 @@ describe('#136 ZoneOperatingModeCard', () => {
     const card = await screen.findByTestId('zone-operating-mode-card');
     expect(card).toHaveTextContent('Steady');
     expect(card).not.toHaveTextContent(/PREVENTIVE/i);
+  });
+
+  it('offers an Info-tooltip explaining how the mode is decided, in plain language', async () => {
+    stubMode([{ zoneId: '1', zoneName: 'North', mode: 'DEFICIT', silentCount: 142, eligibleCount: 3010 }]);
+    renderFor(zm);
+    const card = await screen.findByTestId('zone-operating-mode-card');
+    expect(within(card).getByRole('button', { name: /how is this decided/i })).toBeInTheDocument();
+    const tip = within(card).getByRole('tooltip');
+    expect(tip).toHaveTextContent(/how many of the devices we track in your zone have gone quiet/i);
+    expect(tip).not.toHaveTextContent(/threshold|DEFICIT|PREVENTIVE/i);
   });
 
   it('renders an honest empty state when the zone has no data', async () => {

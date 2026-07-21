@@ -41,10 +41,19 @@ describe('operatingModeCopy', () => {
         expect(c.label).not.toMatch(ENGINE_TERMS);
         expect(c.reason).not.toMatch(ENGINE_TERMS);
         expect(c.primaryFact).not.toMatch(ENGINE_TERMS);
+        expect(c.help).not.toMatch(ENGINE_TERMS);
         // No percentage vocabulary either.
         expect(c.primaryFact).not.toContain('%');
       }
     }
+  });
+
+  it('provides plain-language help text for the card Info-tooltip', () => {
+    const self = operatingModeCopy(row({ mode: 'DEFICIT' }), 'self');
+    expect(self.help).toMatch(/your zone/i);
+    expect(self.help.length).toBeGreaterThan(0);
+    const other = operatingModeCopy(row({ mode: 'DEFICIT' }), 'other');
+    expect(other.help).not.toMatch(/your zone/i);
   });
 
   it('renders an honest fact when the zone tracks no eligible devices (no NaN / divide-by-zero)', () => {

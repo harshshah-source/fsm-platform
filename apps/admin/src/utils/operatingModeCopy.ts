@@ -15,6 +15,8 @@ export interface OperatingModeCopy {
   reason: string;
   /** The supporting counts rendered as a human sentence — never a %, never "threshold". */
   primaryFact: string;
+  /** Plain-language "how is this decided?" text for the card's Info tooltip. */
+  help: string;
   /** Semantic tone for styling (mapped to a Badge tone by the component, not here). */
   tone: OperatingModeTone;
 }
@@ -41,6 +43,13 @@ const TONE: Record<OperatingMode, OperatingModeTone> = {
   DEFICIT: 'attention',
   PREVENTIVE: 'calm',
 };
+
+// "How is this decided?" — the Info-tooltip body. Mode-independent (it explains the whole switch),
+// so it reads the same for Catch-up and Steady; only the voice (your zone vs a zone) changes.
+const HELP_SELF =
+  'We look at how many of the devices we track in your zone have gone quiet. When a lot are quiet at once, the system switches to Catch-up so engineers reach those outages first; otherwise it stays Steady and also fits in routine visits and new installations.';
+const HELP_OTHER =
+  "We look at how many of a zone's tracked devices have gone quiet. When a lot are quiet at once, that zone is in Catch-up so engineers reach outages first; otherwise it stays Steady and also does routine and install work.";
 
 const num = (n: number): string => n.toLocaleString();
 
@@ -72,6 +81,7 @@ export function operatingModeCopy(
       perspective === 'self'
         ? primaryFactSelf(row.silentCount, row.eligibleCount)
         : primaryFactOther(row.silentCount, row.eligibleCount),
+    help: perspective === 'self' ? HELP_SELF : HELP_OTHER,
     tone: TONE[row.mode],
   };
 }
