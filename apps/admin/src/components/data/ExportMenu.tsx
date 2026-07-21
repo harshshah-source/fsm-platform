@@ -5,8 +5,8 @@ import { IconDownload } from '../ui/icons';
 import { FilterSelect } from './FilterBar';
 
 /**
- * Format picker + Download button for tabular exports (Issue 122): CSV, Excel (.xls) or PDF, all
- * generated in-browser via `lib/exportFile` (no dependency). The page owns WHAT is exported — this
+ * Format picker + Download button for tabular exports (Issue 122): CSV, Excel (.xls), PDF or PNG image,
+ * all generated in-browser via `lib/exportFile` (no dependency). The page owns WHAT is exported — this
  * component only collects the format and fires `onExport(format)`.
  */
 export function ExportMenu({
@@ -30,6 +30,7 @@ export function ExportMenu({
         <option value="csv">CSV</option>
         <option value="excel">Excel</option>
         <option value="pdf">PDF</option>
+        <option value="img">Image (PNG)</option>
       </FilterSelect>
       <Button variant="secondary" size="sm" disabled={disabled} onClick={() => onExport(format)}>
         <IconDownload className="h-3.5 w-3.5" />

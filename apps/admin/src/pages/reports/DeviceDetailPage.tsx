@@ -200,28 +200,36 @@ export function DeviceDetailPage() {
   // no longer crammed together, and Inactive Duration is split from the SLA Bucket. All fields come
   // straight off the zone-scoped `/devices` payload (device → vehicle → plant → zone, company_master),
   // so no per-row fetch. Plant short codes (e.g. ACP-9106) are displayed verbatim (source-data issue).
+  // Widths drive the fixed table layout (`tableLayout="fixed"` on the DataTable below) so all 11 columns
+  // fit the page and the operator never scrolls sideways; long ids/names wrap (`break-all` on the mono
+  // id columns). Percentages sum to ~100%.
   const listColumns: Column<DeviceListRow>[] = [
     {
       key: 'deviceId',
       header: 'Device ID',
+      width: '9%',
+      className: 'break-all',
       render: (r) => <span className="font-medium text-ink-strong tabular-nums">{r.deviceId}</span>,
     },
-    { key: 'vehicleNo', header: 'Vehicle Number', render: (r) => r.vehicleNo ?? '—' },
+    { key: 'vehicleNo', header: 'Vehicle Number', width: '9%', className: 'break-all', render: (r) => r.vehicleNo ?? '—' },
     // AutoPlant device identity, mirrored onto `devices` by the daily master sync. Both are sparse at
     // source (Device Type ~93%, IMSI ~85% of the deployed fleet), so "—" is a normal reading here.
-    { key: 'deviceType', header: 'Device Type', render: (r) => r.deviceType ?? '—' },
+    { key: 'deviceType', header: 'Device Type', width: '7%', render: (r) => r.deviceType ?? '—' },
     {
       key: 'imsiNo',
       header: 'IMSI No',
+      width: '10%',
+      className: 'break-all',
       render: (r) => (r.imsiNo ? <span className="tabular-nums">{r.imsiNo}</span> : '—'),
     },
-    { key: 'companyName', header: 'Company Name', render: (r) => r.companyName ?? '—' },
-    { key: 'plantName', header: 'Plant Name', render: (r) => (r.plantName ? <PlantName code={r.plantName} /> : '—') },
-    { key: 'zoneName', header: 'Zone', render: (r) => r.zoneName ?? '—' },
+    { key: 'companyName', header: 'Company Name', width: '11%', render: (r) => r.companyName ?? '—' },
+    { key: 'plantName', header: 'Plant Name', width: '9%', render: (r) => (r.plantName ? <PlantName code={r.plantName} /> : '—') },
+    { key: 'zoneName', header: 'Zone', width: '7%', render: (r) => r.zoneName ?? '—' },
     {
       key: 'inactiveDuration',
       header: 'Inactive Duration',
       align: 'right',
+      width: '8%',
       render: (r) => (
         <span className="tabular-nums text-ink">{formatInactiveDuration(r.latestGpsDatetime) ?? '—'}</span>
       ),
@@ -229,17 +237,20 @@ export function DeviceDetailPage() {
     {
       key: 'tripCreationDatetime',
       header: 'Trip Creation Date Time',
+      width: '10%',
       render: (r) => <span className="tabular-nums text-ink">{formatDateTimeWithYear(r.tripCreationDatetime)}</span>,
     },
     {
       key: 'slaBucket',
       header: 'SLA Bucket',
+      width: '9%',
       render: (r) =>
         r.slaBucket ? <SLABadge bucket={r.slaBucket} showRange /> : <span className="text-xs text-ink-muted">Active</span>,
     },
     {
       key: 'assignment',
       header: 'Assignment',
+      width: '11%',
       render: (r) => (
         <span className="flex flex-col gap-0.5">
           <AssignmentBadge state={r.assignmentState} />
@@ -413,6 +424,7 @@ export function DeviceDetailPage() {
           rowKey={(r) => r.deviceId}
           rowTestId={(r) => `dev-row-${r.deviceId}`}
           ariaLabel="Device list"
+          tableLayout="fixed"
           onRowClick={select}
           // A failed load must read as a failure with a Retry — never as "no devices" (Issue 122b:
           // an operator saw the empty state while the backend was mid-restart and reported a bug).

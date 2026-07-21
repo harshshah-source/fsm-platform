@@ -2,21 +2,19 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { CompanyPlantRow } from '../../api/dashboard';
 import { EmptyState, ExportMenu, FilterBar, FilterSelect, SearchInput, Skeleton } from '../../components/data';
-import { DurationBadge, PlantName, StatusPill, TierBadge } from '../../components/domain';
+import { DurationBadge, InactiveCountLink, PlantName, StatusPill, TierBadge } from '../../components/domain';
 import { Badge } from '../../components/ui';
 import { IconChevronRight, IconTruck } from '../../components/ui/icons';
 import { apiTicketsList, type TicketRow } from '../../api/tickets';
 import { cn } from '../../lib/cn';
 import { exportTable, type ExportFormat } from '../../lib/exportFile';
 import {
-  BUCKET_CLASS,
   BUCKET_LABEL,
   BUCKET_LABEL_RANGE,
   criticalOnlyCount,
   SLA_BUCKETS,
   type SlaBucket,
 } from '../../lib/slaBucket';
-import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 
 interface CompanyGroup {
@@ -53,8 +51,12 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
   return [...byCompany.values()];
 }
 
-// company + tier + plants + plant + inactive/total + SLA spread + fleet uptime % (Issue 135).
-const COLSPAN = 7;
+// SLA buckets ordered by increasing inactivity (4–8Hr … 7d+) so the per-bucket columns read left→right
+// from least to most severe. `SLA_BUCKETS` is most-severe-first, so reverse a copy.
+const SLA_BUCKETS_ASC = [...SLA_BUCKETS].reverse();
+
+// company + tier + plants + plant + inactive/total + one column per SLA bucket + fleet uptime %.
+const COLSPAN = 6 + SLA_BUCKETS_ASC.length;
 
 /** Inactive devices as a percentage of the fleet at that entity (inactive / total devices). One
  *  decimal; degrades to a dash when the denominator is unknown so it never renders `NaN%`. */
@@ -74,30 +76,59 @@ type AssignmentFilter = '' | 'FORMALLY_ASSIGNED' | 'UNASSIGNED';
 type SortOrder = '' | 'INACTIVE_DESC' | 'INACTIVE_ASC';
 
 /**
- * The per-bucket counts as one compact wrapping chip row (Issue 122b) — replaces eight fixed columns
- * so the whole table fits on screen with no horizontal scroll. Only non-zero buckets render; each chip
- * keeps its `bucket-<B>` test id and shows the label + range on hover.
+ * The per-bucket SLA columns: one column per bucket, header = its inactivity range (e.g. `24–48Hr`,
+ * `7d+`), cell = the number of devices in that band. Rendered as `<th>`/`<td>` fragments so they sit
+ * directly in the table row. Ordered least→most severe (`SLA_BUCKETS_ASC`); a zero cell reads as a muted
+ * dash so the populated bands stand out. Each count cell keeps its `bucket-<B>` test id.
  */
-function SlaSpread({ byBucket }: { byBucket: Record<string, number> }) {
-  const nonZero = SLA_BUCKETS.filter((b) => (byBucket[b] ?? 0) > 0);
-  if (nonZero.length === 0) return <span className="text-xs text-ink-muted/50">—</span>;
+function BucketHeaderCells({ className }: { className: string }) {
   return (
-    <span className="flex flex-wrap items-center gap-1">
-      {nonZero.map((b) => (
-        <span
-          key={b}
-          data-testid={`bucket-${b}`}
-          title={BUCKET_LABEL_RANGE[b]}
-          className={cn(
-            'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold tabular-nums',
-            BUCKET_CLASS[b],
-          )}
-        >
-          <span className="max-w-20 truncate font-normal">{BUCKET_LABEL[b]}</span>
-          {byBucket[b]}
-        </span>
+    <>
+      {SLA_BUCKETS_ASC.map((b) => (
+        <th key={b} className={className} title={BUCKET_LABEL_RANGE[b]}>
+          {BUCKET_LABEL[b]}
+        </th>
       ))}
-    </span>
+    </>
+  );
+}
+
+function BucketCountCells({
+  byBucket,
+  className,
+  scope,
+}: {
+  byBucket: Record<string, number>;
+  className: string;
+  /** Device Detail query params identifying the entity, e.g. `{ companyId }` or `{ plantId }`. */
+  scope: Record<string, string>;
+}) {
+  return (
+    <>
+      {SLA_BUCKETS_ASC.map((b) => {
+        const n = byBucket[b] ?? 0;
+        // A non-zero count deep-links into the Device Detail list, pre-filtered to exactly those devices:
+        // the entity (company/plant) + this SLA bucket + INACTIVE — the same contract as InactiveCountLink.
+        // `stopPropagation` keeps the row's expand/toggle handler from also firing on the count click.
+        const to = `/reports/device?${new URLSearchParams({ ...scope, status: 'INACTIVE', bucket: b }).toString()}`;
+        return (
+          <td key={b} data-testid={`bucket-${b}`} className={className}>
+            {n > 0 ? (
+              <Link
+                to={to}
+                onClick={(e) => e.stopPropagation()}
+                title={`View ${BUCKET_LABEL_RANGE[b]} inactive devices`}
+                className="font-semibold text-brand-700 underline-offset-2 hover:underline"
+              >
+                {n}
+              </Link>
+            ) : (
+              <span className="text-ink-muted/40">—</span>
+            )}
+          </td>
+        );
+      })}
+    </>
   );
 }
 
@@ -105,9 +136,11 @@ function SlaSpread({ byBucket }: { byBucket: Record<string, number> }) {
  * Company/Plant Overview (Issue 06 AC#3 · FE-06 · Issue 122/122b rework). Company is its own column
  * and the table opens collapsed to one aggregate row per company; expanding a company reveals its
  * plants, and a plant drills down to its open device tickets (device · vehicle · assignment ·
- * overridden · SLA). The per-bucket counts render as one compact chip row (`SlaSpread`) so the table
- * needs NO horizontal scrolling. A universal search + assignment-state filter scope the tree and the
- * drill-down; the download exports the whole filtered view as CSV / Excel / PDF.
+ * overridden · SLA). The SLA distribution renders as one column per bucket — header = the inactivity
+ * range (`24–48Hr`, `7d+`, …), cell = the device count in that band (`BucketHeaderCells` /
+ * `BucketCountCells`) — so the table scrolls horizontally when the bucket columns overflow. A universal
+ * search + assignment-state filter scope the tree and the drill-down; the download exports the whole
+ * filtered view as CSV / Excel / PDF.
  */
 export function CompanyPlantTable({
   rows,
@@ -237,8 +270,12 @@ export function CompanyPlantTable({
     exportTable(format, 'company-plant-overview', 'Company / Plant Overview', headers, body);
   };
 
-  const th =
-    'whitespace-nowrap px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-white';
+  // Fixed layout (`table-fixed` + colgroup below) keeps the whole table at 100% of the card width so the
+  // 8 SLA-bucket columns never force a horizontal scroll; headers/cells stay compact and truncate/wrap.
+  const th = 'px-2.5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-white';
+  const thBucket = 'px-1 py-2.5 text-right text-[10px] font-bold uppercase tracking-tight text-white';
+  const td = 'px-2.5 py-2.5';
+  const tdBucket = 'px-1 py-2.5 text-right text-xs tabular-nums text-ink';
 
   return (
     <section aria-labelledby="company-plant-heading" className="mb-8">
@@ -279,7 +316,18 @@ export function CompanyPlantTable({
         </FilterBar>
       </div>
       <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
-        <table aria-label="Company/Plant Overview" className="w-full border-collapse text-sm">
+        <table aria-label="Company/Plant Overview" className="w-full table-fixed border-collapse text-sm">
+          <colgroup>
+            <col style={{ width: '15%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '9%' }} />
+            {SLA_BUCKETS_ASC.map((b) => (
+              <col key={b} style={{ width: '6%' }} />
+            ))}
+            <col style={{ width: '7%' }} />
+          </colgroup>
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900">
               <th className={th}>Company</th>
@@ -287,7 +335,7 @@ export function CompanyPlantTable({
               <th className={cn(th, 'text-right')}>Plants</th>
               <th className={th}>Plant</th>
               <th className={cn(th, 'text-right')}>Inactive / Total</th>
-              <th className={th}>SLA Spread</th>
+              <BucketHeaderCells className={thBucket} />
               <th className={cn(th, 'text-right')}>Fleet Uptime %</th>
             </tr>
           </thead>
@@ -310,83 +358,48 @@ export function CompanyPlantTable({
                     className="cursor-pointer border-b border-line bg-surface-sunken/50 hover:bg-surface-sunken"
                     onClick={() => toggleCompany(co.companyId)}
                   >
-                    <td className="px-4 py-2.5 font-semibold text-ink-strong">
-                      <span className="flex items-center gap-1.5">
+                    <td className={cn(td, 'font-semibold text-ink-strong')}>
+                      <span className="flex min-w-0 items-center gap-1.5">
                         <IconChevronRight
                           className={cn('h-4 w-4 shrink-0 text-ink-muted transition-transform', open && 'rotate-90')}
                         />
-                        <span className="min-w-0 truncate">{co.companyName}</span>
+                        <span className="min-w-0 truncate" title={co.companyName}>{co.companyName}</span>
                       </span>
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className={td}>
                       <TierBadge tier={co.companyTier} />
                     </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-ink">{co.plants.length}</td>
-                    <td className="px-4 py-2.5 text-ink-muted">—</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-ink">
-                      {formatInactiveOfTotal(co.totalInactive, co.totalDevices)}
+                    <td className={cn(td, 'text-right tabular-nums text-ink')}>{co.plants.length}</td>
+                    <td className={cn(td, 'text-ink-muted')}>—</td>
+                    <td className={cn(td, 'text-right tabular-nums text-ink')}>
+                      <InactiveCountLink
+                        inactive={co.totalInactive}
+                        total={co.totalDevices}
+                        scope={{ companyId: co.companyId }}
+                      />
                     </td>
-                    <td className="px-4 py-2.5">
-                      <SlaSpread byBucket={co.byBucket} />
-                    </td>
-                    <td className="px-4 py-2.5" />
+                    <BucketCountCells byBucket={co.byBucket} className={tdBucket} scope={{ companyId: co.companyId }} />
+                    <td className={td} />
                   </tr>
 
-                  {open &&
-                    co.plants.map((p) => (
-                      <Fragment key={p.plantId}>
-                        {/* The whole plant row is the toggle for its device sub-table (Issue 135) — no
-                            separate "View devices" button. Keyboard-operable like the ticket rows. */}
-                        <tr
-                          onClick={() => togglePlant(p.plantId)}
-                          tabIndex={0}
-                          aria-expanded={openPlant === p.plantId}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              void togglePlant(p.plantId);
-                            }
-                          }}
-                          className="cursor-pointer border-b border-line last:border-b-0 hover:bg-surface-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50"
-                        >
-                          <td className="px-4 py-2.5 pl-10 text-xs text-ink-muted">{co.companyName}</td>
-                          <td className="px-4 py-2.5" />
-                          <td className="px-4 py-2.5" />
-                          <td className="px-4 py-2.5 text-ink">
-                            <PlantName code={p.plantName} />
-                          </td>
-                          <td
-                            data-testid="plant-inactive-total"
-                            className="px-4 py-2.5 text-right tabular-nums text-ink"
-                          >
-                            {formatInactiveOfTotal(p.totalInactive, p.totalDevices)}
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <SlaSpread byBucket={p.byBucket} />
-                          </td>
-                          <td
-                            data-testid="plant-fleet-uptime"
-                            className="px-4 py-2.5 text-right tabular-nums text-ink-muted"
-                          >
-                            {fmtUptime(plantUptime?.get(p.plantId))}
-                          </td>
-                        </tr>
-                        {openPlant === p.plantId && (
-                          <tr>
-                            <td colSpan={COLSPAN} className="bg-surface-sunken/40 p-0">
-                              <div className="px-6 py-4 sm:px-10">
-                                <OpenDeviceTickets
-                                  plantLabel={formatPlantDisplayName(p.plantName)}
-                                  loading={loadingPlant === p.plantId}
-                                  tickets={devices[p.plantId] ?? []}
-                                  totalDevices={p.totalDevices}
-                                />
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    ))}
+                  {/* Expanding a company opens its plants as their OWN table (styled like the Open device
+                      tickets panel) inside a full-width cell — not as interleaved rows in this table. */}
+                  {open && (
+                    <tr>
+                      <td colSpan={COLSPAN} className="bg-surface-sunken/40 p-0">
+                        <div className="px-2 py-4 sm:px-4">
+                          <CompanyPlants
+                            company={co}
+                            plantUptime={plantUptime}
+                            openPlant={openPlant}
+                            loadingPlant={loadingPlant}
+                            devices={devices}
+                            onTogglePlant={togglePlant}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                 </Fragment>
               );
             })}
@@ -394,6 +407,107 @@ export function CompanyPlantTable({
         </table>
       </div>
     </section>
+  );
+}
+
+/**
+ * One company's plants as their own bordered table (Issue 135 rework) — the same panel treatment as the
+ * plant-level "Open device tickets" sub-table, opened when a company row is expanded instead of splicing
+ * plant rows into the parent overview table. Each plant row is itself the toggle for its device
+ * sub-table (no separate "View devices" button); the fetch/cache of a plant's tickets stays owned by the
+ * parent (`onTogglePlant` / `devices` / `loadingPlant`) so only one plant loads at a time app-wide.
+ */
+function CompanyPlants({
+  company,
+  plantUptime,
+  openPlant,
+  loadingPlant,
+  devices,
+  onTogglePlant,
+}: {
+  company: CompanyGroup;
+  plantUptime?: Map<string, number>;
+  openPlant: string | null;
+  loadingPlant: string | null;
+  devices: Record<string, TicketRow[]>;
+  onTogglePlant: (plantId: string) => void | Promise<void>;
+}) {
+  const cellPad = 'px-2 py-1.5';
+  const th = `${cellPad} font-bold`;
+  const thBucket = 'px-1 py-1.5 text-right text-[10px] font-bold';
+  const tdBucket = 'px-1 py-1.5 text-right text-xs tabular-nums text-ink';
+  // The plant sub-table's expansion cell spans Plant · Inactive/Total · the SLA-bucket columns · Uptime.
+  const PLANT_COLSPAN = 3 + SLA_BUCKETS_ASC.length;
+
+  return (
+    <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
+      <div className="border-b border-line bg-surface-raised px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
+          Plants — {company.companyName}
+        </span>
+      </div>
+      <table aria-label={`Plants for ${company.companyName}`} className="w-full table-fixed border-collapse text-sm">
+        <colgroup>
+          <col style={{ width: '18%' }} />
+          <col style={{ width: '12%' }} />
+          {SLA_BUCKETS_ASC.map((b) => (
+            <col key={b} style={{ width: '8%' }} />
+          ))}
+          <col style={{ width: '6%' }} />
+        </colgroup>
+        <thead>
+          <tr className="border-b border-chrome-700 bg-chrome-900 text-left text-[11px] uppercase tracking-wider text-white">
+            <th className={th}>Plant</th>
+            <th className={cn(th, 'text-right')}>Inactive / Total</th>
+            <BucketHeaderCells className={thBucket} />
+            <th className={cn(th, 'text-right')}>Fleet Uptime %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {company.plants.map((p) => (
+            <Fragment key={p.plantId}>
+              <tr
+                onClick={() => onTogglePlant(p.plantId)}
+                tabIndex={0}
+                aria-expanded={openPlant === p.plantId}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    void onTogglePlant(p.plantId);
+                  }
+                }}
+                className="cursor-pointer border-b border-line/70 last:border-b-0 hover:bg-surface-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50"
+              >
+                <td className={`${cellPad} truncate text-ink`} title={formatPlantDisplayName(p.plantName)}>
+                  <PlantName code={p.plantName} />
+                </td>
+                <td data-testid="plant-inactive-total" className={`${cellPad} text-right tabular-nums text-ink`}>
+                  <InactiveCountLink inactive={p.totalInactive} total={p.totalDevices} scope={{ plantId: p.plantId }} />
+                </td>
+                <BucketCountCells byBucket={p.byBucket} className={tdBucket} scope={{ plantId: p.plantId }} />
+                <td data-testid="plant-fleet-uptime" className={`${cellPad} text-right tabular-nums text-ink-muted`}>
+                  {fmtUptime(plantUptime?.get(p.plantId))}
+                </td>
+              </tr>
+              {openPlant === p.plantId && (
+                <tr>
+                  <td colSpan={PLANT_COLSPAN} className="bg-surface-sunken/40 p-0">
+                    <div className="px-4 py-3 sm:px-6">
+                      <OpenDeviceTickets
+                        plantLabel={formatPlantDisplayName(p.plantName)}
+                        loading={loadingPlant === p.plantId}
+                        tickets={devices[p.plantId] ?? []}
+                        totalDevices={p.totalDevices}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

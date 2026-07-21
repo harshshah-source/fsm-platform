@@ -5,7 +5,7 @@
 import { downloadCsv, toCsv } from './csv';
 
 export type ExportCell = string | number | null | undefined;
-export type ExportFormat = 'csv' | 'excel' | 'pdf';
+export type ExportFormat = 'csv' | 'excel' | 'pdf' | 'img';
 
 const cellText = (v: ExportCell): string => (v === null || v === undefined ? '' : String(v));
 
@@ -166,6 +166,86 @@ export function downloadPdf(filename: string, title: string, headers: string[], 
   downloadBlob(filename, toPdf(title, headers, rows));
 }
 
+// ── Image (PNG) ────────────────────────────────────────────────────────────────────────────────────
+
+/** Render the table onto a canvas and download it as a PNG — dependency-free, same posture as the
+ *  Excel/PDF builders. Column widths follow the widest header/cell; drawn at 2× for a crisp raster. */
+export function downloadPng(filename: string, title: string, headers: string[], rows: ExportCell[][]): void {
+  const scale = 2; // supersample so text stays sharp on high-DPI screens and when zoomed
+  const padX = 12;
+  const padY = 8;
+  const fontSize = 12;
+  const titleSize = 15;
+  const cellFont = `${fontSize}px Arial, Helvetica, sans-serif`;
+  const boldFont = `bold ${fontSize}px Arial, Helvetica, sans-serif`;
+  const rowH = fontSize + padY * 2;
+  const titleH = titleSize + padY * 2;
+
+  const meter = document.createElement('canvas').getContext('2d');
+  if (!meter) return;
+  // Per-column width = widest of its (bold) header and its (regular) cells, plus horizontal padding.
+  const colW = headers.map((h, i) => {
+    meter.font = boldFont;
+    let w = meter.measureText(cellText(h)).width;
+    meter.font = cellFont;
+    for (const r of rows) w = Math.max(w, meter.measureText(cellText(r[i])).width);
+    return Math.ceil(w) + padX * 2;
+  });
+  const width = Math.max(
+    colW.reduce((a, b) => a + b, 0),
+    Math.ceil(meter.measureText(title).width) + padX * 2,
+  );
+  const height = titleH + rowH * (rows.length + 1) + padY;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.scale(scale, scale);
+  ctx.textBaseline = 'middle';
+
+  // White background so the PNG isn't transparent when pasted into docs/chat.
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+
+  // Title.
+  ctx.fillStyle = '#0f172a';
+  ctx.font = `bold ${titleSize}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(title, padX, titleH / 2);
+
+  // Header band (dark, matching the on-screen table chrome).
+  let y = titleH;
+  ctx.fillStyle = '#0f172a';
+  ctx.fillRect(0, y, width, rowH);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = boldFont;
+  let hx = 0;
+  headers.forEach((h, i) => {
+    ctx.fillText(cellText(h), hx + padX, y + rowH / 2);
+    hx += colW[i];
+  });
+  y += rowH;
+
+  // Body rows, zebra-striped for legibility.
+  ctx.font = cellFont;
+  rows.forEach((r, ri) => {
+    ctx.fillStyle = ri % 2 === 0 ? '#ffffff' : '#f1f5f9';
+    ctx.fillRect(0, y, width, rowH);
+    ctx.fillStyle = '#0f172a';
+    let cx = 0;
+    r.forEach((c, i) => {
+      ctx.fillText(cellText(c), cx + padX, y + rowH / 2);
+      cx += colW[i];
+    });
+    y += rowH;
+  });
+
+  canvas.toBlob((blob) => {
+    if (blob) downloadBlob(filename, blob);
+  }, 'image/png');
+}
+
 /** One-call export in the chosen format; `basename` gets the right extension appended. */
 export function exportTable(
   format: ExportFormat,
@@ -176,5 +256,6 @@ export function exportTable(
 ): void {
   if (format === 'csv') downloadCsv(`${basename}.csv`, toCsv(headers, rows));
   else if (format === 'excel') downloadExcel(`${basename}.xls`, headers, rows, title);
+  else if (format === 'img') downloadPng(`${basename}.png`, title, headers, rows);
   else downloadPdf(`${basename}.pdf`, title, headers, rows);
 }

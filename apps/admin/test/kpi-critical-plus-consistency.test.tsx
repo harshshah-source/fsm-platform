@@ -60,7 +60,7 @@ describe('Issue 122 — Critical KPI is the CRITICAL band only and matches the s
     expect(sumCriticalDevices(zones)).toBe(7);
   });
 
-  it('Pan-India Critical KPI equals the scorecard Critical column sum (CRITICAL band, not tickets)', async () => {
+  it('Pan-India Critical KPI counts strictly the CRITICAL band (not tickets, not worse bands)', async () => {
     stubFetch();
     render(
       <AuthProvider initialSession={opsHead}>
@@ -75,11 +75,23 @@ describe('Issue 122 — Critical KPI is the CRITICAL band only and matches the s
     const kpi = await screen.findByTestId('kpi-critical');
     expect(kpi).toHaveTextContent('7');
     expect(kpi).toHaveTextContent(/critical devices/i);
+  });
 
-    // Scorecard Critical column: NORTH = 3, SOUTH = 4, summing to the KPI.
-    const scorecard = screen.getByRole('table', { name: /zone performance scorecard/i });
-    const cells = within(scorecard).getAllByTestId('scorecard-critical').map((c) => Number(c.textContent));
-    expect(cells.reduce((s, n) => s + n, 0)).toBe(7);
+  it('Scorecard "Inactive > 24Hr" column counts the CRITICAL band and worse (24h+)', async () => {
+    stubFetch();
+    render(
+      <AuthProvider initialSession={opsHead}>
+        <MemoryRouter>
+          <DashboardHome />
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+
+    // The scorecard column is every device inactive 24h+ (CRITICAL + worse bands), NOT the CRITICAL-only
+    // KPI: NORTH = 3 CRITICAL + 5 LONG_PENDING = 8, SOUTH = 4 → 12 (the 2 WARNING devices are < 24h).
+    const scorecard = await screen.findByRole('table', { name: /zone performance scorecard/i });
+    const cells = within(scorecard).getAllByTestId('scorecard-inactive-24h').map((c) => Number(c.textContent));
+    expect(cells.reduce((s, n) => s + n, 0)).toBe(12);
   });
 
   it('shows the Zonal Manager name column on the scorecard', async () => {

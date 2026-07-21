@@ -125,17 +125,32 @@ function renderPage() {
 }
 
 describe('Dispatch batch detail (Issue 123)', () => {
-  it('hides the numeric score while scoreDegenerate holds (selection basis = Precedence)', async () => {
+  it('drops the Rank / Selection basis / Recommendation columns and shows the batch SE + plant per row', async () => {
     renderPage();
     const row = within(await screen.findByTestId('dispatch-assignment-row-t-uuid-1'));
     expect(row.getByText('DEV-9001')).toBeInTheDocument();
-    expect(row.getByText('Precedence')).toBeInTheDocument();
-    // The raw score number is not shown on the row.
+    // The Rank / Selection basis / Recommendation columns were removed — no "Precedence" basis chip and
+    // the raw candidate score never surfaces on the row.
+    expect(row.queryByText('Precedence')).toBeNull();
     expect(row.queryByText('4.20')).toBeNull();
-    // Enrichment (Issue 125): vehicle under device, company + transporter columns.
+    // Enrichment (Issue 125): vehicle under device, company + transporter columns; plus the new
+    // batch-level Plant + SE columns (a batch is one SE dispatched to one plant).
     expect(row.getByText('RJ14-GA-1234')).toBeInTheDocument();
     expect(row.getByText('UltraTech')).toBeInTheDocument();
+    expect(row.getByText('Kotputli Works')).toBeInTheDocument();
+    expect(row.getByText('Ramesh Kumar')).toBeInTheDocument();
     expect(row.getByText('Blue Dart')).toBeInTheDocument();
+  });
+
+  it('offers a Download menu with CSV / Excel / PDF / Image formats', async () => {
+    renderPage();
+    await screen.findByTestId('dispatch-assignment-row-t-uuid-1');
+    const fmt = screen.getByLabelText(/download format/i);
+    expect(within(fmt).getByRole('option', { name: 'CSV' })).toBeInTheDocument();
+    expect(within(fmt).getByRole('option', { name: 'Excel' })).toBeInTheDocument();
+    expect(within(fmt).getByRole('option', { name: 'PDF' })).toBeInTheDocument();
+    expect(within(fmt).getByRole('option', { name: /Image/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Download/i })).toBeEnabled();
   });
 
   it('expands the row to the precedence-terms trace with SE names, not UUIDs', async () => {

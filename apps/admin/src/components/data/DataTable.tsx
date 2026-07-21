@@ -11,6 +11,8 @@ export interface Column<T> {
   /** Mark sortable + provide the comparable value. */
   sortable?: boolean;
   sortValue?: (row: T) => string | number;
+  /** Column width for `tableLayout="fixed"` (e.g. `'10%'`, `'120px'`). Ignored in the default auto layout. */
+  width?: string;
 }
 
 interface DataTableProps<T> {
@@ -45,6 +47,13 @@ interface DataTableProps<T> {
   stickyHeader?: boolean;
   maxBodyHeight?: string;
   /**
+   * Fixed table layout. `'fixed'` pins the table to 100% of its container so a wide, many-column table
+   * never forces a horizontal scroll — columns take their `width` (or divide the space evenly) and long
+   * cell text wraps instead of pushing the table wider. Headers stop being nowrap and padding tightens.
+   * Default `'auto'` preserves the original content-sized behaviour for every existing table.
+   */
+  tableLayout?: 'auto' | 'fixed';
+  /**
    * Disclosure: when supplied and it returns non-null for a row, that row becomes expandable — a
    * trailing chevron toggles a full-width panel (rendered below the row) holding the returned content.
    * Row click toggles the panel (takes over from `onRowClick`, which expandable tables don't use).
@@ -74,8 +83,12 @@ export function DataTable<T>({
   empty,
   stickyHeader = false,
   maxBodyHeight = '70vh',
+  tableLayout = 'auto',
   renderExpanded,
 }: DataTableProps<T>) {
+  const isFixed = tableLayout === 'fixed';
+  // Fixed layout tightens padding and (below) lets headers/cells wrap so many columns fit the width.
+  const cellPad = isFixed ? 'px-2.5 py-2.5' : 'px-4 py-3';
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const toggleExpanded = (key: string) =>
@@ -116,7 +129,18 @@ export function DataTable<T>({
         className={cn('overflow-x-auto', stickyHeader && 'overflow-y-auto')}
         style={stickyHeader ? { maxHeight: maxBodyHeight } : undefined}
       >
-        <table aria-label={ariaLabel} className="w-full border-collapse text-sm">
+        <table
+          aria-label={ariaLabel}
+          className={cn('w-full border-collapse text-sm', isFixed && 'table-fixed')}
+        >
+          {isFixed && (
+            <colgroup>
+              {columns.map((c) => (
+                <col key={c.key} style={c.width ? { width: c.width } : undefined} />
+              ))}
+              {renderExpanded && <col style={{ width: '2.5rem' }} />}
+            </colgroup>
+          )}
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900 text-left">
               {columns.map((c) => (
@@ -131,7 +155,9 @@ export function DataTable<T>({
                       : undefined
                   }
                   className={cn(
-                    'whitespace-nowrap px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-white',
+                    cellPad,
+                    'text-[11px] font-bold uppercase tracking-wider text-white',
+                    isFixed ? 'align-bottom' : 'whitespace-nowrap',
                     c.align === 'right' && 'text-right tabular-nums',
                     c.sortable && 'cursor-pointer select-none hover:text-white/75',
                     // Sticky header: each cell carries its own opaque bg + hairline so it paints cleanly
@@ -161,8 +187,8 @@ export function DataTable<T>({
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={`sk-${i}`} className="border-b border-line/80 last:border-b-0">
                   {columns.map((c) => (
-                    // Match the real row's px-4 py-3 exactly so there is no jump on loading → loaded.
-                    <td key={c.key} className={cn('px-4 py-3', c.align === 'right' && 'text-right')}>
+                    // Match the real row's padding exactly so there is no jump on loading → loaded.
+                    <td key={c.key} className={cn(cellPad, c.align === 'right' && 'text-right')}>
                       <Skeleton className={cn('h-4 w-24', c.align === 'right' && 'ml-auto')} />
                     </td>
                   ))}
@@ -246,7 +272,9 @@ export function DataTable<T>({
                         <td
                           key={c.key}
                           className={cn(
-                            'px-4 py-3 align-middle text-ink',
+                            cellPad,
+                            'align-middle text-ink',
+                            isFixed && 'break-words',
                             c.align === 'right' && 'text-right tabular-nums',
                             c.className,
                           )}
