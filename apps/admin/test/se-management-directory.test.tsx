@@ -137,7 +137,12 @@ describe('SE Management directory (Phase 4)', () => {
       return undefined;
     });
     renderPage(OH);
-    await userEvent.click(await screen.findByText('Asha Rao')); // select the row → open the edit panel
+    // Row selection is the explicit "Manage coverage →" affordance, NOT the name — the name cell is an
+    // EditableCell (#150), so clicking it starts an inline edit instead of opening the panel. Scoped to
+    // the SE's own row so a second directory row can never satisfy this click.
+    const row = (await screen.findByText('Asha Rao')).closest('tr');
+    expect(row).not.toBeNull();
+    await userEvent.click(within(row!).getByRole('button', { name: /manage coverage/i }));
     await userEvent.click(await screen.findByRole('button', { name: /remove pune depot/i }));
     await waitFor(() => expect(deleted).toContain('/engineers/se-1/coverage/77'));
   });
