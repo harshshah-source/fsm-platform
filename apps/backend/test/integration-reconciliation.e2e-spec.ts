@@ -5,7 +5,12 @@ import {
   type MasterSourceCounts,
 } from '../src/ingestion/autoplant/health.service';
 import { AutoPlantMasterSource } from '../src/ingestion/autoplant/autoplant-master-source';
+import { OPERATIONAL_DEPLOYMENT_STATUSES } from '../src/ingestion/autoplant/master-mapping';
 import { PrismaService } from '../src/prisma/prisma.service';
+
+/** Mirror of `AutoPlantMasterSource.inClause` — keeps the expected SQL derived, never hand-counted. */
+const placeholders = (column: string, values: readonly string[]): string =>
+  `${column} IN (${values.map(() => '?').join(', ')})`;
 
 /**
  * Issue 97 Slice 5 (review A6) — reconciliation counts in `GET /api/integration/health`. A master
@@ -129,14 +134,17 @@ describe('Issue 97 Slice 5 — reconciliation counts in integration health', () 
 
   it('AutoPlantMasterSource counts: one single-row COUNT each, reusing the sync filters', async () => {
     const calls: { sql: string; params: unknown }[] = [];
+    const plantStatuses = ['ACTIVE'];
     const source = new AutoPlantMasterSource({
       query: async <T>(sql: string, params?: readonly unknown[]): Promise<T[]> => {
         calls.push({ sql, params });
         return [{ c: 17 }] as T[];
       },
       mastersSchema: 'ap_masters',
-      plantStatuses: ['ACTIVE'],
-      deploymentStatuses: ['DEPLOYED'],
+      plantStatuses,
+      // READ scope only — since Issue 128 this is `[]` (every status) in production so departures are
+      // observable. It deliberately does NOT drive countVehicleMasters; see the next assertion block.
+      deploymentStatuses: [],
     });
 
     expect(await source.countPlants()).toBe(17);
@@ -145,12 +153,37 @@ describe('Issue 97 Slice 5 — reconciliation counts in integration health', () 
 
     // Plants: DISTINCT plant_id (mirrors readPlants' composite-PK dedup) under the same status filter.
     expect(calls[0].sql).toMatch(/SELECT COUNT\(DISTINCT plant_id\) AS c FROM `ap_masters`\.`mst_plant`/);
-    expect(calls[0].sql).toContain('status IN (?)');
-    expect(calls[0].params).toEqual(['ACTIVE']);
+    expect(calls[0].sql).toContain(placeholders('status', plantStatuses));
+    expect(calls[0].params).toEqual(plantStatuses);
 
-    // Vehicles: plain COUNT(*) under the same deployment filter (no join — the count needs no company).
+    // Vehicles: plain COUNT(*) under the OPERATIONAL filter (no join — the count needs no company).
+    // Derived from the exported constant, never a duplicated literal: #128 widened it from
+    // ['DEPLOYED'] to ['DEPLOYED','ACTIVE'] and this assertion silently desynced, leaving the whole
+    // backend suite red for 43 commits. Deriving it means the next widening cannot repeat that.
     expect(calls[1].sql).toMatch(/SELECT COUNT\(\*\) AS c FROM `ap_masters`\.`mst_vehicle`/);
-    expect(calls[1].sql).toContain('deployment_status IN (?)');
-    expect(calls[1].params).toEqual(['DEPLOYED']);
+    expect(calls[1].sql).toContain(placeholders('deployment_status', OPERATIONAL_DEPLOYMENT_STATUSES));
+    expect(calls[1].params).toEqual(OPERATIONAL_DEPLOYMENT_STATUSES);
+  });
+
+  it('countVehicleMasters counts the OPERATIONAL scope, not the READ scope', async () => {
+    // The regression that made the assertion above stale was not really a changed literal — it was
+    // that the spec injected `deploymentStatuses` (the READ scope) while countVehicleMasters reads
+    // `operationalStatuses` (the create/reconciliation scope). The injection was inert, so the test
+    // was pinning a default it did not know it was pinning. This pins WHICH knob drives the count.
+    const calls: { sql: string; params: unknown }[] = [];
+    const operationalStatuses = ['DEPLOYED', 'ACTIVE', 'IN_TRANSIT'];
+    const source = new AutoPlantMasterSource({
+      query: async <T>(sql: string, params?: readonly unknown[]): Promise<T[]> => {
+        calls.push({ sql, params });
+        return [{ c: 3 }] as T[];
+      },
+      mastersSchema: 'ap_masters',
+      deploymentStatuses: [], // read every status — must NOT reach the count
+      operationalStatuses,
+    });
+
+    expect(await source.countVehicleMasters()).toBe(3);
+    expect(calls[0].sql).toContain(placeholders('deployment_status', operationalStatuses));
+    expect(calls[0].params).toEqual(operationalStatuses);
   });
 });
