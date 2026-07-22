@@ -115,7 +115,7 @@ describe('Dispatch zone detail — companies & plants overview', () => {
 
     const plant = within(await screen.findByTestId('zone-plant-row-10'));
     expect(plant.getByText('Kotputli Works')).toBeInTheDocument();
-    expect(plant.getByText('4')).toBeInTheDocument(); // 3 + 1 assignments across the plant's two batches
+    expect(plant.getByText('2')).toBeInTheDocument(); // 2 batches formed at this plant in the run
     // Fleet-context columns from plantStats: inactive/total, assigned, unassigned.
     expect(plant.getByText('5')).toBeInTheDocument(); // inactive
     expect(plant.getByText('/ 40')).toBeInTheDocument(); // total

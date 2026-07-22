@@ -28,6 +28,7 @@ export function DashboardHero({
   bottom,
   bottomHeading,
   bottomHeadingId = 'hero-bottom-strip-heading',
+  centerBelow,
 }: {
   title: ReactNode;
   /** Header-row extras (Snapshot Healthy pill, period selector) — right-aligned over the hero. */
@@ -40,6 +41,7 @@ export function DashboardHero({
   bottom?: Metric[];
   bottomHeading?: ReactNode;
   bottomHeadingId?: string;
+  centerBelow?: ReactNode;
 }) {
   const sideRows = Math.max(left.length, right.length);
   return (
@@ -63,7 +65,7 @@ export function DashboardHero({
 
         {/* One grid, two behaviours: below xl it is the classic metric grid (1-col / sm 2-col, cards
             in reading order); at xl each card is pinned into a side column flanking the truck. */}
-        <div className="relative grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-h-[440px] xl:grid-cols-[minmax(230px,300px)_minmax(0,1fr)_minmax(230px,300px)] xl:content-between xl:gap-4">
+        <div className="relative grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-h-[564px] xl:grid-cols-[minmax(230px,300px)_minmax(0,1fr)_minmax(230px,300px)] xl:content-start xl:gap-x-4 xl:gap-y-20">
           {left.map((m, i) => (
             <div key={`l-${i}`} className={cn('xl:col-start-1', ROW_START[i + 1])}>
               <MetricCard glass {...m} />
@@ -94,8 +96,16 @@ export function DashboardHero({
               </div>
             </section>
           )}
+          {centerBelow && (
+            <div className="sm:col-span-2 xl:absolute xl:-bottom-6 xl:left-[25%] xl:right-[25%] xl:z-10">
+              {centerBelow}
+            </div>
+          )}
         </div>
       </div>
     </section>
   );
 }
+
+
+

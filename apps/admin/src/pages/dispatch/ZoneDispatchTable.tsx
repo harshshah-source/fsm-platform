@@ -12,7 +12,6 @@ interface PlantGroup {
   plantId: string;
   plantName: string;
   companyName: string;
-  assignments: number;
   batches: DispatchBatchRow[];
   stats: PlantDeviceStats;
 }
@@ -20,7 +19,6 @@ interface PlantGroup {
 interface CompanyGroup {
   companyName: string;
   plants: PlantGroup[];
-  assignments: number;
   batchCount: number;
   stats: PlantDeviceStats;
 }
@@ -59,13 +57,11 @@ function groupByCompanyPlant(
         plantId: b.plantId,
         plantName: b.plantName,
         companyName,
-        assignments: 0,
         batches: [],
         stats: plantStats[b.plantId] ?? ZERO_STATS,
       };
       plants.set(b.plantId, plant);
     }
-    plant.assignments += b.ticketCount;
     plant.batches.push(b);
   }
   return [...byCompany.entries()].map(([companyName, plants]) => {
@@ -73,17 +69,16 @@ function groupByCompanyPlant(
     return {
       companyName,
       plants: plantList,
-      assignments: plantList.reduce((n, p) => n + p.assignments, 0),
       batchCount: plantList.reduce((n, p) => n + p.batches.length, 0),
       stats: sumStats(plantList),
     };
   });
 }
 
-type SortOrder = '' | 'ASSIGN_DESC' | 'ASSIGN_ASC';
+type SortOrder = '' | 'BATCH_DESC' | 'BATCH_ASC';
 
-// company + plant + inactive/total + assigned + unassigned + assignments + batches + expander.
-const COLSPAN = 8;
+// company + plant + inactive/total + assigned + unassigned + batches + expander.
+const COLSPAN = 7;
 
 /** "inactive / total" fleet-health cell, muted when the plant has no devices on record. */
 function InactiveTotal({ stats }: { stats: PlantDeviceStats }) {
@@ -134,7 +129,6 @@ export function ZoneDispatchTable({
             return {
               ...g,
               plants,
-              assignments: plants.reduce((n, p) => n + p.assignments, 0),
               batchCount: plants.reduce((n, p) => n + p.batches.length, 0),
               stats: sumStats(plants),
             };
@@ -142,10 +136,10 @@ export function ZoneDispatchTable({
           .filter((g): g is CompanyGroup => g !== null);
 
     if (!sortOrder) return [...filtered].sort((a, b) => a.companyName.localeCompare(b.companyName));
-    const dir = sortOrder === 'ASSIGN_DESC' ? -1 : 1;
+    const dir = sortOrder === 'BATCH_DESC' ? -1 : 1;
     return filtered
-      .map((g) => ({ ...g, plants: [...g.plants].sort((a, b) => (a.assignments - b.assignments) * dir) }))
-      .sort((a, b) => (a.assignments - b.assignments) * dir);
+      .map((g) => ({ ...g, plants: [...g.plants].sort((a, b) => (a.batches.length - b.batches.length) * dir) }))
+      .sort((a, b) => (a.batchCount - b.batchCount) * dir);
   }, [batches, plantStats, term, status, sortOrder]);
 
   const toggleCompany = (companyName: string) =>
@@ -192,13 +186,13 @@ export function ZoneDispatchTable({
             ))}
           </FilterSelect>
           <FilterSelect
-            aria-label="Sort by assignments"
+            aria-label="Sort by batches"
             value={sortOrder}
             onChange={(e) => setSortOrder(e.target.value as SortOrder)}
           >
             <option value="">Sort: company name</option>
-            <option value="ASSIGN_DESC">Most assignments first</option>
-            <option value="ASSIGN_ASC">Fewest assignments first</option>
+            <option value="BATCH_DESC">Most batches first</option>
+            <option value="BATCH_ASC">Fewest batches first</option>
           </FilterSelect>
         </FilterBar>
       </div>
@@ -217,9 +211,6 @@ export function ZoneDispatchTable({
               </th>
               <th className={cn(th, 'text-right')} title="Devices with an unassigned ticket">
                 Unassigned
-              </th>
-              <th className={cn(th, 'text-right')} title="Tickets dispatched in this run">
-                Assignments
               </th>
               <th className={cn(th, 'text-right')}>Batches</th>
               <th className={th} />
@@ -259,7 +250,6 @@ export function ZoneDispatchTable({
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-ink">{co.stats.assignedDevices}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-ink">{co.stats.unassignedDevices}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-ink">{co.assignments}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums text-ink">{co.batchCount}</td>
                     <td className="px-4 py-2.5" />
                   </tr>
@@ -279,7 +269,6 @@ export function ZoneDispatchTable({
                           </td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-ink">{p.stats.assignedDevices}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-ink">{p.stats.unassignedDevices}</td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-ink">{p.assignments}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-ink">{p.batches.length}</td>
                           <td className="px-4 py-2.5 text-right">
                             <span className="whitespace-nowrap text-xs font-medium text-brand-700">

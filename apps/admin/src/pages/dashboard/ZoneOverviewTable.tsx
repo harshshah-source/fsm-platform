@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { ZoneOverviewRow } from '../../api/dashboard';
 import { DataTable, FilterBar, FilterSelect, type Column } from '../../components/data';
+import { InactiveCountLink } from '../../components/domain';
 import { Button } from '../../components/ui';
 import { cn } from '../../lib/cn';
 import { downloadCsv, toCsv } from '../../lib/csv';
 import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_LABEL_RANGE, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
-import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
 
 /**
  * Zone Overview table (Issue 06 AC#2/#5 · FE-06). One row per zone: total inactive + per-SLA-bucket
@@ -53,7 +53,7 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
       align: 'right',
       render: (r) => (
         <span data-testid="zone-inactive-total" className="tabular-nums">
-          {formatInactiveOfTotal(r.totalInactive, r.totalDevices)}
+          <InactiveCountLink inactive={r.totalInactive} total={r.totalDevices} scope={{ zoneId: r.zoneId }} />
         </span>
       ),
     },

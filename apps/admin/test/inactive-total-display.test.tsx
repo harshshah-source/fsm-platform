@@ -28,12 +28,20 @@ describe('Issue 2 — inactive / total presentation', () => {
   });
 
   it('Zone Overview shows inactive / total per zone', () => {
-    render(<ZoneOverviewTable rows={[zone]} />);
+    render(
+      <MemoryRouter>
+        <ZoneOverviewTable rows={[zone]} />
+      </MemoryRouter>,
+    );
     expect(screen.getByTestId('zone-inactive-total')).toHaveTextContent('3 / 10');
   });
 
   it('Company/Plant shows inactive / total per plant (after expanding the company)', async () => {
-    render(<CompanyPlantTable rows={[plant]} />);
+    render(
+      <MemoryRouter>
+        <CompanyPlantTable rows={[plant]} />
+      </MemoryRouter>,
+    );
     // Collapsed by default (Issue 122) — expand the company to reveal its plant rows.
     await userEvent.click(screen.getByText('Acme'));
     expect(within(screen.getByTestId('plant-inactive-total')).getByText('2 / 40')).toBeInTheDocument();

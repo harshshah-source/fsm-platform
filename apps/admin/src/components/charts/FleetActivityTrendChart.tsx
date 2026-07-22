@@ -48,19 +48,26 @@ export function FleetActivityTrendChart({
   };
 
   return (
-    <div style={{ height }} data-testid="activity-trend-chart">
+    <div className="relative" style={{ height }} data-testid="activity-trend-chart">
+      <span className="pointer-events-none absolute left-14 top-1 z-10 text-[10px] font-extrabold uppercase tracking-[0.16em] text-ink-caps">Device / ticket count</span>
+      <span className="pointer-events-none absolute bottom-0 right-4 z-10 text-[10px] font-extrabold uppercase tracking-[0.16em] text-ink-caps">Date</span>
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: -8 }}>
+        <LineChart data={data} margin={{ top: 34, right: 16, bottom: 30, left: 12 }}>
           <CartesianGrid stroke={CHART.grid} vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 11, fill: CHART.axis }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 11, fill: CHART.axis }} axisLine={false} tickLine={false} width={40} allowDecimals={false} />
+          <YAxis tick={{ fontSize: 11, fill: CHART.axis }} axisLine={false} tickLine={false} width={44} allowDecimals={false} />
           <Tooltip />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Line name="Inactive Devices" type="monotone" dataKey="inactive" stroke={CHART.warning} strokeWidth={2} dot={inactiveDot} connectNulls />
-          <Line name="Troubleshoot" type="monotone" dataKey="troubleshoot" stroke={CHART.brand} strokeWidth={2} dot={false} />
-          <Line name="Installation" type="monotone" dataKey="installation" stroke={CHART.info} strokeWidth={2} dot={false} />
+          <Legend verticalAlign="top" align="right" height={24} wrapperStyle={{ fontSize: 12, fontWeight: 700, paddingTop: 2 }} />
+          <Line name="Inactive Devices" type="monotone" dataKey="inactive" stroke={CHART.warning} strokeWidth={2.5} style={{ filter: `drop-shadow(0 0 2px ${CHART.warning})` }} dot={inactiveDot} connectNulls />
+          <Line name="Troubleshoot" type="monotone" dataKey="troubleshoot" stroke={CHART.brand} strokeWidth={2.5} style={{ filter: `drop-shadow(0 0 2px ${CHART.brand})` }} dot={false} />
+          <Line name="Installation" type="monotone" dataKey="installation" stroke={CHART.info} strokeWidth={2.5} style={{ filter: `drop-shadow(0 0 2px ${CHART.info})` }} dot={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>
   );
 }
+
+
+
+
+

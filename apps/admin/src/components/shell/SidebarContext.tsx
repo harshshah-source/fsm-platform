@@ -22,6 +22,7 @@ function readPersistedCollapsed(): boolean {
 interface SidebarState {
   collapsed: boolean;
   toggleCollapsed: () => void;
+  collapse: () => void;
   mobileOpen: boolean;
   openMobile: () => void;
   closeMobile: () => void;
@@ -44,12 +45,13 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   // Stable action identities — the route-change effect in <Sidebar> depends on `closeMobile`, so it must
   // not change every render or it would re-fire and immediately re-close a just-opened drawer.
   const toggleCollapsed = useCallback(() => setCollapsedState((c) => !c), []);
+  const collapse = useCallback(() => setCollapsedState(true), []);
   const openMobile = useCallback(() => setMobileOpen(true), []);
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
   const value = useMemo<SidebarState>(
-    () => ({ collapsed, toggleCollapsed, mobileOpen, openMobile, closeMobile }),
-    [collapsed, mobileOpen, toggleCollapsed, openMobile, closeMobile],
+    () => ({ collapsed, toggleCollapsed, collapse, mobileOpen, openMobile, closeMobile }),
+    [collapsed, mobileOpen, toggleCollapsed, collapse, openMobile, closeMobile],
   );
 
   return <SidebarContext.Provider value={value}>{children}</SidebarContext.Provider>;

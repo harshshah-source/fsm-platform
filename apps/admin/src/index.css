@@ -101,11 +101,33 @@
   }
 }
 
+/* Page-container entrance — the routed content fades/rises in on every navigation (keyed by pathname
+   in <ShellFrame>). Short and subtle so it reads as smooth, not slow. Respects reduced-motion. */
+@utility animate-page-in {
+  animation: page-in 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @layer base {
   html,
   body,
   #root {
     height: 100%;
+  }
+  html {
+    scroll-behavior: smooth;
   }
   body {
     background: linear-gradient(180deg, #f7f8fa 0%, var(--color-surface-app) 30rem);

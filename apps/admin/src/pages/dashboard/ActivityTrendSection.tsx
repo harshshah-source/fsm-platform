@@ -27,9 +27,11 @@ interface ZoneOption {
 export function ActivityTrendSection({
   zones,
   canSelectZone,
+  compact = false,
 }: {
   zones: ZoneOption[];
   canSelectZone: boolean;
+  compact?: boolean;
 }) {
   const [range, setRange] = useState<ActivityTrendRange>('7D');
   const [zoneWise, setZoneWise] = useState(false);
@@ -62,7 +64,7 @@ export function ActivityTrendSection({
   const hasData = points.some((p) => p.inactive != null || p.troubleshoot > 0 || p.installation > 0);
 
   return (
-    <section aria-labelledby="activity-trend-heading" className="mb-8">
+    <section aria-labelledby="activity-trend-heading" className={compact ? '' : 'mb-8'}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3
           id="activity-trend-heading"
@@ -143,7 +145,7 @@ export function ActivityTrendSection({
 
       <div className="rounded-card border border-line bg-surface-card p-4 shadow-sm">
         {loading ? (
-          <Skeleton className="h-64 w-full" />
+          <Skeleton className={compact ? 'h-48 w-full' : 'h-64 w-full'} />
         ) : error ? (
           <p role="alert" className="py-16 text-center text-sm text-critical">
             Couldn’t load the activity trend.
@@ -153,9 +155,11 @@ export function ActivityTrendSection({
             No activity in this period yet — telemetry and ticket history are still accruing.
           </p>
         ) : (
-          <FleetActivityTrendChart points={points} bucket={report?.bucket ?? 'day'} />
+          <FleetActivityTrendChart points={points} bucket={report?.bucket ?? 'day'} height={compact ? 190 : 260} />
         )}
       </div>
     </section>
   );
 }
+
+

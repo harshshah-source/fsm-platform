@@ -1,9 +1,14 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CompanyPlantRow, ZoneOverviewRow } from '../src/api/dashboard';
 import { CompanyPlantTable } from '../src/pages/dashboard/CompanyPlantTable';
 import { ZoneOverviewTable } from '../src/pages/dashboard/ZoneOverviewTable';
+
+// The overview tables now deep-link their inactive counts into the Device Detail list, so each render
+// needs a Router in scope for the <Link>s (same requirement the Scorecard table already carries).
+const inRouter = (ui: JSX.Element) => render(<MemoryRouter>{ui}</MemoryRouter>);
 
 /**
  * Issue 06 slice 8 — the overview filters (AC#2/#3 "filter ... work"). Client-side filtering of the
@@ -27,7 +32,7 @@ afterEach(() => {
 
 describe('Dashboard filters (Issue 06 AC#2/#3)', () => {
   it('filters Zone Overview by zone', async () => {
-    render(<ZoneOverviewTable rows={zoneRows} />);
+    inRouter(<ZoneOverviewTable rows={zoneRows} />);
     const table = () => within(screen.getByRole('table', { name: /zone overview/i }));
     expect(table().getByText('NORTH')).toBeInTheDocument();
     expect(table().getByText('SOUTH')).toBeInTheDocument();
@@ -38,7 +43,7 @@ describe('Dashboard filters (Issue 06 AC#2/#3)', () => {
   });
 
   it('filters Zone Overview by bucket', async () => {
-    render(<ZoneOverviewTable rows={zoneRows} />);
+    inRouter(<ZoneOverviewTable rows={zoneRows} />);
     const table = () => within(screen.getByRole('table', { name: /zone overview/i }));
     await userEvent.selectOptions(screen.getByLabelText(/filter by bucket/i), 'WARNING');
     expect(table().queryByText('NORTH')).not.toBeInTheDocument();
@@ -46,7 +51,7 @@ describe('Dashboard filters (Issue 06 AC#2/#3)', () => {
   });
 
   it('filters Company/Plant Overview by the universal search (Issue 122)', async () => {
-    render(<CompanyPlantTable rows={cpRows} />);
+    inRouter(<CompanyPlantTable rows={cpRows} />);
     const table = () => within(screen.getByRole('table', { name: /company\/plant overview/i }));
     expect(table().getByText('Acme')).toBeInTheDocument();
     expect(table().getByText('Globex')).toBeInTheDocument();

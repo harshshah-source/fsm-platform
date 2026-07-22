@@ -80,7 +80,17 @@ export function Sidebar({ role }: { role: string }) {
             <IconMenu className="h-[18px] w-[18px]" />
           </button>
 
-          <BrandLogo className={cn('min-w-0', collapsed && 'lg:hidden')} />
+          <Link
+            to="/"
+            aria-label="AutoPlant FSM — go to dashboard"
+            onClick={closeMobile}
+            className={cn(
+              'min-w-0 rounded-md transition-opacity hover:opacity-80 focus-ring',
+              collapsed && 'lg:hidden',
+            )}
+          >
+            <BrandLogo />
+          </Link>
 
           <button
             type="button"

@@ -49,10 +49,16 @@ export function Footer() {
     <footer className="mt-auto bg-chrome-900 px-6 py-6 text-chrome-text">
       <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
         <div className="max-w-sm">
-          <div className="text-sm font-bold tracking-tight text-brand-logo">autoplant Systems</div>
-          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-chrome-muted">
-            Field Management System
-          </div>
+          <Link
+            to="/"
+            aria-label="AutoPlant FSM — go to dashboard"
+            className="inline-block rounded-md transition-opacity hover:opacity-80"
+          >
+            <div className="text-sm font-bold tracking-tight text-brand-logo">autoplant Systems</div>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-chrome-muted">
+              Field Management System
+            </div>
+          </Link>
           <p className="mt-2 text-xs text-chrome-muted">
             A premium command workspace for field service dispatch, SLA governance, readiness
             intelligence, verification, warehouse visibility, and zone performance.
