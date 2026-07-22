@@ -38,9 +38,13 @@ export class VerificationService {
       select: { ticketId: true, deviceId: true, failureCycleId: true, status: true },
     });
 
+    // #148: read the telemetry watermark ONCE per sweep, not once per ticket — it is a single global
+    // value and the sweep runs every 5 minutes over every pending ticket.
+    const telemetryAsOf = await this.telemetryWatermark();
+
     const result: VerificationSweepResult = { closed: 0, failed: 0, fraud: 0, pending: 0 };
     for (const ticket of tickets) {
-      const outcome = await this.verifyTicket(ticket, now);
+      const outcome = await this.verifyTicket(ticket, now, telemetryAsOf);
       if (outcome === 'CLOSED') result.closed++;
       else if (outcome === 'FRAUD') {
         result.failed++;
@@ -142,9 +146,49 @@ export class VerificationService {
     return 'OK';
   }
 
+  /**
+   * Newest telemetry watermark — the `data_as_of` of the most recent snapshot run that recorded one.
+   * Mirrors the read in `AutoPlantHealthService.snapshotHealth`, deliberately, so "how fresh is
+   * telemetry" has exactly one definition on the platform. `null` = no run has ever recorded a
+   * watermark.
+   */
+  private async telemetryWatermark(): Promise<Date | null> {
+    const lastGood = await this.prisma.snapshotRun.findFirst({
+      where: { dataAsOf: { not: null } },
+      orderBy: { runId: 'desc' },
+      select: { dataAsOf: true },
+    });
+    return lastGood?.dataAsOf ?? null;
+  }
+
+  /**
+   * #148 — a verification window may expire only once BOTH are true: 24 h of wall-clock has elapsed,
+   * AND telemetry has actually advanced past the submission.
+   *
+   * Wall-clock alone is not evidence. The sweep fires every 5 minutes while
+   * `INGESTION_SCHEDULER_ENABLED` may be `false`, so nothing is guaranteed to be writing the
+   * `raw_device_snapshots` this verdict reads. Without the second condition a device the SE genuinely
+   * repaired ages into an IRREVERSIBLE `FAILED_VERIFICATION` — rolling back its `PRE_VERIFICATION`
+   * inventory — purely because nobody ran the pipeline that day.
+   *
+   * A null watermark (no run has ever recorded one) means telemetry has NOT advanced: no ping could
+   * have arrived, so expiring would be exactly the wrong verdict. Conservative by construction.
+   *
+   * This can only ever DELAY a failure verdict, never cause one — so it is strictly safer than the
+   * behaviour it replaces, and it needs no ops discipline to hold. The cost is the opposite tail: a
+   * window that never expires because the watermark never advances. That is a REAL condition being
+   * correctly surfaced, not hidden — it must be made visible (slice 3), never auto-expired after a
+   * grace period, which would merely re-create this bug with a longer fuse.
+   */
+  private windowExpired(startedAt: Date, now: Date, telemetryAsOf: Date | null): boolean {
+    if (now.getTime() - startedAt.getTime() < TWENTY_FOUR_HOURS_MS) return false;
+    return telemetryAsOf != null && telemetryAsOf.getTime() > startedAt.getTime();
+  }
+
   private async verifyTicket(
     ticket: { ticketId: string; deviceId: string; failureCycleId: string | null; status: string },
     now: Date,
+    telemetryAsOf: Date | null,
   ): Promise<'CLOSED' | 'FRAUD' | 'FAILED' | 'PENDING'> {
     // Phase-1 anchor: the latest troubleshoot submission for this ticket.
     const submission = await this.prisma.troubleshootingSubmission.findFirst({
@@ -179,7 +223,7 @@ export class VerificationService {
       return this.finalize(ticket, run.runId, { ...baseUpdate, fraudFlag: true }, 'FAILED_VERIFICATION', now, 'FRAUD');
     }
 
-    const expired = now.getTime() - run.startedAt.getTime() >= TWENTY_FOUR_HOURS_MS;
+    const expired = this.windowExpired(run.startedAt, now, telemetryAsOf);
 
     if (!p1.passed) {
       // 1–2 pings (partial badge) or none — fail only once the 24 h window expires; else keep watching.

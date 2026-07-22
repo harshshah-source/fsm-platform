@@ -174,6 +174,14 @@ describe('Issue 18 slice 3 — verification run', () => {
   it('fails a ticket with no pings once the 24 h window expires', async () => {
     const { ticketId } = await makeTicket();
     await submitForm(ticketId, 'FORM_GPS');
+    // #148: expiry now requires telemetry to have actually advanced past the submission — 25 h of
+    // wall-clock against a frozen pipeline proves nothing. This test has always meant "telemetry is
+    // flowing and the device still did not ping"; that precondition is now stated instead of
+    // inherited from whatever watermark other specs left in the shared database.
+    // `verification-staleness.e2e-spec.ts` owns the stale-telemetry half of the pair.
+    await prisma.snapshotRun.create({
+      data: { status: 'SUCCESS', startedAt: T0, dataAsOf: new Date(T0.getTime() + 26 * 60 * 60_000) },
+    });
 
     const res = await verify.runVerification(new Date(T0.getTime() + 25 * 60 * 60_000), { ticketIds: [ticketId] });
     expect(res.failed).toBe(1);

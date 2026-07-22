@@ -100,6 +100,12 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
     const { ticketId } = await makeTicket();
     await submitForm(ticketId); // stock → before-2, PRE_VERIFICATION
     expect(await stock()).toBe(before - 2);
+    // #148: expiry now requires telemetry to have actually advanced past the submission, so the
+    // precondition this test always relied on is stated explicitly rather than inherited from
+    // whatever watermark other specs happened to leave behind.
+    await prisma.snapshotRun.create({
+      data: { status: 'SUCCESS', startedAt: T0, dataAsOf: new Date(T0.getTime() + 26 * 60 * 60_000) },
+    });
     const res = await verify.runVerification(new Date(T0.getTime() + 25 * 60 * 60_000), { ticketIds: [ticketId] });
     expect(res.failed).toBe(1);
     const txn = await prisma.inventoryTransaction.findFirstOrThrow({ where: { ticketId } });
