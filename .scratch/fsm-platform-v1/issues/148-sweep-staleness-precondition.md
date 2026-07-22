@@ -1,5 +1,5 @@
 # 148 — Business sweeps expire on wall-clock, not telemetry freshness
-Status: ready-for-agent
+Status: ready-for-agent  # slices 1, 2, 4 landed 2026-07-22; slice 3 (stall observability on /build-health) open
 Type: AFK
 
 > Source: `docs/audits/2026-07-22-full-project-audit.md` §5 B4, re-verified still-open by
@@ -90,13 +90,13 @@ switch-pair coupling.
 
 ## Acceptance criteria
 
-- [ ] A verification window does not expire while `snapshot_runs.data_as_of` has not advanced past the run's `submittedAt`.
-- [ ] The same precondition guards install-activation expiry (`FAILED_ACTIVATION`).
-- [ ] With **fresh** telemetry, expiry behaviour is **unchanged** — pinned by regression assertions that pass before any source change.
-- [ ] No code path can write `FAILED_VERIFICATION` or `FAILED_ACTIVATION` on stale telemetry.
+- [x] A verification window does not expire while `snapshot_runs.data_as_of` has not advanced past the run's `submittedAt`.
+- [x] The same precondition guards install-activation expiry (`FAILED_ACTIVATION`).
+- [x] With **fresh** telemetry, expiry behaviour is **unchanged** — pinned by regression assertions that pass before any source change.
+- [x] No code path can write `FAILED_VERIFICATION` or `FAILED_ACTIVATION` on stale telemetry.
 - [ ] A stalled window is **observable** — surfaced on the existing integration-health page (`/build-health`, [#131](./131-build-health-ui-parity.md)) rather than failing silently.
-- [ ] The ingestion↔sweeps coupling is documented as a **switch pair** in the INDEX activation checklist, matching the existing ingestion↔partition-maintenance precedent.
-- [ ] Backend suite green.
+- [x] The ingestion↔sweeps coupling is documented as a **switch pair** in the INDEX activation checklist, matching the existing ingestion↔partition-maintenance precedent.
+- [x] Targeted regression green (see below); **full backend suite not re-run since these commits** — see "Remaining".
 
 ## TDD Strategy
 
