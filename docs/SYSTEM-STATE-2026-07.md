@@ -8,6 +8,25 @@ uncommitted working-tree layer of admin-UI polish + device/schedule read tweaks 
 
 Section order is the resume order for future sessions.
 
+> **2026-07-22 — the working tree is now clean (#144).** The dispatch-correctness layer that had been
+> running the live cron while existing only as uncommitted files on one machine is committed:
+> **#127** same-day APPEND + run-attribution moved down from `work_schedules` to
+> `plant_batch_assignments`, **#138** floating-eligibility MV freshness, and the migration
+> `20260721120000_batch_run_attribution` that had **already been applied to the live dev DB while
+> untracked** — so the repository can now reproduce the running schema. Landed as four explicit-path
+> commits (backend · SE-directory rework → #150 · dashboard/shell polish → #151 · docs), verified
+> green beforehand (dispatch 14 files/47 tests, recommender 9 files/22 tests, tsc clean). The "plus an
+> uncommitted working-tree layer" caveat above and in §1.5/§4 refers to earlier sessions and is
+> historical; `git status` is clean as of this entry.
+>
+> **Known, tracked, and NOT fixed by #144:** the repo has **pre-existing schema drift across 22
+> unrelated tables** (18 renamed indexes, 1 renamed FK, FK/default annotation differences) between the
+> hand-written migration set and `schema.prisma`. `prisma migrate diff` against a fully migrated
+> database is non-empty. This is cosmetic (naming conventions, not structure) but **#107's
+> from-zero-migrate "no drift" acceptance criterion will trip on it** and must either absorb it or
+> normalise it first. The #144 migration itself is drift-free — its table appears zero times in the
+> report.
+
 ---
 
 ## 1. SYSTEM OVERVIEW
