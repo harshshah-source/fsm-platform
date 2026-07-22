@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { AuditService } from '../src/audit/audit.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { CandidateSelectionService } from '../src/recommender/candidate-selection.service';
 import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
+import { LoggingDayPlanNotifier } from '../src/scheduling/day-plan-notifier';
+import { OverrideService } from '../src/scheduling/override.service';
 
 /**
  * Same-day re-run must APPEND new work onto the SE's existing ACTIVE (se, zone, day) schedule, never
@@ -19,6 +22,7 @@ describe('dispatch — same-day re-run appends new work (no drop, idempotent)', 
   let prisma: PrismaService;
   let rec: RecommenderService;
   let dispatch: BatchAssignmentService;
+  let override: OverrideService;
 
   let zoneId: bigint;
   let companyId: bigint;
@@ -28,6 +32,7 @@ describe('dispatch — same-day re-run appends new work (no drop, idempotent)', 
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
   const runIds: bigint[] = [];
+  const overriddenBatchIds: bigint[] = [];
 
   const NOW = new Date('2026-06-21T06:00:00Z');
   const DAY = new Date(Date.UTC(2026, 5, 21));
@@ -64,6 +69,7 @@ describe('dispatch — same-day re-run appends new work (no drop, idempotent)', 
     await prisma.onModuleInit();
     rec = new RecommenderService(prisma, new CandidateSelectionService(prisma));
     dispatch = new BatchAssignmentService(prisma);
+    override = new OverrideService(prisma, new AuditService(prisma), new LoggingDayPlanNotifier());
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-append-' + NS } })).zoneId;
     companyId = (await prisma.company.create({ data: { name: 'Co-append-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
@@ -79,6 +85,9 @@ describe('dispatch — same-day re-run appends new work (no drop, idempotent)', 
 
   afterAll(async () => {
     await prisma.dispatchDecisionTrace.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await prisma.auditLog.deleteMany({
+      where: { entityType: 'plant_batch_assignment', entityId: { in: overriddenBatchIds.map(String) } },
+    });
     const schedules = await prisma.workSchedule.findMany({ where: { zoneId }, select: { scheduleId: true } });
     const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } }, select: { batchId: true } });
     await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
@@ -169,5 +178,49 @@ describe('dispatch — same-day re-run appends new work (no drop, idempotent)', 
     expect(after).toHaveLength(1);
     const guardRec = await prisma.recommendation.findFirst({ where: { ticketId: assignedTicket, runId: run3 } });
     expect(guardRec?.status).toBe('DISPATCHED');
+  });
+
+  it('#153 — appends onto an OVERRIDDEN schedule too, instead of creating a colliding second day-plan', async () => {
+    // A ZM adjusts the morning plan. Any override flips the SCHEDULE to OVERRIDDEN, and the APPEND
+    // lookup used to require status ACTIVE — so it found nothing and created a SECOND schedule for the
+    // same (se, zone, day). The unique index does NOT catch that: it is partial on `status = 'ACTIVE'`
+    // (migration 20260708120000), so an OVERRIDDEN row is invisible to it. That silently re-opened the
+    // duplicate-day-plan class #126/#127 closed — for every SE whose ZM had touched their plan.
+    const stop1 = await prisma.plantBatchAssignment.findFirstOrThrow({
+      where: { schedule: { zoneId, seId } },
+      orderBy: { stopSequence: 'asc' },
+    });
+    await override.override(
+      stop1.batchId,
+      { action: 'REORDER', stopSequence: 1, reasonCode: 'ROUTE_OPT' },
+      { role: 'ZONAL_MANAGER', zoneId: Number(zoneId) },
+      { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null },
+    );
+    overriddenBatchIds.push(stop1.batchId);
+
+    const schedulesBefore = await prisma.workSchedule.findMany({ where: { zoneId, seId } });
+    expect(schedulesBefore).toHaveLength(1);
+    expect(schedulesBefore[0].status).toBe('OVERRIDDEN'); // the mechanism under test, asserted not assumed
+    const scheduleId = schedulesBefore[0].scheduleId;
+
+    // Fresh backlog arrives after the ZM's adjustment — the same "same-day re-run" case as above.
+    const lateTicket = await makeTicket(30);
+    const run4 = await newRun();
+    const rec4 = await rec.runForZone(zoneId, { now: NOW, runId: run4 });
+    const out4 = await dispatch.dispatchForZone(zoneId, { dateFrom: DAY, dateTo: DAY, now: NOW, runId: run4 });
+    expect(rec4.recommended).toBe(1);
+    expect(out4.tickets).toBe(1);
+    expect(out4.skipReason).toBeUndefined();
+
+    // Still exactly ONE schedule for (se, zone, day) — the new stop appended onto the overridden plan.
+    const schedulesAfter = await prisma.workSchedule.findMany({ where: { zoneId, seId } });
+    expect(schedulesAfter).toHaveLength(1);
+    expect(schedulesAfter[0].scheduleId).toBe(scheduleId);
+
+    const appended = await prisma.plantBatchAssignment.findMany({ where: { scheduleId, runId: run4 } });
+    expect(appended).toHaveLength(1);
+    const live = await activeAssignmentsFor([lateTicket]);
+    expect(live).toHaveLength(1);
+    expect(live[0].batchId).toBe(appended[0].batchId);
   });
 });

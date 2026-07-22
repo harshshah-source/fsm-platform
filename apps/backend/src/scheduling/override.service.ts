@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DAY_PLAN_NOTIFIER, DayPlanNotifier } from './day-plan-notifier';
+import { liveScheduleFilter } from './schedule-status';
 import {
   NoConflictSoftStatePort,
   SOFT_STATE_CONFLICT,
@@ -426,15 +427,19 @@ export class OverrideService {
     return { result: 'OK', batchId: String(batch.batchId), scheduleId: String(batch.scheduleId), seId: batch.seId, status: 'OVERRIDDEN' };
   }
 
-  /** Find the target SE's ACTIVE schedule for the source date range, or create a ZM_MANUAL one. */
+  /** Find the target SE's live schedule for the source date range, or create a ZM_MANUAL one. */
   private async ensureSchedule(
     tx: Prisma.TransactionClient,
     seId: string,
     source: { zoneId: bigint; dateFrom: Date; dateTo: Date },
     now: Date,
   ) {
+    // #153 — the target SE's own plan may itself have been overridden earlier (a ZM commonly adjusts
+    // several plans in one sitting). Matching ACTIVE only stacked a second ZM_MANUAL schedule on top of
+    // the plan they were already working. Oldest-first, matching the dispatch APPEND path.
     const existing = await tx.workSchedule.findFirst({
-      where: { seId, zoneId: source.zoneId, status: 'ACTIVE', dateFrom: source.dateFrom, dateTo: source.dateTo },
+      where: { seId, zoneId: source.zoneId, dateFrom: source.dateFrom, dateTo: source.dateTo, ...liveScheduleFilter() },
+      orderBy: { scheduleId: 'asc' },
     });
     if (existing) return existing;
     return tx.workSchedule.create({

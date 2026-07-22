@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { LIVE_SCHEDULE_STATUSES } from './schedule-status';
 
 export interface ZmScope {
   role: string;
@@ -75,8 +76,6 @@ export interface ZmScheduleDetail {
   stops: ZmDetailStop[];
 }
 
-const ACTIVE_STATUSES = ['ACTIVE', 'OVERRIDDEN'] as const;
-
 /**
  * ZM Batch-Schedule monitoring reads (Issue 13a AC#1/#2). Per-SE schedule rows and the ordered-stop
  * detail with the per-ticket "Why suggested?" Recommender reasoning. Monitoring only — no approval or
@@ -89,7 +88,7 @@ export class ZmScheduleQueryService {
 
   async listSchedules(scope: ZmScope): Promise<ZmScheduleRow[]> {
     const schedules = await this.prisma.workSchedule.findMany({
-      where: { status: { in: [...ACTIVE_STATUSES] }, ...this.zoneFilter(scope) },
+      where: { status: { in: [...LIVE_SCHEDULE_STATUSES] }, ...this.zoneFilter(scope) },
       orderBy: [{ zoneId: 'asc' }, { seId: 'asc' }],
       include: {
         engineer: { select: { user: { select: { name: true } } } },
@@ -117,7 +116,7 @@ export class ZmScheduleQueryService {
 
   async getScheduleDetail(engineerId: string, scope: ZmScope): Promise<ZmScheduleDetail | null> {
     const schedule = await this.prisma.workSchedule.findFirst({
-      where: { seId: engineerId, status: { in: [...ACTIVE_STATUSES] }, ...this.zoneFilter(scope) },
+      where: { seId: engineerId, status: { in: [...LIVE_SCHEDULE_STATUSES] }, ...this.zoneFilter(scope) },
       orderBy: { dispatchedAt: 'desc' },
       include: {
         engineer: { select: { user: { select: { name: true } } } },

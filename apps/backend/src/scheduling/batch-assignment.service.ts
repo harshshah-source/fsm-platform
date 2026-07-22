@@ -5,6 +5,7 @@ import {
   type DayPlanNotifier,
   LoggingDayPlanNotifier,
 } from './day-plan-notifier';
+import { UNIQUE_ACTIVE_SCHEDULE_INDEX_STATUS, liveScheduleFilter } from './schedule-status';
 
 export interface DispatchOptions {
   /** Day Plan coverage start (Schedule Cadence: daily → dateFrom === dateTo). */
@@ -112,13 +113,19 @@ export class BatchAssignmentService {
       let tickets = 0;
 
       for (const [seId, byPlant] of bySe) {
-        // APPEND, don't collide: reuse the SE's existing ACTIVE (se, zone, day) schedule — an earlier
+        // APPEND, don't collide: reuse the SE's existing live (se, zone, day) schedule — an earlier
         // dispatch run today, or a ZM_MANUAL plan — instead of creating a second one (which would P2002
         // on `work_schedules_one_active_per_se_zone_day` and roll back the whole zone, dropping every
         // fresh recommendation). New stops continue after the schedule's current last stop; a fresh
         // schedule is created only when the SE has none. The unique index stays the final safety net.
+        //
+        // #153 — "live" must include OVERRIDDEN, and here the index canNOT be the safety net: it is
+        // partial on `status = 'ACTIVE'`, so once a ZM override flipped the schedule this lookup missed
+        // it, the create succeeded unopposed, and the SE ended the day with two day-plans. Oldest-first
+        // so an SE carrying legacy duplicates keeps getting the plan they are already executing.
         const existing = await tx.workSchedule.findFirst({
-          where: { seId, zoneId, dateFrom: opts.dateFrom, status: 'ACTIVE' },
+          where: { seId, zoneId, dateFrom: opts.dateFrom, ...liveScheduleFilter() },
+          orderBy: { scheduleId: 'asc' },
           select: { scheduleId: true },
         });
         const scheduleId =
@@ -241,10 +248,14 @@ export class BatchAssignmentService {
    * #126 — SEs already holding an ACTIVE schedule for (zone, day): the conflict source behind a
    * dispatch P2002 on `work_schedules_one_active_per_se_zone_day`. Reported on the ledger zone row so
    * the skip names WHO blocked it (per-SE isolation of the conflict is #127).
+   *
+   * #153 note — this one is deliberately NOT widened to the live set. It answers "which rows did the
+   * database refuse to duplicate?", and that index is partial on `status = 'ACTIVE'`; naming overridden
+   * schedules here would blame rows that cannot have caused the collision.
    */
   private async conflictingScheduleSeIds(zoneId: bigint, dateFrom: Date): Promise<string[]> {
     const rows = await this.prisma.workSchedule.findMany({
-      where: { zoneId, dateFrom, status: 'ACTIVE' },
+      where: { zoneId, dateFrom, status: UNIQUE_ACTIVE_SCHEDULE_INDEX_STATUS },
       select: { seId: true },
     });
     return [...new Set(rows.map((r) => r.seId))];

@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client';
 import { type CoverageType } from '../generated/prisma/enums';
 import { type CommonKitMissing, InventoryService, type VanStockItem } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { type ActivityStatus, deriveActivityStatus, resolveShiftEnd } from '../soft-state/activity-status';
 import { SeAvailabilityService } from './se-availability.service';
 
@@ -199,7 +200,7 @@ export class EngineersQueryService {
     seId: string,
   ): Promise<{ schedule: EngineerDetail['schedule']; stops: EngineerStop[] }> {
     const ws = await this.prisma.workSchedule.findFirst({
-      where: { seId, status: { in: ['ACTIVE', 'OVERRIDDEN'] } },
+      where: { seId, ...liveScheduleFilter() },
       orderBy: { dispatchedAt: 'desc' },
       include: {
         batches: {
@@ -273,7 +274,7 @@ export class EngineersQueryService {
   /** The SE's current active Work Schedule status + its open-ticket count (null status = none active). */
   private async currentDayPlan(seId: string): Promise<{ status: string | null; ticketCount: number }> {
     const schedule = await this.prisma.workSchedule.findFirst({
-      where: { seId, status: { in: ['ACTIVE', 'OVERRIDDEN'] } },
+      where: { seId, ...liveScheduleFilter() },
       orderBy: { dispatchedAt: 'desc' },
       include: {
         batches: {
@@ -308,7 +309,7 @@ export class EngineersQueryService {
       where: {
         seId: { in: seIds },
         status: { in: ['AUTO_ASSIGNED', 'OVERRIDDEN'] },
-        schedule: { status: { in: ['ACTIVE', 'OVERRIDDEN'] } },
+        schedule: liveScheduleFilter(),
       },
       include: { tickets: { where: { removedAt: null }, select: { ticketId: true } } },
     });
