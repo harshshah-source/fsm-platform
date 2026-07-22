@@ -49,6 +49,7 @@ export interface UpdateSeBody {
   phone?: string;
   email?: string;
   address?: string | null;
+  zoneId?: number;
   dailyCapacity?: number;
   coverageType?: string;
 }

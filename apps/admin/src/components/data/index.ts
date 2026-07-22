@@ -1,5 +1,6 @@
 export * from './DataTable';
 export * from './DateRangeChips';
+export * from './EditableCell';
 export * from './ExportMenu';
 export * from './feedback';
 export * from './FilterBar';

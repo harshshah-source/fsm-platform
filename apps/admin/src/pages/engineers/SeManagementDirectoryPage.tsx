@@ -16,7 +16,15 @@ import {
   setSeActive,
   updateSe,
 } from '../../api/engineersAdmin';
-import { DataTable, FilterSelect, PageHeader, type Column } from '../../components/data';
+import {
+  DataTable,
+  EditableCell,
+  EditableSelectCell,
+  FilterSelect,
+  PageHeader,
+  ToggleCell,
+  type Column,
+} from '../../components/data';
 import { Badge, Button, Field, Input, SectionCard } from '../../components/ui';
 
 /** Backend error `code` → operator-facing inline message. */
@@ -40,15 +48,27 @@ const messageFor = (code: string): string => ERROR_MESSAGE[code] ?? `Request fai
 const codeOf = (err: unknown): string => (err instanceof SeApiError ? err.code : 'UNKNOWN');
 
 const COVERAGE_TYPES = ['DEDICATED', 'MULTI_PLANT'] as const;
+const COVERAGE_TYPE_OPTIONS = COVERAGE_TYPES.map((c) => ({ value: c, label: c }));
 
 const EMPTY_FORM = { name: '', phone: '', email: '', address: '', coverageType: 'DEDICATED', dailyCapacity: '10' };
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^\+?[0-9][0-9\s-]{5,}$/;
+const requireName = (v: string): string | null => (v ? null : 'Name is required.');
+const requireEmail = (v: string): string | null => (EMAIL_RE.test(v) ? null : 'Enter a valid email address.');
+const requirePhone = (v: string): string | null => (PHONE_RE.test(v) ? null : 'Enter a valid phone number.');
+const requireCapacity = (v: string): string | null =>
+  Number.isInteger(Number(v)) && Number(v) > 0 ? null : 'Daily capacity must be a positive whole number.';
 
 /**
  * Phase 4 — SE Management directory (`/engineers/manage`). Admin-entered Service Engineers are the source
  * of truth for dispatch: this is where OH / CSM / ZM create, edit, deactivate, and map SEs to plants over
  * the existing model. Authority is enforced server-side (this page only mirrors it for affordances): a ZM
- * is clamped to their home zone (the create Zone field is pre-filled + locked; no zone filter), OH / CSM
- * pick / filter any zone. SE→company is not modelled — the column renders "—".
+ * is clamped to their home zone (the create Zone field is pre-filled + locked; no zone filter; the Zone
+ * cell is read-only), OH / CSM pick / filter any zone and can reassign a SE's zone inline. SE→company is
+ * not modelled — the column renders "—". Every editable field below is edited directly in the table cell
+ * (click-to-edit for text/number, live dropdowns, and a status toggle); the side panel is reserved for
+ * plant coverage, which is a many-to-many mapping and not a single cell value.
  */
 export function SeManagementDirectoryPage() {
   const { session } = useAuth();
@@ -71,10 +91,9 @@ export function SeManagementDirectoryPage() {
   const [panelError, setPanelError] = useState<string | null>(null);
   const [coverPlant, setCoverPlant] = useState('');
   const [coverType, setCoverType] = useState<string>('DEDICATED');
-  const [edit, setEdit] = useState({ name: '', phone: '', email: '', address: '', dailyCapacity: '' });
-  const [savedEdit, setSavedEdit] = useState(false);
 
   const zoneName = useMemo(() => new Map(zones.map((z) => [z.zoneId, z.name])), [zones]);
+  const zoneOptions = useMemo(() => zones.map((z) => ({ value: String(z.zoneId), label: z.name })), [zones]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -91,21 +110,13 @@ export function SeManagementDirectoryPage() {
 
   const selected = rows.find((r) => r.seId === selectedId) ?? null;
 
-  // Load the selected SE's zone plants for the in-zone coverage picker + prime the edit form.
+  // Load the selected SE's zone plants for the in-zone coverage picker.
   useEffect(() => {
     if (!selected) {
       setPanelPlants([]);
       return;
     }
     void listPlants(selected.zoneId).then(setPanelPlants);
-    setEdit({
-      name: selected.name,
-      phone: selected.phone,
-      email: selected.email,
-      address: selected.address ?? '',
-      dailyCapacity: String(selected.dailyCapacity),
-    });
-    setSavedEdit(false);
     setPanelError(null);
   }, [selected?.seId, selected?.zoneId]);
 
@@ -131,7 +142,7 @@ export function SeManagementDirectoryPage() {
       });
       setCreated(row.name);
       setForm({ ...EMPTY_FORM, zoneId: isZm && homeZoneId != null ? String(homeZoneId) : '' });
-      load();
+      setRows((prev) => [...prev, row]);
     } catch (err) {
       setFormError(messageFor(codeOf(err)));
     } finally {
@@ -139,15 +150,24 @@ export function SeManagementDirectoryPage() {
     }
   };
 
-  const toggleActive = async (row: SeDirectoryRow) => {
-    setPanelError(null);
+  /** Patch a single field on one SE and splice the server's fresh row into local state — no full refetch. */
+  const saveField = useCallback(async (seId: string, patch: Parameters<typeof updateSe>[1]) => {
     try {
-      await setSeActive(row.seId, !row.isActive);
-      load();
+      const updated = await updateSe(seId, patch);
+      setRows((prev) => prev.map((r) => (r.seId === updated.seId ? updated : r)));
     } catch (err) {
-      setPanelError(messageFor(codeOf(err)));
+      throw new Error(messageFor(codeOf(err)));
     }
-  };
+  }, []);
+
+  const toggleActive = useCallback(async (row: SeDirectoryRow) => {
+    try {
+      const updated = await setSeActive(row.seId, !row.isActive);
+      setRows((prev) => prev.map((r) => (r.seId === updated.seId ? updated : r)));
+    } catch (err) {
+      throw new Error(messageFor(codeOf(err)));
+    }
+  }, []);
 
   const addCoverage = async () => {
     if (!selected || !coverPlant) return;
@@ -160,26 +180,6 @@ export function SeManagementDirectoryPage() {
       setPanelError(messageFor(codeOf(err)));
     }
   };
-
-  const saveEdit = async () => {
-    if (!selected) return;
-    setPanelError(null);
-    setSavedEdit(false);
-    try {
-      await updateSe(selected.seId, {
-        name: edit.name.trim(),
-        phone: edit.phone.trim(),
-        email: edit.email.trim(),
-        address: edit.address.trim() || null,
-        dailyCapacity: Number(edit.dailyCapacity),
-      });
-      setSavedEdit(true);
-      load();
-    } catch (err) {
-      setPanelError(messageFor(codeOf(err)));
-    }
-  };
-  const setE = (key: keyof typeof edit) => (value: string) => setEdit((s) => ({ ...s, [key]: value }));
 
   const dropCoverage = async (coverageId: number) => {
     if (!selected) return;
@@ -197,25 +197,126 @@ export function SeManagementDirectoryPage() {
       key: 'name',
       header: 'Name',
       render: (r) => (
-        <button type="button" onClick={() => setSelectedId(r.seId)} className="font-medium text-brand-700 hover:underline">
-          {r.name}
-        </button>
+        <EditableCell
+          ariaLabel={`Edit name for ${r.name}`}
+          value={r.name}
+          display={<span className="font-medium text-ink-strong">{r.name}</span>}
+          validate={requireName}
+          onSave={(v) => saveField(r.seId, { name: v })}
+        />
       ),
     },
-    { key: 'phone', header: 'Phone', render: (r) => <span className="text-ink-muted">{r.phone}</span> },
-    { key: 'email', header: 'Email', render: (r) => <span className="text-ink-muted">{r.email}</span> },
-    { key: 'address', header: 'Address', render: (r) => <span className="text-ink-muted">{r.address ?? '—'}</span> },
-    { key: 'zone', header: 'Zone', render: (r) => zoneName.get(r.zoneId) ?? `Zone ${r.zoneId}` },
+    {
+      key: 'phone',
+      header: 'Phone',
+      render: (r) => (
+        <EditableCell
+          ariaLabel={`Edit phone for ${r.name}`}
+          value={r.phone}
+          display={<span className="text-ink-muted">{r.phone}</span>}
+          placeholder="+91 90000 00000"
+          validate={requirePhone}
+          onSave={(v) => saveField(r.seId, { phone: v })}
+        />
+      ),
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      render: (r) => (
+        <EditableCell
+          ariaLabel={`Edit email for ${r.name}`}
+          value={r.email}
+          display={<span className="text-ink-muted">{r.email}</span>}
+          type="email"
+          validate={requireEmail}
+          onSave={(v) => saveField(r.seId, { email: v })}
+        />
+      ),
+    },
+    {
+      key: 'address',
+      header: 'Address',
+      render: (r) => (
+        <EditableCell
+          ariaLabel={`Edit address for ${r.name}`}
+          value={r.address ?? ''}
+          display={<span className="text-ink-muted">{r.address ?? '—'}</span>}
+          onSave={(v) => saveField(r.seId, { address: v || null })}
+        />
+      ),
+    },
+    {
+      key: 'zone',
+      header: 'Zone',
+      render: (r) =>
+        isZm ? (
+          <span>{zoneName.get(r.zoneId) ?? `Zone ${r.zoneId}`}</span>
+        ) : (
+          <EditableSelectCell
+            ariaLabel={`Edit zone for ${r.name}`}
+            value={String(r.zoneId)}
+            options={zoneOptions}
+            onSave={(v) => saveField(r.seId, { zoneId: Number(v) })}
+          />
+        ),
+    },
+    {
+      key: 'coverageType',
+      header: 'Coverage Type',
+      render: (r) => (
+        <EditableSelectCell
+          ariaLabel={`Edit coverage type for ${r.name}`}
+          value={r.coverageType}
+          options={COVERAGE_TYPE_OPTIONS}
+          onSave={(v) => saveField(r.seId, { coverageType: v })}
+        />
+      ),
+    },
+    {
+      key: 'dailyCapacity',
+      header: 'Daily Capacity',
+      align: 'right',
+      render: (r) => (
+        <EditableCell
+          ariaLabel={`Edit daily capacity for ${r.name}`}
+          value={String(r.dailyCapacity)}
+          type="number"
+          validate={requireCapacity}
+          onSave={(v) => saveField(r.seId, { dailyCapacity: Number(v) })}
+        />
+      ),
+    },
     {
       key: 'plants',
       header: 'Mapped Plants',
-      render: (r) => (r.plants.length ? r.plants.map((p) => p.name).join(', ') : '—'),
+      render: (r) => (
+        <div className="flex flex-col items-start gap-1">
+          <span>{r.plants.length ? r.plants.map((p) => p.name).join(', ') : '—'}</span>
+          <button
+            type="button"
+            onClick={() => setSelectedId(r.seId)}
+            className="text-xs text-brand-700 hover:underline"
+          >
+            Manage coverage →
+          </button>
+        </div>
+      ),
     },
     { key: 'companies', header: 'Mapped Companies', render: () => <span className="text-ink-muted">—</span> },
     {
       key: 'status',
       header: 'Status',
-      render: (r) => <Badge tone={r.isActive ? 'success' : 'neutral'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>,
+      render: (r) => (
+        <div className="flex items-center gap-2">
+          <ToggleCell
+            ariaLabel={`${r.isActive ? 'Deactivate' : 'Reactivate'} ${r.name}`}
+            active={r.isActive}
+            onToggle={() => toggleActive(r)}
+          />
+          <Badge tone={r.isActive ? 'success' : 'neutral'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>
+        </div>
+      ),
     },
   ];
 
@@ -225,7 +326,7 @@ export function SeManagementDirectoryPage() {
     <div>
       <PageHeader
         title="SE Management"
-        subtitle="Create and maintain Service Engineers and their plant coverage. The Recommender dispatches to whatever SEs are entered here — an empty zone simply means no candidate."
+        subtitle="Create and maintain Service Engineers and their plant coverage. The Recommender dispatches to whatever SEs are entered here — an empty zone simply means no candidate. Click any cell to edit it directly."
         actions={
           !isZm ? (
             <Field label="Filter zone" htmlFor="se-zone-filter">
@@ -322,36 +423,25 @@ export function SeManagementDirectoryPage() {
         </div>
 
         {selected && (
-          <section aria-label="SE edit" className="w-80 shrink-0 rounded-card border border-line bg-surface-card p-4 text-sm shadow-sm">
-            <h3 className="mb-2 text-base font-semibold text-ink-strong">{selected.name}</h3>
-            <p className="mb-3 text-xs text-ink-muted">
-              {selected.coverageType} · {selected.isActive ? 'Active' : 'Inactive'}
-            </p>
-
-            <div className="mb-3 flex flex-col gap-2">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">Edit details</div>
-              <Field label="Name" htmlFor="se-edit-name">
-                <Input id="se-edit-name" value={edit.name} onChange={(e) => setE('name')(e.target.value)} />
-              </Field>
-              <Field label="Phone" htmlFor="se-edit-phone">
-                <Input id="se-edit-phone" value={edit.phone} onChange={(e) => setE('phone')(e.target.value)} />
-              </Field>
-              <Field label="Email" htmlFor="se-edit-email">
-                <Input id="se-edit-email" value={edit.email} onChange={(e) => setE('email')(e.target.value)} />
-              </Field>
-              <Field label="Address" htmlFor="se-edit-address">
-                <Input id="se-edit-address" value={edit.address} onChange={(e) => setE('address')(e.target.value)} />
-              </Field>
-              <Field label="Daily Capacity" htmlFor="se-edit-capacity">
-                <Input id="se-edit-capacity" type="number" min={1} value={edit.dailyCapacity} onChange={(e) => setE('dailyCapacity')(e.target.value)} />
-              </Field>
-              <Button size="sm" onClick={() => void saveEdit()} className="self-start">
-                Save changes
-              </Button>
-              {savedEdit && <p role="status" className="text-xs text-success">Saved.</p>}
+          <section aria-label="SE coverage" className="w-80 shrink-0 rounded-card border border-line bg-surface-card p-4 text-sm shadow-sm">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <h3 className="text-base font-semibold text-ink-strong">{selected.name}</h3>
+                <p className="text-xs text-ink-muted">
+                  {selected.coverageType} · {selected.isActive ? 'Active' : 'Inactive'}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setSelectedId(null)}
+                className="text-ink-muted hover:text-ink-strong"
+              >
+                ✕
+              </button>
             </div>
 
-            <div className="mb-3 border-t border-line pt-3">
+            <div className="border-t border-line pt-3">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">Coverage</div>
               {selected.plants.length === 0 && <div className="text-ink-muted">No mapped plants</div>}
               <ul className="text-ink">
@@ -391,12 +481,6 @@ export function SeManagementDirectoryPage() {
                   Add coverage
                 </Button>
               </div>
-            </div>
-
-            <div className="mt-3 border-t border-line pt-3">
-              <Button size="sm" variant="secondary" onClick={() => void toggleActive(selected)} className="self-start">
-                {selected.isActive ? 'Deactivate' : 'Reactivate'}
-              </Button>
             </div>
 
             {panelError && (
