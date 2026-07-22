@@ -94,6 +94,35 @@ describe('Issue 122 — Critical KPI is the CRITICAL band only and matches the s
     expect(cells.reduce((s, n) => s + n, 0)).toBe(12);
   });
 
+  it('KPI and scorecard column are coupled: same source, KPI is the CRITICAL-only subset', async () => {
+    // #143. The two halves of the Issue-122 invariant were asserted in SEPARATE tests, so when
+    // ad03769 dropped the KPI card only one of them went red — and it read as a broken test rather
+    // than a lost feature, which is how it survived 3 commits. This renders ONCE and asserts the
+    // relationship, so the pair can never again be half-true.
+    stubFetch();
+    render(
+      <AuthProvider initialSession={opsHead}>
+        <MemoryRouter>
+          <DashboardHome />
+        </MemoryRouter>
+      </AuthProvider>,
+    );
+
+    const kpi = Number((await screen.findByTestId('kpi-critical')).textContent?.match(/\d+/)?.[0]);
+    const scorecard = await screen.findByRole('table', { name: /zone performance scorecard/i });
+    const column = within(scorecard)
+      .getAllByTestId('scorecard-inactive-24h')
+      .reduce((s, c) => s + Number(c.textContent), 0);
+
+    // Both are device counts off the same zone-overview `byBucket` payload, so the CRITICAL-only KPI
+    // is always a subset of the 24h+ column — never a different metric, never larger, never zero
+    // while the column is populated.
+    expect(kpi).toBe(7);
+    expect(column).toBe(12);
+    expect(kpi).toBeLessThanOrEqual(column);
+    expect(kpi).toBeGreaterThan(0);
+  });
+
   it('shows the Zonal Manager name column on the scorecard', async () => {
     stubFetch();
     render(

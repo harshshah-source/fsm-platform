@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { RollingNumber, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { ZoneOperatingModeTable } from '../../components/dashboard/ZoneOperatingModeTable';
+import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
@@ -66,6 +67,18 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
         testId: 'kpi-uptime',
       },
       { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
+      // Strictly the CRITICAL band (Issue 122 HITL decision) — same zone-overview `byBucket` source as
+      // the scorecard's "Inactive > 24Hr" column, which is deliberately a SUPERSET (CRITICAL + worse).
+      // Removed in error by ad03769's hero rework and restored by #143; the guarding test
+      // (kpi-critical-plus-consistency) was left in place and red for 3 commits. Do not drop this card
+      // without reversing the Issue-122 decision in INDEX and the #122 issue file.
+      {
+        label: 'Critical Devices',
+        value: roll(sumCriticalDevices(zones)),
+        hint: 'pan-India, CRITICAL band',
+        tone: 'critical',
+        testId: 'kpi-critical',
+      },
       { label: 'Active Fleet', value: fleet ? roll(fleet.devices) : '—', hint: 'deployed devices', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
       {
         label: 'Total Devices',
@@ -83,7 +96,7 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
           as the old flat strips. */}
       <DashboardHero
         title="Pan-India Fleet Command"
-        left={kpis.slice(0, 2)}
+        left={kpis.slice(0, 3)}
         right={[
           {
             label: 'Fleet directory',
@@ -96,8 +109,8 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
               />
             ),
           },
-          kpis[2],
           kpis[3],
+          kpis[4],
         ]}
         centerBelow={
           <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone compact />
