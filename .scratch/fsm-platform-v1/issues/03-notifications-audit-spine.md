@@ -15,8 +15,8 @@ HITL because FCM/APNs, the WhatsApp Business API account, and SMS/SMTP gateways 
 - [x] General notifications follow push → SMS → WhatsApp → email fallback chain
 - [x] WhatsApp Confirmation is a first-class (non-fallback) channel for SE Acceptance events, shown as "sent"
 - [~] Push delivered via FCM (Android) / APNs (iOS), including quick-action Accept/Decline payloads *(chain + payload `metadata` built; actual FCM/APNs send is the deferred external seam — needs accounts)*
-- [x] Audit-trail viewer renders the full transition chain for any Ticket with actor, role, timestamp
-- [x] `acted_as_role` is visible in the trail where applicable
+- [~] Audit-trail viewer renders the full transition chain for any Ticket with actor, role, timestamp *(**API only** — corrected 2026-07-22, see "Correction" below. The viewer UI is owned by follow-up [#145](./145-audit-trail-viewer-admin-surface.md).)*
+- [~] `acted_as_role` is visible in the trail where applicable *(same — the API returns it; no UI renders it. → [#145](./145-audit-trail-viewer-admin-surface.md))*
 
 ## Blocked by
 
@@ -47,3 +47,35 @@ is isolated behind one seam.
 **Deferred → follow-up #76:** rewire the existing per-feature notifier seams (day-plan, recovery, install,
 customer-confirmation, component-request, escalation) to route through `NotificationService`, and add the
 real external channel adapters (FCM/APNs/WhatsApp/SMS/SMTP) once accounts + templates exist.
+
+---
+
+## Correction 2026-07-22 — AC#5/#6 were checked on the strength of the API alone
+
+*Appended, not rewritten. The disposition above stands: this issue remains **accepted**, and it is
+**not** reopened — `docs/agents/issue-tracker.md` "accepted-with-follow-up" applies, since the core
+objective (the notification spine + the audit-trail read model) was genuinely met.*
+
+**Source:** `docs/audits/2026-07-22-adversarial-review-admin-backend.md` §4.4 (N2, `needs-changes`).
+
+The two audit-trail acceptance criteria were marked `[x]` when only the backend existed:
+
+- **What was built:** `GET /api/audit-trail/tickets/:ticketId` + `AuditTrailService` (merging
+  `ticket_events` with `audit_logs`, carrying `acted_as_role`, ZM zone-scoped, out-of-zone → 404),
+  covered by 5 e2e. That half is real and remains accepted.
+- **What was never built:** any UI. `grep -ri "audit-trail|auditTrail|AuditTrail" apps/admin/src` →
+  **zero hits** (verified 2026-07-22). This issue's own scope line (`:8`) promised *"a reusable
+  audit-trail viewer"*, and the PRD grounds it as user story **73**.
+- **And the last affordance was removed:** INDEX:92 records the footer's dead **"Audit Trail"** label
+  being repointed to **Exports** — correct at the time, since it led nowhere, but nothing replaced it.
+
+**Why this needed correcting rather than leaving.** CLAUDE.md's parity gate permits an unbuilt in-scope
+UI AC only if **(a)** a follow-up is filed and linked in INDEX **and** **(b)** the deferral reason is an
+external-integration blocker. (a) was absent; (b) does not apply — the endpoint is in this repo, and
+CLAUDE.md states that "build the seam" covers external integrations, *not* admin pages over existing
+endpoints. The legitimately deferred part of this issue was always the FCM/APNs/WhatsApp/SMS/SMTP
+adapters (→ #76), and the viewer was swept along with that deferral in error.
+
+**Now owned by [#145](./145-audit-trail-viewer-admin-surface.md)** (filed 2026-07-22, linked in
+INDEX's Follow-ups section). AC#5 and AC#6 above are re-marked `[~]` — partial, API-complete,
+UI-outstanding — which is the same convention already used for AC#4 (the FCM/APNs push seam).

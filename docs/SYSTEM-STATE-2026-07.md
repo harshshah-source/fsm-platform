@@ -391,7 +391,7 @@ to next tier when hard-filtered out.
 |---|---|---|
 | VEHICLE_ON_TRIP | readiness = ON_TRIP | **Stubbed `'UNKNOWN'` constant** (`:152`) — Issue 28 VU is a ZM review flow, not wired as a feed; this filter can never fire in production |
 | SE_UNAVAILABLE | not (`engineer_master.is_active` AND current `se_availability` window = AVAILABLE) | real (`se-availability.service.ts`) |
-| OVER_CAPACITY | assigned-today count ≥ `engineer_master.daily_capacity` | real |
+| OVER_CAPACITY | assigned-today count ≥ `engineer_master.daily_capacity` | real — **whole-day** count (NEW-A1 fix 2026-07-21): the per-run `assigned` map is seeded from `committedDayLoad(day)` (non-removed `batch_assignment_tickets` across ALL the SE's ACTIVE `work_schedules` for the run day), so cap is enforced across zones + prior runs + intraday inserts, not just this zone-run |
 | COMMON_KIT_INCOMPLETE | `se_van_stock` fails `common_kit_definition` min quantities | real (`InventoryService.commonKitStatus`) |
 | COMPONENT_UNAVAILABLE | expected components OOS | **Stubbed `true`** — expected-component leg is open #51 |
 

@@ -14,6 +14,21 @@ Type: AFK
 > tickets once per device; measured 86s → 0.4s at 20k devices / 19k tickets). Do not re-add a plain
 > `tickets(device_id)` — the composite covers it. Still open here: `tickets(vehicle_id)`,
 > `audit_logs(actor_role, created_at)`, the remaining partial uniques, and the `CONCURRENTLY` note.
+>
+> **2026-07-22 — evidence refreshed (full-project audit B5 / adversarial review v3 §2).** The
+> `audit_logs` leg is **re-verified still open**, and the audit's B5 finding is folded in here rather
+> than filed separately (its own recommendation: *"Fold into #103 rather than filing separately"*).
+> Re-read on disk 2026-07-22:
+> - Query: `reports/zm-performance-aggregation.service.ts:69` →
+>   `WHERE actor_role = 'ZONAL_MANAGER' AND created_at >= … AND created_at < … GROUP BY actor_id, action`.
+> - Only composite on `model AuditLog`: `@@index([actedAsRole, actingZone, createdAt])`
+>   (`schema.prisma:1317`; columns at `:1307` `actor_role`, `:1308` `acted_as_role`, `:1314` `created_at`).
+>
+> **Different leading column — and `acted_as_role` is NULL for native (non-acting) actions**, so the
+> existing index cannot serve this predicate at all. It *looks* like coverage and is not. Severity LOW
+> today (~10.7k rows, measured by the prior audit) and grows unbounded with every audited action, which
+> is the argument for doing it while the table is still small. AC#1 and AC#2 below already cover it;
+> no scope change, evidence only.
 
 ## What to build
 
