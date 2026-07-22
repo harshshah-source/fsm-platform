@@ -173,6 +173,10 @@ export class InstallLifecycleService {
       select: { ticketId: true, deviceId: true, assignedSeId: true, activatedAt: true },
     });
 
+    // #148: read the telemetry watermark ONCE per sweep — a single global value, and this sweep runs
+    // every few minutes over every ACTIVATED install ticket.
+    const telemetryAsOf = await this.telemetryWatermark();
+
     const result: InstallVerificationSweepResult = { verified: 0, failed: 0, pending: 0 };
     for (const t of tickets) {
       const anchor = t.activatedAt ?? now;
@@ -188,7 +192,7 @@ export class InstallLifecycleService {
         await this.closeVerified(t, now);
         await this.notifier.installVerified({ ticketId: t.ticketId, deviceId: t.deviceId, seId: t.assignedSeId });
         result.verified++;
-      } else if (now.getTime() - anchor.getTime() >= INSTALL_ACTIVATION_WINDOW_MS) {
+      } else if (this.activationWindowExpired(anchor, now, telemetryAsOf)) {
         await this.failActivation(t, now);
         await this.notifier.failedActivation({ ticketId: t.ticketId, deviceId: t.deviceId, seId: t.assignedSeId });
         result.failed++;
@@ -197,6 +201,35 @@ export class InstallLifecycleService {
       }
     }
     return result;
+  }
+
+  /**
+   * Newest telemetry watermark — the `data_as_of` of the most recent snapshot run that recorded one.
+   * Same read as `VerificationService.telemetryWatermark` and `AutoPlantHealthService.snapshotHealth`,
+   * deliberately: "how fresh is telemetry" has one definition on this platform. `null` = never recorded.
+   */
+  private async telemetryWatermark(): Promise<Date | null> {
+    const lastGood = await this.prisma.snapshotRun.findFirst({
+      where: { dataAsOf: { not: null } },
+      orderBy: { runId: 'desc' },
+      select: { dataAsOf: true },
+    });
+    return lastGood?.dataAsOf ?? null;
+  }
+
+  /**
+   * #148 — the install half of the staleness precondition (see `VerificationService.windowExpired`
+   * for the full rationale; this sweep resolves the same 24 h window against the same
+   * `raw_device_snapshots` and carried the identical defect).
+   *
+   * Activation may fail only once BOTH hold: the window has elapsed AND telemetry has advanced past
+   * activation. With ingestion paused, a device fitted and activated perfectly would otherwise age
+   * into FAILED_ACTIVATION — and fire a "failed activation" push at the SE — because no ping *could*
+   * be written. A null watermark counts as "not advanced": conservative by construction.
+   */
+  private activationWindowExpired(anchor: Date, now: Date, telemetryAsOf: Date | null): boolean {
+    if (now.getTime() - anchor.getTime() < INSTALL_ACTIVATION_WINDOW_MS) return false;
+    return telemetryAsOf != null && telemetryAsOf.getTime() > anchor.getTime();
   }
 
   /** ACTIVATED → CLOSED on a verified first ping (SYSTEM-driven, audited, one tx). */

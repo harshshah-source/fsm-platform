@@ -29,6 +29,7 @@ describe('Issue 34 — InstallLifecycleService.runInstallVerification', () => {
   let companyId: bigint;
   let plantId: bigint;
   let snapshotRunId: bigint;
+  const watermarkRunIds: bigint[] = [];
   let deviceSeq = 9_342_000n;
   const createdTicketIds: string[] = [];
 
@@ -45,7 +46,7 @@ describe('Issue 34 — InstallLifecycleService.runInstallVerification', () => {
 
   afterAll(async () => {
     await prisma.rawDeviceSnapshot.deleteMany({ where: { runId: snapshotRunId } });
-    await prisma.snapshotRun.deleteMany({ where: { runId: snapshotRunId } });
+    await prisma.snapshotRun.deleteMany({ where: { runId: { in: [snapshotRunId, ...watermarkRunIds] } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: createdTicketIds } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: createdTicketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: createdTicketIds } } });
@@ -106,9 +107,22 @@ describe('Issue 34 — InstallLifecycleService.runInstallVerification', () => {
     expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).status).toBe('ACTIVATED');
   });
 
+  /**
+   * #148 — make the newest `data_as_of` in the table the telemetry watermark the sweep reads.
+   * Registered for cleanup alongside the fixture's own snapshot run.
+   */
+  const setWatermark = async (dataAsOf: Date) => {
+    const run = await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: T_ACT, dataAsOf } });
+    watermarkRunIds.push(run.runId);
+  };
+
   it('no ping within the activation window → FAILED_ACTIVATION + push', async () => {
     const { ticketId } = await makeActivated();
     const past = new Date(T_ACT.getTime() + INSTALL_ACTIVATION_WINDOW_MS + 60_000);
+    // #148: expiry now also requires telemetry to have advanced past activation. This test has always
+    // meant "telemetry is flowing and the device still did not ping" — stated explicitly rather than
+    // inherited from whatever watermark other specs left in the shared database.
+    await setWatermark(new Date(T_ACT.getTime() + INSTALL_ACTIVATION_WINDOW_MS + 2 * 60 * 60_000));
     const res = await service.runInstallVerification(past, { ticketIds: [ticketId] });
     expect(res.failed).toBe(1);
     const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
@@ -125,5 +139,30 @@ describe('Issue 34 — InstallLifecycleService.runInstallVerification', () => {
     const res = await service.runInstallVerification(lateNow, { ticketIds: [ticketId] });
     expect(res.verified).toBe(1);
     expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).status).toBe('CLOSED');
+  });
+
+  /**
+   * #148 slice 2 — the install half of the staleness precondition, mirroring
+   * `verification-staleness.e2e-spec.ts`. The install sweep resolves the same 24 h window against the
+   * same `raw_device_snapshots`, so it carries the same defect: with ingestion paused, a device that
+   * was fitted and activated perfectly ages into FAILED_ACTIVATION because no ping *could* be written.
+   *
+   * The case above ("no ping within the activation window") pins the fresh-telemetry behaviour and
+   * must keep passing; this one is the new branch.
+   */
+  it('#148 — does NOT fail activation while the telemetry watermark is behind activation', async () => {
+    const { ticketId } = await makeActivated();
+    // Ingestion stopped an hour BEFORE the device was activated: no ping could have been recorded,
+    // so 25 h of wall-clock is not evidence the install failed.
+    await setWatermark(new Date(T_ACT.getTime() - 60 * 60_000));
+    const past = new Date(T_ACT.getTime() + INSTALL_ACTIVATION_WINDOW_MS + 60_000);
+
+    const res = await service.runInstallVerification(past, { ticketIds: [ticketId] });
+
+    expect(res.failed).toBe(0);
+    expect(res.pending).toBe(1);
+    const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
+    expect(t.status).toBe('ACTIVATED');
+    expect(failed).not.toContain(ticketId);
   });
 });
