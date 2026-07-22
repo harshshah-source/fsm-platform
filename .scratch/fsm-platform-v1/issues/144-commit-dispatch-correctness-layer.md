@@ -1,5 +1,5 @@
 # 144 — Dispatch-correctness layer exists only as uncommitted files on one disk
-Status: ready-for-agent
+Status: accepted
 Type: AFK
 
 > Source: `docs/audits/2026-07-22-adversarial-review-admin-backend.md` §6.1 (R1, **`fail`**) and
@@ -76,14 +76,29 @@ A and B, plus the INDEX session-log line the progress convention mandates.
 
 ## Acceptance criteria
 
-- [ ] Group A committed by explicit path, message referencing #127/#138, with `20260721120000_batch_run_attribution/` tracked.
-- [ ] Group A's suites verified green **before** the commit: `dispatch-*`, `recommender-*`, plus the two untracked specs. Committing red tests converts a local problem into a shared one.
-- [ ] A from-zero migrate on a scratch database produces **no drift** against `schema.prisma`, and the resulting schema matches the live dev schema for the tables `batch_run_attribution` touches.
-- [ ] Groups B and C committed separately, each with a filed issue/stub per the INDEX WIP convention (INDEX:53-55 precedent: *"commit it under its own issue/stub before starting item 2"*).
-- [ ] `apps/backend/scripts/reset-reseed-ses.cjs` is an explicit decision — tracked **or** `.gitignore`d — not an accidental passenger. It is a destructive dev script; review before tracking.
-- [ ] Group D committed; `docs/audits/test.md` deduped or renamed.
-- [ ] `git status` is clean of every `apps/backend/src/scheduling`, `apps/backend/src/recommender`, and `apps/backend/prisma` path.
-- [ ] `.scratch/fsm-platform-v1/INDEX.md` session log appended (date · what landed · commit hashes) per the mandatory progress convention in `CLAUDE.md`.
+- [x] Group A committed by explicit path (`5937f2c`), message referencing #127/#138, with `20260721120000_batch_run_attribution/` tracked.
+- [x] Group A's suites verified green **before** the commit: 4 core specs **9/9**, full dispatch regression **14 files / 47 tests**, full recommender regression **9 files / 22 tests**, `tsc --noEmit` clean.
+- [x] **Drift checked — with a caveat that became its own finding.** `prisma migrate diff` against a fully `migrate deploy`-ed database shows **`plant_batch_assignments` zero times**: this migration is drift-free and reproduces its `schema.prisma` delta exactly. **However the repo as a whole is NOT drift-free** — see the finding below. A true scratch-DB from-zero run was not performed: the PostGIS extension is a one-time superuser bootstrap (`test/global-setup.ts` docblock, `.env.example`) and no `psql` is available on this host, so the check ran against the migrations-built `_test` database instead. That is a genuine migrations-only surface, but it is **not** identical to provisioning a brand-new database, and is stated rather than glossed.
+- [x] Groups B and C committed separately, each with a filed stub — **#150** (SE-directory inline editing) and **#151** (dashboard/shell polish + `InactiveCountLink`).
+- [x] `reset-reseed-ses.cjs` — **explicit decision: tracked.** `apps/backend/scripts/` is already a tracked directory with sibling dev scripts (`db-explore.cjs`, `run-ingest.cjs`); the script is **dry-run by default** (`--yes` required to execute), carries a "Never run against production" banner, and its docblock says to keep it in sync with the tracked `prisma/seed-mock-engineers.ts` — which is an argument for tracking it beside its twin, not away from it.
+- [x] Group D committed; `docs/audits/test.md` **deleted** after verifying it byte-identical to `2026-07-22-adversarial-review-mobile-readiness.md` modulo CRLF (same 315 lines; `diff` clean after `tr -d '\r'`).
+- [x] `git status` clean of every `apps/backend/src/scheduling`, `apps/backend/src/recommender`, and `apps/backend/prisma` path — in fact the **entire working tree** was clean after Slice 4.
+- [x] INDEX session log appended (date · what landed · commit hashes).
+
+### Finding surfaced by AC#3 — pre-existing repo-wide schema drift (NOT caused by this issue)
+
+`prisma migrate diff --from-config-datasource --to-schema` against a fully migrated database is
+**non-empty**: **22 unrelated tables** drift — 18 renamed indexes, 1 renamed foreign key, and
+FK/default-annotation differences (e.g. `vehicle_unavail_ticket_fkey` vs
+`vehicle_unavailability_reports_ticket_id_fkey`; `zpsm_month_idx` vs
+`zm_performance_summary_monthly_month_idx`). Cause: hand-written migrations used short index names
+where Prisma's introspected default naming differs. It is **cosmetic — naming, not structure.**
+
+**This blocks nothing today, but [#107](./107-ci-concurrency-guard-migration-tests.md) AC#2
+("a migration-from-zero test asserts a clean migrate with no drift") will trip on it immediately.**
+#107 must either normalise the names first or scope its drift assertion to structural differences.
+Recorded in the commit body, the INDEX session log, and `SYSTEM-STATE` so it cannot be rediscovered
+as a surprise.
 
 ## TDD Strategy
 

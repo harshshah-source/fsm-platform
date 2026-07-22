@@ -1,5 +1,5 @@
 # 142 — Admin suite red: SE-directory row-selection contract changed by the `EditableCell` rework
-Status: ready-for-agent
+Status: accepted
 Type: AFK
 
 > Source: `docs/audits/2026-07-22-adversarial-review-admin-backend.md` §3.4 (N1b, `needs-changes`).
@@ -71,11 +71,11 @@ design and was reviewed clean.
 
 ## Acceptance criteria
 
-- [ ] The coverage-removal test opens the edit panel via the **"Manage coverage →"** button and passes.
-- [ ] The click target is **row-scoped** (queried within the target row), not a global `findByRole`, so a second SE row cannot match it.
-- [ ] Every other spec that opens the SE-directory edit panel is located, updated if needed, and green.
-- [ ] `EditableCell.tsx` and `SeManagementDirectoryPage.tsx` are unchanged — verified by `git diff --stat` showing only `test/` paths.
-- [ ] Full admin suite green (expected 318/318), reading **vitest's own exit code**.
+- [x] The coverage-removal test opens the edit panel via the **"Manage coverage →"** button and passes — `se-management-directory` 9/9.
+- [x] The click target is **row-scoped** — `(await screen.findByText('Asha Rao')).closest('tr')` then `within(row).getByRole('button', …)`, so a second directory row can never satisfy it. *(The default fixture renders one row today; the scoping keeps the test honest when it does not.)*
+- [x] Every other spec that opens the SE-directory edit panel is located and green — a `grep` for panel-opening steps found **exactly one** (`:140`); `:73` is a presence assertion only, and needs no change.
+- [x] `EditableCell.tsx` and `SeManagementDirectoryPage.tsx` are unchanged — the commit diff contains only `apps/admin/test/`.
+- [x] Full admin suite green, reading **vitest's own exit code** — **82 files / 321 tests, exit 0** (the "318" in the original AC predates the +1 spec and +3 tests added by #143).
 
 ## TDD Strategy
 

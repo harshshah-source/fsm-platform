@@ -1,5 +1,5 @@
 # 143 — Critical Devices KPI silently dropped from the Pan-India dashboard
-Status: ready-for-agent
+Status: accepted
 Type: AFK
 
 > Source: `docs/audits/2026-07-22-adversarial-review-admin-backend.md` §3.3 (N1a, **`fail`**).
@@ -103,12 +103,22 @@ numbers.
 
 ## Acceptance criteria
 
-- [ ] `data-testid="kpi-critical"` renders on the Operations-Head dashboard, sourced from `sumCriticalDevices(zones)`, labelled `Critical Devices`, hint `pan-India, CRITICAL band`, tone `critical`.
-- [ ] A single test asserts the **invariant** — the KPI value equals the sum of the scorecard's Critical column — rather than asserting two independent constants.
-- [ ] Hero layout matches `docs/ui/hero-ref.jpg`: 3 cards each side. `kpi-total-devices` and `kpi-devices` are both retained; `ad03769`'s feature is **not** reverted.
-- [ ] `kpi-critical-plus-consistency.test.tsx` passes with its original intent intact (the CRITICAL-band-only semantics of #122 are unchanged).
-- [ ] Full admin suite green (expected 318/318), reading vitest's own exit code.
-- [ ] INDEX session log records the regression, its 3-commit window, and the resolution.
+> **AC#2 corrected during implementation (2026-07-22).** As originally written it asserted *"the KPI
+> value equals the sum of the scorecard's **Critical column**"*. **The scorecard has no Critical
+> column.** `ScorecardTable.tsx:121` renders **"Inactive > 24Hr"** (`data-testid="scorecard-inactive-24h"`),
+> which is deliberately a **superset** — CRITICAL *and worse* bands. Against the spec fixture the KPI
+> is **7** and the column is **12**, and the existing tests already asserted them as two different,
+> correctly-explained numbers. Asserting equality would have pinned a **false invariant** and broken a
+> correct implementation. AC#2 is restated below as the relationship that is actually true. The
+> Background section's phrase "must agree with … the Critical column" carries the same original error
+> and is superseded by this note.
+
+- [x] `data-testid="kpi-critical"` renders on the Operations-Head dashboard, sourced from `sumCriticalDevices(zones)`, labelled `Critical Devices`, hint `pan-India, CRITICAL band`, tone `critical`.
+- [x] **(corrected)** A single test renders once and asserts the KPI **and** the scorecard column **together** with their true relationship — same zone-overview `byBucket` source, KPI ⊆ 24h column, KPI > 0 — so the two halves can never again be independently half-true. *(The original defect was not a missing equality; it was that the halves lived in separate tests, so losing one read as a broken test rather than a lost feature.)*
+- [x] Hero layout matches `docs/ui/hero-ref.jpg`: 3 cards each side (`left={kpis.slice(0, 3)}`). `kpi-total-devices` and `kpi-devices` are both retained; `ad03769`'s feature is **not** reverted.
+- [x] `kpi-critical-plus-consistency.test.tsx` passes with its original intent intact (the CRITICAL-band-only semantics of #122 are unchanged).
+- [x] Full admin suite green — **82 files / 321 tests, exit 0** (the "318" in the original AC predates the +1 spec and +3 tests this issue adds).
+- [x] INDEX session log records the regression, its 3-commit window, and the resolution.
 
 ## TDD Strategy
 

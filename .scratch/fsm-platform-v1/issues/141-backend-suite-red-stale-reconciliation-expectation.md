@@ -1,5 +1,5 @@
 # 141 — Backend suite red for 43 commits: stale AutoPlant reconciliation expectation
-Status: ready-for-agent
+Status: accepted
 Type: AFK
 
 > Source: `docs/audits/2026-07-22-adversarial-review-admin-backend.md` §3.5 (N4, `needs-changes`).
@@ -73,10 +73,28 @@ fixed. The code is right; the test is stale.
 
 ## Acceptance criteria
 
-- [ ] `calls[1].sql` asserts `deployment_status IN (?, ?)` and `calls[1].params` equals `['DEPLOYED', 'ACTIVE']`.
-- [ ] Both count expectations (vehicles **and** plants) are derived from the exported constants, not from duplicated string literals, so the next widening cannot desync them.
-- [ ] `OPERATIONAL_DEPLOYMENT_STATUSES` is unchanged — verified by `git diff` showing no `src/` file.
-- [ ] Full backend suite green (expected 1176/1176), reading **vitest's own exit code** — no pipe into `tail`/`head`/`tee`.
+- [x] `calls[1].sql` asserts `deployment_status IN (?, ?)` and `calls[1].params` equals `['DEPLOYED', 'ACTIVE']` — expressed via a `placeholders()` helper mirroring `inClause`, so the `?` count is generated rather than hand-written.
+- [x] Both count expectations (vehicles **and** plants) are derived from the exported constants, not from duplicated string literals, so the next widening cannot desync them.
+- [x] `OPERATIONAL_DEPLOYMENT_STATUSES` is unchanged — `git diff` for the commit contains no `src/` path.
+- [x] Full backend suite green, reading **vitest's own exit code** (no pipe) — **286 files / 1172 passed + 5 skipped, exit 0, 539s**. Was `1 failed | 1170 passed | 5 skipped`; the +1 test is this issue's new operational-scope guard.
+
+### Root cause was deeper than the audit stated (recorded 2026-07-22)
+
+The audit diagnosed a changed literal. On disk the cause is one level down, and it matters because
+the audit's prescribed fix would have **hidden** it:
+
+The spec injected **`deploymentStatuses: ['DEPLOYED']`**, but `countVehicleMasters` reads
+**`operationalStatuses`** (`autoplant-master-source.ts:187`). #128 deliberately split these into two
+knobs — `deploymentStatuses` is the **READ** scope (default `[]`, every status, so departures are
+observable) and `operationalStatuses` is the **create/reconciliation** scope (default
+`['DEPLOYED','ACTIVE']`, what FSM actually mirrors). The injection was therefore **inert**, and the
+test had been pinning a default it did not know it was pinning.
+
+Merely updating the expected literal to `['DEPLOYED','ACTIVE']` would have produced a green test that
+still injected a dead key. So the fix additionally adds a test —
+**"countVehicleMasters counts the OPERATIONAL scope, not the READ scope"** — which injects a distinct
+three-value `operationalStatuses` and asserts it reaches the SQL, pinning *which knob drives the
+count*. That is the thing that actually broke.
 
 ## TDD Strategy
 
