@@ -5,6 +5,7 @@ import { type SeAvailabilityStatus } from '../generated/prisma/enums';
 import { type CommonKitStatus, InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
+import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { CandidateSelectionService } from './candidate-selection.service';
 import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
@@ -539,17 +540,20 @@ export class RecommenderService {
 
   /**
    * NEW-A1 — an SE's already-committed workload for `day`, counted as active batch stops across ALL their
-   * ACTIVE work schedules covering that date (every zone, every prior run today, plus intraday inserts —
+   * live work schedules covering that date (every zone, every prior run today, plus intraday inserts —
    * all of which land as day-plan stops). This is the same "used" unit the transparency ledger displays
    * (`capacityUsed.used` = the SE's non-removed batch tickets), so enforcement and display agree. It is
    * read once at run start and used to seed the per-run `assigned` counter; the current zone's own
    * suggestions are not yet dispatched (they add via the in-run increment), so there is no double count.
+   *
+   * #153 — "live" includes OVERRIDDEN. A ZM adjusting a day plan does not un-commit the work still on
+   * it; counting only ACTIVE zeroed the SE's load and let the next run hand them a whole second day.
    */
   private async committedDayLoad(day: Date): Promise<Map<string, number>> {
     const rows = await this.prisma.batchAssignmentTicket.findMany({
       where: {
         removedAt: null,
-        batch: { schedule: { status: 'ACTIVE', dateFrom: { lte: day }, dateTo: { gte: day } } },
+        batch: { schedule: { ...liveScheduleFilter(), dateFrom: { lte: day }, dateTo: { gte: day } } },
       },
       select: { batch: { select: { seId: true } } },
     });

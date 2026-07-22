@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { liveScheduleFilter } from './schedule-status';
 
 export interface DayPlanStopTicket {
   ticketId: string;
@@ -28,7 +29,7 @@ const EMPTY: DayPlanView = { dispatched: false, scheduleId: null, dateFrom: null
 /**
  * The SE Day Plan read model (Issue 11 AC#5). Resolves an SE's current dispatched Work Schedule into
  * ordered, plant-clustered stops — stop sequence, plant name, device count per stop, and the stop's
- * tickets in sort order. Pre-dispatch (no ACTIVE schedule) returns the empty-state so the mobile Home
+ * tickets in sort order. Pre-dispatch (no live schedule) returns the empty-state so the mobile Home
  * can show "your plan is being prepared." (The Zone Warehouse pickup step in AC#5 needs component data
  * from Issues 21/22 and is added when that lands.)
  */
@@ -38,7 +39,9 @@ export class DayPlanQueryService {
 
   async getDayPlan(seId: string): Promise<DayPlanView> {
     const schedule = await this.prisma.workSchedule.findFirst({
-      where: { seId, status: 'ACTIVE' },
+      // #153 — a ZM override flips the schedule to OVERRIDDEN but the SE still has to work it; filtering
+      // to ACTIVE alone blanked the entire day plan the moment a ZM touched anything.
+      where: { seId, ...liveScheduleFilter() },
       orderBy: { dispatchedAt: 'desc' },
     });
     if (!schedule) return EMPTY;
