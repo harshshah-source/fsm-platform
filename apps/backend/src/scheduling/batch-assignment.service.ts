@@ -78,9 +78,26 @@ export class BatchAssignmentService {
         orderBy: { processingRank: 'asc' },
       });
 
+      // Idempotency guard (belt to the `batch_assignment_tickets_one_active_per_ticket` braces): a
+      // ticket already sitting in a LIVE batch (removed_at IS NULL) is never assigned a second time.
+      // The recommender only selects UNASSIGNED tickets, so this should be empty in normal flow — it
+      // is the defence for a raced/retried dispatch. Such recs are still CONSUMED below (so they don't
+      // re-loop) but produce no schedule/batch/ticket. The DB partial-unique remains the final backstop.
+      const alreadyAssigned = new Set(
+        recs.length === 0
+          ? []
+          : (
+              await tx.batchAssignmentTicket.findMany({
+                where: { ticketId: { in: recs.map((r) => r.ticketId) }, removedAt: null },
+                select: { ticketId: true },
+              })
+            ).map((t) => t.ticketId),
+      );
+      const freshRecs = recs.filter((r) => !alreadyAssigned.has(r.ticketId));
+
       // se_id → plant_id → ticket_ids (insertion order = canonical order).
       const bySe = new Map<string, Map<bigint, string[]>>();
-      for (const r of recs) {
+      for (const r of freshRecs) {
         const seId = r.seId!;
         const plantId = r.ticket.plantId;
         const byPlant = bySe.get(seId) ?? new Map<bigint, string[]>();
@@ -95,26 +112,49 @@ export class BatchAssignmentService {
       let tickets = 0;
 
       for (const [seId, byPlant] of bySe) {
-        const schedule = await tx.workSchedule.create({
-          data: {
-            seId,
-            zoneId,
-            dateFrom: opts.dateFrom,
-            dateTo: opts.dateTo,
-            status: 'ACTIVE',
-            source: 'SYSTEM_GENERATED',
-            dispatchedAt: now,
-            runId: opts.runId ?? null,
-          },
+        // APPEND, don't collide: reuse the SE's existing ACTIVE (se, zone, day) schedule — an earlier
+        // dispatch run today, or a ZM_MANUAL plan — instead of creating a second one (which would P2002
+        // on `work_schedules_one_active_per_se_zone_day` and roll back the whole zone, dropping every
+        // fresh recommendation). New stops continue after the schedule's current last stop; a fresh
+        // schedule is created only when the SE has none. The unique index stays the final safety net.
+        const existing = await tx.workSchedule.findFirst({
+          where: { seId, zoneId, dateFrom: opts.dateFrom, status: 'ACTIVE' },
+          select: { scheduleId: true },
         });
-        schedules++;
+        const scheduleId =
+          existing?.scheduleId ??
+          (
+            await tx.workSchedule.create({
+              data: {
+                seId,
+                zoneId,
+                dateFrom: opts.dateFrom,
+                dateTo: opts.dateTo,
+                status: 'ACTIVE',
+                source: 'SYSTEM_GENERATED',
+                dispatchedAt: now,
+                runId: opts.runId ?? null,
+              },
+              select: { scheduleId: true },
+            })
+          ).scheduleId;
+        schedules++; // schedules touched by this run (created or appended-to)
 
-        let stopSequence = 0;
+        // Continue stop numbering after the schedule's current last stop so an appended plan preserves
+        // the route the SE may already be executing — new work lands at the end, never reordering it.
+        const lastStop = await tx.plantBatchAssignment.aggregate({
+          where: { scheduleId },
+          _max: { stopSequence: true },
+        });
+        let stopSequence = lastStop._max.stopSequence ?? 0;
         let scheduleTickets = 0;
         for (const [plantId, ticketIds] of this.orderPlantStops(byPlant)) {
           stopSequence++;
+          // A fresh batch per run (stamped with run_id) even when the plant already has a stop from an
+          // earlier run — keeps run-attribution clean (the transparency ledger reads batch.run_id) and
+          // sidesteps mutating another run's batch. Duplicate TICKETS are already excluded above.
           const batch = await tx.plantBatchAssignment.create({
-            data: { scheduleId: schedule.scheduleId, plantId, seId, status: 'AUTO_ASSIGNED', stopSequence },
+            data: { scheduleId, plantId, seId, status: 'AUTO_ASSIGNED', stopSequence, runId: opts.runId ?? null },
           });
           batches++;
 
@@ -135,11 +175,12 @@ export class BatchAssignmentService {
           }
         }
 
-        notifications.push({ seId, scheduleId: schedule.scheduleId, zoneId, stops: stopSequence, tickets: scheduleTickets });
+        notifications.push({ seId, scheduleId, zoneId, stops: stopSequence, tickets: scheduleTickets });
       }
 
-      // Consume the dispatched recommendations (Issue 100): flip SUGGESTED → DISPATCHED so a re-invoke
-      // (retry, double-click, second instance) no longer re-reads and re-dispatches the same set.
+      // Consume ALL recommendations read (Issue 100): flip SUGGESTED → DISPATCHED so a re-invoke
+      // (retry, double-click, second instance) no longer re-reads and re-dispatches the same set. This
+      // includes the idempotency-guarded duplicates — they are done with, not to be re-evaluated.
       if (recs.length) {
         await tx.recommendation.updateMany({
           where: { recommendationId: { in: recs.map((r) => r.recommendationId) } },

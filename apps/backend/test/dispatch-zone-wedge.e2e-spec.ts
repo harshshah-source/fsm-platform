@@ -153,35 +153,30 @@ describe('Issue 126 — dispatch zone-wedge via orphaned SUGGESTED recs', () => 
     await prisma.onModuleDestroy();
   });
 
-  it('a rollback does not wedge the zone — once the conflict clears, the next run recovers AND dispatches', async () => {
+  it('a pre-existing ACTIVE schedule no longer drops the zone — the recommended work appends to it', async () => {
     const s = await seedScenario('wedge', 2, { conflict: true });
 
-    // Run 1 — recommender suggests both; the zone-wide dispatch tx P2002s on the pre-existing schedule.
+    // A ZM_MANUAL ACTIVE schedule already occupies this SE/zone/day. Pre-fix the zone-wide dispatch tx
+    // P2002'd on `work_schedules_one_active_per_se_zone_day`, rolled back the whole zone, and orphaned
+    // the SUGGESTED recs (the wedge + the "recommended but never dispatched" leak). Now dispatch REUSES
+    // that schedule and APPENDS the recommended tickets onto it — nothing dropped, no rollback, no orphans.
     const run1 = await newRun();
     const rec1 = await rec.runForZone(s.zoneId, { now: NOW, runId: run1 });
     expect(rec1.recommended).toBe(2);
     const dispatch1 = await dispatch.dispatchForZone(s.zoneId, { dateFrom: DAY, dateTo: DAY, now: NOW, runId: run1 });
-    expect(dispatch1.tickets).toBe(0); // rolled back → no-op
-    expect(dispatch1.skipReason).toMatch(/SCHEDULE_CONFLICT/); // never a silent skip
-    expect(dispatch1.orphansCleared).toBe(2); // run-1 orphans cleaned on rollback
-    await prisma.dispatchRun.update({ where: { runId: run1 }, data: { status: 'PARTIAL', finishedAt: NOW } });
+    expect(dispatch1.tickets).toBe(2); // appended, not dropped — reconciles with rec1.recommended
+    expect(dispatch1.skipReason).toBeUndefined(); // no SCHEDULE_CONFLICT skip
 
-    // Tickets never left the pool (rollback), so the next run re-selects them.
-    const tix1 = await prisma.ticket.findMany({ where: { ticketId: { in: s.ticketIds } } });
-    expect(tix1.every((t) => t.status === 'OPEN' && t.assignmentState === 'UNASSIGNED')).toBe(true);
+    // Exactly one ACTIVE schedule — the pre-existing ZM_MANUAL one, now carrying the appended stops.
+    const schedules = await prisma.workSchedule.findMany({ where: { zoneId: s.zoneId, status: 'ACTIVE' } });
+    expect(schedules).toHaveLength(1);
+    expect(schedules[0].source).toBe('ZM_MANUAL');
 
-    // The ZM override that caused the conflict is cleared. The rollback's orphans must NOT outlive it.
-    await prisma.workSchedule.deleteMany({ where: { zoneId: s.zoneId, source: 'ZM_MANUAL' } });
-
-    // Run 2 — pre-fix this THREW P2002 (the wedge); post-fix it re-evaluates fresh and dispatches.
-    const run2 = await newRun();
-    const rec2 = await rec.runForZone(s.zoneId, { now: NOW, runId: run2 });
-    expect(rec2.recommended).toBe(2);
-    const dispatch2 = await dispatch.dispatchForZone(s.zoneId, { dateFrom: DAY, dateTo: DAY, now: NOW, runId: run2 });
-    expect(dispatch2.schedules).toBe(1);
-    expect(dispatch2.tickets).toBe(2);
-    const tix2 = await prisma.ticket.findMany({ where: { ticketId: { in: s.ticketIds } } });
-    expect(tix2.every((t) => t.assignmentState === 'FORMALLY_ASSIGNED')).toBe(true);
+    // Both tickets committed; no orphaned SUGGESTED rec left behind (there was no rollback to orphan them).
+    const tix = await prisma.ticket.findMany({ where: { ticketId: { in: s.ticketIds } } });
+    expect(tix.every((t) => t.assignmentState === 'FORMALLY_ASSIGNED')).toBe(true);
+    const orphans = await suggestedFor(s.ticketIds);
+    expect(orphans).toHaveLength(0);
   });
 
   it('idempotent re-run after a successful dispatch places nothing new and does not throw', async () => {

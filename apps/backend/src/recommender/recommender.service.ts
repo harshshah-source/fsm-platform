@@ -149,7 +149,12 @@ export class RecommenderService {
     const clusterMultiplier = await this.plantClusterMultiplier();
     const capacity = await this.engineerCapacity();
 
-    const assigned = new Map<string, number>(); // se_id → tickets assigned this run
+    // NEW-A1 — seed the capacity counter from the SE's ALREADY-committed day plan (other zones this run,
+    // and any earlier run today), so `daily_capacity` caps the whole day rather than this zone-run in
+    // isolation. Without this a cross-zone floating/multi-plant SE is dispatched up to capacity in every
+    // zone the daily loop visits (each `runForZone` started the map at 0). The in-run increments below add
+    // this zone's suggestions on top, giving a running whole-day total to check against the cap.
+    const assigned = await this.committedDayLoad(utcDayStart(now)); // se_id → tickets on the SE's day plan
     const seededPlants = new Set<string>(); // plant_id → already has a cluster seed this run
     const plannerByPlant = await this.plannerForDate(zoneId, now); // plant_id → planned se_ids (soft bias)
     const kitStatusBySe = new Map<string, CommonKitStatus>(); // memoised Common-Kit status per SE
@@ -531,4 +536,30 @@ export class RecommenderService {
     });
     return new Map(rows.map((r) => [r.engineerId, { dailyCapacity: r.dailyCapacity, isActive: r.isActive }]));
   }
+
+  /**
+   * NEW-A1 — an SE's already-committed workload for `day`, counted as active batch stops across ALL their
+   * ACTIVE work schedules covering that date (every zone, every prior run today, plus intraday inserts —
+   * all of which land as day-plan stops). This is the same "used" unit the transparency ledger displays
+   * (`capacityUsed.used` = the SE's non-removed batch tickets), so enforcement and display agree. It is
+   * read once at run start and used to seed the per-run `assigned` counter; the current zone's own
+   * suggestions are not yet dispatched (they add via the in-run increment), so there is no double count.
+   */
+  private async committedDayLoad(day: Date): Promise<Map<string, number>> {
+    const rows = await this.prisma.batchAssignmentTicket.findMany({
+      where: {
+        removedAt: null,
+        batch: { schedule: { status: 'ACTIVE', dateFrom: { lte: day }, dateTo: { gte: day } } },
+      },
+      select: { batch: { select: { seId: true } } },
+    });
+    const load = new Map<string, number>();
+    for (const r of rows) load.set(r.batch.seId, (load.get(r.batch.seId) ?? 0) + 1);
+    return load;
+  }
+}
+
+/** UTC midnight of the day containing `now` — matches the daily Day Plan's single coverage date. */
+function utcDayStart(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }

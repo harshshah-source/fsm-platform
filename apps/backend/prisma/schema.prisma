@@ -521,17 +521,24 @@ model PlantBatchAssignment {
   status         BatchStatus @default(AUTO_ASSIGNED)
   stopSequence   Int         @map("stop_sequence")
   overrideReason String?     @map("override_reason")
+  /// Dispatch-run that CREATED this batch (transparency). A same-day re-run appends fresh batches onto
+  /// an SE's existing schedule, so a schedule can span runs — run-attribution lives on the batch, not
+  /// the schedule. Null for pre-#batch-run-attribution history / ZM_MANUAL batches (fall back to the
+  /// schedule's run_id, which is unshared for those).
+  runId          BigInt?     @map("run_id")
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   schedule WorkSchedule            @relation(fields: [scheduleId], references: [scheduleId])
   plant    Plant                   @relation(fields: [plantId], references: [plantId])
   engineer EngineerMaster          @relation(fields: [seId], references: [engineerId])
+  run      DispatchRun?            @relation(fields: [runId], references: [runId], onDelete: SetNull)
   tickets  BatchAssignmentTicket[]
 
   @@index([scheduleId])
   @@index([plantId])
   @@index([seId])
+  @@index([runId])
   @@map("plant_batch_assignments")
 }
 
@@ -632,6 +639,7 @@ model DispatchRun {
   traces          DispatchDecisionTrace[]
   recommendations Recommendation[]
   workSchedules   WorkSchedule[]
+  batchRows       PlantBatchAssignment[]
 
   @@index([startedAt(sort: Desc)])
   @@map("dispatch_runs")

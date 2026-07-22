@@ -5,12 +5,12 @@ import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 
 /**
- * Issue 100 AC#1 — each SE's day-plan write is atomic. A failure mid-dispatch must leave NO partial
- * state: no orphaned WorkSchedule/batch, no half-updated ticket `assignmentState`, no consumed
- * recommendations. We stage a deterministic mid-loop failure by pre-occupying one of the SE's tickets
- * in an active batch (a state the existing `batch_assignment_tickets_one_active_per_ticket` partial
- * unique forbids), so dispatch's insert of that ticket raises P2002 partway through the SE's writes.
- * The test is agnostic to whether dispatch throws or degrades gracefully — it asserts the rollback.
+ * Issue 100 AC#1 + idempotency — a dispatch write leaves NO partial or DUPLICATED state. We pre-occupy
+ * one of the SE's tickets in another SE's active batch (the state
+ * `batch_assignment_tickets_one_active_per_ticket` forbids). The idempotency guard now DETECTS that the
+ * ticket is already live and skips it — so the SE's remaining (non-conflicting) work still dispatches
+ * cleanly, the already-assigned ticket is never assigned twice, and no P2002 rollback is needed. The
+ * partial-unique index remains the final backstop behind the guard.
  */
 const NS = Date.now();
 
@@ -105,21 +105,31 @@ describe('Issue 100 — dispatchForZone is transactional (rolls back a partial S
     await prisma.onModuleDestroy();
   });
 
-  it('a mid-loop failure leaves no orphaned schedule/batch and no half-assigned ticket', async () => {
-    // May throw (pre-graceful) or return a degraded summary (post-graceful) — either is fine here.
-    await dispatch.dispatchForZone(zoneId, { dateFrom: NOW, dateTo: NOW, now: NOW }).catch(() => undefined);
+  it('an already-assigned ticket is skipped; the rest of the SE plan dispatches with no partial/duplicate state', async () => {
+    const [t1, t2] = ticketIds;
 
-    // No WorkSchedule was left behind for the target SE (the stray SE's schedule is separate).
-    const orphanSchedules = await prisma.workSchedule.findMany({ where: { zoneId, seId } });
-    expect(orphanSchedules).toHaveLength(0);
+    const out = await dispatch.dispatchForZone(zoneId, { dateFrom: NOW, dateTo: NOW, now: NOW });
+    expect(out.tickets).toBe(1); // only the non-conflicting ticket dispatched; t1 skipped by the guard
 
-    // Neither target ticket was left FORMALLY_ASSIGNED by a partial write.
+    // t1 (already live in the stray SE's batch) keeps exactly ONE live assignment — never duplicated.
+    const t1Live = await prisma.batchAssignmentTicket.findMany({ where: { ticketId: t1, removedAt: null } });
+    expect(t1Live).toHaveLength(1);
+    expect(t1Live[0].batchId).toBe(strayBatchId);
+
+    // t1 untouched by the target-SE dispatch; t2 cleanly assigned — no half-written state.
     const tickets = await prisma.ticket.findMany({ where: { ticketId: { in: ticketIds } } });
-    expect(tickets.every((t) => t.assignmentState === 'UNASSIGNED')).toBe(true);
+    const stateById = new Map(tickets.map((t) => [t.ticketId, t.assignmentState]));
+    expect(stateById.get(t1)).toBe('UNASSIGNED');
+    expect(stateById.get(t2)).toBe('FORMALLY_ASSIGNED');
 
-    // The recommendations were not consumed — a later (unblocked) retry can still dispatch them.
+    // Both recs are consumed (done with, never re-looped); exactly one target-SE schedule holding just t2.
     const recs = await prisma.recommendation.findMany({ where: { ticketId: { in: ticketIds }, seId: { not: null } } });
-    expect(recs.length).toBeGreaterThan(0);
-    expect(recs.every((r) => r.status === 'SUGGESTED')).toBe(true);
+    expect(recs.every((r) => r.status === 'DISPATCHED')).toBe(true);
+    const targetSchedules = await prisma.workSchedule.findMany({
+      where: { zoneId, seId },
+      include: { batches: { include: { tickets: { where: { removedAt: null } } } } },
+    });
+    expect(targetSchedules).toHaveLength(1);
+    expect(targetSchedules[0].batches.flatMap((b) => b.tickets.map((t) => t.ticketId))).toEqual([t2]);
   });
 });

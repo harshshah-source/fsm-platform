@@ -97,33 +97,44 @@ export class DispatchRunService {
     let batches = 0;
     let recommended = 0;
     let unassignable = 0;
+    // Zones that did not fully dispatch — a hard error OR a benign skip (lock contention / a residual
+    // schedule conflict). Any such zone stamps its `dispatch_run_zones.error`, so this equals the list's
+    // "Errors" column and drives the run status: a run with an issue is never labelled SUCCESS.
+    let zonesWithIssue = 0;
 
     for (const zoneId of zoneIds) {
       const zoneStart = new Date();
       let rec: RunSummary | undefined;
+      let out: DispatchSummary | undefined;
+      let error: string | null = null;
       try {
         rec = await this.recommender.runForZone(zoneId, { now, runId: run.runId });
-        const out = await this.dispatch.dispatchForZone(zoneId, { dateFrom: day, dateTo: day, now, runId: run.runId });
+        out = await this.dispatch.dispatchForZone(zoneId, { dateFrom: day, dateTo: day, now, runId: run.runId });
         summary.zones++;
-        summary.schedules += out.schedules;
-        summary.tickets += out.tickets;
-        batches += out.batches;
-        recommended += rec.recommended ?? 0;
-        unassignable += rec.unassignable ?? 0;
-        // #126 — a benign non-dispatch (schedule conflict / lock contention) is no longer silent: its
-        // reason (+ orphan-cleanup count) is stamped on the zone row's `error` field. A dispatched zone
-        // carries `skipReason` undefined → null, unchanged.
-        await this.zoneRow(run.runId, zoneId, zoneStart, rec, out, out.skipReason ?? null);
+        // #126 — a benign non-dispatch (residual schedule conflict / lock contention) is no longer
+        // silent: its reason is stamped on the zone row's `error`. A dispatched zone → skipReason
+        // undefined → null. Same-day new work now APPENDS to the SE's existing plan (no whole-zone drop).
+        error = out.skipReason ?? null;
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        this.logger.error(`dispatch run failed for zone ${zoneId}: ${message}`);
-        summary.errors.push({ zoneId: zoneId.toString(), message });
-        await this.zoneRow(run.runId, zoneId, zoneStart, rec, undefined, message);
+        error = e instanceof Error ? e.message : String(e);
+        this.logger.error(`dispatch run failed for zone ${zoneId}: ${error}`);
+        summary.errors.push({ zoneId: zoneId.toString(), message: error });
       }
+      // Accumulate run totals from EXACTLY what the zone row records (successes and contained failures
+      // alike), so a run's columns always equal the sum of its per-zone cards — recommended, dispatched,
+      // unassignable, batches and schedules reconcile by construction. `undefined ?? 0` covers a zone
+      // whose dispatch threw (no `out`) or whose recommender threw (no `rec`).
+      await this.zoneRow(run.runId, zoneId, zoneStart, rec, out, error);
+      summary.schedules += out?.schedules ?? 0;
+      summary.tickets += out?.tickets ?? 0;
+      batches += out?.batches ?? 0;
+      recommended += rec?.recommended ?? 0;
+      unassignable += rec?.unassignable ?? 0;
+      if (error !== null) zonesWithIssue++;
     }
 
     const status: DispatchRunStatus =
-      summary.errors.length === 0
+      zonesWithIssue === 0
         ? 'SUCCESS'
         : zoneIds.length > 0 && summary.errors.length >= zoneIds.length
           ? 'FAILED'

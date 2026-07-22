@@ -340,43 +340,58 @@ export class DispatchTransparencyQueryService {
     if (!zoneRow) return null;
 
     const capacityOf = capacityFromSnapshot(zoneRow.run.configSnapshot);
-    const schedules = await this.prisma.workSchedule.findMany({
-      where: { runId, zoneId },
+    // Batches THIS run created in the zone. A same-day re-run APPENDS fresh batches onto an SE's
+    // existing schedule, so a schedule can span runs — attribution lives on the batch (`run_id`). The
+    // `runId: null` leg attributes legacy batches (written before batch-level attribution) via their
+    // schedule's run_id; those schedules are unshared, so exactly one leg matches per batch.
+    const runBatches = await this.prisma.plantBatchAssignment.findMany({
+      where: {
+        schedule: { zoneId },
+        OR: [{ runId }, { runId: null, schedule: { runId } }],
+      },
+      orderBy: [{ seId: 'asc' }, { stopSequence: 'asc' }],
       include: {
+        plant: { select: { name: true } },
         engineer: { select: { user: { select: { name: true } } } },
-        batches: {
-          orderBy: { stopSequence: 'asc' },
-          include: {
-            plant: { select: { name: true } },
-            tickets: {
-              where: { removedAt: null },
-              select: { id: true, ticket: { select: { company: { select: { name: true } } } } },
-            },
-          },
+        tickets: {
+          where: { removedAt: null },
+          select: { id: true, ticket: { select: { company: { select: { name: true } } } } },
         },
       },
-      orderBy: { seId: 'asc' },
     });
 
-    const plantIds = [...new Set(schedules.flatMap((s) => s.batches.map((b) => b.plantId)))];
+    const plantIds = [...new Set(runBatches.map((b) => b.plantId))];
     const plantStats = await this.plantDeviceStats(plantIds);
 
-    const batches: DispatchBatchRow[] = schedules.flatMap((s) => {
-      const used = s.batches.reduce((n, b) => n + b.tickets.length, 0);
-      return s.batches.map((b) => ({
-        batchId: b.batchId.toString(),
-        scheduleId: s.scheduleId.toString(),
-        seId: s.seId,
-        seName: s.engineer?.user?.name ?? null,
-        plantId: b.plantId.toString(),
-        plantName: b.plant.name,
-        companyName: distinctLabel(b.tickets.map((t) => t.ticket?.company?.name ?? null)),
-        stopSequence: b.stopSequence,
-        status: b.status,
-        ticketCount: b.tickets.length,
-        capacityUsed: { used, cap: capacityOf(s.seId) },
-      }));
-    });
+    // SE Day-Plan "used" = LIVE batch tickets across the SE's whole schedule for this zone/day (every
+    // run that appended to it), against the run-snapshot capacity — the same whole-day denominator the
+    // recommender enforces (NEW-A1). One grouped read keyed by scheduleId, tallied in memory.
+    const scheduleIds = [...new Set(runBatches.map((b) => b.scheduleId))];
+    const usedBySchedule = new Map<string, number>();
+    if (scheduleIds.length) {
+      const live = await this.prisma.batchAssignmentTicket.findMany({
+        where: { removedAt: null, batch: { scheduleId: { in: scheduleIds } } },
+        select: { batch: { select: { scheduleId: true } } },
+      });
+      for (const t of live) {
+        const key = t.batch.scheduleId.toString();
+        usedBySchedule.set(key, (usedBySchedule.get(key) ?? 0) + 1);
+      }
+    }
+
+    const batches: DispatchBatchRow[] = runBatches.map((b) => ({
+      batchId: b.batchId.toString(),
+      scheduleId: b.scheduleId.toString(),
+      seId: b.seId,
+      seName: b.engineer?.user?.name ?? null,
+      plantId: b.plantId.toString(),
+      plantName: b.plant.name,
+      companyName: distinctLabel(b.tickets.map((t) => t.ticket?.company?.name ?? null)),
+      stopSequence: b.stopSequence,
+      status: b.status,
+      ticketCount: b.tickets.length,
+      capacityUsed: { used: usedBySchedule.get(b.scheduleId.toString()) ?? b.tickets.length, cap: capacityOf(b.seId) },
+    }));
 
     const unassignableTraces = await this.prisma.dispatchDecisionTrace.findMany({
       where: { runId, zoneId, seId: null },

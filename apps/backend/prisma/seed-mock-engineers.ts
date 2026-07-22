@@ -41,6 +41,40 @@ const ZM_NAME_BY_ZONE: Record<string, string> = {
   west: 'Kalpesh Isame',
 };
 
+/**
+ * Region-flavoured Indian SE name pools, keyed by lowercased zone name. The i-th SE created in a zone
+ * takes the i-th name; a zone with no pool (or more SEs than names) falls back to the generic mock label.
+ * Names are illustrative dev/demo data only — enough distinct, realistic names to seed a 15-SE workforce
+ * per zone without collisions. Keep in sync with `scripts/reset-reseed-ses.cjs` (the live-DB executor).
+ */
+const SE_NAMES_BY_ZONE: Record<string, string[]> = {
+  north: [
+    'Rahul Verma', 'Amit Sharma', 'Vikram Singh', 'Sandeep Chauhan', 'Manish Yadav',
+    'Deepak Rana', 'Ankit Malhotra', 'Rohit Bhardwaj', 'Naveen Kumar', 'Gaurav Sethi',
+    'Pankaj Tiwari', 'Sumit Chopra', 'Arun Nagpal', 'Vivek Saini', 'Nikhil Grover',
+  ],
+  south: [
+    'Suresh Reddy', 'Karthik Nair', 'Venkatesh Iyer', 'Ramesh Rao', 'Arjun Menon',
+    'Praveen Kumar', 'Naveen Krishnan', 'Sathish Babu', 'Harish Gowda', 'Vijay Prabhu',
+    'Manoj Pillai', 'Dinesh Raju', 'Ganesh Murthy', 'Srinivas Chari', 'Bharath Shetty',
+  ],
+  east: [
+    'Subhas Das', 'Arnab Ghosh', 'Debasish Roy', 'Sourav Banerjee', 'Rajat Chatterjee',
+    'Bikash Mohanty', 'Prasenjit Dutta', 'Tanmoy Sen', 'Sanjib Mishra', 'Abhijit Bose',
+    'Pradip Sahoo', 'Kaushik Dey', 'Nirmal Pradhan', 'Sujit Nayak', 'Anup Barman',
+  ],
+  west: [
+    'Kalpesh Patel', 'Nilesh Desai', 'Jignesh Shah', 'Mahesh Joshi', 'Rakesh Mehta',
+    'Paresh Trivedi', 'Sagar Gadhavi', 'Bhavin Parmar', 'Hardik Vyas', 'Chirag Modi',
+    'Tushar Rane', 'Vishal Kulkarni', 'Yogesh Chavan', 'Ketan Bhatt', 'Nitin Gokhale',
+  ],
+  unzoned: [
+    'Rohan Kapoor', 'Aditya Nair', 'Farhan Ahmed', 'Imran Khan', 'Vikas Choudhary',
+    'Sameer Joshi', 'Aakash Menon', 'Rizwan Sheikh', 'Nitesh Kumar', 'Varun Pillai',
+    'Ashish Ranjan', 'Zaid Ansari', 'Kunal Bhatt', 'Devendra Rathi', 'Siddharth Rao',
+  ],
+};
+
 /** Split `items` into `n` contiguous chunks, biggest-first, each non-empty while items remain. */
 function chunk<T>(items: T[], n: number): T[][] {
   const out: T[][] = Array.from({ length: n }, () => []);
@@ -88,18 +122,20 @@ export async function seedMockEngineers(prisma: PrismaClient, plans: ZoneSeedPla
 
     // 3) Distribute the top plants across `seCount` SEs (biggest plants to the first SEs).
     const buckets = chunk(topPlants, plan.seCount);
+    const namePool = SE_NAMES_BY_ZONE[zone?.name.toLowerCase() ?? ''] ?? [];
     const zoneResult: ZoneSeedResult = { zoneId: String(zoneId), zmUserId: zm.userId, engineers: [] };
 
     for (let i = 0; i < plan.seCount; i++) {
       const plants = buckets[i] ?? [];
       const coverageType = plants.length === 1 ? 'DEDICATED' : 'MULTI_PLANT';
       const email = `se-z${zoneId}-${i + 1}@mock.fsm`;
+      const name = namePool[i] ?? `SE Z${zoneId}-${i + 1} (mock)`;
 
       const user = await prisma.user.upsert({
         where: { email },
-        update: {},
+        update: { name },
         create: {
-          name: `SE Z${zoneId}-${i + 1} (mock)`,
+          name,
           role: 'SERVICE_ENGINEER',
           zoneId,
           phone: `+9197${zoneId}${String(i + 1).padStart(3, '0')}00`,
