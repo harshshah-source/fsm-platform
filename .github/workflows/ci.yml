@@ -1,0 +1,113 @@
+# #107 — CI pipeline.
+name: CI
+
+# Every "green" claim on this repo was, until now, a local claim on one machine. Both suites were red
+# and nobody knew: the backend for 43 commits (#141), the admin for 3 (#143). This workflow is the
+# thing that makes green mean something.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The suite derives its isolated database by suffixing this one's name with `_test`
+  # (apps/backend/test/test-db-url.ts), so only the base URL is configured here.
+  DATABASE_URL: postgresql://fsm:fsm@localhost:5432/fsm?schema=public
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    services:
+      postgres:
+        # PostGIS is required by migration 20260621140000_add_geography_postgis, and it is a
+        # per-database superuser bootstrap (the app role is not a superuser and postgis is not a
+        # trusted extension) — so we use the postgis image and create the extension explicitly below.
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: fsm
+          POSTGRES_PASSWORD: fsm
+          POSTGRES_DB: fsm
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U fsm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Three databases, each with a single job:
+      #   fsm        — the base URL above; nothing runs against it directly
+      #   fsm_test   — the e2e suite (global-setup migrates + seeds it, then boots the app)
+      #   fsm_drift  — the drift gate ONLY. Never booted, so boot-time DDL (runtime_lock, #130)
+      #                cannot pollute the comparison.
+      - name: Provision databases
+        env:
+          PGPASSWORD: fsm
+        run: |
+          set -euo pipefail
+          for db in fsm_test fsm_drift; do
+            psql -h localhost -U fsm -d fsm -v ON_ERROR_STOP=1 -c "CREATE DATABASE $db;"
+          done
+          for db in fsm fsm_test fsm_drift; do
+            psql -h localhost -U fsm -d "$db" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+          done
+
+      # src/generated/prisma is gitignored, so nothing typechecks or runs without this.
+      - name: Generate Prisma client
+        working-directory: apps/backend
+        run: npx --no-install prisma generate
+
+      # Must precede typecheck AND both suites: apps/backend and apps/admin import `@fsm/shared`
+      # through its package exports, which point at packages/shared/dist — and dist/ is gitignored.
+      # turbo.json already encodes this as `test: dependsOn ^build`; running the suites directly
+      # (below, for unambiguous exit codes) bypasses that, so the dependency is satisfied here.
+      - name: Build (shared + backend + admin)
+        run: pnpm turbo run build
+
+      - name: Typecheck (backend + admin)
+        run: pnpm turbo run typecheck
+
+      # --- #107 AC2: migrate-from-zero + drift gate -------------------------------------------
+      # fsm_drift starts empty, so this IS a from-zero migrate. It must succeed, and the resulting
+      # schema must then match schema.prisma modulo the committed baseline.
+      - name: Migrate from zero
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: postgresql://fsm:fsm@localhost:5432/fsm_drift?schema=public
+        run: npx --no-install prisma migrate deploy
+
+      - name: Schema drift gate
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: postgresql://fsm:fsm@localhost:5432/fsm_drift?schema=public
+        run: node scripts/check-schema-drift.mjs
+
+      # --- #107 AC1/AC6: both suites, in full, on their OWN exit codes ------------------------
+      # NEVER pipe these into tail/head/tee. During the 2026-07-22 review `vitest … | tail -60`
+      # reported "exit code 0" — that was tail's status, not vitest's, on a suite that was red.
+      # `set -o pipefail` is not a substitute: just do not pipe.
+      - name: Backend suite
+        working-directory: apps/backend
+        run: pnpm test
+
+      - name: Admin suite
+        working-directory: apps/admin
+        run: pnpm test

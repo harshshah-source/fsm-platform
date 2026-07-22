@@ -1,5 +1,5 @@
 # 107 — CI pipeline + concurrency / route-guard / migration-from-zero test coverage
-Status: ready-for-agent
+Status: ready-for-agent  # slices 1-2 landed 2026-07-22 (workflow + drift gate); slices 3-4 + first-run verification open
 Type: AFK
 
 > Source: `docs/audits/2026-07-03-backend-production-readiness-audit.md` — MEDIUM (testing gaps) +
@@ -24,8 +24,8 @@ and route-guard findings can't currently regress-fail.
 
 ## Acceptance criteria
 
-- [ ] CI runs on push/PR: migrate-from-zero → backend suite + admin vitest + tsc + builds, all green, against a disposable DB.
-- [ ] A migration-from-zero test asserts a clean migrate with no drift (beyond `SELECT 1`).
+- [x] CI runs on push/PR: migrate-from-zero → backend suite + admin vitest + tsc + builds, all green, against a disposable DB. *(`.github/workflows/ci.yml`, 2026-07-22.)*
+- [x] A migration-from-zero test asserts a clean migrate with no drift (beyond `SELECT 1`) — **scoped to NEW drift** by operator decision; see "Drift gate" below.
 - [ ] A route-guard sweep test exists (here or referenced from #99) and fails on an unguarded route.
 - [ ] A documented, reusable concurrency-test pattern exists; at least one representative `Promise.all` double-invoke test runs in CI.
 - [ ] The pipeline is documented (how to run locally, how the disposable DB is provisioned).
@@ -34,10 +34,49 @@ and route-guard findings can't currently regress-fail.
 
 *Appended, not rewritten. The five criteria above stand unchanged.*
 
-- [ ] **The CI test step asserts vitest's own exit code.** No pipe into `tail`/`head`/`tee` or any status-swallowing command anywhere in the workflow. Verified by deliberately breaking one test, confirming the job fails, and reverting.
-- [ ] **CI runs both suites in full** — backend (1176 tests / 289 files) and admin (318 tests / 82 files) — never a hand-picked subset.
+- [x] **The CI test step asserts vitest's own exit code.** The two suite steps are bare `pnpm test` with `working-directory` set — no pipe anywhere in the workflow, with a comment recording why. *(The deliberate-break confirmation still needs a real Actions run — see "Remaining".)*
+- [x] **CI runs both suites in full** — separate `Backend suite` / `Admin suite` steps running bare `pnpm test`: no `-t` filter, no file list, no subset. *(Rationale: the #128 session ran a careful, deliberate four-suite regression sweep and still missed N4, because the broken test lay outside the blast radius the author imagined — no amount of diligence reliably selects the right subset.)*
 - [ ] **N3 — the admin→backend HTTP seam has unmocked coverage in the pipeline:** at least one smoke test exercises admin→backend over real HTTP against a booted backend, **or** `apps/admin/visual/` is promoted into the pipeline with a CI-started dev server. Whichever is chosen is documented as the seam's owner.
-- [ ] The issue's blocker record is corrected (see "Blockers cleared" below) so no future session re-parks this on obsolete grounds.
+- [x] The issue's blocker record is corrected (see "Blockers cleared" below) so no future session re-parks this on obsolete grounds.
+
+### Drift gate — scoped to NEW drift (operator decision, 2026-07-22)
+
+AC#2 as originally written was **unsatisfiable**: the repo already carries **72 drift lines across 22
+unrelated tables** (18 renamed indexes, 1 renamed FK, FK/default annotations) from hand-written
+migrations using short index names. A plain zero-drift assertion would have failed on the pipeline's
+first run and been muted — defeating the point of this issue.
+
+Operator decision: **scope the gate to new drift now, normalise the names later** →
+[#152](./152-normalise-migration-index-names.md) filed (P3, not scheduled).
+
+Implemented as a **committed baseline** (`apps/backend/prisma/drift-baseline.txt` +
+`apps/backend/scripts/check-schema-drift.mjs`) rather than the line-filter the decision sketched.
+Same tolerance, strictly better properties — the filter option carried an explicit caveat that *"a
+genuine rename is invisible"*, and the baseline removes it:
+
+- fails on **any** drift line not in the baseline, **including a genuine rename**;
+- baseline lines that **disappear** are not a failure — that is debt being paid down, and it is
+  reported so #152 can shrink the file monotonically;
+- the debt is a reviewable file that reaches empty when #152 lands, not an invisible grep;
+- **the #144 defect class is caught regardless of naming** — a migration applied to a live database
+  but never committed surfaces as columns missing from the migrated DB, i.e. new structural drift.
+
+`runtime_lock` is deliberately **excluded** from the baseline: it is created at boot by
+`PrismaService.onModuleInit` (#130 L1 build-fingerprint lock), not by a migration. The gate therefore
+runs against a dedicated **`fsm_drift`** database that is migrated and **never booted**. Verified: run
+against a *booted* database the gate correctly reports `runtime_lock` as new drift and exits 1.
+
+### Remaining (this issue is NOT done)
+
+- **Slice 3** — route-guard sweep test (may already be owned by #99 — dedupe) plus the reusable
+  `Promise.all` concurrency-test scaffolding that #100/#101 consume. AC#3 and AC#4 above still open.
+- **Slice 4** — N3 unmocked admin→backend HTTP seam coverage. AC open.
+- **AC#5** — "the pipeline is documented (how to run locally, how the disposable DB is provisioned)".
+- **First-run verification.** The workflow is validated locally — YAML parses to the expected 11
+  steps, `pnpm turbo run build` and `pnpm turbo run typecheck` both exit 0, the drift gate is proven
+  to fail on new drift — but it has **never executed on GitHub Actions**. The deliberate-break
+  confirmation must be done on a real run, and the first push should be treated as the real test of
+  the DB-provisioning and `pnpm/action-setup` steps.
 
 ## UI surfaces
 n/a (test/infra)

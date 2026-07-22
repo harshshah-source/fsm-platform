@@ -1,0 +1,86 @@
+# Known schema drift between the committed migration set and schema.prisma. #107 slice 2 gate:
+# CI fails on any drift line NOT listed here. Regenerate deliberately with
+#   node scripts/check-schema-drift.mjs --write
+#
+# All 72 lines below are COSMETIC — 18 renamed indexes, 1 renamed foreign key, and FK/default
+# annotation differences, caused by hand-written migrations using short index names where Prisma's
+# introspected default naming differs. Discovered 2026-07-22 while verifying #144; normalising them
+# is deferred to #152, at which point this file shrinks to empty.
+#
+# DELIBERATELY NOT LISTED: `runtime_lock`. That table is created at BOOT by
+# PrismaService.onModuleInit (#130 L1 build-fingerprint lock), not by any migration, so it is not
+# migration drift. Run this gate against a database built by `migrate deploy` ONLY and never booted
+# (CI uses a dedicated `fsm_drift` database) — against a booted DB it will correctly report
+# runtime_lock as new drift.
+[*] Changed the `component_blocked_queue` table
+  [-] Removed index on columns (blocked_at)
+[*] Changed the `component_request` table
+  [-] Removed foreign key on columns (component_id)
+  [+] Added foreign key on columns (component_id)
+[*] Changed the `cross_zone_escalations` table
+  [-] Removed foreign key on columns (assigned_se_id)
+  [-] Removed foreign key on columns (home_zone_id)
+  [-] Removed foreign key on columns (target_zone_id)
+[*] Changed the `device_downtime_summary_monthly` table
+  [*] Renamed index `ddsm_month_eligible_idx` to `device_downtime_summary_monthly_month_eligible_idx`
+  [*] Renamed index `ddsm_month_zone_idx` to `device_downtime_summary_monthly_month_zone_id_idx`
+[*] Changed the `dispatch_decision_traces` table
+  [-] Removed foreign key on columns (se_id)
+  [+] Added foreign key on columns (se_id)
+[*] Changed the `districts` table
+  [-] Removed foreign key on columns (region_id)
+  [+] Added foreign key on columns (region_id)
+[*] Changed the `engineer_territory_coverage` table
+  [-] Removed foreign key on columns (district_id)
+  [-] Removed foreign key on columns (region_id)
+  [-] Removed index on columns (polygon)
+  [+] Added foreign key on columns (district_id)
+  [+] Added foreign key on columns (region_id)
+[*] Changed the `expense_vouchers` table
+  [*] Altered column `voucher_id` (default changed from `Some(DbGenerated(Some("gen_random_uuid()")))` to `None`)
+[*] Changed the `intraday_insertions` table
+  [-] Removed foreign key on columns (offered_se_id)
+  [-] Removed foreign key on columns (zone_id)
+[*] Changed the `inventory_transactions` table
+  [-] Removed foreign key on columns (submission_id)
+  [-] Removed foreign key on columns (ticket_id)
+  [+] Added foreign key on columns (ticket_id)
+  [+] Added foreign key on columns (submission_id)
+[*] Changed the `notification_deliveries` table
+  [*] Renamed index `notification_deliveries_notification_idx` to `notification_deliveries_notification_id_idx`
+[*] Changed the `notifications` table
+  [*] Renamed index `notifications_recipient_created_idx` to `notifications_recipient_user_id_created_at_idx`
+  [*] Renamed index `notifications_recipient_unread_idx` to `notifications_recipient_user_id_in_app_read_at_idx`
+[*] Changed the `plants` table
+  [-] Removed foreign key on columns (district_id)
+  [-] Removed index on columns (location)
+  [+] Added foreign key on columns (district_id)
+[*] Changed the `recommendations` table
+  [-] Removed foreign key on columns (se_id)
+  [+] Added foreign key on columns (se_id)
+[*] Changed the `role_unavailability` table
+  [*] Renamed index `role_unavailability_role_zone_start_idx` to `role_unavailability_role_zone_id_window_start_idx`
+[*] Changed the `root_cause_summary_monthly` table
+  [*] Renamed index `rcsm_month_idx` to `root_cause_summary_monthly_month_idx`
+  [*] Renamed index `rcsm_month_zone_idx` to `root_cause_summary_monthly_month_zone_id_idx`
+[*] Changed the `soft_inactive_count_history` table
+  [*] Renamed index `sich_captured_idx` to `soft_inactive_count_history_captured_at_idx`
+  [*] Renamed index `sich_zone_captured_idx` to `soft_inactive_count_history_zone_id_captured_at_idx`
+[*] Changed the `system_efficiency_summary_daily` table
+  [*] Renamed index `sesd_day_idx` to `system_efficiency_summary_daily_day_idx`
+  [*] Renamed index `sesd_day_zone_idx` to `system_efficiency_summary_daily_day_zone_id_idx`
+[*] Changed the `troubleshooting_submissions` table
+  [*] Altered column `submission_id` (default changed from `Some(DbGenerated(Some("gen_random_uuid()")))` to `None`)
+  [*] Renamed index `troubleshooting_submissions_root_cause_category_submitted_at_id` to `troubleshooting_submissions_root_cause_category_submitted_a_idx`
+[*] Changed the `vehicle_unavailability_reports` table
+  [*] Renamed the foreign key "vehicle_unavail_ticket_fkey" to "vehicle_unavailability_reports_ticket_id_fkey"
+  [*] Renamed index `vehicle_unavail_status_expected_idx` to `vehicle_unavailability_reports_status_expected_from_idx`
+  [*] Renamed index `vehicle_unavail_ticket_idx` to `vehicle_unavailability_reports_ticket_id_idx`
+[*] Changed the `verification_runs` table
+  [-] Removed foreign key on columns (submission_id)
+  [*] Altered column `run_id` (default changed from `Some(DbGenerated(Some("gen_random_uuid()")))` to `None`)
+  [+] Added foreign key on columns (submission_id)
+[*] Changed the `zm_performance_summary_monthly` table
+  [*] Renamed index `zpsm_month_idx` to `zm_performance_summary_monthly_month_idx`
+  [*] Renamed index `zpsm_month_zm_idx` to `zm_performance_summary_monthly_month_zm_id_idx`
+  [*] Renamed index `zpsm_month_zone_idx` to `zm_performance_summary_monthly_month_zone_id_idx`
