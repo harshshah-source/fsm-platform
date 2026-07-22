@@ -82,9 +82,25 @@ AutoPlant MySQL (VPN, read-only)
 
 **Funnel status (verified 2026-07-09, `INDEX.md:124-139`, spot-checked this session):** every stage
 is code-complete and tested; activation is blocked by (1) empty `engineer_master`/`se_coverage`
-data, (2) the B7 eligibility business decision (`pgi_history` empty), and (3) two deliberately-OFF
-ops switches (`INGESTION_SCHEDULER_ENABLED`, `BUSINESS_SWEEPS_ENABLED`). Nothing runs unattended
-today. See §6.
+data, (2) the B7 eligibility business decision (`pgi_history` empty), and (3) the ops switches in
+§6.2 — of which **`BUSINESS_SWEEPS_ENABLED` is `"true"` in `apps/backend/.env:38` and its ten crons
+are running now**, while `INGESTION_SCHEDULER_ENABLED` (`:18`) and `PARTITION_MAINTENANCE_ENABLED`
+(`:24`) are `"false"`. See §6.
+
+> **Corrected 2026-07-22 (#149).** This paragraph previously read *"two **deliberately-OFF** ops
+> switches … **Nothing runs unattended today**"* — describing **code defaults** in a sentence phrased
+> as **deployed reality**. It was false, and it was the single most consequential operational claim in
+> this document. (`:468` *"All three master switches **default** OFF"* is a claim about
+> `business-sweep-scheduler.service.ts:27-36` and remains **accurate**; the `:770` blockquote is dated
+> history and is correctly frozen. Neither was changed.)
+>
+> **Why it matters, not just that it is wrong:** the verification sweep fires every 5 minutes and
+> expires its 24-hour window on **wall-clock**, while `INGESTION_SCHEDULER_ENABLED="false"` means
+> nothing automatically writes the telemetry it reads. A troubleshoot submission made during an
+> ingestion pause therefore ages into an **irreversible** `FAILED_VERIFICATION` — with its
+> `PRE_VERIFICATION` inventory rolled back — regardless of whether the SE actually fixed the device.
+> Exposure is 0 only because no SE has submitted a form yet: **armed, not safe.** Owned by
+> [#148](../.scratch/fsm-platform-v1/issues/148-sweep-staleness-precondition.md).
 
 ### 1.3 Runtime topology
 

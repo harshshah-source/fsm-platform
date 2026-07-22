@@ -1,7 +1,14 @@
 # Issue tracker: Local Markdown
 
-Issues and PRDs for this repo live as markdown files in `.scratch/`. This repo is not (yet) a git
-repository and has no GitHub/GitLab remote, so there is no `gh`/`glab` workflow — operate on files.
+Issues and PRDs for this repo live as markdown files in `.scratch/` — **by choice**, not by
+limitation. Operate on files: there is no `gh issue` / `glab issue` workflow for this backlog.
+
+> **Corrected 2026-07-22 (#149).** This paragraph previously claimed the repo *"is not (yet) a git
+> repository and has no GitHub/GitLab remote"*. Both halves are false — it is a git repository with a
+> live remote (`origin` → `github.com/harshshah-source/fsm-platform`). The **file-based issue
+> convention is unchanged and still correct**; only the stated reason for it was stale. This mattered
+> because `workflow.md` cited the missing remote as a reason [#107](../../.scratch/fsm-platform-v1/issues/107-ci-concurrency-guard-migration-tests.md)
+> CI could not be built. `gh` may be used for CI/PR work even though issues stay local.
 
 ## Conventions
 

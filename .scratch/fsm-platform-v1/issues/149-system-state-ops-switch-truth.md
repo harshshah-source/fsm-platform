@@ -1,5 +1,5 @@
 # 149 — Current-state docs misstate the single most consequential operational fact
-Status: ready-for-agent
+Status: accepted
 Type: AFK
 
 > Source: `docs/audits/2026-07-22-adversarial-review-admin-backend.md` §2.1 and §6.1 (X1, `advisory`),
@@ -81,13 +81,13 @@ Three in-place doc edits. No code.
 
 ## Acceptance criteria
 
-- [ ] `SYSTEM-STATE:67` reads true against `apps/backend/.env`: business sweeps **are** enabled and running; ingestion and partition maintenance are OFF.
-- [ ] That line states the consequence, not merely the fact, and points at [#148](./148-sweep-staleness-precondition.md).
-- [ ] `SYSTEM-STATE:449` and `:751` are **unchanged** — verified by `git diff` touching only the one region.
-- [ ] Edited **in place**; no new status / progress / current-state doc is created.
-- [ ] `docs/agents/issue-tracker.md:3` corrected — the repo has a git remote; the "operate on files" convention for *issues* is retained (that part is still true and is the project's chosen workflow).
-- [ ] `docs/agents/workflow.md:47` corrected, and **#107's HITL framing updated** to record that the remote exists and the OOM objection is disproven.
-- [ ] `.scratch/fsm-platform-v1/INDEX.md` session log appended.
+- [x] `SYSTEM-STATE:67` reads true against `apps/backend/.env`: business sweeps **are** enabled and running; ingestion and partition maintenance are OFF.
+- [x] That line states the consequence, not merely the fact, and points at [#148](./148-sweep-staleness-precondition.md).
+- [x] `SYSTEM-STATE:449` and `:751` are **unchanged** — verified by `git diff` touching only the one region.
+- [x] Edited **in place**; no new status / progress / current-state doc is created.
+- [x] `docs/agents/issue-tracker.md:3` corrected — the repo has a git remote; the "operate on files" convention for *issues* is retained (that part is still true and is the project's chosen workflow).
+- [x] `docs/agents/workflow.md:47` corrected, and **#107's HITL framing updated** to record that the remote exists and the OOM objection is disproven.
+- [x] `.scratch/fsm-platform-v1/INDEX.md` session log appended.
 
 ## TDD Strategy
 

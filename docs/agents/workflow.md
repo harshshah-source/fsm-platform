@@ -40,9 +40,18 @@ requires a tracked follow-up issue (see the Parity gate under "UI reference syst
 - **Security decision** — changes to the auth model, authorization model, encryption, secrets
   handling, or production-data access. Stop for review.
 
-The two HITL slices are `01` (foundation/infra: CI needs a git remote, PostGIS install, dep installs
-behind FortiGate) and `03` (notifications: FCM/APNs/WhatsApp accounts + template approval). Keep both
-marked HITL in `INDEX.md`. Everything else is AFK (`ready-for-agent`).
+The two HITL slices are `01` (foundation/infra: PostGIS install, dep installs behind FortiGate) and
+`03` (notifications: FCM/APNs/WhatsApp accounts + template approval). Keep both marked HITL in
+`INDEX.md`. Everything else is AFK (`ready-for-agent`).
+
+> **Corrected 2026-07-22 (#149).** *"CI needs a git remote"* was removed from `01`'s blocker list: the
+> remote exists (`origin` → `github.com/harshshah-source/fsm-platform`) and has for some time, so it
+> never was a live blocker. It was, however, **the stated reason
+> [#107](../../.scratch/fsm-platform-v1/issues/107-ci-concurrency-guard-migration-tests.md) CI stayed
+> parked** — alongside an OOM warning that the 2026-07-22 review disproved by running the full backend
+> suite unattended in ~9 minutes (independently re-measured at 539 s). Both obstacles were stale; #107
+> slices 1–2 landed the same day. **Stale blockers are worth deleting, not just noting** — an
+> untrue blocker parks real work indefinitely.
 
 ## TDD execution and per-slice report
 
