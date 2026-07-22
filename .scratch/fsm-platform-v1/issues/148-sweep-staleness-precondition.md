@@ -96,7 +96,7 @@ switch-pair coupling.
 - [x] No code path can write `FAILED_VERIFICATION` or `FAILED_ACTIVATION` on stale telemetry.
 - [ ] A stalled window is **observable** — surfaced on the existing integration-health page (`/build-health`, [#131](./131-build-health-ui-parity.md)) rather than failing silently.
 - [x] The ingestion↔sweeps coupling is documented as a **switch pair** in the INDEX activation checklist, matching the existing ingestion↔partition-maintenance precedent.
-- [x] Targeted regression green (see below); **full backend suite not re-run since these commits** — see "Remaining".
+- [x] Full backend suite green — **287 files passed / 3 skipped (290); 1176 passed / 5 skipped (1181); exit 0; 494s** — re-run after slices 1+2, +4 tests vs the 1172 baseline.
 
 ## TDD Strategy
 
