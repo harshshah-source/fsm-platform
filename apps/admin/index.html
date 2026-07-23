@@ -2,6 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Without this the browser falls back to requesting /favicon.ico, which does not exist and
+         shows up as a 404 in every console. There was no `public/` directory at all before this. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FSM Admin</title>
   </head>
