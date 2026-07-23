@@ -29,7 +29,8 @@ interface MapValueBody {
 interface UpsertOverrideBody {
   sourcePlantId: string | number;
   fsmZoneId: string | number;
-  reason?: string | null;
+  /** Mandatory — the override row is overwritten on re-pin, so the reason survives only in `audit_logs`. */
+  reason: string;
 }
 
 /** Parse a BigInt id from a string/number, or 400. Rejects junk / non-integer / 0-and-negative ids. */
@@ -87,6 +88,7 @@ export class ZoneMappingAdminController {
     return this.zoneMappings.listOverrides();
   }
 
+  /** Pin a plant to a zone. `reason` is mandatory (400 without one); effective on `reapply`. */
   @Put('plant-zone-overrides')
   upsertOverride(
     @Body() body: UpsertOverrideBody,
@@ -95,7 +97,7 @@ export class ZoneMappingAdminController {
     return this.zoneMappings.upsertOverride(
       parseBigId(body.sourcePlantId, 'sourcePlantId'),
       parseBigId(body.fsmZoneId, 'fsmZoneId'),
-      body.reason?.trim() || null,
+      body.reason,
       actor,
     );
   }

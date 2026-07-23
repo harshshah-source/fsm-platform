@@ -120,27 +120,43 @@ export class ZoneMappingService {
     return rows.map(toOverrideView);
   }
 
-  /** Pin a specific AutoPlant plant to a zone (highest resolver precedence). Audited. Effective on reapply. */
+  /**
+   * Pin a specific AutoPlant plant to a zone (highest resolver precedence). Audited. Effective on reapply.
+   *
+   * A `reason` is mandatory, and the audit row carries prev/new zone, because this is an UPSERT of a
+   * single row per plant: re-pinning overwrites `fsm_zone_id` and `reason` in place (and leaves
+   * `created_by` at the original author), so `audit_logs` is the ONLY place the previous zone survives.
+   */
   async upsertOverride(
     sourcePlantId: bigint,
     fsmZoneId: bigint,
     reason: string | null,
     actor: RequestActor,
   ): Promise<PlantZoneOverrideView> {
+    const trimmedReason = reason?.trim();
+    if (!trimmedReason) {
+      throw new BadRequestException('A reason is required to reassign a plant to a zone.');
+    }
     await this.assertZoneExists(fsmZoneId);
+    const previous = await this.prisma.plantZoneOverride.findUnique({ where: { sourcePlantId } });
     return this.audit.withAudit(
       {
         ...auditActor(actor),
         action: 'PLANT_ZONE_OVERRIDE_SET',
         entityType: 'plant_zone_overrides',
         entityId: sourcePlantId.toString(),
+        metadata: {
+          prevFsmZoneId: previous ? previous.fsmZoneId.toString() : null,
+          newFsmZoneId: fsmZoneId.toString(),
+          reason: trimmedReason,
+        },
       },
       async (tx) =>
         toOverrideView(
           await tx.plantZoneOverride.upsert({
             where: { sourcePlantId },
-            create: { sourcePlantId, fsmZoneId, reason, createdBy: actor.userId },
-            update: { fsmZoneId, reason },
+            create: { sourcePlantId, fsmZoneId, reason: trimmedReason, createdBy: actor.userId },
+            update: { fsmZoneId, reason: trimmedReason },
             include: { zone: { select: { name: true } } },
           }),
         ),
@@ -156,6 +172,11 @@ export class ZoneMappingService {
         action: 'PLANT_ZONE_OVERRIDE_CLEARED',
         entityType: 'plant_zone_overrides',
         entityId: sourcePlantId.toString(),
+        metadata: {
+          prevFsmZoneId: existing.fsmZoneId.toString(),
+          newFsmZoneId: null,
+          reason: existing.reason,
+        },
       },
       async (tx) => {
         await tx.plantZoneOverride.delete({ where: { sourcePlantId } });

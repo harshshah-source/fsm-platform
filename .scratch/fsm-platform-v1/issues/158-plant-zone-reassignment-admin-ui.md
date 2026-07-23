@@ -1,7 +1,14 @@
 # 158 — Plant zone reassignment (OH-editable) — surface plant_zone_overrides in the admin UI
 
-Status: ready-for-agent (draft — needs HITL sign-off on the two open questions before any slice starts)
-Type: AFK after HITL sign-off (design session 2026-07-23; investigation was read-only, no code touched)
+Status: ready-for-agent (APPROVED to build 2026-07-23 — standalone ship, ahead of #157)
+Type: AFK (open questions resolved at approval; see the decisions block)
+
+> **Operator approval 2026-07-23.** Build first as a small standalone ship, 3 slices, TDD, commit
+> per slice, push, then STOP and confirm downstream effects. Open questions resolved at approval:
+> **OQ-1 → accept auto-rescope** ("tickets move per your design"); **OQ-2/OQ-3 → build per the
+> design decisions below** (mandatory reason at the API; surface location chosen against the v2
+> reference). The #157 cross-feature warning is **not** in scope here — it is only live if #157's
+> Q1 lands per-zone, and would then be a follow-up slice filed against this issue.
 
 > Filed from the 2026-07-23 investigation session. OH cannot edit a plant's zone through the admin
 > UI today — the entire zone-mapping/override surface is API-only (verified: zero matches for
@@ -142,23 +149,26 @@ precedent, including its OH-only admin page — the closest existing UI pattern
 - [ ] AC-7: UI matches the v2 reference layout/hierarchy per `docs/agents/workflow.md` UI-discovery
       steps (read `docs/ui/desktop/v2-reference/` before building — surfacing rule).
 
-## Slice plan (TDD-first, #128/#130/#136 discipline)
+## Slice plan (3 slices as approved — TDD-first, #128/#130/#136 discipline, commit + push per slice)
 
-- **S1 — backend audit metadata (small).** RED on the audit-row shape for SET (create + update
-  paths — prev zone differs), CLEARED, and the mandatory-reason 400 (pending OQ-3). No schema
-  change; `zone-mapping.service.ts` only.
-- **S2 — engine consumption: explicitly N/A.** Zone is consumed transitively via `plants.zone_id`
-  by every engine read (evidence above); reapply already performs the write. This slice is a
-  one-paragraph verification note in the TDD report, not code — recorded so the slice numbering
-  matches the #157 template.
-- **S3 — admin UI (role-gated).** Read v2 reference first (hard gate). API client
-  (`apps/admin/src/api/zoneMappings.ts` or extend `org.ts`), page/tab, set/clear flows chaining
-  reapply, result-count surface, override badges, UNZONED filter; vitest selector-contract tests;
-  OH RoleRoute.
-- **S4 — audit verification + edge cases.** Mid-day-move warning (AC-6) with a probe test for the
-  schedule-stays/tickets-move split; end-to-end sync-survival regression (AC-5); UNZONED → zone and
-  zone → zone e2e walk-throughs on the dev DB documented in the TDD report; INDEX/SYSTEM-STATE
-  updates.
+- **S1 — backend: audit metadata + mandatory reason.** RED on the audit-row shape for SET (both the
+  create path and the update path, where prev zone differs and is the whole point), CLEARED (records
+  the zone it cleared from), and the mandatory-reason 400. No schema change; `zone-mapping.service.ts`
+  + controller validation only. Advances AC-1.
+- **S2 — admin UI (role-gated).** Read the v2 reference first (hard gate, `docs/agents/workflow.md`
+  UI-discovery steps). API client, page/tab, set/clear flows **chaining reapply**, reapply-result
+  counts as the success surface, override badges + reason, UNZONED filter; vitest selector-contract
+  tests; OH-only route. Advances AC-2/3/4/7.
+- **S3 — audit verification, edge cases, downstream confirmation.** End-to-end sync-survival
+  regression (AC-5); the mid-day-move warning (AC-6) with a probe test pinning the
+  schedule-stays/tickets-move split; UNZONED→zone and zone→zone walk-throughs confirming devices
+  re-scope, open tickets move, and ZM dashboards reflect the change; INDEX/SYSTEM-STATE updates.
+  **Then STOP** — this is the agreed end of the ship.
+
+> **Engine-consumption slice deliberately absent.** Zone is consumed transitively via
+> `plants.zone_id` by every engine read (evidence above) and `reapply` already performs the only
+> sanctioned write, so there is no engine wiring to build — the claim is *verified* in S3 rather
+> than asserted here. (#157 keeps its own engine slice; this issue does not need one.)
 
 ## Open questions (HITL — sign-off required before S1)
 

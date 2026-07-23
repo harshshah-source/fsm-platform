@@ -1,7 +1,14 @@
 # 157 — Admin-editable company priority + plant ranking for the assignment engine
 
-Status: ready-for-agent (draft — needs HITL sign-off on the two open questions before any slice starts)
-Type: AFK after HITL sign-off (design session 2026-07-23; investigation was read-only, no code touched)
+Status: needs-info (DEFERRED 2026-07-23 by operator — build not authorized; blocked on the Q1/Q2 decision session below)
+Type: HITL (blocked on two human-only business decisions; all investigation is complete and recorded)
+
+> **Operator decision 2026-07-23 — deferred for a decision session, and the proposed engine seam was
+> vetoed.** Design decision 3 below ("scoring component, weight seeded 0") **is** the
+> ship-the-config-now-wire-later middle path, and it is **out**: a knob that displays but moves
+> nothing is the silent-lie pattern this project has been fighting (run-65 / #130, and the NEW-C1
+> family). Recorded honestly rather than argued — the weight-0 proposal is withdrawn pending Q2.
+> #158 (plant zone reassignment) was authorized to build first and independently.
 
 > Filed from the 2026-07-23 investigation session. The ask was "admins should be able to set/edit
 > company priority and plant ranking values that feed the engine." The investigation found the
@@ -111,11 +118,12 @@ Three layers, matching ADR-0003:
    - *Anti-drift*: the new column is FSM-owned — it simply never appears in `mapPlant`'s `mirrored`
      update set (`master-mapping.ts:251-273`), same posture as `deal_type`/`zone_id`. A sync-survival
      test pins this (S4).
-3. **Engine seam — Seam B (scoring component `plant_rank`), weight seeded 0.** Weight 0 makes the
-   rollout inert until OH raises it via the existing scoring-weights surface — safe to land, and the
-   weight is auto-captured in `config_snapshot`. Seam A (a new canonical-sort key) changes ADR-0017
-   ordering semantics and is only taken if HITL explicitly wants strict lexicographic precedence
-   (OQ-2).
+3. ~~**Engine seam — Seam B (scoring component `plant_rank`), weight seeded 0.**~~
+   **WITHDRAWN 2026-07-23 (operator veto).** Weight-0 was argued as "safe to land, inert until OH
+   raises it" — but from the admin's chair it is a rank field that changes nothing, with the real
+   control on a different page. That is the vetoed middle path. The seam is now **Q2**, and the
+   investigation note that matters for answering it is that `canonical-sort.ts:53-54` is
+   weight-gated by nothing, so it is the only seam with no second hidden knob.
 4. **Endpoint contract**: extend the existing plants admin surface (`org/plants` controller, #45)
    with `PATCH /api/org/plants/:id` accepting `{ priorityRank?: number | null }` — validated range,
    404 unknown id, audited `PLANT_UPDATED` with `previous:{}`. OH-only via the standard
@@ -163,21 +171,43 @@ Three layers, matching ADR-0003:
 - **S4 — audit + edge cases.** Audit-row shape assertions; concurrent-edit-during-run probe;
   AC-0 verification note; INDEX/SYSTEM-STATE updates.
 
-## Open questions (HITL — sign-off required before S1)
+## Open questions (HITL — the decision session; build is NOT authorized until Q1 + Q2 are answered)
 
-- **OQ-1 (blocking): is priority global or per-zone?** E.g. "Company X is priority 1 in South but
-  3 in East." Today *everything* is global (evidence above) and the recommendation is **global for
-  v1**. Per-zone means: a `(zone_id, company_id/plant_id, rank)` side table, a resolver in the
-  candidate mapping, explicit `config_snapshot` wiring, *and* a hard interaction with #158 (a plant
-  changing zone silently changes which rank applies — see Cross-feature notes). Decide before S1
-  because it changes the data model.
-- **OQ-2: plant-rank seam — score component (recommended, weight-gated, ADR-0017 untouched) or a
-  new canonical-sort key (strict precedence, changes persisted `processing_rank` semantics and
-  needs an ADR revision)?**
-- **OQ-3 (minor): rank domain** — integer 1..N (recommended) vs a letter grade mirroring
-  `companyPriorityRank`'s A/B/C. Cosmetic but fixes the validation + transform.
-- **OQ-4 (scope confirm): is any company-side change wanted beyond what #46 shipped** (e.g. rank
-  edit surfaced somewhere more discoverable than Settings → Companies)? Default: no.
+- **Q1 (blocking) — is priority global or per-zone? The business question, not the technical one:
+  does the business ever prioritize the same customer differently across zones?**
+  - *If no*: per-zone is scope creep. `companies.companyPriorityRank` is **already editable** (#46,
+    evidence above) — the feature collapses to UI copy + whatever Q2 decides, shippable in a day.
+  - *If yes*: the per-zone design is right but the scope is materially larger — a
+    `(zone_id, company_id, rank)` side table, a resolver in the candidate mapping, explicit
+    `config_snapshot` wiring (`dispatch-run.service.ts:217-234` does **not** auto-capture new
+    tables), and the live coupling to #158 in Q3.
+  - Decide first: it determines the data model, and Q3 only exists if the answer is *yes*.
+- **Q2 (blocking) — ranking must actually move the engine. Two honest options; the middle path is
+  vetoed.**
+  - **(a) Grow the scope so priority genuinely affects dispatch.** Note from the investigation that
+    makes (a) cheaper than it looks: company rank moves dispatch **two** ways — a weighted score
+    term (`scoring.ts:45,79,94`, gated by the `priority_rule_config` weight) *and* an unconditional
+    canonical-sort key (`canonical-sort.ts:53-54`, gated by nothing). **The sort-key seam is the
+    only design where "admin changes rank → order changes" is guaranteed with no second hidden
+    knob.** Cost: it changes ADR-0017 canonical ordering and persisted `processing_rank` semantics,
+    so it needs an ADR revision + dispatch-outcome regression. If (a) is chosen via the scoring
+    seam instead, the default weight must be **nonzero and ops-chosen** — never 0.
+  - **(b) Reframe as "customer tiebreaker ordering"** with UI copy saying exactly that. This is
+    honest about what already ships: company rank is the 3rd canonical sort key, i.e. a tiebreaker
+    within a tier/bucket cell. Smallest true scope; plant ranking is dropped or re-filed.
+  - **Vetoed: (c) ship the config now and wire it later** — including the withdrawn weight-0
+    proposal, where an admin sets a rank and nothing observable happens because a second knob on a
+    different page is zero.
+- **Q3 (cross-feature, answered together with Q1) — when a plant's zone changes via #158, do
+  per-zone priorities re-attach to the new zone automatically, or is there a UX to warn/re-confirm?**
+  Only live if Q1 = per-zone. Options: silently re-attach (the plant now takes the new zone's rank
+  rows — cheapest, and invisible, which is the pattern we are avoiding); carry the old zone's rank
+  across; or block the zone change behind a warning + explicit re-confirm in #158's UI. #158 S2 is
+  being built **without** this warning on the standing assumption Q1 = global; if Q1 = per-zone, the
+  warning is a follow-up slice on #158, filed at that point.
+- **Q4 (minor, deferred until Q1/Q2 land): rank domain** — integer 1..N vs a letter grade mirroring
+  `companyPriorityRank`'s A/B/C.
+- **Q5 (scope confirm): any company-side change wanted beyond what #46 shipped?** Default: no.
 
 ## Cross-feature interaction notes (with #158 — plant zone reassignment)
 
