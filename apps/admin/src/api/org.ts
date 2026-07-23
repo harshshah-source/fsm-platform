@@ -66,6 +66,12 @@ export interface PlantView {
   plantId: number;
   name: string;
   zoneId: number;
+  /** Resolved FSM zone name — 'UNZONED' when the crosswalk could not place the plant (#158). */
+  zoneName: string | null;
+  /** AutoPlant id; the key `plant_zone_overrides` pins on. Null for FSM-created plants (#158). */
+  sourcePlantId: string | null;
+  /** What AutoPlant claims the zone is — the raw value the crosswalk resolves (or fails to) (#158). */
+  sourceZoneName: string | null;
 }
 
 export const listZones = () => api<ZoneView[]>('/org/zones');

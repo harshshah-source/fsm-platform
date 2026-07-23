@@ -32,6 +32,7 @@ import { SettingsPage } from './pages/settings/SettingsPage';
 import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { ExportsPage } from './pages/exports/ExportsPage';
 import { PlantDeactivationsPage } from './pages/admin/PlantDeactivationsPage';
+import { PlantZonesPage } from './pages/admin/PlantZonesPage';
 import { BuildHealthPage } from './pages/admin/BuildHealthPage';
 import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
 import { FleetDirectoryPage } from './pages/reports/FleetDirectoryPage';
@@ -209,6 +210,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['OPERATIONS_HEAD']}>
                 <PlantDeactivationsPage />
+              </RoleRoute>
+            }
+          />
+          {/* Plant Zones — Operations Head only (#158, plant_zone_overrides surface). */}
+          <Route
+            path="/plant-zones"
+            element={
+              <RoleRoute roles={['OPERATIONS_HEAD']}>
+                <PlantZonesPage />
               </RoleRoute>
             }
           />
