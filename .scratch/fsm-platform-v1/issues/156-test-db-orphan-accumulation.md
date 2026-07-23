@@ -1,6 +1,12 @@
 # 156 — The shared test DB accumulates orphaned fixtures, so "full suite green" degrades over time
-Status: needs-triage
+Status: ready-for-agent
 Type: AFK
+
+> **Partially actioned 2026-07-22 (operator-approved).** The accumulated orphans were cleared and the
+> full suite came back clean — **288 files / 3 skipped (291); 1182 passed / 5 skipped (1187); exit 0;
+> 582 s**, zero errors. That is the *symptom* cleared, not the *cause*: `global-setup.ts` still never
+> truncates, so the next interrupted run starts the accumulation again. The permanent fix (option (a)
+> below) is what this issue is still open for. See "What was already done" before starting.
 
 > Found 2026-07-22 while verifying [#153](./153-override-blanks-day-plan-and-capacity.md). Directly
 > undermines every "suite green" claim — the same class of problem the 2026-07-22 adversarial review
@@ -46,6 +52,37 @@ with load and accumulated rows — the signature of environment, not of a defect
 **This is corrosive to the audit programme.** A suite whose red/green flips with database history
 cannot be used as evidence for anything, and an agent that sees a red it did not cause is pushed
 toward either chasing a phantom or dismissing a real failure. Both already happened this session.
+
+## What was already done (2026-07-22) — do not redo the probe, do redo the fix
+
+Truncated every `public` base table in `fsm_test`, then let `global-setup` reseed. Counts went
+**780 zones / 404 engineers → 0 / 0**, and the next full run was clean (see banner).
+
+Two things that will bite whoever automates this:
+
+1. **Exclude `spatial_ref_sys`.** It is PostGIS's own table, owned by the superuser that installed the
+   extension; the `fsm` role gets `permission denied for table spatial_ref_sys` and — because
+   `TRUNCATE` is atomic across all named tables — **the entire truncate rolls back**. The first
+   attempt did exactly this and changed nothing.
+2. **Exclude `_prisma_migrations`.** Truncating Prisma's ledger makes `migrate deploy` replay the
+   whole migration history on the next run.
+
+The script was **guarded to refuse any database whose name does not end in `_test`**, derived through
+the same rule as `test/test-db-url.ts`. Keep that guard: the dev DB (`fsm`) and the test DB
+(`fsm_test`) differ by a suffix on the same server, and this operation is unrecoverable.
+
+The script was intentionally left in scratch rather than committed, so this issue can decide where it
+belongs (`global-setup` vs a `scripts/` entry point vs both) instead of inheriting that choice.
+
+## Residual finding — orphans were not the only cause
+
+After the clean full run, an 18-file ad-hoc **parallel subset** still lost
+`intraday-updates-controller` to `Worker exited unexpectedly` (4/4 in isolation, zero assertion
+failures). So there is a second, load-related crash mode that a clean database does not fix. It did
+not appear in the clean full run, so it is intermittent rather than systematic — but "green full run"
+should not be read as "worker crashes solved". Whoever takes this issue should decide whether to cap
+`poolOptions` concurrency and whether these e2e specs should run `singleThread`/`fileParallelism:false`
+given they all share one database.
 
 ## Root Cause
 

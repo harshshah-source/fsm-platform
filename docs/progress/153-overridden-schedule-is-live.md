@@ -4,10 +4,10 @@
 > Status: **ACCEPTED** — all 6 ACs met. Backend **+1 e2e file (5 tests)**, **+1 regression test** on the
 > #127 same-day-append spec, **+1 shared predicate module**; 5 read sites corrected across `scheduling`,
 > `recommender` and `engineers`. No schema change, no migration, no data change.
-> Backend **1179 passed + 5 skipped, 0 test failures attributable to this work**; admin **82 files /
-> 321 passed, exit 0**. Read the "Suite verification — read this before quoting a number" section
-> below: the backend full run is **flaky for environmental reasons unrelated to #153**, now filed as
-> **#156**. Unblocks **#146**.
+> **Backend 288 files / 3 skipped (291); 1182 passed / 5 skipped (1187); exit 0; 582 s** — verified on
+> a cleaned test database. Admin **82 files / 321 passed; exit 0**. Getting to that clean run required
+> fixing the test database itself (**#156**); the three earlier non-green runs and what they turned out
+> to be are recorded below. Unblocks **#146**.
 
 ## The defect in one line
 
@@ -27,7 +27,7 @@ PARTIAL`. The status column conflates **lifecycle** ("is this plan live today?")
 | 3 | Same-day APPEND (#127) reuses an overridden schedule instead of colliding | 🟢 | `batch-assignment.service.ts:121`. #127 regression extended: REORDER override → same-day re-run → **1** schedule, new stop appended. RED produced **2**. |
 | 4 | Every "is this schedule live?" filter reads from one shared predicate | 🟢 | `scheduling/schedule-status.ts`. Grep gate below. |
 | 5 | `COMPLETED` / `PARTIAL` stay excluded — exactly one value added | 🟢 | Explicit PIN test: schedule flipped to `COMPLETED` → `dispatched: false`, 0 stops. Passed before and after the fix. |
-| 6 | Full backend suite green | 🟡 | **1179 passed / 5 skipped, zero failures caused by #153** — but no run of the three reached exit 0, for environmental reasons (**#156**). Admin clean at 82 / 321, exit 0. See below; do not quote a bare "green". |
+| 6 | Full backend suite green | 🟢 | **288 files / 1182 passed + 5 skipped, exit 0, 582 s** on a cleaned DB. Reconciles exactly against the prior baseline: 287 + 1 new file, 1176 + 6 new tests. Admin 82 / 321, exit 0. |
 
 ## Slice-by-slice RED→GREEN report
 
@@ -93,39 +93,39 @@ constant, so the admin's correctness and the SE's are the same line of code.
 
 Admin suite unchanged: **82 files / 321 passed**, no admin source touched.
 
-## Suite verification — read this before quoting a number
+## Suite verification — how the green was actually obtained
 
-Three full backend runs were made on this work. **No run reached exit 0**, and none of the reasons is
-#153. Recording it honestly because the previous session's baseline ("287 files, 1176 passed, exit 0,
-494 s") no longer reproduces, and a future session comparing against it will otherwise think #153
-broke something.
+The first three full backend runs on this work **all failed**, and none of the causes was #153.
+Recording the path because the previous session's baseline ("287 files, 1176 passed, exit 0, 494 s")
+stopped reproducing, and a future session would otherwise read that as #153 breaking something.
 
 | Run | Files | Tests | Non-green cause |
 |---|---|---|---|
 | 1 | 287 passed / 3 skipped | 1179 passed / 5 skipped | 1 worker crash — `settings-write` (0 references to schedules) |
-| 2 | 285 passed / 3 skipped | 1168 passed / 5 skipped | 3 worker crashes — `engineers-availability-controller`, `system-efficiency-controller`, `verification-review`. **Overlapped a concurrent admin suite run** (my error) |
+| 2 | 285 passed / 3 skipped | 1168 passed / 5 skipped | 3 worker crashes — different files. **Overlapped a concurrent admin run** (my error) |
 | 3 | 286 passed / 3 skipped | 1179 passed / 5 skipped | `dispatch-run-controller` **timed out at 5000 ms**, + 1 worker crash |
+| **4** | **288 passed / 3 skipped** | **1182 passed / 5 skipped** | **none — exit 0**, after the DB fix below |
 
-Findings:
+What the first three had in common: **zero assertion failures**. Every test that reported, passed;
+the failures were `Error: Worker exited unexpectedly` plus one timeout, on a *different* set of files
+each run, and every affected file passed in isolation.
 
-- **Zero assertion failures in any run.** Every test that reported, passed. The failures are
-  `Error: Worker exited unexpectedly` and one timeout.
-- **Every affected file passes in isolation** — all four crashed files: 4 files / 22 tests, exit 0;
-  `dispatch-run-controller`: 3/3, exit 0.
-- **The affected set is different every run**, which is the signature of environment, not of a defect
-  in the code under test.
-- **Root cause found:** the shared `fsm_test` database has accumulated **780 orphan zones / 404 orphan
-  engineers**. `global-setup.ts` migrates and seeds but **never truncates**, so any spec that dies
-  before its `afterAll` leaks fixtures permanently. `dispatch-run-controller` triggers a dispatch that
-  **iterates every zone**, so its cost grows with the orphan count until it blows the 5 s timeout.
-  It passed in runs 1 and 2 and failed only in run 3 — after a run I killed at the tool's 10-minute
-  ceiling added a fresh batch of orphans. Filed as **#156**.
+**Root cause: the shared `fsm_test` database had accumulated 780 orphan zones and 404 orphan
+engineers.** `test/global-setup.ts` migrates and seeds but **never truncates**, and each spec owns its
+own `afterAll`, so every interrupted run leaks fixtures permanently. `dispatch-run-controller`
+triggers a dispatch that **iterates every zone**, so its cost grew with the orphan count until it blew
+the 5 s timeout. Filed as **#156**.
 
-**What this does and does not license.** It does not license "suite green". It does support the claim
-that #153 introduced no regression: the dispatch/override/recommender/engineers neighbourhood was run
-directly and repeatedly (32/32 on the 10 most-coupled specs; 9/9 earlier), and the specific failures
-are reproducible-in-absence and non-reproducible-in-isolation. The test database was **not** cleaned —
-that is a destructive operation on shared state and is #156's call, not a side effect of this issue.
+**Resolution (operator-approved, 2026-07-22):** truncated every `public` base table in `fsm_test`
+except `_prisma_migrations` (Prisma's ledger) and `spatial_ref_sys` (PostGIS's own, superuser-owned —
+the first attempt correctly rolled back the whole TRUNCATE on it). Guarded to refuse any database
+whose name does not end in `_test`, so it could not touch the developer's `fsm`. `global-setup`
+reseeds the org/reference data on the next run. Counts went 780/404 → 0/0, and run 4 came back clean.
+
+**Residual, recorded for #156:** worker crashes are not *only* orphan-driven. A later 18-file ad-hoc
+parallel subset still lost `intraday-updates-controller` to `Worker exited unexpectedly` (4/4 in
+isolation, zero assertion failures). The cleaned DB fixed the full-suite run; parallel-load crashes
+remain intermittent and are part of #156's scope.
 
 ## AC#4 grep gate
 
