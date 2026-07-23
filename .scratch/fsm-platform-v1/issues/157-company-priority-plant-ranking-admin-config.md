@@ -1,7 +1,25 @@
 # 157 — Company tier: global setting + scoped, expiring tier overrides (redesigned)
 
-Status: ready-for-human (redesign complete 2026-07-23 — operator review required before any slice starts)
-Type: AFK after review sign-off
+Status: ready-for-human (review answers incorporated 2026-07-23 — awaiting the operator's final go before S1)
+Type: AFK after go-ahead
+
+> **Review completed 2026-07-23 (interactive).** Q-A **stacking allowed** (operator choice, against
+> recommendation) — precedence set to newest-wins as the working assumption, confirm at go-ahead;
+> Q-B **live reads only** (operator choice, against recommendation) — the scope consequence is
+> documented honestly below and must appear in UI copy; Q-C **CSM any zone**; Q-D **extend #158's
+> impact warning** (S6). Defaults accepted without objection: Q-E SLA windows follow effective tier
+> (consumers verified in-slice), Q-F plant ranking split to its own issue, Q-G 10-char min reason +
+> overrides may raise or lower.
+>
+> **Retraction note (do not resurrect):** a mid-review operator message introduced a "Payment
+> Defaulter" tier, PRD ordinal tables (Bronze=1…PayDef=5), "Special Case" vocabulary, a
+> `company_tier_transitions` PRD posture, and a `companies.rank` integer migration. Investigation
+> found **none of these exist** in this repo, in any sibling project (`fsm-admin-dashboard`,
+> `-v2`, `fsm-platform-issue34` — all use the identical 3-tier canon), or in the live dev DB
+> (43 companies, exactly PLATINUM/GOLD/SILVER). The operator confirmed the message was based on
+> hallucinated content and **retracted it in full**; the business uses exactly three tiers. Nothing
+> from that message is part of this design (including its expiry-notification idea — Q1's clean
+> "revert silently but audit" stands; a notification can be added at final go if wanted).
 
 > **Decision history.** Filed 2026-07-23 as "admin-editable company priority + plant ranking"; the
 > original weight-0 plant-rank seam was **vetoed** the same day as the ship-config-now-wire-later
@@ -120,9 +138,12 @@ VALUE` + a `tiers` row — documented two-step, out of scope).
 | `status` | `ACTIVE` / `EXPIRED` / `CANCELLED` |
 | `created_by`, `created_at`, `updated_at` | actor + timestamps; `cancelled_by`/`cancelled_at` nullable |
 
-- **No stacking (recommended — Q-A decides):** partial unique `(company_id, zone_id) WHERE
-  status = 'ACTIVE'` — the platform's established idiom (one-active-per-X partial uniques, e.g.
-  `failure_cycles`, `plant_deactivations`). "Replace" = cancel + create, two audit rows, full trail.
+- **Stacking ALLOWED (operator decision 2026-07-23, Q-A):** multiple ACTIVE overrides may coexist
+  per (company, zone). **Precedence: newest wins** — `ORDER BY created_at DESC, id DESC LIMIT 1`
+  among unexpired ACTIVE rows (working assumption from the review; confirm at go-ahead). No partial
+  unique; instead an index `(company_id, zone_id, status, expires_at)` for the resolver read. The
+  report and UI must show ALL active overrides for a pair, with the winning one marked — a stack
+  where only the top row bites is exactly the kind of thing the monthly report exists to catch.
 - **Anti-drift:** FSM-owned side table; never in any sync update set (the
   `plant_zone_overrides`/`plant_deactivations` posture, `schema.prisma:1771-1773`).
 - **History:** rows are never deleted — EXPIRED/CANCELLED rows + `audit_logs` (prev/new metadata,
@@ -132,7 +153,8 @@ VALUE` + a `tiers` row — documented two-step, out of scope).
 
 ```
 effectiveTier(companyId, zoneId, now) =
-  activeOverride(companyId, zoneId) where status='ACTIVE' AND expires_at > now
+  newest override for (companyId, zoneId) where status='ACTIVE' AND expires_at > now
+    (ORDER BY created_at DESC, id DESC LIMIT 1)
   ?? companies.company_tier
 ```
 
@@ -155,8 +177,9 @@ on cron timing.
 - `POST /api/org/tier-overrides` — body `{companyId, zoneId, tier, reason, expiresAt}`. Roles:
   OH (any zone), CSM (any zone — cross-zone role; Q-C confirms), ZM (**service-level clamp** to
   `actor.zone_id`, since the zone is in the body and `ZoneScopeGuard` only reads params/query).
-  400 on missing/short reason, expiry past the 2-month cap, unknown tier; 409 on an existing ACTIVE
-  override for the pair (no stacking). Audited `TIER_OVERRIDE_SET` with
+  400 on missing/short reason (min 10 chars), expiry past the 2-month cap, unknown tier. Stacking
+  is allowed (Q-A) — no conflict response; the create simply becomes the newest (winning) override.
+  Audited `TIER_OVERRIDE_SET` with
   `{companyId, zoneId, prevEffectiveTier, newTier, reason, expiresAt}`.
 - `DELETE /api/org/tier-overrides/:id` — cancel (same role scope as creation; ZM own-zone only).
   Audited `TIER_OVERRIDE_CANCELLED` with the row's fields.
@@ -174,12 +197,16 @@ on cron timing.
    `scoreBreakdown` with the effective tier + `tierOverrideId` when applied (explainability).
 2. **Ticket creation** — stamp `tickets.company_tier` with the **effective** tier (creation already
    knows the plant → zone).
-3. **Snapshot coherence (Q-B decides, option B recommended)** — on override create/cancel/expiry,
-   re-stamp `tickets.company_tier` for that company × zone's **open** tickets in the same
-   transaction (sweep does it for expiry), audited. Without this, the Platinum auto-escalation
-   sweep (`cross-zone-escalation.service.ts:78`) and every queue reads the old tier and the
-   override is half-inert — the vetoed pattern. Bounded write (open tickets of one company in one
-   zone), same class as #119's deactivation cancel.
+3. **Snapshot coherence — RESOLVED: live reads only (operator decision 2026-07-23, Q-B, chosen
+   with the trade-off stated).** No retroactive re-stamp, ever. `tickets.company_tier` keeps the
+   effective-tier-at-creation stamp for each ticket's lifetime; existing open tickets keep their
+   old stamp when an override lands or lapses. **Documented scope consequence:** an override
+   changes dispatch ordering (live recommender read) and applies to tickets created while it is
+   active — it does NOT grant the Platinum auto-escalation path
+   (`cross-zone-escalation.service.ts:78`) or re-badge queues for tickets that already existed.
+   This is deliberate, not an oversight — and the honesty requirement moves to the UI: the
+   create-override dialog and the report MUST state this scope in copy (AC-7), so the knob's
+   limits are visible to the person turning it.
 4. **Transparency ledger** — add active overrides to `captureConfigSnapshot` (explicit wiring
    required, `dispatch-run.service.ts:217-234`).
 5. **SLA windows** (Q-E) — `sla_rule_config` `company_tier` scope should key off effective tier for
@@ -189,29 +216,38 @@ on cron timing.
 
 Overrides are keyed `(company, zone)` and a plant's zone is `plants.zone_id` — so a #158 zone
 reassignment **instantly changes which override applies** to that plant's tickets (they re-scope
-to the new zone and read its overrides). #158 was built **without** a tier-override warning on the
-standing assumption priority was global; that assumption is now false. Q-D covers the decision;
-the likely outcome is a small follow-up slice on #158's impact probe ("this company has an active
-tier override in <old/new zone>").
+to the new zone and read its overrides). **RESOLVED (operator decision 2026-07-23, Q-D): extend
+#158's impact warning** — S6 widens `zoneChangeImpact` + the Plant Zones confirm dialog to name
+active tier overrides for the plant's companies in both the old and new zone, so the re-attachment
+is visible before the admin confirms. Owned by this issue's S6 (the warning is meaningless until
+overrides exist).
 
 ## Acceptance criteria (draft — confirm at review)
 
 - [ ] AC-1: `tiers` seeded exactly PLATINUM(1)/GOLD(2)/SILVER(3); spec-pin test asserts table ⇄
       enum ⇄ `TIER_ORDER` agreement; admin dropdowns read it.
-- [ ] AC-2: override create/cancel enforced: mandatory reason (min length), expiry ≤ 2 months
-      (DB CHECK + service 400), no stacking (partial unique + 409), ZM clamped to own zone at the
-      service layer, CSM/OH cross-zone; every mutation audited with prev/new metadata in-transaction.
-- [ ] AC-3: effective-tier resolver is the single shared predicate (timestamp-based); an expired-
-      but-not-yet-swept override does NOT apply (test pins the sweep-lag case).
+- [ ] AC-2: override create/cancel enforced: mandatory reason (min 10 chars), expiry ≤ 2 months
+      (DB CHECK + service 400), ZM clamped to own zone at the service layer, CSM/OH cross-zone
+      (CSM any zone — Q-C); raise AND lower both permitted (Q-G); every mutation audited with
+      prev/new metadata in-transaction.
+- [ ] AC-3: effective-tier resolver is the single shared predicate (timestamp-based, newest-wins
+      under stacking — Q-A); an expired-but-not-yet-swept override does NOT apply (sweep-lag pin);
+      with two ACTIVE overrides on one pair, the newer provably wins (stacking-precedence pin).
 - [ ] AC-4: a ZM's PLATINUM override provably reorders that zone's dispatch (canonical-sort seam,
       asserted at the `runForZone` boundary) and is stamped in `scoreBreakdown`; other zones
       unaffected; global tier unchanged in `company_master`.
-- [ ] AC-5: expiry sweep flips status + writes `TIER_OVERRIDE_EXPIRED`; open tickets re-stamped per
-      Q-B's decision; behaviour identical whether the sweep has run or not (AC-3).
-- [ ] AC-6: `config_snapshot` includes active overrides; the monthly report read returns active
-      overrides + reason + creator + expiry, zone-scoped for ZM.
+- [ ] AC-5: expiry sweep flips status + writes `TIER_OVERRIDE_EXPIRED`; **no ticket re-stamp**
+      (Q-B: live reads only — a test PINS that open tickets' stamped tier is untouched by override
+      lifecycle events); behaviour identical whether the sweep has run or not (AC-3).
+- [ ] AC-6: `config_snapshot` includes active overrides; the monthly report read returns ALL active
+      overrides + reason + creator + expiry with the winning override per pair marked (Q-A),
+      zone-scoped for ZM.
 - [ ] AC-7: admin UI (role-gated per role matrix; v2-reference/UI-discovery gate honoured) for
-      create/cancel/list; parity gate applies — no silent UI deferral.
+      create/cancel/list; the create dialog and report state the Q-B scope in copy ("affects
+      dispatch ordering and newly created tickets; existing tickets keep their tier"); parity gate
+      applies — no silent UI deferral.
+- [ ] AC-9: #158's `zoneChangeImpact` + Plant Zones confirm dialog name active tier overrides for
+      the plant's companies in old and new zone (Q-D).
 - [ ] AC-8: CONTEXT.md/PRD updated to record the extended authority (OH global; CSM/ZM scoped +
       expiring) so spec and code agree.
 
@@ -223,33 +259,33 @@ tier override in <old/new zone>").
   largest test surface (roles × validation × stacking).
 - **S3 — effective-tier resolver + engine bite.** Resolver helper + recommender wiring +
   ticket-creation stamp + `scoreBreakdown` + `config_snapshot`; the AC-4 reorder proof.
-- **S4 — expiry sweep + snapshot coherence.** Sweep (env-gated, business-sweep family) +
-  `TIER_OVERRIDE_EXPIRED` audit + Q-B re-stamp + AC-3 sweep-lag pin.
+- **S4 — expiry sweep.** Sweep (env-gated, business-sweep family) + `TIER_OVERRIDE_EXPIRED` audit +
+  AC-3 sweep-lag pin + the AC-5 no-re-stamp pin (Q-B). Smaller than originally scoped — no ticket
+  writes.
 - **S5 — admin UI + report surface.** UI-discovery gate first; role-variant page (ZM own-zone
-  create/list, CSM/OH cross-zone), active-overrides report view.
-- **S6 — docs + edge cases.** CONTEXT/PRD authority update (AC-8); #158 interaction per Q-D;
-  INDEX/SYSTEM-STATE.
+  create/list, CSM/OH cross-zone), active-overrides report view with winning-override marking
+  (Q-A) and the Q-B scope copy (AC-7).
+- **S6 — #158 warning + docs + edge cases.** Extend `zoneChangeImpact` + Plant Zones dialog
+  (AC-9/Q-D); CONTEXT/PRD authority update (AC-8); INDEX/SYSTEM-STATE.
 
-## Open questions (operator review — blocking before S1)
+## Resolved decisions (operator review, 2026-07-23 — interactive)
 
-- **Q-A (operator explicitly requested this decision): stacking.** Recommend **prevent** — partial
-  unique one-ACTIVE-per-(company, zone); replace = cancel + create (two audit rows). Explicit
-  stacking would need precedence rules (newest? highest tier?) with no PRD basis.
-- **Q-B: snapshot coherence.** Recommend **re-stamp open tickets** on override create/cancel/expiry
-  (option B above). The alternative — overrides affect only live reads — leaves Platinum
-  auto-escalation and every queue on the stale tier, which is the half-inert knob the Q2 veto was
-  about. Confirm, since it widens the write surface.
-- **Q-C: CSM scope.** "Their zone/scope" — CSM is a cross-zone role with no home zone. Recommend:
-  CSM may create overrides in any zone (audited with `actingZone`); confirm, or restrict CSM to
-  their acting-scope zones under the #27 backup cascade.
-- **Q-D (= the original Q3, still unanswered): #158 interaction.** A zone move silently re-attaches
-  overrides. Recommend: extend #158's impact probe + warning to name active tier overrides in both
-  zones. Confirm, and whether it belongs to this issue's S6 or a #158 follow-up.
-- **Q-E: does effective tier drive SLA windows** (`sla_rule_config` `company_tier` scope) as well
-  as dispatch order? Recommend yes for coherence; consumers verified in-slice first.
-- **Q-F: plant ranking is parked.** The Q1 decision covers company tiers only; the plant-ranking
-  half of the original filing (and its Q2 sort-key-vs-score question) remains undecided. Recommend
-  splitting it to its own issue when/if it proceeds, so this issue ships without a dormant half.
-- **Q-G (minor): min reason length** — recommend 10 characters (matches nothing existing; pick one
-  at review) — and whether ZM overrides may only **raise** a tier or also lower it (nothing in the
-  Q1 decision restricts direction; recommend allowing both, the report keeps it honest).
+- **Q-A: stacking ALLOWED** (operator choice, against the prevent recommendation). Precedence:
+  newest-wins — see data model. Report shows all active rows, winner marked.
+- **Q-B: live reads only** (operator choice, against the re-stamp recommendation). No retroactive
+  ticket re-stamp; scope stated in UI copy (AC-7); no-re-stamp behaviour test-pinned (AC-5).
+- **Q-C: CSM may create overrides in any zone**, audited with `actingZone`.
+- **Q-D: #158 interaction handled via the extended impact warning** (S6, AC-9).
+- **Q-E: SLA windows follow effective tier** (default accepted); `sla_rule_config` `company_tier`
+  consumers verified in-slice before wiring.
+- **Q-F: plant ranking split to its own issue** (default accepted) — file the stub when it
+  proceeds; this issue ships tiers only.
+- **Q-G: min reason length 10 chars; overrides may raise or lower** (default accepted).
+
+## Remaining open items (for the final go-ahead — not blocking the design)
+
+- **Stacking precedence = newest-wins is a working assumption** taken from the review's option
+  wording; confirm (alternatives: highest-tier-wins, explicit priority field).
+- **Optional: expiry notification** (notify creator + OH on auto-revert, renew link). Considered
+  and NOT adopted — it originated in the retracted message; Q1's clean "revert silently but audit"
+  stands. Say the word at go-ahead if wanted; it slots into S4/S5.
