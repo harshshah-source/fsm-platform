@@ -40,6 +40,17 @@ enum CompanyTier {
   @@map("company_tier")
 }
 
+/// Canonical tier list and order as data (Issue 157 AC-1) — seeded from the PRD canon
+/// (`CONTEXT.md:315`, Decision §17 `:765`: Platinum > Gold > Silver). `rank` 1 = highest priority.
+/// Retires the `TIER_ORDER` reversed-array footgun (`canonical-sort.ts:30`) as a spec-pin, without
+/// touching the recommender's in-process comparator (hot path, no join).
+model Tier {
+  name String @id
+  rank Int    @unique
+
+  @@map("tiers")
+}
+
 /// SE coverage model — DEDICATED (one plant), MULTI_PLANT (several), FLOATING (territory polygon,
 /// modelled in `se_territory` from Issue 09, never in `se_coverage`). Schema D3.
 enum CoverageType {

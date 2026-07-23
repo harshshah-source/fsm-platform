@@ -47,6 +47,7 @@ import {
 import { GeographyController } from './org/geography.controller';
 import { SeTerritoryAdminController } from './org/se-territory.controller';
 import { SlaRulesAdminController } from './org/sla-rules.controller';
+import { TiersAdminController } from './org/tiers.controller';
 import { UsersAdminController } from './org/users.controller';
 import { ZoneMappingAdminController } from './org/zone-mapping.controller';
 import { ZonesAdminController } from './org/zones.controller';
@@ -124,6 +125,7 @@ import { ZonesController } from './zones/zones.controller';
     PlantsAdminController,
     UsersAdminController,
     CompaniesAdminController,
+    TiersAdminController,
     EngineersAdminController,
     SeCoverageAdminController,
     SeTerritoryAdminController,

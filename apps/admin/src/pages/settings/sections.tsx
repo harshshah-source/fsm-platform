@@ -223,6 +223,7 @@ export function PlantsSection() {
 
 export function CompaniesSection() {
   const { items, setItems } = useList(org.listCompanies);
+  const { items: tiers } = useList(org.listTiers);
   const [name, setName] = useState('');
   const [companyTier, setTier] = useState('PLATINUM');
   const [companyPriorityRank, setRank] = useState('A');
@@ -242,9 +243,11 @@ export function CompaniesSection() {
         </Field>
         <Field label="Tier">
           <select className={inputClass} value={companyTier} onChange={(e) => setTier(e.target.value)}>
-            <option value="PLATINUM">PLATINUM</option>
-            <option value="GOLD">GOLD</option>
-            <option value="SILVER">SILVER</option>
+            {tiers.map((t) => (
+              <option key={t.name} value={t.name}>
+                {t.name}
+              </option>
+            ))}
           </select>
         </Field>
         <Field label="Rank">
@@ -260,6 +263,7 @@ export function CompaniesSection() {
             <CompanyRow
               key={c.companyId}
               company={c}
+              tiers={tiers}
               onSaved={(updated) => setItems((xs) => xs.map((x) => (x.companyId === updated.companyId ? updated : x)))}
             />
           ))}
@@ -270,7 +274,15 @@ export function CompaniesSection() {
 }
 
 /** A Companies table row with inline Operations-Head edit of tier / rank / ops-override (Issue 46). */
-function CompanyRow({ company, onSaved }: { company: org.CompanyView; onSaved: (c: org.CompanyView) => void }) {
+function CompanyRow({
+  company,
+  tiers,
+  onSaved,
+}: {
+  company: org.CompanyView;
+  tiers: org.TierView[];
+  onSaved: (c: org.CompanyView) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [tier, setTier] = useState(company.companyTier);
   const [rank, setRank] = useState(company.companyPriorityRank);
@@ -302,9 +314,11 @@ function CompanyRow({ company, onSaved }: { company: org.CompanyView; onSaved: (
           value={tier}
           onChange={(e) => setTier(e.target.value)}
         >
-          <option value="PLATINUM">PLATINUM</option>
-          <option value="GOLD">GOLD</option>
-          <option value="SILVER">SILVER</option>
+          {tiers.map((t) => (
+            <option key={t.name} value={t.name}>
+              {t.name}
+            </option>
+          ))}
         </select>
       </td>
       <td className="pr-4">

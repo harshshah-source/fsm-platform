@@ -76,6 +76,12 @@ describe('Settings — Operations Head only (AC#1)', () => {
       if (url.endsWith('/org/companies')) {
         return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
+      if (url.endsWith('/org/tiers')) {
+        return new Response(
+          JSON.stringify([{ name: 'PLATINUM', rank: 1 }, { name: 'GOLD', rank: 2 }, { name: 'SILVER', rank: 3 }]),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
       return new Response('[]', { status: 200 });
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -84,7 +90,7 @@ describe('Settings — Operations Head only (AC#1)', () => {
     await userEvent.click(await screen.findByRole('tab', { name: /companies/i }));
 
     await userEvent.type(screen.getByLabelText(/company name/i), 'Globex');
-    await userEvent.selectOptions(screen.getByLabelText(/tier/i), 'GOLD');
+    await userEvent.selectOptions(await screen.findByLabelText(/^tier$/i), 'GOLD');
     await userEvent.type(screen.getByLabelText(/rank/i), 'B');
     await userEvent.click(screen.getByRole('button', { name: /add company/i }));
 
@@ -93,6 +99,29 @@ describe('Settings — Operations Head only (AC#1)', () => {
       ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
     );
     expect(postCall).toBeTruthy();
+  });
+
+  it('sources the tier dropdown options from /org/tiers, not a hard-coded list (Issue 157 AC-1)', async () => {
+    stubApi({
+      '/org/companies': { body: [] },
+      // Deliberately not PLATINUM/GOLD/SILVER order — proves the options are read from the API
+      // response, not a hard-coded array (a hard-coded list would ignore this order entirely).
+      '/org/tiers': {
+        body: [
+          { name: 'SILVER', rank: 3 },
+          { name: 'GOLD', rank: 2 },
+          { name: 'PLATINUM', rank: 1 },
+        ],
+      },
+    });
+    renderAt('/settings', opsHead);
+    await userEvent.click(await screen.findByRole('tab', { name: /companies/i }));
+
+    const select = await screen.findByLabelText(/^tier$/i);
+    const optionLabels = within(select)
+      .getAllByRole('option')
+      .map((o) => o.textContent);
+    expect(optionLabels).toEqual(['SILVER', 'GOLD', 'PLATINUM']);
   });
 
   it('edits an existing company tier + override via PATCH (Issue 46)', async () => {
@@ -110,6 +139,12 @@ describe('Settings — Operations Head only (AC#1)', () => {
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
       }
+      if (url.endsWith('/org/tiers')) {
+        return new Response(
+          JSON.stringify([{ name: 'PLATINUM', rank: 1 }, { name: 'GOLD', rank: 2 }, { name: 'SILVER', rank: 3 }]),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
       return new Response('[]', { status: 200 });
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -119,7 +154,7 @@ describe('Settings — Operations Head only (AC#1)', () => {
 
     const row = (await screen.findByText('Acme Logistics')).closest('tr') as HTMLElement;
     await userEvent.click(within(row).getByRole('button', { name: /edit/i }));
-    await userEvent.selectOptions(within(row).getByLabelText(/tier for/i), 'GOLD');
+    await userEvent.selectOptions(await within(row).findByLabelText(/tier for/i), 'GOLD');
     await userEvent.click(within(row).getByLabelText(/override for/i));
     await userEvent.click(within(row).getByRole('button', { name: /save/i }));
 

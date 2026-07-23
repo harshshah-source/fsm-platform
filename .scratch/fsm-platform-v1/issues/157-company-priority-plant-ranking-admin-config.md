@@ -1,6 +1,6 @@
 # 157 — Company tier: global setting + scoped, expiring tier overrides (redesigned)
 
-Status: ready-for-human (review answers incorporated 2026-07-23 — awaiting the operator's final go before S1)
+Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1 landed; S2 onward in progress)
 Type: AFK after go-ahead
 
 > **Review completed 2026-07-23 (interactive).** Q-A **stacking allowed** (operator choice, against
@@ -224,8 +224,8 @@ overrides exist).
 
 ## Acceptance criteria (draft — confirm at review)
 
-- [ ] AC-1: `tiers` seeded exactly PLATINUM(1)/GOLD(2)/SILVER(3); spec-pin test asserts table ⇄
-      enum ⇄ `TIER_ORDER` agreement; admin dropdowns read it.
+- [x] AC-1: `tiers` seeded exactly PLATINUM(1)/GOLD(2)/SILVER(3); spec-pin test asserts table ⇄
+      enum ⇄ `TIER_ORDER` agreement; admin dropdowns read it. **DONE 2026-07-23 (S1).**
 - [ ] AC-2: override create/cancel enforced: mandatory reason (min 10 chars), expiry ≤ 2 months
       (DB CHECK + service 400), ZM clamped to own zone at the service layer, CSM/OH cross-zone
       (CSM any zone — Q-C); raise AND lower both permitted (Q-G); every mutation audited with
@@ -253,7 +253,13 @@ overrides exist).
 
 ## Slice plan (TDD-first; each slice green + committed; sized like #158's)
 
-- **S1 — tiers table + spec-pin.** Additive migration (seed 3 rows), pin test, dropdowns read it.
+- **S1 — tiers table + spec-pin. DONE 2026-07-23.** Additive migration (seed 3 rows), pin test,
+  dropdowns read it. `tiers` model + migration `20260723120000_tiers_reference_table`; OH-gated
+  `GET /api/org/tiers` (`tiers.service.ts`, `tiers.controller.ts`); spec-pin test asserts `tiers`
+  ⇄ `CompanyTier` enum ⇄ `TIER_ORDER` agree (`test/tiers-spec-pin.spec.ts`, via a new derived
+  export `TIER_ORDER_EFFECTIVE_PRIORITY_DESC` in `canonical-sort.ts`, not a hand-duplicated
+  literal); admin Companies create-form + inline-edit tier `<select>`s now read `listTiers()`
+  instead of a hard-coded PLATINUM/GOLD/SILVER option list.
 - **S2 — override table + endpoint contract.** Migration (partial unique + CHECKs via raw-SQL
   appendix, the established convention); POST/DELETE/GET + role scoping + validation + audit. The
   largest test surface (roles × validation × stacking).

@@ -17,6 +17,11 @@ export interface CompanyView {
   companyPriorityRank: string;
   opsOverride: boolean;
 }
+/** Canonical tier list + order as data (Issue 157 AC-1); `rank` 1 = highest priority. */
+export interface TierView {
+  name: string;
+  rank: number;
+}
 export interface UserView {
   userId: string;
   name: string;
@@ -82,6 +87,8 @@ export const createPlant = (body: { name: string; zoneId: number }) =>
   api<PlantView>('/org/plants', { method: 'POST', body: JSON.stringify(body) });
 export const createZone = (name: string) =>
   api<ZoneView>('/org/zones', { method: 'POST', body: JSON.stringify({ name }) });
+
+export const listTiers = () => api<TierView[]>('/org/tiers');
 
 export const listCompanies = () => api<CompanyView[]>('/org/companies');
 export const createCompany = (body: {

@@ -40,6 +40,11 @@ const BUCKET_ORDER: DeviceBucket[] = [
 ];
 
 const tierRank = (t: CompanyTier): number => TIER_ORDER.indexOf(t);
+
+// TIER_ORDER's effective priority, highest first — the same order Issue 157's `tiers.rank`
+// encodes right-side-up. Derived (not hand-duplicated) so a drift between the two encodings is
+// a real test failure, not two copies of the same literal (Issue 157 AC-1 spec-pin).
+export const TIER_ORDER_EFFECTIVE_PRIORITY_DESC: CompanyTier[] = [...TIER_ORDER].reverse();
 const bucketRank = (b: DeviceBucket): number => BUCKET_ORDER.indexOf(b);
 // A device with no GPS timestamp sorts last among "oldest inactive" ties (treated as newest).
 const inactiveKey = (d: Date | null): number => (d === null ? Number.POSITIVE_INFINITY : d.getTime());
