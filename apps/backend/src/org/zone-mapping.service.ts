@@ -8,6 +8,8 @@ import {
   ZONE_MAPPING_SOURCE_FIELD,
 } from '../ingestion/autoplant/mapping-table-zone-resolver';
 import { PrismaService } from '../prisma/prisma.service';
+import { liveScheduleFilter } from '../scheduling/schedule-status';
+import { utcDayStart } from '../common/utc-day';
 
 export interface ZoneMappingView {
   id: string;
@@ -26,6 +28,21 @@ export interface PlantZoneOverrideView {
   fsmZoneId: string;
   fsmZoneName: string | null;
   reason: string | null;
+}
+
+/**
+ * What moving a plant between zones will actually affect (#158 AC-6). Devices and open tickets carry
+ * no zone of their own, so they re-scope the instant `reapply` moves `plants.zone_id` — harmless, but
+ * worth showing. `dispatchedTodayCount` is the one that needs a warning: `work_schedules` are keyed by
+ * the zone at dispatch time and stay under the OLD zone, so a mid-day move splits today's picture —
+ * the old zone's ZM keeps the day plan while the new zone's ZM sees the tickets.
+ */
+export interface ZoneChangeImpact {
+  plantName: string;
+  currentZoneName: string | null;
+  deviceCount: number;
+  openTicketCount: number;
+  dispatchedTodayCount: number;
 }
 
 export interface ReapplyResult {
@@ -161,6 +178,38 @@ export class ZoneMappingService {
           }),
         ),
     );
+  }
+
+  /** Blast radius of a pending zone change, for the admin confirmation step. Unknown plant → 404. */
+  async zoneChangeImpact(sourcePlantId: bigint): Promise<ZoneChangeImpact> {
+    const plant = await this.prisma.plant.findUnique({
+      where: { sourcePlantId },
+      include: { zone: { select: { name: true } } },
+    });
+    if (!plant) throw new NotFoundException(`No synced plant with source id ${sourcePlantId}`);
+
+    const day = utcDayStart(new Date());
+    const [deviceCount, openTicketCount, dispatchedTodayCount] = await Promise.all([
+      this.prisma.device.count({ where: { currentVehicle: { plantId: plant.plantId } } }),
+      this.prisma.ticket.count({ where: { plantId: plant.plantId, status: 'OPEN' } }),
+      this.prisma.batchAssignmentTicket.count({
+        where: {
+          removedAt: null,
+          batch: {
+            plantId: plant.plantId,
+            schedule: { ...liveScheduleFilter(), dateFrom: { lte: day }, dateTo: { gte: day } },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      plantName: plant.name,
+      currentZoneName: plant.zone?.name ?? null,
+      deviceCount,
+      openTicketCount,
+      dispatchedTodayCount,
+    };
   }
 
   async deleteOverride(sourcePlantId: bigint, actor: RequestActor): Promise<void> {

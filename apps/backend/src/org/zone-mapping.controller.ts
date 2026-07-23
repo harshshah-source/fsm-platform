@@ -19,6 +19,7 @@ import type { RequestActor } from '../common/request-actor';
 import {
   type PlantZoneOverrideView,
   type ReapplyResult,
+  type ZoneChangeImpact,
   type ZoneMappingView,
   ZoneMappingService,
 } from './zone-mapping.service';
@@ -100,6 +101,12 @@ export class ZoneMappingAdminController {
       body.reason,
       actor,
     );
+  }
+
+  /** What a pending zone change will affect — shown before the admin confirms it (#158 AC-6). */
+  @Get('plant-zone-overrides/:sourcePlantId/impact')
+  zoneChangeImpact(@Param('sourcePlantId') sourcePlantId: string): Promise<ZoneChangeImpact> {
+    return this.zoneMappings.zoneChangeImpact(parseBigId(sourcePlantId, 'sourcePlantId'));
   }
 
   @Delete('plant-zone-overrides/:sourcePlantId')

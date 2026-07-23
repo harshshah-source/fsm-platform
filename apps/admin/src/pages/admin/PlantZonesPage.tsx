@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   clearPlantZoneOverride,
+  getZoneChangeImpact,
   listPlantZoneOverrides,
   reapplyZoneMappings,
   setPlantZoneOverride,
   type PlantZoneOverrideRow,
   type ReapplyResult,
+  type ZoneChangeImpact,
 } from '../../api/plantZones';
 import { listPlants, listZones, type PlantView, type ZoneView } from '../../api/org';
 import { DataTable, EmptyState, PageHeader, type Column } from '../../components/data';
@@ -210,6 +212,17 @@ function ChangeZoneDialog({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [impact, setImpact] = useState<ZoneChangeImpact | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    getZoneChangeImpact(plant.sourcePlantId!)
+      .then((i) => live && setImpact(i))
+      .catch(() => undefined); // the blast-radius read is advisory; never block the edit on it
+    return () => {
+      live = false;
+    };
+  }, [plant.sourcePlantId]);
 
   const submit = async () => {
     if (!zoneId) {
@@ -253,6 +266,27 @@ function ChangeZoneDialog({
         <strong>{plant.sourceZoneName ?? '—'}</strong>. Pinning outranks the crosswalk and survives
         master sync. The plant's devices and open tickets move to the new zone's queues immediately.
       </p>
+      {impact && (
+        <div data-testid="zone-change-impact" className="mb-3 rounded-md border border-line bg-surface-raised px-3 py-2 text-sm">
+          Moving this plant re-scopes <strong>{impact.deviceCount.toLocaleString()} devices</strong> and{' '}
+          <strong>{impact.openTicketCount.toLocaleString()} open tickets</strong> to the new zone's
+          dashboards and queues immediately.
+        </div>
+      )}
+
+      {impact != null && impact.dispatchedTodayCount > 0 && (
+        <div
+          data-testid="mid-day-move-warning"
+          role="alert"
+          className="mb-3 rounded-md border border-warning/30 bg-warning-bg px-3 py-2 text-sm text-warning"
+        >
+          {impact.dispatchedTodayCount} of this plant's tickets are already on a dispatched day plan
+          today. Those tickets will move with the plant, but the day plan itself stays under{' '}
+          <strong>{impact.currentZoneName ?? '—'}</strong> — the zone it was dispatched in. Until
+          tomorrow's run, one ZM holds the plan and the other sees the tickets.
+        </div>
+      )}
+
       <label className="mb-1 block text-xs font-medium text-ink-subtle" htmlFor="plant-zone-select">
         Zone
       </label>

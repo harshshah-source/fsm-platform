@@ -333,6 +333,17 @@ when an in-scope plant names them) — no company allow-list, no reliance on the
 - **Zone resolution**: injected `PlantZoneResolver` = `MappingTableZoneResolver` — precedence
   `plant_zone_overrides` pin → `zone_mappings` MAPPED row (normalized `zone_name`) → **UNZONED
   holding zone** for PENDING/IGNORED; unseen raw values auto-discovered as PENDING rows.
+  **Admin surface (#158, 2026-07-23):** the override half is no longer curl-only — OH-only
+  **Plant Zones** page (`apps/admin/src/pages/admin/PlantZonesPage.tsx`, route `/plant-zones`)
+  sets/clears pins and **chains `reapply`**, because a pin is inert on its own. `SET`/`CLEARED`
+  audit rows now carry `{prevFsmZoneId, newFsmZoneId, reason}` (the row is upserted, so the previous
+  zone survives nowhere else) and a reason is mandatory. Verified by test, not assertion: a zone
+  change re-scopes the plant's devices, its open tickets and both ZM dashboards **with zero writes
+  to the ticket or device-state rows** — `plants.zone_id` is the only stored copy of a plant's zone,
+  which is why no recompute job exists. A `zoneChangeImpact` probe
+  (`GET /api/org/plant-zone-overrides/:sourcePlantId/impact`) warns before a **mid-day** move: the
+  tickets follow the plant but today's dispatched `work_schedules` stay under the old zone, so until
+  the next run one ZM holds the plan and another sees the tickets.
 - **Anti-drift (R4) is structural**: the pure `master-mapping` layer excludes every FSM-owned column
   (`ops_override`, tier/rank, operational `zone_id`, `deal_type`) from its update set
   (`master-sync.service.ts:92-94`) — edits re-apply via `ZoneMappingService.reapply`, never re-sync.

@@ -16,6 +16,15 @@ export interface PlantZoneOverrideRow {
   reason: string | null;
 }
 
+export interface ZoneChangeImpact {
+  plantName: string;
+  currentZoneName: string | null;
+  deviceCount: number;
+  openTicketCount: number;
+  /** Tickets already on a live day plan today. These re-scope, but the PLAN stays under the old zone. */
+  dispatchedTodayCount: number;
+}
+
 export interface ReapplyResult {
   plantsConsidered: number;
   updated: number;
@@ -34,6 +43,10 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const listPlantZoneOverrides = () =>
   req<PlantZoneOverrideRow[]>('/org/plant-zone-overrides');
+
+/** What a pending zone change will re-scope — shown before the admin confirms. */
+export const getZoneChangeImpact = (sourcePlantId: string) =>
+  req<ZoneChangeImpact>(`/org/plant-zone-overrides/${sourcePlantId}/impact`);
 
 /** Pin a plant to a zone. `reason` is mandatory — the row is overwritten on re-pin, so it survives only in audit_logs. */
 export const setPlantZoneOverride = (sourcePlantId: string, fsmZoneId: number, reason: string) =>

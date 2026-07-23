@@ -45,6 +45,14 @@ const OVERRIDES = [
 
 const REAPPLY = { plantsConsidered: 751, updated: 1, unchanged: 750, landedUnzoned: 3 };
 
+let impact = {
+  plantName: 'Alpha Cement',
+  currentZoneName: 'UNZONED',
+  deviceCount: 200,
+  openTicketCount: 12,
+  dispatchedTodayCount: 0,
+};
+
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
@@ -52,6 +60,7 @@ const fetchMock = vi.fn();
 
 /** Routes each call by URL so assertions can read the calls back by endpoint. */
 function route(url: string, init?: RequestInit): Response {
+  if (url.includes('/impact')) return json(impact);
   if (url.includes('/org/plant-zone-overrides')) {
     if (init?.method === 'PUT') return json({ sourcePlantId: '5001', fsmZoneId: '4', fsmZoneName: 'South', reason: 'x' });
     if (init?.method === 'DELETE') return new Response(null, { status: 204 });
@@ -69,6 +78,13 @@ const callsTo = (fragment: string, method?: string) =>
   );
 
 beforeEach(() => {
+  impact = {
+    plantName: 'Alpha Cement',
+    currentZoneName: 'UNZONED',
+    deviceCount: 200,
+    openTicketCount: 12,
+    dispatchedTodayCount: 0,
+  };
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => route(String(url), init));
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -148,6 +164,29 @@ describe('Plant Zones page (#158)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/reason is required/i);
     expect(callsTo('/org/plant-zone-overrides', 'PUT')).toHaveLength(0);
     expect(callsTo('/org/zone-mappings/reapply', 'POST')).toHaveLength(0);
+  });
+
+  it('shows what the move will re-scope before the admin confirms it', async () => {
+    render(<PlantZonesPage />);
+    await userEvent.click(await screen.findByTestId('change-zone-5001'));
+
+    const blast = await screen.findByTestId('zone-change-impact');
+    expect(blast).toHaveTextContent(/200 devices/i);
+    expect(blast).toHaveTextContent(/12 open tickets/i);
+    // Nothing is dispatched today, so there is nothing confusing to warn about.
+    expect(screen.queryByTestId('mid-day-move-warning')).not.toBeInTheDocument();
+  });
+
+  it('warns when the plant already has work on a dispatched day plan today', async () => {
+    impact = { ...impact, dispatchedTodayCount: 3 };
+    render(<PlantZonesPage />);
+    await userEvent.click(await screen.findByTestId('change-zone-5001'));
+
+    const warning = await screen.findByTestId('mid-day-move-warning');
+    // The split the admin needs to understand: tickets follow the plant, today's plan does not.
+    expect(warning).toHaveTextContent(/3/);
+    expect(warning).toHaveTextContent(/day plan/i);
+    expect(warning).toHaveTextContent(/UNZONED/); // stays under the zone it was dispatched in
   });
 
   it('clears an override and reapplies so the plant falls back to the crosswalk', async () => {
