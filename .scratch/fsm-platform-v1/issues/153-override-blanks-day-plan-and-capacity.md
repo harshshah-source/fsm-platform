@@ -1,5 +1,5 @@
 # 153 — Any ZM override blanks the SE's day plan and zeroes their capacity accounting
-Status: needs-triage
+Status: done
 Type: AFK
 
 > **Found 2026-07-22 while writing the RED test for [#146](./146-zm-override-integrity-defer-remove.md)
@@ -107,12 +107,12 @@ via one shared predicate rather than six hand-written filters that can drift apa
 
 ## Acceptance criteria
 
-- [ ] After any override (swap / split / remove / defer / reorder / reassign), `getDayPlan` still returns the SE's remaining work for that day.
-- [ ] `committedDayLoad` counts tickets on overridden schedules, so an overridden SE cannot be over-assigned on the next run.
-- [ ] Same-day APPEND (#127) reuses an overridden schedule rather than creating a colliding second one — pinned by extending the #127 regression.
-- [ ] Every "is this schedule live?" filter reads from **one** shared predicate; a grep for `status: 'ACTIVE'` on `workSchedule` returns only that constant.
-- [ ] `COMPLETED` and `PARTIAL` remain excluded — this issue widens the live set by exactly one value.
-- [ ] Full backend suite green.
+- [x] After any override (swap / split / remove / defer / reorder / reassign), `getDayPlan` still returns the SE's remaining work for that day.
+- [x] `committedDayLoad` counts tickets on overridden schedules, so an overridden SE cannot be over-assigned on the next run.
+- [x] Same-day APPEND (#127) reuses an overridden schedule rather than creating a colliding second one — pinned by extending the #127 regression.
+- [x] Every "is this schedule live?" filter reads from **one** shared predicate; a grep for `status: 'ACTIVE'` on `workSchedule` returns only that constant.
+- [x] `COMPLETED` and `PARTIAL` remain excluded — this issue widens the live set by exactly one value.
+- [x] Full backend suite green.
 
 ## TDD Strategy
 
@@ -136,6 +136,28 @@ Strict TDD, and the RED is already written and reproducible — it is the probe 
    schedule first.
 3. **Slice 3 — admin parity check**: confirm no admin surface depended on the old (broken) behaviour
    of an overridden schedule disappearing from these reads.
+
+## Outcome (2026-07-22 — DONE)
+
+Design **(a)** taken. Full report: [`docs/progress/153-overridden-schedule-is-live.md`](../../../docs/progress/153-overridden-schedule-is-live.md).
+Commits: slice 1 `2532d36`, slice 2 `161a596`.
+
+Two things the issue did not anticipate, both now filed:
+
+1. **The unique index does not cover overridden schedules.**
+   `work_schedules_one_active_per_se_zone_day` is partial on `status = 'ACTIVE'`, so the duplicate
+   schedule described in Problem §3 was created **unopposed** — no P2002, no rollback, no ledger skip
+   reason. The comment at `batch-assignment.service.ts:117` calling the index "the final safety net"
+   was true only for `ACTIVE`. Code path fixed here; the schema backstop is **[#155](./155-unique-index-misses-overridden-schedules.md)**.
+2. **Slice 3's answer was "no admin change — and that is the finding."** `zm-schedule-query` and
+   `engineers-query` already carried their own `['ACTIVE','OVERRIDDEN']` lists, so every admin surface
+   rendered overridden plans correctly the whole time. **That asymmetry is why the bug survived:** the
+   ZM saw the plan they had just adjusted; only the SE's day plan and the dispatch engine went blank,
+   and neither has a human watching it in dev. Both copies now read the shared constant.
+
+Design **(b)** (drop the `status` overload, derive provenance from `lastOverriddenAt`) is
+**[#154](./154-drop-work-schedule-status-overload.md)** — it needs the `OVERRIDDEN`-consumer sweep the
+design note called for, plus a backfill decision for existing rows.
 
 ## Rollback Plan
 

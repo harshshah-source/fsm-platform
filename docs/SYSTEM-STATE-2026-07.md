@@ -27,6 +27,40 @@ Section order is the resume order for future sessions.
 > normalise it first. The #144 migration itself is drift-free — its table appears zero times in the
 > report.
 
+> **2026-07-22 (#153) — `OVERRIDDEN` is a LIVE work-schedule state, and now behaves like one.**
+> Every ZM override flips the *schedule* to `OVERRIDDEN` (`override.service.ts:487-490`) purely to
+> record provenance, but six read sites filtered `status: 'ACTIVE'` and so treated a ZM-adjusted plan
+> as non-existent. Consequences, all real and all now closed: the SE's **entire day plan returned
+> empty**, `committedDayLoad` **reset their committed load to 0** (so the next dispatch run could hand
+> them a full second day of work on top of the invisible first), and #127's same-day APPEND created a
+> **second schedule** for the same (SE, zone, day). Liveness now has exactly one definition —
+> `LIVE_SCHEDULE_STATUSES` in `apps/backend/src/scheduling/schedule-status.ts`; `COMPLETED`/`PARTIAL`
+> stay excluded, pinned by test. Commits `2532d36` (day plan + capacity) and `161a596` (dispatch +
+> override lookups). Report: `docs/progress/153-overridden-schedule-is-live.md`.
+>
+> **Two things this exposed that are still open:**
+>
+> 1. **`work_schedules_one_active_per_se_zone_day` does not cover overridden schedules.** It is
+>    **partial** on `status = 'ACTIVE'` (migration `20260708120000`), so the duplicate day-plan above
+>    was created **unopposed** — no P2002, no rollback, no ledger skip reason. The code path is fixed,
+>    but the invariant is currently enforced **only in application code**. → **#155** (needs a
+>    duplicate probe before the index can be created; do not assume zero).
+> 2. **The `status` column still conflates lifecycle with provenance.** #153 made that safe behind one
+>    constant; it did not remove it. `lastOverriddenBy`/`lastOverriddenAt` already exist on the row.
+>    → **#154** (needs an `OVERRIDDEN`-consumer sweep + a backfill decision; 5 admin surfaces and
+>    `ticket-query.service.ts:147` read the enum value).
+>
+> **The local test suite is no longer a reliable green/red signal.** `fsm_test` is long-lived and
+> `test/global-setup.ts` migrates + seeds but **never truncates**, so every spec that dies before its
+> `afterAll` leaks fixtures permanently. Measured 2026-07-22: **780 orphan zones, 404 orphan
+> engineers**. Three consecutive full backend runs on one commit gave three *different* non-green
+> results (1 worker crash, then 3, then a `dispatch-run-controller` 5 s timeout) with **zero assertion
+> failures** and every affected file passing in isolation — `dispatch-run-controller` iterates every
+> zone, so its cost grows with the orphan count. The previous baseline ("287 files / 1176 passed /
+> exit 0 / 494 s") therefore **no longer reproduces, and #153 is not the reason**. → **#156**.
+> Treat any local "full suite green" claim from before that issue lands as unverified; CI (#107)
+> provisions a fresh DB per run and is immune.
+
 ---
 
 ## 1. SYSTEM OVERVIEW
