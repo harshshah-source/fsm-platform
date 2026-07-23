@@ -1,5 +1,6 @@
 # 146 — ZM override integrity: `DEFER_TICKET` is write-only and `REMOVE_TICKET` has no exclusion memory
 Status: ready-for-agent
+Progress: **slices 1-2 of 5 done** (`0d17842`) — AC 1/2/4/7/9 met; AC 3 (slice 3), 5+6 (slice 4), 8 (slice 5) open. See `docs/progress/146-zm-override-integrity.md`.
 Type: AFK
 
 > Source: `docs/audits/2026-07-22-full-project-audit.md` §5 B1 (incl. c3) + B2, re-verified still-open
@@ -98,15 +99,15 @@ Give `DEFER_TICKET` the semantics the workflow doc specifies, stop it burning ca
 
 ## Acceptance criteria
 
-- [ ] A deferred ticket **disappears from the current day's** SE day plan, ZM schedule view, and dispatch-transparency reads.
-- [ ] A deferred ticket **does not consume** SE capacity for the current day (`committedDayLoad` excludes it).
+- [x] A deferred ticket **disappears from the current day's** SE day plan, ZM schedule view, and dispatch-transparency reads.
+- [x] A deferred ticket **does not consume** SE capacity for the current day (`committedDayLoad` excludes it).
 - [ ] A deferred ticket becomes re-dispatchable **on `deferredToDate` — not before, and not never**: it re-enters the recommender's candidate set on that date.
-- [ ] Capacity and scoring for non-deferred tickets are **byte-identical** to today, pinned by a regression test with zero deferred rows.
+- [x] Capacity and scoring for non-deferred tickets are **byte-identical** to today, pinned by a regression test with zero deferred rows.
 - [ ] After a `REMOVE_TICKET`, the same-day recommender **de-prioritises** the SE it was removed from; with no alternative SE, that SE is **still** assigned (soft, not hard — shared-pool intent preserved).
 - [ ] The soft bias is expressed through the ADR-0022 mechanism, not a new concept, and appears in `scoreBreakdown` so [#123](./123-batch-assignment-transparency.md)'s transparency panel can explain it.
-- [ ] `deferrals` remains countable for the ZM Performance Scorecard.
+- [x] `deferrals` remains countable for the ZM Performance Scorecard.
 - [ ] Admin batch-schedule-detail (`/schedules/:engineerId`) reflects a deferred ticket's new state — parity gate satisfied **in-slice**, not deferred.
-- [ ] Backend suite green; the #127 APPEND and #126 zone-wedge regressions stay green.
+- [x] Backend suite green; the #127 APPEND and #126 zone-wedge regressions stay green.
 
 ## TDD Strategy
 
