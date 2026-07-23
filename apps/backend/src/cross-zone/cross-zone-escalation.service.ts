@@ -1,3 +1,5 @@
+import { utcDayStart } from '../common/utc-day';
+import { notDeferredOn } from '../ticketing/deferral';
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { Prisma } from '../generated/prisma/client';
@@ -76,6 +78,9 @@ export class CrossZoneEscalationService {
         companyTier: 'PLATINUM',
         status: 'OPEN',
         assignmentState: 'UNASSIGNED',
+        // #146 — a deferred ticket has a ZM-chosen return date; it is not "unassigned and rotting",
+        // so it must not trip the Platinum auto-escalation clock while the deferral is still running.
+        ...notDeferredOn(utcDayStart(now)),
         crossZoneEscalations: { none: {} },
         ...(zoneId != null ? { plant: { zoneId } } : {}),
       },

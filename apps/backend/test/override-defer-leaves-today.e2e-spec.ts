@@ -25,11 +25,13 @@ import { ZmScheduleQueryService } from '../src/scheduling/zm-schedule-query.serv
  * `deferredToDate`. Every read already filters `removedAt: null`, so all three surfaces below fall
  * into line at once, and capacity frees itself (slice 2 asserts that).
  *
- * **`assignmentState` is deliberately NOT touched here.** Flipping the ticket to `UNASSIGNED` now
- * would make it immediately re-dispatchable *today* — the recommender selects `OPEN` + `UNASSIGNED`
- * (`recommender.service.ts:103-108`) — which is worse than the current bug. It stays
- * `FORMALLY_ASSIGNED` until slice 3 adds the ticket-level `deferred_until` predicate that makes
- * re-dispatch safe, and only on the deferred date.
+ * Slice 1 deliberately did NOT touch `assignmentState`: flipping the ticket to `UNASSIGNED` before a
+ * date gate existed would have made it immediately re-dispatchable *today* — the recommender selects
+ * `OPEN` + `UNASSIGNED` (`recommender.service.ts:103-108`) — which is worse than the bug being fixed.
+ * **Slice 3 has since landed** and added the `deferred_until` column plus the shared `notDeferredOn`
+ * predicate, so the ticket is now `UNASSIGNED` *and* dated. The last test here tracks that; the rest
+ * of the file is unchanged, which is the point — slice 3 altered how defer is enforced, not what
+ * these three read surfaces show.
  *
  * Both tickets sit on the SAME plant, so they share one batch: the sibling assertion proves the defer
  * removed one ticket rather than emptying the stop.
@@ -209,10 +211,14 @@ describe('#146 slice 1 — a deferred ticket leaves today\'s reads, its batch-ma
     expect(audits.some((a) => JSON.stringify(a.metadata).includes('DEFER_TICKET'))).toBe(true);
   });
 
-  it('slice-1 boundary — the ticket is NOT yet re-dispatchable today (that is slice 3)', async () => {
-    // Guards the hazard in the handoff: flipping assignmentState here would put the deferred ticket
-    // straight back into the recommender's candidate set (OPEN + UNASSIGNED) on the SAME day.
+  it('the ticket is returned to the pool but held by its deferral date, not re-dispatchable today', async () => {
+    // This assertion was inverted by slice 3, deliberately and as documented. Slices 1-2 pinned
+    // `FORMALLY_ASSIGNED` because, without a date gate, `UNASSIGNED` meant "re-dispatch me today" —
+    // the hazard the handoff called out. Slice 3 added `deferred_until` + the shared `notDeferredOn`
+    // predicate, so the correct state is now UNASSIGNED (re-plannable) AND dated (not yet).
+    // The pair is what makes it safe; neither half is correct alone.
     const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: deferred } });
-    expect(t.assignmentState).toBe('FORMALLY_ASSIGNED');
+    expect(t.assignmentState).toBe('UNASSIGNED');
+    expect(t.deferredUntil?.toISOString().slice(0, 10)).toBe('2026-06-28');
   });
 });

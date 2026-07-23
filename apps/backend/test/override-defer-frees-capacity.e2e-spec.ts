@@ -176,12 +176,15 @@ describe('#146 slice 2 — defer frees the SE slot; zero-deferred capacity is un
     expect(r?.status).toBe('SUGGESTED');
   });
 
-  it('the deferred ticket itself is not re-planned today (slice-1 boundary still holds)', async () => {
-    // It is still FORMALLY_ASSIGNED, so the recommender cannot pick it up. Freeing the SLOT and
-    // re-planning the TICKET are different things; the second waits for slice 3's `deferred_until`.
+  it('the deferred ticket itself is still not re-planned today', async () => {
+    // Freeing the SLOT and re-planning the TICKET remain different things. Slice 3 changed HOW that
+    // is enforced — the ticket is now UNASSIGNED (so it CAN return) and held back by `deferred_until`
+    // instead of being stranded in FORMALLY_ASSIGNED — but the day-of behaviour is unchanged, which
+    // is the point of keeping this assertion across the slice boundary.
     const r = await recFor(committed);
     expect(r?.status).not.toBe('SUGGESTED');
     const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: committed } });
-    expect(t.assignmentState).toBe('FORMALLY_ASSIGNED');
+    expect(t.assignmentState).toBe('UNASSIGNED');
+    expect(t.deferredUntil?.toISOString().slice(0, 10)).toBe('2026-06-29');
   });
 });

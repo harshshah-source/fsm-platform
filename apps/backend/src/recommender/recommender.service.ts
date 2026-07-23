@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { utcDayStart } from '../common/utc-day';
 import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { Prisma } from '../generated/prisma/client';
 import { type SeAvailabilityStatus } from '../generated/prisma/enums';
@@ -6,6 +7,7 @@ import { type CommonKitStatus, InventoryService } from '../inventory/inventory.s
 import { PrismaService } from '../prisma/prisma.service';
 import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
+import { notDeferredOn } from '../ticketing/deferral';
 import { CandidateSelectionService } from './candidate-selection.service';
 import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
@@ -106,6 +108,9 @@ export class RecommenderService {
         workType: 'TROUBLESHOOT',
         status: 'OPEN',
         assignmentState: 'UNASSIGNED',
+        // #146 — a ZM-deferred ticket is UNASSIGNED precisely so it can come back, but not before the
+        // date the ZM chose. Without this it would be re-dispatched on the same run that removed it.
+        ...notDeferredOn(utcDayStart(now)),
         // Deactivated plants (Issue 119) are skipped by dispatch — no SE is sent to a shut plant.
         plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
         // Departed devices (Issue 128) likewise — no SE is sent to a device that left the fleet.
@@ -144,7 +149,7 @@ export class RecommenderService {
       repeatFailure: t.repeatFailure,
       ageAnchor: t.latestGpsDatetime,
     }));
-    const runList: RunCandidate[] = [...tsRun, ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId) : [])];
+    const runList: RunCandidate[] = [...tsRun, ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId, utcDayStart(now)) : [])];
 
     const { weights, weightSetRef } = await this.activeWeights(mode);
     const clusterMultiplier = await this.plantClusterMultiplier();
@@ -437,12 +442,15 @@ export class RecommenderService {
    * under the PREVENTIVE aged-bias term. The recommender only *suggests* — the ZM override path (Issue 13)
    * remains the human approval/reorder step, so an install is never double-scheduled here.
    */
-  private async installBacklog(zoneId: bigint): Promise<RunCandidate[]> {
+  private async installBacklog(zoneId: bigint, day: Date): Promise<RunCandidate[]> {
     const installs = await this.prisma.ticket.findMany({
       where: {
         workType: 'INSTALL',
         status: 'REQUESTED',
         assignmentState: 'UNASSIGNED',
+        // #146 — an INSTALL can sit in a batch and be deferred like any other ticket, so the same
+        // date gate applies here. Deferrals are rare on this path; the predicate is not.
+        ...notDeferredOn(day),
         plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
         // NOTE: deliberately NOT filtered on device departure (Issue 128), unlike the Troubleshoot
         // selection above. An Install exists to bring a device INTO the fleet, so "not currently
@@ -563,7 +571,3 @@ export class RecommenderService {
   }
 }
 
-/** UTC midnight of the day containing `now` — matches the daily Day Plan's single coverage date. */
-function utcDayStart(now: Date): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}

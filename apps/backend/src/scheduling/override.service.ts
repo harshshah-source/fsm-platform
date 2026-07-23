@@ -1,7 +1,9 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
+import { utcDayStart } from '../common/utc-day';
 import { Prisma } from '../generated/prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { notDeferredOn } from '../ticketing/deferral';
 import { DAY_PLAN_NOTIFIER, DayPlanNotifier } from './day-plan-notifier';
 import { liveScheduleFilter } from './schedule-status';
 import {
@@ -185,14 +187,20 @@ export class OverrideService {
         // every read already filters `removedAt: null`, so the day plan, the ZM schedule view, the
         // transparency reads and `committedDayLoad` all fall into line at once.
         //
-        // `assignmentState` is deliberately left `FORMALLY_ASSIGNED`. Flipping it to UNASSIGNED here
-        // would put the ticket straight back into the recommender's candidate set (it selects
-        // OPEN + UNASSIGNED, `recommender.service.ts:103-108`) and it would be re-dispatched TODAY —
-        // worse than the bug being fixed. Re-dispatch becomes safe only once slice 3 adds the
-        // ticket-level `deferred_until` predicate that holds it until the deferred date.
         await tx.batchAssignmentTicket.update({
           where: { id: bat.id },
           data: { deferredToDate: new Date(cmd.deferredToDate), removedAt: now, removedBy: actor.userId },
+        });
+        // Slice 3 — the second clause of the workflow's definition: "pushed to a specific future
+        // date". The ticket returns to `UNASSIGNED` so it CAN be re-planned (leaving it
+        // `FORMALLY_ASSIGNED` stranded it permanently — no reader of unassigned work could ever see
+        // it again), and `deferredUntil` is what stops that re-planning happening today. The two are
+        // a pair: every unassigned-work reader spreads in `notDeferredOn(day)`, so the ticket
+        // reappears on the deferred date and not before. Splitting them would make defer a same-day
+        // no-op with extra steps.
+        await tx.ticket.update({
+          where: { ticketId: cmd.ticketId },
+          data: { assignmentState: 'UNASSIGNED', deferredUntil: new Date(cmd.deferredToDate) },
         });
         await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
       },
@@ -336,7 +344,10 @@ export class OverrideService {
 
     for (const plantId of ids) {
       const open = await this.prisma.ticket.findMany({
-        where: { plantId, status: 'OPEN', assignmentState: 'UNASSIGNED' },
+        // #146 — a bulk "assign this plant's open work to an SE" must not silently resurrect a ticket
+        // another ZM deliberately deferred to a future date. The deferral is still an explicit human
+        // decision; a ZM who wants it back today can re-assign that ticket directly.
+        where: { plantId, status: 'OPEN', assignmentState: 'UNASSIGNED', ...notDeferredOn(utcDayStart(now)) },
         select: { ticketId: true },
         orderBy: { createdAt: 'asc' },
       });

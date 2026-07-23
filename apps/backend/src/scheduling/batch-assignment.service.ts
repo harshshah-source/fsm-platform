@@ -175,7 +175,10 @@ export class BatchAssignmentService {
             // Assignment, not pickable secondary work (schema D6, LLD shared-pool partial index).
             await tx.ticket.update({
               where: { ticketId },
-              data: { assignmentState: 'FORMALLY_ASSIGNED' },
+              // #146 — clear any spent deferral as the ticket is re-dispatched. The date has done its
+              // job; leaving it set would keep a stale "was deferred" marker on live work. The batch
+              // row's `deferred_to_date` is the durable record of what the ZM did (scorecard AC#7).
+              data: { assignmentState: 'FORMALLY_ASSIGNED', deferredUntil: null },
             });
             tickets++;
             scheduleTickets++;

@@ -1985,6 +1985,13 @@ model Ticket {
   companyId                BigInt                 @map("company_id")
   companyTier              CompanyTier            @map("company_tier")
   assignmentState          AssignmentState        @default(UNASSIGNED) @map("assignment_state")
+  // ZM deferral (Issue 146 B1, workflow:711 "pushed to a specific future date"). A deferred Ticket
+  // returns to `UNASSIGNED` so it CAN be re-planned, and this date is what stops that happening
+  // before the ZM intended: every unassigned-work reader filters
+  // `deferred_until IS NULL OR deferred_until <= <run day>`. Ticket-level, not batch-level — the
+  // batch row is per-plan and the Ticket is being removed from the current batch, so it cannot carry
+  // the future date. Null for the overwhelming majority of rows; cleared on re-dispatch.
+  deferredUntil            DateTime?              @map("deferred_until") @db.Date
   repeatFailure            Boolean                @default(false) @map("repeat_failure")
   lastStateChangedAt       DateTime               @map("last_state_changed_at") @db.Timestamptz(6)
   version                  Int                    @default(0)

@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { utcDayStart } from '../common/utc-day';
+import { notDeferredOn } from '../ticketing/deferral';
 
 export interface SharedPoolTicket {
   ticketId: string;
@@ -24,12 +26,24 @@ export interface SharedPoolTicket {
 export class SharedPoolService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getSharedPool(seId: string): Promise<SharedPoolTicket[]> {
+  /**
+   * `now` is injectable so the deferral gate below is testable against a fixed timeline and so a
+   * caller can ask "what would this SE's pool look like on day X" — the same idiom the intraday and
+   * cross-zone sweeps already use. Defaults to the wall clock for the controller.
+   */
+  async getSharedPool(seId: string, now: Date = new Date()): Promise<SharedPoolTicket[]> {
     const plantIds = await this.coveredPlantIds(seId);
     if (plantIds.length === 0) return [];
 
     const tickets = await this.prisma.ticket.findMany({
-      where: { plantId: { in: plantIds }, status: 'OPEN', assignmentState: 'UNASSIGNED' },
+      where: {
+        plantId: { in: plantIds },
+        status: 'OPEN',
+        assignmentState: 'UNASSIGNED',
+        // #146 — a deferred ticket returns to UNASSIGNED so it can be re-planned later; offering it
+        // here would hand it straight back to an SE as pickable work on the day it was deferred off.
+        ...notDeferredOn(utcDayStart(now)),
+      },
       orderBy: [{ plantId: 'asc' }, { createdAt: 'asc' }],
       include: {
         plant: { select: { name: true } },

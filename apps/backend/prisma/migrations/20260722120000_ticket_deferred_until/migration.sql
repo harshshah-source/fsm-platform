@@ -1,0 +1,24 @@
+-- Issue 146 B1 slice 3 — ticket-level deferral date.
+--
+-- `DEFER_TICKET` previously wrote `batch_assignment_tickets.deferred_to_date` and nothing read it.
+-- Slice 1 made defer also stamp `removed_at`, which takes the Ticket off today's plan — but the
+-- Ticket stayed `FORMALLY_ASSIGNED`, and the recommender only selects `UNASSIGNED`, so it could
+-- never be picked up again: stranded permanently rather than deferred.
+--
+-- Returning it to `UNASSIGNED` is what makes re-planning possible, and this column is what stops
+-- that re-planning happening the SAME DAY. Every "unassigned work" reader filters
+-- `deferred_until IS NULL OR deferred_until <= <run day>`.
+--
+-- Ticket-level rather than batch-level on purpose: the batch row is per-plan and the Ticket is being
+-- removed from its current batch, so it cannot carry a future date. `batch_assignment_tickets.
+-- deferred_to_date` is retained as the audit/scorecard record of what the ZM did.
+--
+-- Additive and nullable: existing rows read as "not deferred", which is correct for all of them.
+ALTER TABLE "tickets" ADD COLUMN "deferred_until" DATE;
+
+-- Deliberately NO index. The predicate is `deferred_until IS NULL OR deferred_until <= :day`, which
+-- is unselective by construction (almost every row is NULL), and it always rides alongside the
+-- existing status/assignment_state/plant filters. A partial index would also have to be raw SQL --
+-- `@@index` cannot express a WHERE clause -- adding a fresh schema-drift entry (SYSTEM-STATE records
+-- 22 tables of pre-existing drift already) to buy nothing measured. Revisit under #103 if profiling
+-- ever shows this predicate mattering.

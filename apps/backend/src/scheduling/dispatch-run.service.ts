@@ -1,3 +1,4 @@
+import { utcDayStart } from '../common/utc-day';
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { buildStampFields } from '../build-info/run-stamp';
@@ -240,7 +241,3 @@ export class DispatchRunService {
   }
 }
 
-/** UTC midnight of the day containing `now` — the daily Day Plan's single coverage date. */
-function utcDayStart(now: Date): Date {
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
