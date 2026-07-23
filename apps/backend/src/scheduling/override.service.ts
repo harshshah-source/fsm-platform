@@ -178,9 +178,21 @@ export class OverrideService {
         seId,
       }),
       async (tx) => {
+        // #146 B1 — the workflow defines defer as TWO clauses (`fsm-business-technical-workflow.md:711`):
+        // "pushed to a specific future date" AND "removed from current batch". Only the first was
+        // written, and `deferredToDate` had zero readers, so the ticket stayed on today's plan and kept
+        // burning a capacity slot for a day it would not be worked. `removedAt` is the second clause:
+        // every read already filters `removedAt: null`, so the day plan, the ZM schedule view, the
+        // transparency reads and `committedDayLoad` all fall into line at once.
+        //
+        // `assignmentState` is deliberately left `FORMALLY_ASSIGNED`. Flipping it to UNASSIGNED here
+        // would put the ticket straight back into the recommender's candidate set (it selects
+        // OPEN + UNASSIGNED, `recommender.service.ts:103-108`) and it would be re-dispatched TODAY —
+        // worse than the bug being fixed. Re-dispatch becomes safe only once slice 3 adds the
+        // ticket-level `deferred_until` predicate that holds it until the deferred date.
         await tx.batchAssignmentTicket.update({
           where: { id: bat.id },
-          data: { deferredToDate: new Date(cmd.deferredToDate) },
+          data: { deferredToDate: new Date(cmd.deferredToDate), removedAt: now, removedBy: actor.userId },
         });
         await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
       },
