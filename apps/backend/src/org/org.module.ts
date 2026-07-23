@@ -10,6 +10,7 @@ import { ScoringWeightsService } from './scoring-weights.service';
 import { SeCoverageService } from './se-coverage.service';
 import { SeTerritoryService } from './se-territory.service';
 import { SlaRulesService } from './sla-rules.service';
+import { TierOverridesService } from './tier-overrides.service';
 import { TiersService } from './tiers.service';
 import { UsersService } from './users.service';
 import { ZoneMappingService } from './zone-mapping.service';
@@ -32,6 +33,7 @@ const services = [
   CommonKitService,
   ZoneMappingService,
   TiersService,
+  TierOverridesService,
 ];
 
 @Module({

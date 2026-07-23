@@ -1,6 +1,6 @@
 # 157 — Company tier: global setting + scoped, expiring tier overrides (redesigned)
 
-Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1 landed; S2 onward in progress)
+Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1+S2 landed; S3 onward in progress)
 Type: AFK after go-ahead
 
 > **Review completed 2026-07-23 (interactive).** Q-A **stacking allowed** (operator choice, against
@@ -226,13 +226,15 @@ overrides exist).
 
 - [x] AC-1: `tiers` seeded exactly PLATINUM(1)/GOLD(2)/SILVER(3); spec-pin test asserts table ⇄
       enum ⇄ `TIER_ORDER` agreement; admin dropdowns read it. **DONE 2026-07-23 (S1).**
-- [ ] AC-2: override create/cancel enforced: mandatory reason (min 10 chars), expiry ≤ 2 months
+- [x] AC-2: override create/cancel enforced: mandatory reason (min 10 chars), expiry ≤ 2 months
       (DB CHECK + service 400), ZM clamped to own zone at the service layer, CSM/OH cross-zone
       (CSM any zone — Q-C); raise AND lower both permitted (Q-G); every mutation audited with
-      prev/new metadata in-transaction.
-- [ ] AC-3: effective-tier resolver is the single shared predicate (timestamp-based, newest-wins
+      prev/new metadata in-transaction. **DONE 2026-07-23 (S2).**
+- [x] AC-3: effective-tier resolver is the single shared predicate (timestamp-based, newest-wins
       under stacking — Q-A); an expired-but-not-yet-swept override does NOT apply (sweep-lag pin);
       with two ACTIVE overrides on one pair, the newer provably wins (stacking-precedence pin).
+      **DONE 2026-07-23 (S2)** — resolver built and pinned; engine wiring (recommender/ticket
+      creation/scoreBreakdown/config_snapshot) is S3's "engine bite," not yet done.
 - [ ] AC-4: a ZM's PLATINUM override provably reorders that zone's dispatch (canonical-sort seam,
       asserted at the `runForZone` boundary) and is stamped in `scoreBreakdown`; other zones
       unaffected; global tier unchanged in `company_master`.
@@ -260,9 +262,16 @@ overrides exist).
   export `TIER_ORDER_EFFECTIVE_PRIORITY_DESC` in `canonical-sort.ts`, not a hand-duplicated
   literal); admin Companies create-form + inline-edit tier `<select>`s now read `listTiers()`
   instead of a hard-coded PLATINUM/GOLD/SILVER option list.
-- **S2 — override table + endpoint contract.** Migration (partial unique + CHECKs via raw-SQL
-  appendix, the established convention); POST/DELETE/GET + role scoping + validation + audit. The
-  largest test surface (roles × validation × stacking).
+- **S2 — override table + endpoint contract. DONE 2026-07-23.** Migration
+  `20260723130000_company_tier_overrides` (expiry-window CHECK + lookup index via raw-SQL
+  appendix, no partial-unique per Q-A); `POST/DELETE/GET /api/org/tier-overrides`
+  (`tier-overrides.service.ts`, `tier-overrides.controller.ts`) with role scoping (OH/CSM
+  cross-zone, ZM clamped to `user.zone_id` at the service layer per the #102 install-scope
+  precedent), validation (reason ≥10 chars, expiry window, unknown tier/company/zone), and
+  in-transaction audit (`TIER_OVERRIDE_SET`/`TIER_OVERRIDE_CANCELLED`). Also lands the AC-3
+  resolver (`effective-tier.ts`, the #146 `deferral.ts` one-exported-predicate pattern) used for
+  the audit's `prevEffectiveTier` and pinned directly (newest-wins, sweep-lag, cross-zone
+  isolation) — engine wiring is still S3.
 - **S3 — effective-tier resolver + engine bite.** Resolver helper + recommender wiring +
   ticket-creation stamp + `scoreBreakdown` + `config_snapshot`; the AC-4 reorder proof.
 - **S4 — expiry sweep.** Sweep (env-gated, business-sweep family) + `TIER_OVERRIDE_EXPIRED` audit +
@@ -290,8 +299,9 @@ overrides exist).
 
 ## Remaining open items (for the final go-ahead — not blocking the design)
 
-- **Stacking precedence = newest-wins is a working assumption** taken from the review's option
-  wording; confirm (alternatives: highest-tier-wins, explicit priority field).
+- **Stacking precedence = newest-wins — CONFIRMED 2026-07-23** at S2 go-ahead (alternatives
+  considered and declined: highest-tier-wins, explicit priority field). Locks the resolver's
+  `ORDER BY created_at DESC, id DESC` and the no-partial-unique data model decision above.
 - **Optional: expiry notification** (notify creator + OH on auto-revert, renew link). Considered
   and NOT adopted — it originated in the retracted message; Q1's clean "revert silently but audit"
   stands. Say the word at go-ahead if wanted; it slots into S4/S5.

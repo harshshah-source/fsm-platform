@@ -51,6 +51,42 @@ model Tier {
   @@map("tiers")
 }
 
+enum CompanyTierOverrideStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+
+  @@map("company_tier_override_status")
+}
+
+/// Issue 157 S2 — scoped, expiring company tier override (CSM/ZM authority extension over the
+/// OH-owned global `companies.company_tier`). Stacking ALLOWED (Q-A, confirmed 2026-07-23):
+/// multiple ACTIVE rows may coexist per (company, zone); `effective-tier.ts`'s resolver picks the
+/// newest by (created_at DESC, id DESC) — no partial-unique, just the lookup index below. Rows are
+/// never deleted — EXPIRED (auto-revert sweep, S4) / CANCELLED (explicit) rows plus `audit_logs`
+/// are the trail. FSM-owned side table, never in the AutoPlant sync update set (same anti-drift
+/// posture as `plant_zone_overrides` / `plant_deactivations`).
+model CompanyTierOverride {
+  id          BigInt                    @id @default(autoincrement())
+  companyId   BigInt                    @map("company_id")
+  zoneId      BigInt                    @map("zone_id")
+  tier        CompanyTier
+  reason      String
+  expiresAt   DateTime                  @map("expires_at") @db.Timestamptz(6)
+  status      CompanyTierOverrideStatus @default(ACTIVE)
+  createdBy   String?                   @map("created_by") @db.Uuid
+  createdAt   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  cancelledBy String?                   @map("cancelled_by") @db.Uuid
+  cancelledAt DateTime?                 @map("cancelled_at") @db.Timestamptz(6)
+
+  company Company @relation(fields: [companyId], references: [companyId])
+  zone    Zone    @relation(fields: [zoneId], references: [zoneId])
+
+  @@index([companyId, zoneId, status, expiresAt])
+  @@map("company_tier_overrides")
+}
+
 /// SE coverage model — DEDICATED (one plant), MULTI_PLANT (several), FLOATING (territory polygon,
 /// modelled in `se_territory` from Issue 09, never in `se_coverage`). Schema D3.
 enum CoverageType {
@@ -81,8 +117,9 @@ model Company {
   createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  vehicles Vehicle[]
-  tickets  Ticket[]
+  vehicles      Vehicle[]
+  tickets       Ticket[]
+  tierOverrides CompanyTierOverride[]
 
   @@index([companyTier, companyPriorityRank])
   @@map("company_master")
@@ -191,6 +228,7 @@ model Zone {
   zoneMappings   ZoneMapping[]
   plantOverrides PlantZoneOverride[]
   dispatchRuns   DispatchRunZone[]
+  tierOverrides  CompanyTierOverride[]
 
   @@index([zonalManagerUserId])
   @@map("zones")
