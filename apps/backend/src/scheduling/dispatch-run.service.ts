@@ -81,7 +81,7 @@ export class DispatchRunService {
         actorUserId: opts.actorUserId ?? null,
         actorRole: opts.actorRole ?? null,
         startedAt: now,
-        configSnapshot: await this.captureConfigSnapshot(),
+        configSnapshot: await this.captureConfigSnapshot(now),
         ...buildStampFields(),
       },
     });
@@ -211,13 +211,20 @@ export class DispatchRunService {
   /**
    * The config in effect AT RUN START, frozen onto the ledger row: active scoring weight sets, the
    * cluster-multiplier and eligibility_mode settings, the per-SE capacity map (the historical "18/25"
-   * denominator — a later capacity edit must not rewrite past runs), and the scheduler flag/cron.
+   * denominator — a later capacity edit must not rewrite past runs), the scheduler flag/cron, and
+   * (Issue 157 AC-6) every ACTIVE, unexpired company tier override — so history shows which
+   * overrides were live for THIS run, even once a later sweep expires or an admin cancels them.
    */
-  private async captureConfigSnapshot(): Promise<Prisma.InputJsonValue> {
-    const [rules, settings, engineers] = await Promise.all([
+  private async captureConfigSnapshot(now: Date): Promise<Prisma.InputJsonValue> {
+    const [rules, settings, engineers, tierOverrides] = await Promise.all([
       this.prisma.priorityRuleConfig.findMany({ where: { active: true }, orderBy: { id: 'asc' } }),
       this.prisma.systemSetting.findMany({ where: { key: { in: ['plant_cluster_multiplier', 'eligibility_mode'] } } }),
       this.prisma.engineerMaster.findMany({ select: { engineerId: true, dailyCapacity: true, isActive: true } }),
+      this.prisma.companyTierOverride.findMany({
+        where: { status: 'ACTIVE', expiresAt: { gt: now } },
+        orderBy: [{ companyId: 'asc' }, { zoneId: 'asc' }, { createdAt: 'desc' }],
+        select: { id: true, companyId: true, zoneId: true, tier: true, expiresAt: true },
+      }),
     ]);
     return {
       priorityRules: rules.map((r) => ({ weightSetRef: r.weightSetRef, component: r.component, weight: Number(r.weight) })),
@@ -231,6 +238,13 @@ export class DispatchRunService {
         // imports this service, and its @Cron decorator evaluates at module load, so a cycle is unsafe).
         dispatchCron: process.env.BUSINESS_SWEEP_DISPATCH_CRON?.trim() || '0 5 * * *',
       },
+      tierOverrides: tierOverrides.map((o) => ({
+        id: o.id.toString(),
+        companyId: o.companyId.toString(),
+        zoneId: o.zoneId.toString(),
+        tier: o.tier,
+        expiresAt: o.expiresAt.toISOString(),
+      })),
     };
   }
 

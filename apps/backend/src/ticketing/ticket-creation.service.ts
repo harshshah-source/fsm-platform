@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
+import { resolveActiveOverrides, tierOverrideKey } from '../org/effective-tier';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Postgres unique-violation → Prisma P2002. Here it means invariant I1 already holds (an active
@@ -58,10 +59,26 @@ export class TicketCreationService {
     });
     const tierByCompany = new Map(companies.map((c) => [c.companyId, c.companyTier]));
 
+    // Issue 157 — a new Troubleshoot Ticket is stamped with the EFFECTIVE tier (global, unless a
+    // CSM/ZM override is ACTIVE for this company in the plant's zone), so the tickets.company_tier
+    // snapshot a candidate's Platinum cross-zone auto-escalation eligibility reads is never stale
+    // from the moment of creation. Batched: one plant lookup + one override lookup for the whole sweep.
+    const plantIds = [...new Set(candidates.map((c) => c.plantId!))];
+    const plants = await this.prisma.plant.findMany({
+      where: { plantId: { in: plantIds } },
+      select: { plantId: true, zoneId: true },
+    });
+    const zoneByPlant = new Map(plants.map((p) => [p.plantId, p.zoneId]));
+    const zoneIds = [...new Set([...zoneByPlant.values()])];
+    const overrides = await resolveActiveOverrides(this.prisma, zoneIds, now);
+
     let created = 0;
     for (const ds of candidates) {
-      const companyTier = tierByCompany.get(ds.companyId!);
-      if (!companyTier) continue; // company row missing — skip defensively rather than violate the FK
+      const globalTier = tierByCompany.get(ds.companyId!);
+      if (!globalTier) continue; // company row missing — skip defensively rather than violate the FK
+      const zoneId = zoneByPlant.get(ds.plantId!);
+      const companyTier =
+        zoneId !== undefined ? (overrides.get(tierOverrideKey(ds.companyId!, zoneId))?.tier ?? globalTier) : globalTier;
 
       // Repeat detection (ADR-0021, event-driven): a prior VERIFIED cycle closed within the last 24h
       // makes this a REPEAT. "Repair completion" is GPS-verified closure, not form submission.

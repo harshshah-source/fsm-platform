@@ -21,6 +21,7 @@ describe('Issue 113 — DispatchRunService per-zone error containment', () => {
       priorityRuleConfig: { findMany: vi.fn(async () => []) },
       systemSetting: { findMany: vi.fn(async () => []) },
       engineerMaster: { findMany: vi.fn(async () => []) },
+      companyTierOverride: { findMany: vi.fn(async () => []) },
     };
     const recommender = { runForZone: vi.fn(async () => ({})) };
     const dispatch = {

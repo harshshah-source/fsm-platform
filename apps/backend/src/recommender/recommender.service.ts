@@ -4,6 +4,7 @@ import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { Prisma } from '../generated/prisma/client';
 import { type SeAvailabilityStatus } from '../generated/prisma/enums';
 import { type CommonKitStatus, InventoryService } from '../inventory/inventory.service';
+import { type ActiveOverride, resolveActiveOverrides, tierOverrideKey } from '../org/effective-tier';
 import { PrismaService } from '../prisma/prisma.service';
 import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
@@ -76,6 +77,8 @@ interface RunCandidate {
   deviceBucket: DeviceBucket | null;
   repeatFailure: boolean;
   ageAnchor: Date | null;
+  /** Issue 157 AC-4 — the zone-scoped override that produced `companyTier`, when one applied. */
+  tierOverrideId: string | null;
 }
 
 /**
@@ -102,6 +105,10 @@ export class RecommenderService {
     // Soft Inactive Count drives the deficit/preventive switch (Issue 40, CONTEXT §5). Recorded on the
     // run + each recommendation's breakdown; full preventive-mode scoring re-prioritisation → follow-up.
     const mode = await this.softInactive.modeForZone(zoneId, now);
+    // Issue 157 AC-4 — one batched lookup per run: every ACTIVE, unexpired override in THIS zone,
+    // reduced to the newest per company (Q-A newest-wins). Company reads below stay untouched; the
+    // override (if any) simply takes precedence over the global companyTier they carry.
+    const overrides = await resolveActiveOverrides(this.prisma, [zoneId], now);
 
     const tickets = await this.prisma.ticket.findMany({
       where: {
@@ -126,16 +133,24 @@ export class RecommenderService {
 
     // Build the canonical-sort candidate list (skip tickets with no computed bucket — unrankable).
     const rankable = tickets.filter((t) => t.device.state?.slaBucket != null);
-    const candidateTickets: (CandidateTicket & { plantId: bigint; repeatFailure: boolean })[] = rankable.map((t) => ({
-      ticketId: t.ticketId,
-      companyTier: t.company.companyTier,
-      deviceBucket: t.device.state!.slaBucket as DeviceBucket,
-      companyPriorityRank: t.company.companyPriorityRank,
-      latestGpsDatetime: t.device.state!.latestGpsDatetime,
-      deviceId: t.deviceId,
-      plantId: t.plantId,
-      repeatFailure: t.repeatFailure,
-    }));
+    const candidateTickets: (CandidateTicket & {
+      plantId: bigint;
+      repeatFailure: boolean;
+      tierOverrideId: string | null;
+    })[] = rankable.map((t) => {
+      const override = overrides.get(tierOverrideKey(t.companyId, zoneId));
+      return {
+        ticketId: t.ticketId,
+        companyTier: override?.tier ?? t.company.companyTier,
+        deviceBucket: t.device.state!.slaBucket as DeviceBucket,
+        companyPriorityRank: t.company.companyPriorityRank,
+        latestGpsDatetime: t.device.state!.latestGpsDatetime,
+        deviceId: t.deviceId,
+        plantId: t.plantId,
+        repeatFailure: t.repeatFailure,
+        tierOverrideId: override?.overrideId ?? null,
+      };
+    });
     const sorted = canonicalSort(candidateTickets);
 
     // TROUBLESHOOT candidates first (canonical order), then — in PREVENTIVE mode only (Issue 75) — the
@@ -148,8 +163,12 @@ export class RecommenderService {
       deviceBucket: t.deviceBucket,
       repeatFailure: t.repeatFailure,
       ageAnchor: t.latestGpsDatetime,
+      tierOverrideId: t.tierOverrideId,
     }));
-    const runList: RunCandidate[] = [...tsRun, ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId, utcDayStart(now)) : [])];
+    const runList: RunCandidate[] = [
+      ...tsRun,
+      ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId, utcDayStart(now), overrides) : []),
+    ];
 
     const { weights, weightSetRef } = await this.activeWeights(mode);
     const clusterMultiplier = await this.plantClusterMultiplier();
@@ -231,7 +250,14 @@ export class RecommenderService {
             seId: null,
             companyTier: t.companyTier,
             deviceBucket: t.deviceBucket,
-            scoreBreakdown: { reason: 'NO_ELIGIBLE_SE', mode, weightSetRef, companyTier: t.companyTier, deviceBucket: t.deviceBucket } as Prisma.InputJsonValue,
+            scoreBreakdown: {
+              reason: 'NO_ELIGIBLE_SE',
+              mode,
+              weightSetRef,
+              companyTier: t.companyTier,
+              deviceBucket: t.deviceBucket,
+              tierOverrideId: t.tierOverrideId,
+            } as Prisma.InputJsonValue,
             processingRank,
             status: 'UNASSIGNABLE',
             path: 'MORNING_BATCH',
@@ -317,6 +343,7 @@ export class RecommenderService {
               deviceBucket: t.deviceBucket,
               companyPriorityRank: t.companyPriorityRank,
               score: scored.score,
+              tierOverrideId: t.tierOverrideId,
             } as Prisma.InputJsonValue,
             processingRank,
             status: 'SUGGESTED',
@@ -442,7 +469,11 @@ export class RecommenderService {
    * under the PREVENTIVE aged-bias term. The recommender only *suggests* — the ZM override path (Issue 13)
    * remains the human approval/reorder step, so an install is never double-scheduled here.
    */
-  private async installBacklog(zoneId: bigint, day: Date): Promise<RunCandidate[]> {
+  private async installBacklog(
+    zoneId: bigint,
+    day: Date,
+    overrides: Map<string, ActiveOverride>,
+  ): Promise<RunCandidate[]> {
     const installs = await this.prisma.ticket.findMany({
       where: {
         workType: 'INSTALL',
@@ -459,10 +490,18 @@ export class RecommenderService {
       },
       include: { company: { select: { companyTier: true, companyPriorityRank: true } } },
     });
+    // Issue 157 AC-4 — the same zone-scoped override applies to the Install backlog: it reads the
+    // same live company join as the TROUBLESHOOT path above (the issue's evidence section flags
+    // both as the "two copies" tier is consumed from), so it must resolve the same way.
+    const effectiveTier = (t: (typeof installs)[number]) =>
+      overrides.get(tierOverrideKey(t.companyId, zoneId))?.tier ?? t.company.companyTier;
+    const tierOverrideId = (t: (typeof installs)[number]) =>
+      overrides.get(tierOverrideKey(t.companyId, zoneId))?.overrideId ?? null;
+
     const ordered = installSort(
       installs.map((t) => ({
         ticketId: t.ticketId,
-        companyTier: t.company.companyTier,
+        companyTier: effectiveTier(t),
         companyPriorityRank: t.company.companyPriorityRank,
         backlogAnchor: t.installTargetDate ?? t.createdAt,
       })),
@@ -473,11 +512,12 @@ export class RecommenderService {
       return {
         ticketId: t.ticketId,
         plantId: t.plantId,
-        companyTier: t.company.companyTier,
+        companyTier: effectiveTier(t),
         companyPriorityRank: t.company.companyPriorityRank,
         deviceBucket: null,
         repeatFailure: false,
         ageAnchor: c.backlogAnchor,
+        tierOverrideId: tierOverrideId(t),
       };
     });
   }

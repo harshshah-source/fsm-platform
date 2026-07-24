@@ -1,6 +1,6 @@
 # 157 — Company tier: global setting + scoped, expiring tier overrides (redesigned)
 
-Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1+S2 landed; S3 onward in progress)
+Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1+S2+S3 landed; S4 onward in progress)
 Type: AFK after go-ahead
 
 > **Review completed 2026-07-23 (interactive).** Q-A **stacking allowed** (operator choice, against
@@ -235,15 +235,17 @@ overrides exist).
       with two ACTIVE overrides on one pair, the newer provably wins (stacking-precedence pin).
       **DONE 2026-07-23 (S2)** — resolver built and pinned; engine wiring (recommender/ticket
       creation/scoreBreakdown/config_snapshot) is S3's "engine bite," not yet done.
-- [ ] AC-4: a ZM's PLATINUM override provably reorders that zone's dispatch (canonical-sort seam,
+- [x] AC-4: a ZM's PLATINUM override provably reorders that zone's dispatch (canonical-sort seam,
       asserted at the `runForZone` boundary) and is stamped in `scoreBreakdown`; other zones
-      unaffected; global tier unchanged in `company_master`.
+      unaffected; global tier unchanged in `company_master`. **DONE 2026-07-23 (S3).**
 - [ ] AC-5: expiry sweep flips status + writes `TIER_OVERRIDE_EXPIRED`; **no ticket re-stamp**
       (Q-B: live reads only — a test PINS that open tickets' stamped tier is untouched by override
       lifecycle events); behaviour identical whether the sweep has run or not (AC-3).
-- [ ] AC-6: `config_snapshot` includes active overrides; the monthly report read returns ALL active
-      overrides + reason + creator + expiry with the winning override per pair marked (Q-A),
-      zone-scoped for ZM.
+- [ ] AC-6: `config_snapshot` includes active overrides **(DONE 2026-07-23, S3)**; the monthly report
+      read returns ALL active overrides + reason + creator + expiry with the winning override per
+      pair marked (Q-A) **(still open — the S2 GET endpoint returns all matching rows and is
+      zone-scoped for ZM, but does not yet compute/mark which row is winning; lands with S5's report
+      UI or a small S3.5 follow-up, whichever slice touches the read next)**.
 - [ ] AC-7: admin UI (role-gated per role matrix; v2-reference/UI-discovery gate honoured) for
       create/cancel/list; the create dialog and report state the Q-B scope in copy ("affects
       dispatch ordering and newly created tickets; existing tickets keep their tier"); parity gate
@@ -272,8 +274,23 @@ overrides exist).
   resolver (`effective-tier.ts`, the #146 `deferral.ts` one-exported-predicate pattern) used for
   the audit's `prevEffectiveTier` and pinned directly (newest-wins, sweep-lag, cross-zone
   isolation) — engine wiring is still S3.
-- **S3 — effective-tier resolver + engine bite.** Resolver helper + recommender wiring +
-  ticket-creation stamp + `scoreBreakdown` + `config_snapshot`; the AC-4 reorder proof.
+- **S3 — effective-tier resolver + engine bite. DONE 2026-07-23.** Batched resolver additions to
+  `effective-tier.ts` (`resolveActiveOverrides` + `tierOverrideKey` — one query per zone-run rather
+  than per candidate); wired into the recommender's TROUBLESHOOT path AND the Install backlog (both
+  read the same live company join per the issue's "two copies" evidence), stamping
+  `scoreBreakdown.tierOverrideId` when an override applied; `ticket-creation.service.ts` now stamps
+  a new ticket's `company_tier` with the effective tier (batched plant→zone + override lookup for
+  the whole sweep); `dispatch-run.service.ts`'s `config_snapshot` now includes every ACTIVE,
+  unexpired override at run start (AC-6, config_snapshot half only — see AC-6 note). **Q-E resolved
+  by evidence, not by wiring:** grepped for every consumer of `sla_rule_config` scope=`company_tier`
+  — none exist yet (`sla-rules.service.ts` is admin CRUD only, `org-seed.ts` just seeds rows); there
+  is nothing to wire to effective tier because nothing reads it yet. AC-4 proven directly: a
+  same-zone Gold-vs-overridden-Silver pair reorders, the other zone and `company_master` stay
+  untouched. **Full backend: 302 files / 3 skipped (305); 1238 passed / 5 skipped (1243); exit 0**
+  (reconciles exactly: 299+3 files, 1232+6 tests). Also fixed a stale hand-rolled prisma stub in
+  `dispatch-run-containment.spec.ts` (missing the new `companyTierOverride.findMany` collaborator)
+  and removed one pre-existing orphaned test-DB fixture row (`device_id 9372001`, unrelated to this
+  issue) that was colliding with `recovery-decision-controller.e2e-spec.ts`.
 - **S4 — expiry sweep.** Sweep (env-gated, business-sweep family) + `TIER_OVERRIDE_EXPIRED` audit +
   AC-3 sweep-lag pin + the AC-5 no-re-stamp pin (Q-B). Smaller than originally scoped — no ticket
   writes.
