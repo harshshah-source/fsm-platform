@@ -1,6 +1,6 @@
 # 157 — Company tier: global setting + scoped, expiring tier overrides (redesigned)
 
-Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1+S2+S3+S4 landed; S5 UI + monthly report (AC-6 winning-mark/AC-7) + AC-8/AC-9 docs remain)
+Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1+S2+S3+S4+S5 landed; S6 remains: AC-9 (#158 zoneChangeImpact + Plant Zones dialog name active overrides) + AC-8 (CONTEXT.md/PRD extended-authority update))
 Type: AFK after go-ahead
 
 > **Review completed 2026-07-23 (interactive).** Q-A **stacking allowed** (operator choice, against
@@ -241,15 +241,19 @@ overrides exist).
 - [x] AC-5: expiry sweep flips status + writes `TIER_OVERRIDE_EXPIRED`; **no ticket re-stamp**
       (Q-B: live reads only — a test PINS that open tickets' stamped tier is untouched by override
       lifecycle events); behaviour identical whether the sweep has run or not (AC-3). **DONE 2026-07-27 (S4).**
-- [ ] AC-6: `config_snapshot` includes active overrides **(DONE 2026-07-23, S3)**; the monthly report
+- [x] AC-6: `config_snapshot` includes active overrides **(DONE 2026-07-23, S3)**; the monthly report
       read returns ALL active overrides + reason + creator + expiry with the winning override per
-      pair marked (Q-A) **(still open — the S2 GET endpoint returns all matching rows and is
-      zone-scoped for ZM, but does not yet compute/mark which row is winning; lands with S5's report
-      UI or a small S3.5 follow-up, whichever slice touches the read next)**.
-- [ ] AC-7: admin UI (role-gated per role matrix; v2-reference/UI-discovery gate honoured) for
+      pair marked (Q-A) **(DONE 2026-07-27, S5 — `GET /api/org/tier-overrides` now returns `isWinning`
+      per row, computed by reusing the shared resolver `resolveActiveOverrides` so the mark matches
+      what the engine applies; resolved against the whole table, so a `month`-filtered or
+      ACTIVE-but-expired row is never falsely marked winning)**.
+- [x] AC-7: admin UI (role-gated per role matrix; v2-reference/UI-discovery gate honoured) for
       create/cancel/list; the create dialog and report state the Q-B scope in copy ("affects
       dispatch ordering and newly created tickets; existing tickets keep their tier"); parity gate
-      applies — no silent UI deferral.
+      applies — no silent UI deferral. **DONE 2026-07-27 (S5)** — standalone role-variant page (ZM
+      own-zone locked, CSM/OH zone picker) at `/tier-overrides`, RoleRoute + nav gated to ZM/CSM/OH;
+      the v2 reference has no such surface and Settings is OH-only, so a documented discrepancy
+      mirroring #158's Plant Zones (no silent deferral).
 - [ ] AC-9: #158's `zoneChangeImpact` + Plant Zones confirm dialog name active tier overrides for
       the plant's companies in old and new zone (Q-D).
 - [ ] AC-8: CONTEXT.md/PRD updated to record the extended authority (OH global; CSM/ZM scoped +

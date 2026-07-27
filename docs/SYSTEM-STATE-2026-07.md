@@ -464,6 +464,17 @@ DEFICIT, else PREVENTIVE (#40); PREVENTIVE appends the INSTALL backlog (REQUESTE
 **Candidate order per plant** (ADR-0001, `candidate-selection.service.ts:13-17`): strict precedence
 DEDICATED → MULTI_PLANT (both `se_coverage`) → FLOATING (`plant_eligible_floating_se` MV), fallback
 to next tier when hard-filtered out.
+**Effective company tier** (#157, S1–S5): the tier driving canonical sort key 1 is the *effective*
+tier from the shared resolver `effective-tier.ts` — the newest ACTIVE, **unexpired**
+`company_tier_overrides` row for the candidate's (company, zone) (stacking allowed, newest-wins),
+else the global `companies.company_tier`. CSM/ZM create these scoped, expiring overrides (mandatory
+reason, ≤2-month expiry) at the role-variant **Tier Overrides** admin page
+(`apps/admin/src/pages/admin/TierOverridesPage.tsx`, route `/tier-overrides`; ZM own-zone, CSM/OH any
+zone), which doubles as the monthly report and badges the live winning override per pair. Reads
+predicate on `expires_at`, never the swept `status`, so an override goes inert the instant it expires
+regardless of the hourly `business-tier-override-expiry` sweep (§3g). Ticket creation stamps the
+effective tier onto `tickets.company_tier`; existing tickets are never re-stamped (Q-B, live reads
+only). **CONTEXT.md/PRD authority note (OH global; CSM/ZM scoped) still lands in S6 (AC-8).**
 **Hard filters** (`hard-filters.ts:40-47`, first-failure-wins) and their **actual data feed**
 (`recommender.service.ts:147-157`):
 
