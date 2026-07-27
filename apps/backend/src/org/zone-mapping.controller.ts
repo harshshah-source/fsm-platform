@@ -103,10 +103,19 @@ export class ZoneMappingAdminController {
     );
   }
 
-  /** What a pending zone change will affect — shown before the admin confirms it (#158 AC-6). */
+  /**
+   * What a pending zone change will affect — shown before the admin confirms it (#158 AC-6). When
+   * `targetZoneId` is supplied, also names the tier overrides that move detaches/attaches (#157 AC-9).
+   */
   @Get('plant-zone-overrides/:sourcePlantId/impact')
-  zoneChangeImpact(@Param('sourcePlantId') sourcePlantId: string): Promise<ZoneChangeImpact> {
-    return this.zoneMappings.zoneChangeImpact(parseBigId(sourcePlantId, 'sourcePlantId'));
+  zoneChangeImpact(
+    @Param('sourcePlantId') sourcePlantId: string,
+    @Query('targetZoneId') targetZoneId?: string,
+  ): Promise<ZoneChangeImpact> {
+    return this.zoneMappings.zoneChangeImpact(
+      parseBigId(sourcePlantId, 'sourcePlantId'),
+      targetZoneId !== undefined && targetZoneId !== '' ? parseBigId(targetZoneId, 'targetZoneId') : undefined,
+    );
   }
 
   @Delete('plant-zone-overrides/:sourcePlantId')

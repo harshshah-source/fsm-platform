@@ -23,8 +23,10 @@ describe('#158 — zone change impact probe', () => {
   let service: ZoneMappingService;
 
   let eastId: bigint;
+  let southId: bigint;
   let plantId: bigint;
   let companyId: bigint;
+  let otherCompanyId: bigint;
   let seId: string;
 
   const cleanup = async (): Promise<void> => {
@@ -33,6 +35,9 @@ describe('#158 — zone change impact probe', () => {
     await prisma.workSchedule.deleteMany({ where: { seId } }).catch(() => undefined);
     await prisma.engineerMaster.deleteMany({ where: { engineerId: seId } }).catch(() => undefined);
     await prisma.deviceState.deleteMany({ where: { deviceId: DEVICE_ID } });
+    await prisma.companyTierOverride
+      .deleteMany({ where: { companyId: { in: [companyId, otherCompanyId].filter((v) => v != null) } } })
+      .catch(() => undefined);
     await prisma.ticket.deleteMany({ where: { plant: { sourcePlantId: SRC_PLANT } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: DEVICE_ID } });
     await prisma.device.deleteMany({ where: { deviceId: DEVICE_ID } });
@@ -40,6 +45,7 @@ describe('#158 — zone change impact probe', () => {
     await prisma.plant.deleteMany({ where: { sourcePlantId: SRC_PLANT } });
     await prisma.user.deleteMany({ where: { email: `impact-se-${NS}@fsm.test` } });
     await prisma.company.deleteMany({ where: { name: `Impact Co ${NS}` } });
+    await prisma.company.deleteMany({ where: { name: `Impact Other Co ${NS}` } });
   };
 
   beforeAll(async () => {
@@ -110,6 +116,43 @@ describe('#158 — zone change impact probe', () => {
     await prisma.batchAssignmentTicket.create({
       data: { batchId: batch.batchId, ticketId: ticket.ticketId, sortOrder: 1 },
     });
+
+    // #157 S6 (AC-9) fixtures: overrides that a zone move would detach/attach for the plant's company.
+    const south = await prisma.zone.upsert({ where: { name: 'South' }, create: { name: 'South' }, update: {} });
+    southId = south.zoneId;
+    const now = Date.now();
+    // Current-zone (East) winning override for the plant's open-ticket company — should DETACH on a move.
+    await prisma.companyTierOverride.create({
+      data: {
+        companyId, zoneId: eastId, tier: 'PLATINUM', reason: 'east override on the plant company',
+        status: 'ACTIVE', createdAt: new Date(now - 60 * 60 * 1000), expiresAt: new Date(now + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+    // An expired East override for the same company — must be excluded (reads predicate on expiresAt).
+    await prisma.companyTierOverride.create({
+      data: {
+        companyId, zoneId: eastId, tier: 'SILVER', reason: 'expired east override must not surface',
+        status: 'ACTIVE', createdAt: new Date(now - 3 * 60 * 60 * 1000), expiresAt: new Date(now - 60 * 1000),
+      },
+    });
+    // Target-zone (South) override for the plant's company — should ATTACH after a move to South.
+    await prisma.companyTierOverride.create({
+      data: {
+        companyId, zoneId: southId, tier: 'SILVER', reason: 'south override that would start applying',
+        status: 'ACTIVE', createdAt: new Date(now - 60 * 60 * 1000), expiresAt: new Date(now + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+    // A DIFFERENT company with no open ticket at this plant — its East override must be excluded (stake filter).
+    const other = await prisma.company.create({
+      data: { name: `Impact Other Co ${NS}`, companyTier: 'SILVER', companyPriorityRank: 'C' },
+    });
+    otherCompanyId = other.companyId;
+    await prisma.companyTierOverride.create({
+      data: {
+        companyId: otherCompanyId, zoneId: eastId, tier: 'PLATINUM', reason: 'other company override, no stake here',
+        status: 'ACTIVE', createdAt: new Date(now - 60 * 60 * 1000), expiresAt: new Date(now + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
   });
 
   afterAll(async () => {
@@ -131,5 +174,24 @@ describe('#158 — zone change impact probe', () => {
 
   it('404s for a plant that was never synced from AutoPlant', async () => {
     await expect(service.zoneChangeImpact(99999999n)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('names the winning active overrides for the plant’s open-ticket companies in the current and target zone (#157 S6, AC-9)', async () => {
+    const impact = await service.zoneChangeImpact(SRC_PLANT, southId);
+
+    // Current zone (East): the winning override detaching on a move — expired and non-stakeholder rows excluded.
+    expect(impact.currentZoneOverrides).toEqual([
+      { companyId: Number(companyId), companyName: `Impact Co ${NS}`, tier: 'PLATINUM' },
+    ]);
+    // Target zone (South): the override that would start applying after the move.
+    expect(impact.targetZoneOverrides).toEqual([
+      { companyId: Number(companyId), companyName: `Impact Co ${NS}`, tier: 'SILVER' },
+    ]);
+  });
+
+  it('returns no target-zone overrides when no target zone is supplied', async () => {
+    const impact = await service.zoneChangeImpact(SRC_PLANT);
+    expect(impact.targetZoneOverrides).toEqual([]);
+    expect(impact.currentZoneOverrides.map((o) => o.tier)).toEqual(['PLATINUM']);
   });
 });

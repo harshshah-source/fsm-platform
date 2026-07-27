@@ -16,6 +16,13 @@ export interface PlantZoneOverrideRow {
   reason: string | null;
 }
 
+/** A company's live winning tier override in one zone — what a plant move detaches or attaches (#157 AC-9). */
+export interface TierOverrideBrief {
+  companyId: number;
+  companyName: string;
+  tier: string;
+}
+
 export interface ZoneChangeImpact {
   plantName: string;
   currentZoneName: string | null;
@@ -23,6 +30,10 @@ export interface ZoneChangeImpact {
   openTicketCount: number;
   /** Tickets already on a live day plan today. These re-scope, but the PLAN stays under the old zone. */
   dispatchedTodayCount: number;
+  /** Overrides on the plant's open-ticket companies in the CURRENT zone — these stop applying on a move (#157 AC-9). */
+  currentZoneOverrides: TierOverrideBrief[];
+  /** Same, in the destination zone (populated once a target is chosen) — these start applying after the move. */
+  targetZoneOverrides: TierOverrideBrief[];
 }
 
 export interface ReapplyResult {
@@ -44,9 +55,14 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export const listPlantZoneOverrides = () =>
   req<PlantZoneOverrideRow[]>('/org/plant-zone-overrides');
 
-/** What a pending zone change will re-scope — shown before the admin confirms. */
-export const getZoneChangeImpact = (sourcePlantId: string) =>
-  req<ZoneChangeImpact>(`/org/plant-zone-overrides/${sourcePlantId}/impact`);
+/**
+ * What a pending zone change will re-scope — shown before the admin confirms. Pass `targetZoneId` to
+ * also learn which tier overrides the move would attach in the destination zone (#157 AC-9).
+ */
+export const getZoneChangeImpact = (sourcePlantId: string, targetZoneId?: number) =>
+  req<ZoneChangeImpact>(
+    `/org/plant-zone-overrides/${sourcePlantId}/impact${targetZoneId != null ? `?targetZoneId=${targetZoneId}` : ''}`,
+  );
 
 /** Pin a plant to a zone. `reason` is mandatory — the row is overwritten on re-pin, so it survives only in audit_logs. */
 export const setPlantZoneOverride = (sourcePlantId: string, fsmZoneId: number, reason: string) =>

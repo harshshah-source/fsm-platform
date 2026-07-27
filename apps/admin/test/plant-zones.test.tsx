@@ -51,6 +51,8 @@ let impact = {
   deviceCount: 200,
   openTicketCount: 12,
   dispatchedTodayCount: 0,
+  currentZoneOverrides: [] as Array<{ companyId: number; companyName: string; tier: string }>,
+  targetZoneOverrides: [] as Array<{ companyId: number; companyName: string; tier: string }>,
 };
 
 const json = (body: unknown) =>
@@ -84,6 +86,8 @@ beforeEach(() => {
     deviceCount: 200,
     openTicketCount: 12,
     dispatchedTodayCount: 0,
+    currentZoneOverrides: [],
+    targetZoneOverrides: [],
   };
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => route(String(url), init));
   vi.stubGlobal('fetch', fetchMock);
@@ -187,6 +191,28 @@ describe('Plant Zones page (#158)', () => {
     expect(warning).toHaveTextContent(/3/);
     expect(warning).toHaveTextContent(/day plan/i);
     expect(warning).toHaveTextContent(/UNZONED/); // stays under the zone it was dispatched in
+  });
+
+  it('names the tier overrides a zone move detaches and attaches, re-fetching impact for the chosen zone (#157 AC-9)', async () => {
+    impact = {
+      ...impact,
+      currentZoneOverrides: [{ companyId: 10, companyName: 'Acme Cement', tier: 'PLATINUM' }],
+      targetZoneOverrides: [{ companyId: 10, companyName: 'Acme Cement', tier: 'SILVER' }],
+    };
+    render(<PlantZonesPage />);
+    await userEvent.click(await screen.findByTestId('change-zone-5001'));
+    await userEvent.selectOptions(await screen.findByTestId('zone-select'), '4');
+
+    const warn = await screen.findByTestId('tier-override-reattach-warning');
+    expect(warn).toHaveTextContent(/stop applying/i);
+    expect(warn).toHaveTextContent(/Acme Cement → PLATINUM/);
+    expect(warn).toHaveTextContent(/start applying/i);
+    expect(warn).toHaveTextContent(/Acme Cement → SILVER/);
+
+    // The destination-zone overrides require a re-fetch keyed by the chosen zone.
+    await waitFor(() =>
+      expect(callsTo('/impact').some(([url]) => String(url).includes('targetZoneId=4'))).toBe(true),
+    );
   });
 
   it('clears an override and reapplies so the plant falls back to the crosswalk', async () => {

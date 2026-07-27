@@ -216,13 +216,15 @@ function ChangeZoneDialog({
 
   useEffect(() => {
     let live = true;
-    getZoneChangeImpact(plant.sourcePlantId!)
+    // Re-fetch when a zone is picked so the impact can name the overrides the destination zone attaches
+    // (#157 AC-9), not just those the current zone detaches.
+    getZoneChangeImpact(plant.sourcePlantId!, zoneId ? Number(zoneId) : undefined)
       .then((i) => live && setImpact(i))
       .catch(() => undefined); // the blast-radius read is advisory; never block the edit on it
     return () => {
       live = false;
     };
-  }, [plant.sourcePlantId]);
+  }, [plant.sourcePlantId, zoneId]);
 
   const submit = async () => {
     if (!zoneId) {
@@ -284,6 +286,28 @@ function ChangeZoneDialog({
           today. Those tickets will move with the plant, but the day plan itself stays under{' '}
           <strong>{impact.currentZoneName ?? '—'}</strong> — the zone it was dispatched in. Until
           tomorrow's run, one ZM holds the plan and the other sees the tickets.
+        </div>
+      )}
+
+      {impact != null && (impact.currentZoneOverrides.length > 0 || impact.targetZoneOverrides.length > 0) && (
+        <div
+          data-testid="tier-override-reattach-warning"
+          role="alert"
+          className="mb-3 rounded-md border border-warning/30 bg-warning-bg px-3 py-2 text-sm text-warning"
+        >
+          {impact.currentZoneOverrides.length > 0 && (
+            <p>
+              Active tier overrides in <strong>{plant.zoneName ?? 'the current zone'}</strong> that will{' '}
+              <strong>stop applying</strong>:{' '}
+              {impact.currentZoneOverrides.map((o) => `${o.companyName} → ${o.tier}`).join('; ')}.
+            </p>
+          )}
+          {impact.targetZoneOverrides.length > 0 && (
+            <p className={impact.currentZoneOverrides.length > 0 ? 'mt-1' : undefined}>
+              Active tier overrides in the destination zone that will <strong>start applying</strong>:{' '}
+              {impact.targetZoneOverrides.map((o) => `${o.companyName} → ${o.tier}`).join('; ')}.
+            </p>
+          )}
         </div>
       )}
 

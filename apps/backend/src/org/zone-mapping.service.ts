@@ -10,6 +10,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { utcDayStart } from '../common/utc-day';
+import { resolveActiveOverrides, tierOverrideKey } from './effective-tier';
 
 export interface ZoneMappingView {
   id: string;
@@ -37,12 +38,23 @@ export interface PlantZoneOverrideView {
  * the zone at dispatch time and stay under the OLD zone, so a mid-day move splits today's picture —
  * the old zone's ZM keeps the day plan while the new zone's ZM sees the tickets.
  */
+/** A company's live winning tier override in one zone — what a plant move detaches or attaches (#157 AC-9). */
+export interface TierOverrideBrief {
+  companyId: number;
+  companyName: string;
+  tier: string;
+}
+
 export interface ZoneChangeImpact {
   plantName: string;
   currentZoneName: string | null;
   deviceCount: number;
   openTicketCount: number;
   dispatchedTodayCount: number;
+  /** Winning active overrides for the plant's open-ticket companies in the CURRENT zone — these stop applying on a move (#157 AC-9). */
+  currentZoneOverrides: TierOverrideBrief[];
+  /** Same, in the TARGET zone (when one is supplied) — these start applying after the move. Empty otherwise. */
+  targetZoneOverrides: TierOverrideBrief[];
 }
 
 export interface ReapplyResult {
@@ -180,8 +192,14 @@ export class ZoneMappingService {
     );
   }
 
-  /** Blast radius of a pending zone change, for the admin confirmation step. Unknown plant → 404. */
-  async zoneChangeImpact(sourcePlantId: bigint): Promise<ZoneChangeImpact> {
+  /**
+   * Blast radius of a pending zone change, for the admin confirmation step. Unknown plant → 404.
+   * When `targetZoneId` is supplied, also names the tier overrides that a move would detach (current
+   * zone) and attach (target zone) for the plant's open-ticket companies (#157 AC-9) — overrides are
+   * keyed (company, zone), so a plant's zone move silently re-attaches them, and the admin should see
+   * that before confirming.
+   */
+  async zoneChangeImpact(sourcePlantId: bigint, targetZoneId?: bigint): Promise<ZoneChangeImpact> {
     const plant = await this.prisma.plant.findUnique({
       where: { sourcePlantId },
       include: { zone: { select: { name: true } } },
@@ -189,7 +207,7 @@ export class ZoneMappingService {
     if (!plant) throw new NotFoundException(`No synced plant with source id ${sourcePlantId}`);
 
     const day = utcDayStart(new Date());
-    const [deviceCount, openTicketCount, dispatchedTodayCount] = await Promise.all([
+    const [deviceCount, openTicketCount, dispatchedTodayCount, openTicketCompanies] = await Promise.all([
       this.prisma.device.count({ where: { currentVehicle: { plantId: plant.plantId } } }),
       this.prisma.ticket.count({ where: { plantId: plant.plantId, status: 'OPEN' } }),
       this.prisma.batchAssignmentTicket.count({
@@ -201,7 +219,18 @@ export class ZoneMappingService {
           },
         },
       }),
+      this.prisma.ticket.findMany({
+        where: { plantId: plant.plantId, status: 'OPEN' },
+        select: { companyId: true },
+        distinct: ['companyId'],
+      }),
     ]);
+
+    const { currentZoneOverrides, targetZoneOverrides } = await this.overrideBriefs(
+      openTicketCompanies.map((t) => t.companyId),
+      plant.zoneId,
+      targetZoneId,
+    );
 
     return {
       plantName: plant.name,
@@ -209,7 +238,46 @@ export class ZoneMappingService {
       deviceCount,
       openTicketCount,
       dispatchedTodayCount,
+      currentZoneOverrides,
+      targetZoneOverrides,
     };
+  }
+
+  /**
+   * The winning active override per (company, zone) for the given companies, split by current vs target
+   * zone. Winner is resolved by the SHARED predicate {@link resolveActiveOverrides} (newest ACTIVE,
+   * unexpired) so this warning names exactly what the recommender would apply — never a stale/expired row.
+   */
+  private async overrideBriefs(
+    companyIds: bigint[],
+    currentZoneId: bigint,
+    targetZoneId?: bigint,
+  ): Promise<{ currentZoneOverrides: TierOverrideBrief[]; targetZoneOverrides: TierOverrideBrief[] }> {
+    if (companyIds.length === 0) return { currentZoneOverrides: [], targetZoneOverrides: [] };
+
+    const zoneIds = targetZoneId != null && targetZoneId !== currentZoneId ? [currentZoneId, targetZoneId] : [currentZoneId];
+    const winners = await resolveActiveOverrides(this.prisma, zoneIds, new Date());
+
+    const pick = (zoneId: bigint): Array<{ companyId: bigint; tier: string }> =>
+      companyIds.flatMap((companyId) => {
+        const w = winners.get(tierOverrideKey(companyId, zoneId));
+        return w ? [{ companyId, tier: w.tier }] : [];
+      });
+    const current = pick(currentZoneId);
+    const target = targetZoneId != null ? pick(targetZoneId) : [];
+
+    const named = new Set<bigint>([...current, ...target].map((x) => x.companyId));
+    const companies = named.size
+      ? await this.prisma.company.findMany({ where: { companyId: { in: [...named] } }, select: { companyId: true, name: true } })
+      : [];
+    const nameById = new Map(companies.map((c) => [c.companyId, c.name]));
+    const toBrief = (x: { companyId: bigint; tier: string }): TierOverrideBrief => ({
+      companyId: Number(x.companyId),
+      companyName: nameById.get(x.companyId) ?? '',
+      tier: x.tier,
+    });
+
+    return { currentZoneOverrides: current.map(toBrief), targetZoneOverrides: target.map(toBrief) };
   }
 
   async deleteOverride(sourcePlantId: bigint, actor: RequestActor): Promise<void> {
