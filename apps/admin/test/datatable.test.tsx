@@ -88,6 +88,7 @@ describe('DataTable shared primitive', () => {
 
   it('pins the header cells when stickyHeader is set', () => {
     renderTable({ stickyHeader: true });
+    // First columnheader is now the leading S.No. column — still sticky, same as every other header.
     const header = within(screen.getByRole('table')).getAllByRole('columnheader')[0];
     expect(header.className).toMatch(/sticky/);
   });
@@ -124,5 +125,63 @@ describe('DataTable shared primitive', () => {
     // animation-duration app-wide; the primitive only needs to opt into that animation class.
     const { container } = render(<Skeleton className="h-4 w-24" />);
     expect(container.firstChild).toHaveClass('animate-pulse');
+  });
+});
+
+describe('S.No. column', () => {
+  it('renders as the leftmost header, numbering the visible rows from 1', () => {
+    renderTable();
+    const headers = within(screen.getByRole('table')).getAllByRole('columnheader');
+    expect(headers[0]).toHaveTextContent('S.No.');
+    const bodyRows = screen.getAllByRole('row').slice(1);
+    expect(within(bodyRows[0]).getAllByRole('cell')[0]).toHaveTextContent('1');
+    expect(within(bodyRows[1]).getAllByRole('cell')[0]).toHaveTextContent('2');
+  });
+
+  it('re-numbers 1..n after a sort instead of pinning to the underlying row', async () => {
+    const sortableColumns: Column<Row>[] = [
+      columns[0],
+      { ...columns[1], sortable: true, sortValue: (r) => r.count },
+    ];
+    renderTable({ columns: sortableColumns });
+    const countHeader = screen.getByRole('columnheader', { name: /count/i });
+    await userEvent.click(countHeader); // asc: Alpha(3), Beta(7) — unchanged order
+    await userEvent.click(countHeader); // desc: Beta(7), Alpha(3) — order flips
+    const bodyRows = screen.getAllByRole('row').slice(1);
+    // Beta (count 7) now sorts to row 1, but S.No. still reads 1, 2 top-to-bottom.
+    expect(bodyRows[0]).toHaveTextContent('Beta');
+    expect(within(bodyRows[0]).getAllByRole('cell')[0]).toHaveTextContent('1');
+    expect(within(bodyRows[1]).getAllByRole('cell')[0]).toHaveTextContent('2');
+  });
+
+  it('accounts for the S.No. column in the expansion panel colSpan', async () => {
+    renderTable({ renderExpanded: (r) => <div>Detail for {r.name}</div> });
+    await userEvent.click(screen.getByText('Alpha').closest('tr')!);
+    const panelCell = screen.getByText('Detail for Alpha').closest('td')!;
+    expect(panelCell).toHaveAttribute('colspan', String(columns.length + 2));
+  });
+
+  it('accounts for the S.No. column in the empty-state colSpan', () => {
+    renderTable({ rows: [] });
+    const emptyCell = screen.getByRole('table').querySelector('tbody tr td')!;
+    expect(emptyCell).toHaveAttribute('colspan', String(columns.length + 1));
+  });
+
+  it('applies snoOffset for the one server-paged table', () => {
+    renderTable({ snoOffset: 100 });
+    const bodyRows = screen.getAllByRole('row').slice(1);
+    expect(within(bodyRows[0]).getAllByRole('cell')[0]).toHaveTextContent('101');
+  });
+
+  it('keeps the loading skeleton row cell count equal to a real row', () => {
+    const { container } = renderTable({ loading: true, rows: [] });
+    const skeletonCellCount = container.querySelectorAll('tbody tr:first-child td').length;
+    expect(skeletonCellCount).toBe(columns.length + 1);
+  });
+
+  it('omits the leading column entirely when serialNumbers is false', () => {
+    renderTable({ serialNumbers: false });
+    const headers = within(screen.getByRole('table')).getAllByRole('columnheader');
+    expect(headers[0]).toHaveTextContent('Name');
   });
 });

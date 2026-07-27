@@ -60,6 +60,13 @@ interface DataTableProps<T> {
    * Rows for which this returns null render normally with no chevron.
    */
   renderExpanded?: (row: T) => ReactNode;
+  /** Leading "S.No." column numbering the current sorted/filtered view from 1. Default `true`. */
+  serialNumbers?: boolean;
+  /**
+   * Added to the 1-based row index before display — for the one table that pages server-side, so
+   * page 2 reads 101..200 instead of re-starting at 1. Default `0`; every other table leaves it unset.
+   */
+  snoOffset?: number;
 }
 
 /**
@@ -85,6 +92,8 @@ export function DataTable<T>({
   maxBodyHeight = '70vh',
   tableLayout = 'auto',
   renderExpanded,
+  serialNumbers = true,
+  snoOffset = 0,
 }: DataTableProps<T>) {
   const isFixed = tableLayout === 'fixed';
   // Fixed layout tightens padding and (below) lets headers/cells wrap so many columns fit the width.
@@ -97,8 +106,11 @@ export function DataTable<T>({
       next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
-  // Total column count including the trailing chevron cell — used for full-width state/expansion rows.
-  const totalCols = columns.length + (renderExpanded ? 1 : 0);
+  // Total column count including the S.No. and trailing chevron cells — used for full-width
+  // state/expansion rows.
+  const totalCols = columns.length + (serialNumbers ? 1 : 0) + (renderExpanded ? 1 : 0);
+  const stickyHeaderCellClass =
+    stickyHeader && 'sticky top-0 z-10 bg-chrome-900 shadow-[inset_0_-1px_0_var(--color-chrome-700)]';
   // The active row auto-scrolls into view exactly once per row key — not on every re-render, or the
   // table would fight the user's own scrolling on each data refresh.
   const scrolledActiveKey = useRef<string | null>(null);
@@ -135,6 +147,7 @@ export function DataTable<T>({
         >
           {isFixed && (
             <colgroup>
+              {serialNumbers && <col style={{ width: '3.5rem' }} />}
               {columns.map((c) => (
                 <col key={c.key} style={c.width ? { width: c.width } : undefined} />
               ))}
@@ -143,6 +156,18 @@ export function DataTable<T>({
           )}
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900 text-left">
+              {serialNumbers && (
+                <th
+                  className={cn(
+                    cellPad,
+                    'w-14 text-right text-[11px] font-bold uppercase tracking-wider text-white tabular-nums',
+                    isFixed ? 'align-bottom' : 'whitespace-nowrap',
+                    stickyHeaderCellClass,
+                  )}
+                >
+                  S.No.
+                </th>
+              )}
               {columns.map((c) => (
                 <th
                   key={c.key}
@@ -186,8 +211,13 @@ export function DataTable<T>({
             {loading &&
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={`sk-${i}`} className="border-b border-line/80 last:border-b-0">
-                  {columns.map((c) => (
+                  {serialNumbers && (
                     // Match the real row's padding exactly so there is no jump on loading → loaded.
+                    <td className={cn(cellPad, 'text-right')}>
+                      <Skeleton className="ml-auto h-4 w-6" />
+                    </td>
+                  )}
+                  {columns.map((c) => (
                     <td key={c.key} className={cn(cellPad, c.align === 'right' && 'text-right')}>
                       <Skeleton className={cn('h-4 w-24', c.align === 'right' && 'ml-auto')} />
                     </td>
@@ -213,7 +243,7 @@ export function DataTable<T>({
 
             {!loading &&
               !error &&
-              sorted.map((row) => {
+              sorted.map((row, index) => {
                 const key = rowKey(row);
                 const accent = rowAccent?.(row);
                 const active = rowActive?.(row) ?? false;
@@ -268,6 +298,13 @@ export function DataTable<T>({
                             : 'bg-info-bg/60 hover:bg-info-bg/60 shadow-[inset_3px_0_0_var(--color-info)]'),
                       )}
                     >
+                      {serialNumbers && (
+                        <td
+                          className={cn(cellPad, 'align-middle text-right text-ink tabular-nums')}
+                        >
+                          {snoOffset + index + 1}
+                        </td>
+                      )}
                       {columns.map((c) => (
                         <td
                           key={c.key}

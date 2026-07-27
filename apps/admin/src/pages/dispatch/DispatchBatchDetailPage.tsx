@@ -53,6 +53,7 @@ export function DispatchBatchDetailPage() {
 
   // Widths drive the fixed table layout (`tableLayout="fixed"` below) so all 11 columns fit the card and
   // the operator never scrolls sideways; long ids/names wrap (`break-all` on the mono id columns).
+  // Re-proportioned down from the pre-#160 98% total to leave room for the leading 3.5rem S.No. column.
   const columns: Column<DispatchAssignmentRow>[] = [
     {
       key: 'device',
@@ -79,7 +80,7 @@ export function DispatchBatchDetailPage() {
     {
       key: 'imsiNo',
       header: 'IMSI No',
-      width: '11%',
+      width: '9%',
       className: 'break-all',
       render: (r) => (r.imsiNo ? <span className="font-mono text-xs tabular-nums">{r.imsiNo}</span> : <span className="text-ink-muted">—</span>),
     },
@@ -108,7 +109,7 @@ export function DispatchBatchDetailPage() {
     {
       key: 'tripCreation',
       header: 'Trip Creation Date Time',
-      width: '10%',
+      width: '9%',
       render: (r) => <span className="tabular-nums">{formatDateTimeWithYear(r.tripCreationDatetime)}</span>,
     },
     { key: 'ticket', header: 'Ticket', width: '6%', render: (r) => <Badge tone="neutral">{r.ticketStatus}</Badge> },

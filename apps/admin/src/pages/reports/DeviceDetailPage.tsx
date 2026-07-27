@@ -202,7 +202,7 @@ export function DeviceDetailPage() {
   // so no per-row fetch. Plant short codes (e.g. ACP-9106) are displayed verbatim (source-data issue).
   // Widths drive the fixed table layout (`tableLayout="fixed"` on the DataTable below) so all 11 columns
   // fit the page and the operator never scrolls sideways; long ids/names wrap (`break-all` on the mono
-  // id columns). Percentages sum to ~100%.
+  // id columns). Re-proportioned down from 100% (#160) to leave room for the leading 3.5rem S.No. column.
   const listColumns: Column<DeviceListRow>[] = [
     {
       key: 'deviceId',
@@ -218,7 +218,7 @@ export function DeviceDetailPage() {
     {
       key: 'imsiNo',
       header: 'IMSI No',
-      width: '10%',
+      width: '8%',
       className: 'break-all',
       render: (r) => (r.imsiNo ? <span className="tabular-nums">{r.imsiNo}</span> : '—'),
     },
@@ -237,7 +237,7 @@ export function DeviceDetailPage() {
     {
       key: 'tripCreationDatetime',
       header: 'Trip Creation Date Time',
-      width: '10%',
+      width: '8%',
       render: (r) => <span className="tabular-nums text-ink">{formatDateTimeWithYear(r.tripCreationDatetime)}</span>,
     },
     {
@@ -425,6 +425,7 @@ export function DeviceDetailPage() {
           rowTestId={(r) => `dev-row-${r.deviceId}`}
           ariaLabel="Device list"
           tableLayout="fixed"
+          snoOffset={page * PAGE_SIZE}
           onRowClick={select}
           // A failed load must read as a failure with a Retry — never as "no devices" (Issue 122b:
           // an operator saw the empty state while the backend was mid-restart and reported a bug).

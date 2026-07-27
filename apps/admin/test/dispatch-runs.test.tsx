@@ -77,7 +77,9 @@ describe('Dispatch Runs — runs list (Issue 123)', () => {
     expect(cron.getByText('Automatic')).toBeInTheDocument();
     expect(cron.getByText('PARTIAL')).toBeInTheDocument();
     expect(cron.getByText('40')).toBeInTheDocument(); // unassignable
-    expect(cron.getByText('2')).toBeInTheDocument(); // errors
+    // Scoped to the errors cell's distinctive styling — S.No. #160 also renders a bare "2" (this row's
+    // own serial number) that a plain getByText('2') would now ambiguously match.
+    expect(cron.getByText('2', { selector: '.text-critical' })).toBeInTheDocument(); // errors
   });
 
   it('exposes the manager-scoped Dispatch Runs nav entry', () => {
