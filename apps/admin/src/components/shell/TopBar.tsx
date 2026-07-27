@@ -1,42 +1,13 @@
 import { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthProvider';
 import { emitIngestionComplete } from '../../pages/dashboard/ingestionEvents';
 import { RunIngestionButton } from '../../pages/dashboard/RunIngestionButton';
 import { Button } from '../ui/Button';
 import { IconBell, IconMenu, IconPlus, IconSearch } from '../ui/icons';
+import { resolveBreadcrumb } from './breadcrumb';
 import { useSidebar } from './SidebarContext';
 import { ROLE_LABEL } from './nav';
-
-// Breadcrumb current-page label by route prefix (longest match wins). Chrome only — no behaviour.
-const PAGE_TITLES: [string, string][] = [
-  ['/tickets', 'Tickets'],
-  ['/schedules', 'Schedules'],
-  ['/intraday', 'Intra-day Queue'],
-  ['/engineers/planner', 'SE Planner'],
-  ['/engineers', 'SE Activity'],
-  ['/leave-requests', 'Leave Requests'],
-  ['/verification', 'Verification Review'],
-  ['/readiness/vehicle-unavailability', 'Readiness & Vehicle Availability'],
-  ['/readiness/non-operational', 'Non-Operational'],
-  ['/readiness/recovery-decisions', 'Recovery Decisions'],
-  ['/component-blocked', 'Component Blocked Queue'],
-  ['/component-requests', 'Component Requests'],
-  ['/warehouse/requests', 'Component Requests'],
-  ['/warehouse/shadow-use', 'Shadow Use Queue'],
-  ['/warehouse/recovery-receipt', 'Recovery Receipt'],
-  ['/coverage', 'Coverage'],
-  ['/reports/csm-approval-share', 'CSM Backup Share'],
-  ['/reports/fleet', 'Fleet Directory'],
-  ['/help', 'Help Center'],
-  ['/settings', 'Settings'],
-];
-
-function titleFor(pathname: string): string {
-  if (pathname === '/') return 'Dashboard';
-  const hit = PAGE_TITLES.find(([prefix]) => pathname.startsWith(prefix));
-  return hit ? hit[1] : 'Console';
-}
 
 /** Light top bar: breadcrumb + global search + Assign SE + acting control + notifications + user chip. */
 export function TopBar() {
@@ -77,15 +48,39 @@ export function TopBar() {
         <IconMenu className="h-[18px] w-[18px]" />
       </button>
 
-      {/* Page identity — muted eyebrow over a prominent current-page title (clear "you are here"). */}
-      <div className="hidden shrink-0 flex-col justify-center leading-tight lg:flex">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-brand-600">
-          FSM Command Console
-        </span>
-        <span className="text-[15px] font-semibold leading-tight text-ink-strong">
-          {titleFor(pathname)}
-        </span>
-      </div>
+      <nav aria-label="Breadcrumb" className="hidden shrink-0 items-center gap-1.5 lg:flex">
+        {resolveBreadcrumb(pathname, session.role).map((crumb, index, crumbs) => {
+          const isLast = index === crumbs.length - 1;
+          return (
+            <span key={`${crumb.label}-${index}`} className="flex items-center gap-1.5">
+              {index > 0 && (
+                <span aria-hidden className="text-ink-muted">
+                  ›
+                </span>
+              )}
+              {!isLast && crumb.to ? (
+                <Link
+                  to={crumb.to}
+                  className="text-[13px] text-ink-muted transition-colors hover:text-ink-strong"
+                >
+                  {crumb.label}
+                </Link>
+              ) : (
+                <span
+                  aria-current={isLast ? 'page' : undefined}
+                  className={
+                    isLast
+                      ? 'text-[15px] font-semibold leading-tight text-ink-strong'
+                      : 'text-[13px] text-ink-muted'
+                  }
+                >
+                  {crumb.label}
+                </span>
+              )}
+            </span>
+          );
+        })}
+      </nav>
 
       <div className="relative hidden max-w-md flex-1 md:block">
         <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-ink-muted" />
