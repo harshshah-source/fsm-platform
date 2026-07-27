@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { CrossZoneEscalationService } from '../cross-zone/cross-zone-escalation.service';
 import { IntradayInsertionService } from '../intraday/intraday-insertion.service';
+import { TierOverrideExpiryService } from '../org/tier-override-expiry.service';
 import { FleetUptimeAggregationService } from '../reports/fleet-uptime-aggregation.service';
 import { RootCauseAnalyticsAggregationService } from '../reports/root-cause-aggregation.service';
 import { SoftInactiveCountService } from '../reports/soft-inactive-count.service';
@@ -19,6 +20,9 @@ import { VerificationService } from '../verification/verification.service';
  *   - intraday timeouts: 2-min — the Issue 30 contract is a 10-min acceptance window, so sub-window
  *     granularity keeps reroute latency small.
  *   - cross-zone / repeat escalation: ~15-min — SLA-breach detection, not real-time.
+ *   - tier-override-expiry (Issue 157): hourly — status truthfulness for the report/audit trail
+ *     only, never for correctness (the effective-tier resolver predicates on `expiresAt`, not
+ *     `status`, so nothing dispatch-relevant depends on this sweep's cadence).
  *   - soft-inactive: twice daily (06:00 / 18:00 UTC) — the Issue 40 snapshot cadence.
  *   - system-efficiency: daily (01:30 UTC) — finalises the day just ended.
  *   - fleet-uptime / root-cause / zm-performance: month-start (03:00-03:30 on the 1st) — finalise the
@@ -29,6 +33,7 @@ export const DEFAULT_INSTALL_VERIFICATION_CRON = '*/5 * * * *';
 export const DEFAULT_INTRADAY_TIMEOUT_CRON = '*/2 * * * *';
 export const DEFAULT_CROSS_ZONE_CRON = '*/15 * * * *';
 export const DEFAULT_REPEAT_ESCALATION_CRON = '*/15 * * * *';
+export const DEFAULT_TIER_OVERRIDE_EXPIRY_CRON = '0 * * * *';
 export const DEFAULT_SOFT_INACTIVE_CRON = '0 6,18 * * *';
 export const DEFAULT_SYSTEM_EFFICIENCY_CRON = '30 1 * * *';
 export const DEFAULT_FLEET_UPTIME_CRON = '0 3 1 * *';
@@ -43,6 +48,7 @@ export interface BusinessSweepSchedulerConfig {
   intradayTimeoutCron: string;
   crossZoneCron: string;
   repeatEscalationCron: string;
+  tierOverrideExpiryCron: string;
   softInactiveCron: string;
   systemEfficiencyCron: string;
   fleetUptimeCron: string;
@@ -61,6 +67,7 @@ export function readBusinessSweepSchedulerConfig(
     intradayTimeoutCron: env.BUSINESS_SWEEP_INTRADAY_TIMEOUT_CRON?.trim() || DEFAULT_INTRADAY_TIMEOUT_CRON,
     crossZoneCron: env.BUSINESS_SWEEP_CROSS_ZONE_CRON?.trim() || DEFAULT_CROSS_ZONE_CRON,
     repeatEscalationCron: env.BUSINESS_SWEEP_REPEAT_ESCALATION_CRON?.trim() || DEFAULT_REPEAT_ESCALATION_CRON,
+    tierOverrideExpiryCron: env.BUSINESS_SWEEP_TIER_OVERRIDE_EXPIRY_CRON?.trim() || DEFAULT_TIER_OVERRIDE_EXPIRY_CRON,
     softInactiveCron: env.BUSINESS_SWEEP_SOFT_INACTIVE_CRON?.trim() || DEFAULT_SOFT_INACTIVE_CRON,
     systemEfficiencyCron: env.BUSINESS_SWEEP_SYSTEM_EFFICIENCY_CRON?.trim() || DEFAULT_SYSTEM_EFFICIENCY_CRON,
     fleetUptimeCron: env.BUSINESS_SWEEP_FLEET_UPTIME_CRON?.trim() || DEFAULT_FLEET_UPTIME_CRON,
@@ -86,7 +93,8 @@ function previousUtcDayStart(now: Date): Date {
 /**
  * Issue 108 — in-process `@nestjs/schedule` scheduler for the business-facing periodic loops
  * (verification, intraday acceptance-timeout, cross-zone auto-escalation, install verification,
- * repeat escalation, and the report cubes). Mirrors {@link IntegrationSchedulerService}: the master
+ * repeat escalation, the Issue 157 tier-override expiry sweep, and the report cubes). Mirrors
+ * {@link IntegrationSchedulerService}: the master
  * switch (`BUSINESS_SWEEPS_ENABLED`) is re-checked on every tick, each handler returns a structured
  * {@link SchedulerTickOutcome} and never throws out of the cron context, and a per-sweep
  * single-in-flight guard turns an overlapping tick into a logged RUN_IN_PROGRESS skip (the underlying
@@ -108,6 +116,7 @@ export class BusinessSweepSchedulerService {
     private readonly crossZone: CrossZoneEscalationService,
     private readonly installLifecycle: InstallLifecycleService,
     private readonly repeatEscalation: RepeatEscalationService,
+    private readonly tierOverrideExpiry: TierOverrideExpiryService,
     private readonly softInactive: SoftInactiveCountService,
     private readonly fleetUptime: FleetUptimeAggregationService,
     private readonly rootCause: RootCauseAnalyticsAggregationService,
@@ -163,6 +172,11 @@ export class BusinessSweepSchedulerService {
   @Cron(readBusinessSweepSchedulerConfig().repeatEscalationCron, { name: 'business-repeat-escalation' })
   repeatEscalationTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
     return this.runGuarded('repeat-escalation', () => this.repeatEscalation.runEscalationScan(now));
+  }
+
+  @Cron(readBusinessSweepSchedulerConfig().tierOverrideExpiryCron, { name: 'business-tier-override-expiry' })
+  tierOverrideExpiryTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
+    return this.runGuarded('tier-override-expiry', () => this.tierOverrideExpiry.sweepExpiredOverrides(now));
   }
 
   @Cron(readBusinessSweepSchedulerConfig().softInactiveCron, { name: 'business-soft-inactive' })

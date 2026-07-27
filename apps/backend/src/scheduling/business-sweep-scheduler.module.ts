@@ -3,6 +3,8 @@ import { CrossZoneModule } from '../cross-zone/cross-zone.module';
 import { CrossZoneEscalationService } from '../cross-zone/cross-zone-escalation.service';
 import { IntradayModule } from '../intraday/intraday.module';
 import { IntradayInsertionService } from '../intraday/intraday-insertion.service';
+import { OrgModule } from '../org/org.module';
+import { TierOverrideExpiryService } from '../org/tier-override-expiry.service';
 import { ReportsModule } from '../reports/reports.module';
 import { FleetUptimeAggregationService } from '../reports/fleet-uptime-aggregation.service';
 import { RootCauseAnalyticsAggregationService } from '../reports/root-cause-aggregation.service';
@@ -28,7 +30,7 @@ import { BusinessSweepSchedulerService } from './business-sweep-scheduler.servic
  * left to read the environment rather than being DI-resolved.
  */
 @Module({
-  imports: [VerificationModule, IntradayModule, CrossZoneModule, TicketingModule, ReportsModule],
+  imports: [VerificationModule, IntradayModule, CrossZoneModule, TicketingModule, ReportsModule, OrgModule],
   providers: [
     {
       provide: BusinessSweepSchedulerService,
@@ -38,6 +40,7 @@ import { BusinessSweepSchedulerService } from './business-sweep-scheduler.servic
         crossZone: CrossZoneEscalationService,
         installLifecycle: InstallLifecycleService,
         repeatEscalation: RepeatEscalationService,
+        tierOverrideExpiry: TierOverrideExpiryService,
         softInactive: SoftInactiveCountService,
         fleetUptime: FleetUptimeAggregationService,
         rootCause: RootCauseAnalyticsAggregationService,
@@ -50,6 +53,7 @@ import { BusinessSweepSchedulerService } from './business-sweep-scheduler.servic
           crossZone,
           installLifecycle,
           repeatEscalation,
+          tierOverrideExpiry,
           softInactive,
           fleetUptime,
           rootCause,
@@ -62,6 +66,7 @@ import { BusinessSweepSchedulerService } from './business-sweep-scheduler.servic
         CrossZoneEscalationService,
         InstallLifecycleService,
         RepeatEscalationService,
+        TierOverrideExpiryService,
         SoftInactiveCountService,
         FleetUptimeAggregationService,
         RootCauseAnalyticsAggregationService,

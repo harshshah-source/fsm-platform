@@ -10,6 +10,7 @@ import { ScoringWeightsService } from './scoring-weights.service';
 import { SeCoverageService } from './se-coverage.service';
 import { SeTerritoryService } from './se-territory.service';
 import { SlaRulesService } from './sla-rules.service';
+import { TierOverrideExpiryService } from './tier-override-expiry.service';
 import { TierOverridesService } from './tier-overrides.service';
 import { TiersService } from './tiers.service';
 import { UsersService } from './users.service';
@@ -34,6 +35,7 @@ const services = [
   ZoneMappingService,
   TiersService,
   TierOverridesService,
+  TierOverrideExpiryService,
 ];
 
 @Module({
