@@ -80,6 +80,7 @@ export function buildNav(role: string): NavGroup[] {
       { label: 'Readiness & Vehicle', to: '/readiness/vehicle-unavailability', icon: IconTruck },
       { label: 'Non-Operational', to: '/readiness/non-operational', icon: IconAlert },
       { label: 'Cross-Zone', to: '/cross-zone', icon: IconShare },
+      { label: 'Tier Overrides', to: '/tier-overrides', icon: IconShield },
       { label: 'Recovery Decisions', to: '/readiness/recovery-decisions', icon: IconRotate },
       { label: 'Leave Requests', to: '/leave-requests', icon: IconClipboard },
       { label: 'Expense Vouchers', to: '/vouchers', icon: IconClipboard },

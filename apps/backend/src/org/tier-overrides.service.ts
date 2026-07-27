@@ -3,7 +3,7 @@ import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 import { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveEffectiveTier } from './effective-tier';
+import { resolveActiveOverrides, resolveEffectiveTier } from './effective-tier';
 
 const TIERS = new Set<string>(Object.values($Enums.CompanyTier));
 const MIN_REASON_LENGTH = 10;
@@ -21,6 +21,8 @@ export interface TierOverrideView {
   status: string;
   createdBy: string | null;
   createdAt: Date;
+  /** True for the single live effective override of this (company, zone) pair — newest ACTIVE, unexpired (Q-A). */
+  isWinning: boolean;
 }
 
 export interface CreateTierOverrideInput {
@@ -112,6 +114,8 @@ export class TierOverridesService {
         },
       },
       async (tx) =>
+        // A just-created override is the newest ACTIVE, unexpired row for its (company, zone) pair,
+        // so under newest-wins (Q-A) it is the live winning override by construction.
         toView(
           await tx.companyTierOverride.create({
             data: {
@@ -124,6 +128,7 @@ export class TierOverridesService {
             },
             include: { company: { select: { name: true } }, zone: { select: { name: true } } },
           }),
+          true,
         ),
     );
   }
@@ -186,7 +191,17 @@ export class TierOverridesService {
       include: { company: { select: { name: true } }, zone: { select: { name: true } } },
       orderBy: [{ companyId: 'asc' }, { zoneId: 'asc' }, { createdAt: 'desc' }],
     });
-    return rows.map(toView);
+
+    // Mark the winning override per (company, zone) pair (AC-6). The winner is the LIVE effective
+    // override resolved by the shared predicate (`resolveActiveOverrides` — newest ACTIVE, unexpired),
+    // computed against the whole table, not just the filtered/paged rows: a row shown under a `month`
+    // filter is winning only if it is still the live winner, and an ACTIVE-but-expired row (status not
+    // yet swept) is never winning. Resolving over the returned rows' distinct zones covers every pair
+    // on screen while reusing the engine's exact precedence rather than re-deriving it here.
+    const zoneIds = [...new Set(rows.map((r) => r.zoneId))];
+    const winners = await resolveActiveOverrides(this.prisma, zoneIds, new Date());
+    const winningIds = new Set([...winners.values()].map((w) => w.overrideId));
+    return rows.map((row) => toView(row, winningIds.has(row.id.toString())));
   }
 }
 
@@ -207,7 +222,7 @@ function toView(row: {
   createdAt: Date;
   company?: { name: string };
   zone?: { name: string } | null;
-}): TierOverrideView {
+}, isWinning: boolean): TierOverrideView {
   return {
     id: row.id.toString(),
     companyId: Number(row.companyId),
@@ -220,5 +235,6 @@ function toView(row: {
     status: row.status,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
+    isWinning,
   };
 }

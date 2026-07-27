@@ -33,6 +33,7 @@ import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { ExportsPage } from './pages/exports/ExportsPage';
 import { PlantDeactivationsPage } from './pages/admin/PlantDeactivationsPage';
 import { PlantZonesPage } from './pages/admin/PlantZonesPage';
+import { TierOverridesPage } from './pages/admin/TierOverridesPage';
 import { BuildHealthPage } from './pages/admin/BuildHealthPage';
 import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
 import { FleetDirectoryPage } from './pages/reports/FleetDirectoryPage';
@@ -219,6 +220,17 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['OPERATIONS_HEAD']}>
                 <PlantZonesPage />
+              </RoleRoute>
+            }
+          />
+          {/* Tier Overrides — ZM (own zone) / CSM / OH (#157 S5, scoped expiring company tier overrides).
+              No v2-reference surface exists and Settings is OH-only, yet this feature is for CSM/ZM —
+              a role-variant page, mirroring the #158 Plant Zones precedent. */}
+          <Route
+            path="/tier-overrides"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <TierOverridesPage />
               </RoleRoute>
             }
           />
