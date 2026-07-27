@@ -474,7 +474,12 @@ zone), which doubles as the monthly report and badges the live winning override 
 predicate on `expires_at`, never the swept `status`, so an override goes inert the instant it expires
 regardless of the hourly `business-tier-override-expiry` sweep (§3g). Ticket creation stamps the
 effective tier onto `tickets.company_tier`; existing tickets are never re-stamped (Q-B, live reads
-only). **CONTEXT.md/PRD authority note (OH global; CSM/ZM scoped) still lands in S6 (AC-8).**
+only). The extended authority (OH global; CSM/ZM scoped + expiring) is recorded in `CONTEXT.md`
+(Company Master + OH persona) and PRD story 54 (#157 AC-8). Because overrides key on `(company,
+zone)`, a #158 plant zone move silently re-attaches them: the extended `zoneChangeImpact` now names
+the winning overrides a move **detaches** (current zone) and **attaches** (target zone) for the
+plant's open-ticket companies, surfaced in the Plant Zones confirm dialog (AC-9). **#157 is complete
+(S1–S6); the plant-ranking half remains split out — Q-F.**
 **Hard filters** (`hard-filters.ts:40-47`, first-failure-wins) and their **actual data feed**
 (`recommender.service.ts:147-157`):
 

@@ -1,6 +1,6 @@
 # 157 — Company tier: global setting + scoped, expiring tier overrides (redesigned)
 
-Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1+S2+S3+S4+S5 landed; S6 remains: AC-9 (#158 zoneChangeImpact + Plant Zones dialog name active overrides) + AC-8 (CONTEXT.md/PRD extended-authority update))
+Status: DONE (all slices S1–S6 landed 2026-07-23…27; all 9 ACs checked. Tiers reference table, scoped expiring company tier overrides, effective-tier resolver + engine bite, auto-revert sweep, admin surface + monthly report, #158 impact warning, and CONTEXT/PRD authority update. Plant-ranking half remains split out — Q-F.)
 Type: AFK after go-ahead
 
 > **Review completed 2026-07-23 (interactive).** Q-A **stacking allowed** (operator choice, against
@@ -254,10 +254,14 @@ overrides exist).
       own-zone locked, CSM/OH zone picker) at `/tier-overrides`, RoleRoute + nav gated to ZM/CSM/OH;
       the v2 reference has no such surface and Settings is OH-only, so a documented discrepancy
       mirroring #158's Plant Zones (no silent deferral).
-- [ ] AC-9: #158's `zoneChangeImpact` + Plant Zones confirm dialog name active tier overrides for
-      the plant's companies in old and new zone (Q-D).
-- [ ] AC-8: CONTEXT.md/PRD updated to record the extended authority (OH global; CSM/ZM scoped +
-      expiring) so spec and code agree.
+- [x] AC-9: #158's `zoneChangeImpact` + Plant Zones confirm dialog name active tier overrides for
+      the plant's companies in old and new zone (Q-D). **DONE 2026-07-27 (S6)** — `zoneChangeImpact`
+      gains an optional `targetZoneId` and returns `currentZoneOverrides`/`targetZoneOverrides` (the
+      winning override per open-ticket company, via the shared resolver); the ChangeZoneDialog re-fetches
+      on zone select and warns which overrides stop/start applying.
+- [x] AC-8: CONTEXT.md/PRD updated to record the extended authority (OH global; CSM/ZM scoped +
+      expiring) so spec and code agree. **DONE 2026-07-27 (S6)** — `CONTEXT.md` Company Master + OH
+      persona and `PRD` story 54 now record the operator-approved extension; 3-tier canon unchanged.
 
 ## Slice plan (TDD-first; each slice green + committed; sized like #158's)
 
