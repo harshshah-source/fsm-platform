@@ -117,7 +117,7 @@ AutoPlant MySQL (VPN, read-only)
 **Funnel status (verified 2026-07-09, `INDEX.md:124-139`, spot-checked this session):** every stage
 is code-complete and tested; activation is blocked by (1) empty `engineer_master`/`se_coverage`
 data, (2) the B7 eligibility business decision (`pgi_history` empty), and (3) the ops switches in
-§6.2 — of which **`BUSINESS_SWEEPS_ENABLED` is `"true"` in `apps/backend/.env:38` and its ten crons
+§6.2 — of which **`BUSINESS_SWEEPS_ENABLED` is `"true"` in `apps/backend/.env:38` and its eleven crons
 are running now**, while `INGESTION_SCHEDULER_ENABLED` (`:18`) and `PARTITION_MAINTENANCE_ENABLED`
 (`:24`) are `"false"`. See §6.
 
@@ -169,7 +169,7 @@ dual-confirm, recovery lifecycle, install create+lifecycle | 8 controllers |
 | `devices` | Device list read + per-device cycles/downtime-trend + deal-type tag | `DeviceService`, `DeviceDetailService` |
 | `recommender` | Candidate selection, hard filters, scoring, canonical sort → `recommendations` | consumed by SchedulingModule |
 | `scheduling` | Batch dispatch, day-plan/schedule queries, ZM override, same-day update, dispatch-run + daily dispatch cron | `SchedulingModule` imports `RecommenderModule` (#113) |
-| `business-sweep-scheduler` (in `scheduling/`) | 10 env-gated `@Cron` sweeps: verification, install-verification, intraday-timeout, cross-zone, repeat-escalation, soft-inactive, system-efficiency, 3 month-start cubes | leaf module (#108) |
+| `business-sweep-scheduler` (in `scheduling/`) | 11 env-gated `@Cron` sweeps: verification, install-verification, intraday-timeout, cross-zone, repeat-escalation, tier-override-expiry, soft-inactive, system-efficiency, 3 month-start cubes | leaf module (#108) |
 | `intraday` | CRITICAL insertion offer state machine, accept/decline/timeout | #29/#30/#101 |
 | `cross-zone` | Platinum auto-escalation + manual flag, approve/deny/defer/re-escalate | #32 |
 | `shared-pool` | SE shared ticket pool | #12 |
@@ -519,6 +519,7 @@ and never throws out of cron context.
 | `business-intraday-timeout` | `*/2 * * * *` | … | 〃 | `sweepTimeouts` |
 | `business-cross-zone` | `*/15 * * * *` | … | 〃 | `sweepAutoEscalations` |
 | `business-repeat-escalation` | `*/15 * * * *` | … | 〃 | repeat escalation |
+| `business-tier-override-expiry` | `0 * * * *` | `BUSINESS_SWEEP_TIER_OVERRIDE_EXPIRY_CRON` | 〃 | tier-override expiry sweep (#157 S4): ACTIVE→EXPIRED past `expires_at` + `TIER_OVERRIDE_EXPIRED` audit — status-truth only, resolver keys on `expires_at` |
 | `business-soft-inactive` | `0 6,18 * * *` | … | 〃 | soft-inactive snapshot |
 | `business-system-efficiency` | `30 1 * * *` | … | 〃 | previous-day cube |
 | `business-fleet-uptime` | `0 3 1 * *` | … | 〃 | previous-month cube |

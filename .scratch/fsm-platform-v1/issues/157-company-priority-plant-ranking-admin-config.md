@@ -1,6 +1,6 @@
 # 157 — Company tier: global setting + scoped, expiring tier overrides (redesigned)
 
-Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1+S2+S3 landed; S4 onward in progress)
+Status: ready-for-agent (operator go-ahead given 2026-07-23 — S1+S2+S3+S4 landed; S5 UI + monthly report (AC-6 winning-mark/AC-7) + AC-8/AC-9 docs remain)
 Type: AFK after go-ahead
 
 > **Review completed 2026-07-23 (interactive).** Q-A **stacking allowed** (operator choice, against
@@ -238,9 +238,9 @@ overrides exist).
 - [x] AC-4: a ZM's PLATINUM override provably reorders that zone's dispatch (canonical-sort seam,
       asserted at the `runForZone` boundary) and is stamped in `scoreBreakdown`; other zones
       unaffected; global tier unchanged in `company_master`. **DONE 2026-07-23 (S3).**
-- [ ] AC-5: expiry sweep flips status + writes `TIER_OVERRIDE_EXPIRED`; **no ticket re-stamp**
+- [x] AC-5: expiry sweep flips status + writes `TIER_OVERRIDE_EXPIRED`; **no ticket re-stamp**
       (Q-B: live reads only — a test PINS that open tickets' stamped tier is untouched by override
-      lifecycle events); behaviour identical whether the sweep has run or not (AC-3).
+      lifecycle events); behaviour identical whether the sweep has run or not (AC-3). **DONE 2026-07-27 (S4).**
 - [ ] AC-6: `config_snapshot` includes active overrides **(DONE 2026-07-23, S3)**; the monthly report
       read returns ALL active overrides + reason + creator + expiry with the winning override per
       pair marked (Q-A) **(still open — the S2 GET endpoint returns all matching rows and is
