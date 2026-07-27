@@ -7,4 +7,5 @@ export * from './FilterBar';
 export * from './MetricStrip';
 export * from './PageHeader';
 export * from './RollingNumber';
+export * from './TableDownloadButton';
 export * from './Toast';

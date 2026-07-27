@@ -15,12 +15,11 @@ import {
 } from '../../api/devices';
 import { useAuth } from '../../auth/AuthProvider';
 import { BarChartCard, ChartCard, type BarDatum } from '../../components/charts';
-import { DataTable, EmptyState, ExportMenu, FilterBar, FilterSelect, PageHeader, type Column } from '../../components/data';
+import { DataTable, EmptyState, FilterBar, FilterSelect, PageHeader, type Column } from '../../components/data';
 import { Badge, Button, Field, Input, SectionCard } from '../../components/ui';
 import { PlantName, SLABadge } from '../../components/domain';
 import { formatDateTimeWithYear } from '../../lib/datetime';
 import { formatInactiveDuration } from '../../lib/inactiveDuration';
-import { exportTable, type ExportFormat } from '../../lib/exportFile';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
 import { AssignSePanel } from './AssignSePanel';
@@ -273,35 +272,6 @@ export function DeviceDetailPage() {
     },
   ];
 
-  // Flat export of the current (filtered) device page — CSV / Excel / PDF (Issue 122), no dependency.
-  const exportDevices = (format: ExportFormat) => {
-    // Mirrors the visible columns (Issue 122 export contract) — the new AutoPlant fields included, so a
-    // download matches what the operator is looking at. Inactive Duration is exported as the elapsed
-    // string the table shows, not the raw ping, for the same reason.
-    const headers = [
-      'Device ID', 'Vehicle Number', 'Device Type', 'IMSI No', 'Company', 'Plant', 'Zone',
-      'Inactive Duration', 'Trip Creation Date Time', 'SLA Bucket',
-      'Assignment', 'Assigned SE', 'Open Ticket', 'Batch',
-    ];
-    const body = rows.map((r) => [
-      r.deviceId,
-      r.vehicleNo ?? '',
-      r.deviceType ?? '',
-      r.imsiNo ?? '',
-      r.companyName ?? '',
-      r.plantName ? formatPlantDisplayName(r.plantName) : '',
-      r.zoneName ?? '',
-      formatInactiveDuration(r.latestGpsDatetime) ?? '',
-      r.tripCreationDatetime ? formatDateTimeWithYear(r.tripCreationDatetime) : '',
-      r.slaBucket ?? 'ACTIVE',
-      r.assignmentState ?? '',
-      r.assignedSeName ?? '',
-      r.openTicketId ?? '',
-      r.batchId ?? '',
-    ]);
-    exportTable(format, 'device-detail', 'Device Detail', headers, body);
-  };
-
   const summaryColumns: Column<DeviceDowntimeTrend['monthly'][number]>[] = [
     { key: 'month', header: 'Month', render: (m) => m.month },
     { key: 'cycles', header: 'Cycles', align: 'right', render: (m) => m.cycleCount },
@@ -410,11 +380,8 @@ export function DeviceDetailPage() {
         title="Devices"
         className="mb-5"
         action={
-          <span className="flex items-center gap-3">
-            <span data-testid="device-list-count" className="text-xs text-ink-muted tabular-nums">
-              {total === 0 ? 'No devices' : `Showing ${nf.format(fromRow)}–${nf.format(toRow)} of ${nf.format(total)}`}
-            </span>
-            <ExportMenu onExport={exportDevices} disabled={rows.length === 0} label="Download" />
+          <span data-testid="device-list-count" className="text-xs text-ink-muted tabular-nums">
+            {total === 0 ? 'No devices' : `Showing ${nf.format(fromRow)}–${nf.format(toRow)} of ${nf.format(total)}`}
           </span>
         }
       >

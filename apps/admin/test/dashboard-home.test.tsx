@@ -71,9 +71,9 @@ describe('Zone Operations Dashboard — Zone Overview (Issue 06 AC#2/#5)', () =>
     expect(screen.queryByText('ACTIVE')).not.toBeInTheDocument();
   });
 
-  it('offers a CSV export for the Zone Overview', async () => {
+  it('offers a table-level download for the Zone Overview (Issue 160)', async () => {
     stubFetch({ 'dashboard/zone-overview': [], 'dashboard/action-required': [] });
     renderHome(zm);
-    expect(await screen.findByRole('button', { name: /export zone overview/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Download Zone Overview' })).toBeInTheDocument();
   });
 });

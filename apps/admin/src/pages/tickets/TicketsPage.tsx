@@ -5,7 +5,6 @@ import { apiDeviceFilterOptions, type DeviceFilterOptions } from '../../api/devi
 import {
   DataTable,
   EmptyState,
-  ExportMenu,
   FilterBar,
   FilterSelect,
   PageHeader,
@@ -15,7 +14,6 @@ import {
 import { AgeChip, StatusPill, TierBadge } from '../../components/domain';
 import { Badge, Button } from '../../components/ui';
 import { IconTicket } from '../../components/ui/icons';
-import { exportTable, type ExportFormat } from '../../lib/exportFile';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
 import { BucketBadge, InlineBadges } from './ticketBadges';
@@ -203,28 +201,6 @@ export function TicketsPage() {
     },
   ];
 
-  const exportTickets = (format: ExportFormat) => {
-    const headers = [
-      'Ticket', 'Work Type', 'Company', 'Plant', 'Vehicle No.', 'Tier',
-      'Assignment', 'Assigned SE', 'Overridden', 'Status', 'SLA Bucket', 'Age (days)',
-    ];
-    const body = rows.map((t) => [
-      t.ticketId,
-      t.workType,
-      t.companyName ?? `Company ${t.companyId}`,
-      t.plantName ? formatPlantDisplayName(t.plantName) : `Plant ${t.plantId}`,
-      t.vehicleNo ?? '',
-      t.companyTier,
-      t.assignmentState,
-      t.assignedSeName ?? '',
-      t.overridden ? 'Yes' : 'No',
-      t.status,
-      t.slaBucket ?? 'ACTIVE',
-      ageDays(t.createdAt),
-    ]);
-    exportTable(format, 'ticket-operations', 'Ticket Operations', headers, body);
-  };
-
   return (
     <div className="flex">
       <div className="min-w-0 flex-1">
@@ -232,14 +208,11 @@ export function TicketsPage() {
           title="Ticket Operations"
           subtitle="Every open and recently-closed ticket in your zone, sorted by SLA urgency."
           actions={
-            <span className="flex items-center gap-2">
-              {hasFilters && (
-                <Button variant="ghost" size="sm" onClick={() => setFilters({})}>
-                  Clear filters
-                </Button>
-              )}
-              <ExportMenu onExport={exportTickets} disabled={rows.length === 0} label="Download" />
-            </span>
+            hasFilters ? (
+              <Button variant="ghost" size="sm" onClick={() => setFilters({})}>
+                Clear filters
+              </Button>
+            ) : undefined
           }
         />
 

@@ -1,6 +1,9 @@
 import { Fragment, useMemo, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../lib/cn';
+import { exportTable, type ExportCell, type ExportFormat } from '../../lib/exportFile';
+import { extractTableExport, slugify } from '../../lib/tableExport';
 import { EmptyState, ErrorState, Skeleton } from './feedback';
+import { TableDownloadButton } from './TableDownloadButton';
 
 export interface Column<T> {
   key: string;
@@ -13,6 +16,10 @@ export interface Column<T> {
   sortValue?: (row: T) => string | number;
   /** Column width for `tableLayout="fixed"` (e.g. `'10%'`, `'120px'`). Ignored in the default auto layout. */
   width?: string;
+  /** Computed export value, used instead of the rendered cell's DOM text for this column. */
+  exportValue?: (row: T) => ExportCell;
+  /** Set `false` to leave this column out of the table's download entirely (e.g. an actions column). */
+  exportable?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -67,6 +74,10 @@ interface DataTableProps<T> {
    * page 2 reads 101..200 instead of re-starting at 1. Default `0`; every other table leaves it unset.
    */
   snoOffset?: number;
+  /** Table-level download button (CSV/Excel/PDF/PNG) of the on-screen view. Default `true`. */
+  downloadable?: boolean;
+  /** Export filename/title override; defaults to `ariaLabel`. */
+  exportName?: string;
 }
 
 /**
@@ -94,12 +105,15 @@ export function DataTable<T>({
   renderExpanded,
   serialNumbers = true,
   snoOffset = 0,
+  downloadable = true,
+  exportName,
 }: DataTableProps<T>) {
   const isFixed = tableLayout === 'fixed';
   // Fixed layout tightens padding and (below) lets headers/cells wrap so many columns fit the width.
   const cellPad = isFixed ? 'px-2.5 py-2.5' : 'px-4 py-3';
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const tableRef = useRef<HTMLTableElement | null>(null);
   const toggleExpanded = (key: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -135,13 +149,50 @@ export function DataTable<T>({
     );
   };
 
+  const exportableColumns = columns.filter((c) => c.exportable !== false);
+  const snoColOffset = serialNumbers ? 1 : 0;
+
+  // Deliberately a DOM read (issue #160 decision) — it is both the visible-view guarantee (the
+  // export equals what's on screen, post-filter and post-sort) and the zone-scoping proof (a table
+  // can only export what it already rendered, so it cannot leak an out-of-zone row). `exportValue`
+  // overrides the DOM text for a specific column only; everything else comes straight off the table.
+  const handleExport = (format: ExportFormat) => {
+    if (!tableRef.current) return;
+    const { headers, rows: domRows } = extractTableExport(tableRef.current);
+    const exportRows = domRows.map((domRow, rowIndex) => {
+      const sourceRow = sorted[rowIndex];
+      return domRow.map((cellText, colIndex) => {
+        const col = exportableColumns[colIndex - snoColOffset];
+        if (col?.exportValue) {
+          const v = col.exportValue(sourceRow);
+          return v === null || v === undefined ? '' : String(v);
+        }
+        return cellText;
+      });
+    });
+    const name = exportName ?? ariaLabel;
+    exportTable(format, slugify(name), name, headers, exportRows);
+  };
+
+  const downloadDisabled = Boolean(loading || error || sorted.length === 0);
+
   return (
     <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-card">
+      {downloadable && (
+        <div className="flex items-center justify-end gap-2 border-b border-line bg-surface-raised px-3 py-2">
+          <TableDownloadButton
+            ariaLabel={ariaLabel}
+            disabled={downloadDisabled}
+            onSelectFormat={handleExport}
+          />
+        </div>
+      )}
       <div
         className={cn('overflow-x-auto', stickyHeader && 'overflow-y-auto')}
         style={stickyHeader ? { maxHeight: maxBodyHeight } : undefined}
       >
         <table
+          ref={tableRef}
           aria-label={ariaLabel}
           className={cn('w-full border-collapse text-sm', isFixed && 'table-fixed')}
         >
@@ -171,6 +222,7 @@ export function DataTable<T>({
               {columns.map((c) => (
                 <th
                   key={c.key}
+                  data-export-skip={c.exportable === false ? '' : undefined}
                   onClick={() => toggleSort(c)}
                   aria-sort={
                     sort?.key === c.key
@@ -193,12 +245,17 @@ export function DataTable<T>({
                   )}
                 >
                   {c.header}
-                  {c.sortable && sort?.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                  {c.sortable && sort?.key === c.key && (
+                    <span aria-hidden data-export-skip="">
+                      {sort.dir === 'asc' ? ' ▲' : ' ▼'}
+                    </span>
+                  )}
                 </th>
               ))}
               {renderExpanded && (
                 <th
                   aria-hidden
+                  data-export-skip=""
                   className={cn(
                     'w-10 px-2 py-3',
                     stickyHeader && 'sticky top-0 z-10 bg-chrome-900 shadow-[inset_0_-1px_0_var(--color-chrome-700)]',
@@ -256,6 +313,7 @@ export function DataTable<T>({
                   <Fragment key={key}>
                     <tr
                       data-testid={rowTestId?.(row)}
+                      data-row-export=""
                       aria-current={active ? 'true' : undefined}
                       aria-expanded={canExpand ? isOpen : undefined}
                       ref={
@@ -308,6 +366,7 @@ export function DataTable<T>({
                       {columns.map((c) => (
                         <td
                           key={c.key}
+                          data-export-skip={c.exportable === false ? '' : undefined}
                           className={cn(
                             cellPad,
                             'align-middle text-ink',
@@ -320,7 +379,7 @@ export function DataTable<T>({
                         </td>
                       ))}
                       {renderExpanded && (
-                        <td className="w-10 px-2 py-3 text-center align-middle text-ink-muted">
+                        <td data-export-skip="" className="w-10 px-2 py-3 text-center align-middle text-ink-muted">
                           {canExpand && (
                             <span aria-hidden className="inline-block transition-transform">
                               {isOpen ? '▾' : '▸'}

@@ -9,7 +9,6 @@ import {
 import {
   DataTable,
   EmptyState,
-  ExportMenu,
   FilterBar,
   MetricStrip,
   PageHeader,
@@ -19,7 +18,6 @@ import {
 } from '../../components/data';
 import { PlantName, TierBadge } from '../../components/domain';
 import { cn } from '../../lib/cn';
-import { exportTable, type ExportFormat } from '../../lib/exportFile';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 
 const nf = new Intl.NumberFormat('en-IN');
@@ -157,18 +155,6 @@ export function FleetDirectoryPage() {
     },
   ];
 
-  const exportDirectory = (format: ExportFormat) => {
-    if (tab === 'companies') {
-      exportTable(format, 'fleet-companies', 'Fleet Directory — Companies',
-        ['Company', 'ID', 'Tier', 'Plants', 'Devices'],
-        companies.map((c) => [c.name, c.companyId, c.tier ?? '', c.plantCount, c.deviceCount]));
-    } else {
-      exportTable(format, 'fleet-plants', 'Fleet Directory — Plants',
-        ['Plant', 'ID', 'Company', 'Zone', 'Devices'],
-        plants.map((p) => [formatPlantDisplayName(p.name), p.plantId, p.companyName ?? '', p.zoneName ?? '', p.deviceCount]));
-    }
-  };
-
   const tabBtn = (t: Tab, label: string, count: number | null) => (
     <button
       type="button"
@@ -217,9 +203,6 @@ export function FleetDirectoryPage() {
             Clear company filter
           </button>
         )}
-        <span className="ml-auto">
-          <ExportMenu onExport={exportDirectory} disabled={!dir} label="Download" />
-        </span>
       </FilterBar>
 
       {tab === 'companies' ? (

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { apiDispatchBatchDetail, type DispatchAssignmentRow, type DispatchBatchDetail } from '../../api/dispatch-runs';
-import { DataTable, EmptyState, ErrorState, ExportMenu, FilterBar, FilterSelect, PageHeader, SearchInput, type Column } from '../../components/data';
+import { DataTable, EmptyState, ErrorState, FilterBar, FilterSelect, PageHeader, SearchInput, type Column } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { formatDateTimeWithYear } from '../../lib/datetime';
-import { exportTable, type ExportFormat } from '../../lib/exportFile';
 import { formatInactiveDuration } from '../../lib/inactiveDuration';
 import { TracePanel } from './DecisionTrace';
 
@@ -115,28 +114,6 @@ export function DispatchBatchDetailPage() {
     { key: 'ticket', header: 'Ticket', width: '6%', render: (r) => <Badge tone="neutral">{r.ticketStatus}</Badge> },
   ];
 
-  // Download the current (searched/filtered) rows in the chosen format — columns match the table above.
-  const exportBatch = (format: ExportFormat) => {
-    const headers = [
-      'Device', 'Vehicle No.', 'Device Type', 'IMSI No', 'Company', 'Plant', 'SE', 'Transporter',
-      'Inactive Duration', 'Trip Creation Date Time', 'Ticket',
-    ];
-    const body = rows.map((r) => [
-      r.deviceId ?? r.ticketId.slice(0, 8),
-      r.vehicleNo ?? '',
-      r.deviceType ?? '',
-      r.imsiNo ?? '',
-      r.companyName ?? '',
-      detail?.plantName ?? '',
-      detail?.seName ?? '',
-      r.transporterName ?? '',
-      formatInactiveDuration(r.latestGpsDatetime) ?? '',
-      formatDateTimeWithYear(r.tripCreationDatetime),
-      r.ticketStatus,
-    ]);
-    exportTable(format, `batch-${detail?.batchId ?? batchId}`, `Batch #${detail?.batchId ?? batchId}`, headers, body);
-  };
-
   return (
     <section>
       {/* The zone drill-down is a view OF a run, so it only exists when this batch has one. A run-less
@@ -183,7 +160,6 @@ export function DispatchBatchDetailPage() {
                 </option>
               ))}
             </FilterSelect>
-            <ExportMenu onExport={exportBatch} disabled={rows.length === 0} label="Download" />
           </FilterBar>
           <DataTable
             columns={columns}
@@ -191,6 +167,7 @@ export function DispatchBatchDetailPage() {
             rowKey={(r) => r.ticketId}
             rowTestId={(r) => `dispatch-assignment-row-${r.ticketId}`}
             ariaLabel="Batch assignments"
+            exportName={`Batch #${detail?.batchId ?? batchId}`}
             tableLayout="fixed"
             empty={<EmptyState message="No tickets match this search." />}
             // The trace is keyed by run, so it exists only for run-backed batches — `hasTrace` is

@@ -142,15 +142,18 @@ describe('Dispatch batch detail (Issue 123)', () => {
     expect(row.getByText('Blue Dart')).toBeInTheDocument();
   });
 
-  it('offers a Download menu with CSV / Excel / PDF / Image formats', async () => {
+  it('offers a table-level Download control with CSV / Excel / PDF / Image formats (Issue 160)', async () => {
     renderPage();
     await screen.findByTestId('dispatch-assignment-row-t-uuid-1');
-    const fmt = screen.getByLabelText(/download format/i);
-    expect(within(fmt).getByRole('option', { name: 'CSV' })).toBeInTheDocument();
-    expect(within(fmt).getByRole('option', { name: 'Excel' })).toBeInTheDocument();
-    expect(within(fmt).getByRole('option', { name: 'PDF' })).toBeInTheDocument();
-    expect(within(fmt).getByRole('option', { name: /Image/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Download/i })).toBeEnabled();
+    // The old page-level two-control ExportMenu is gone — one button per table, disambiguated by its
+    // own aria-label, per issue #160 decision 3.
+    const trigger = screen.getByRole('button', { name: 'Download Batch assignments' });
+    expect(trigger).toBeEnabled();
+    await userEvent.click(trigger);
+    expect(screen.getByRole('menuitem', { name: 'CSV' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Excel' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'PDF' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Image (PNG)' })).toBeInTheDocument();
   });
 
   it('expands the row to the precedence-terms trace with SE names, not UUIDs', async () => {

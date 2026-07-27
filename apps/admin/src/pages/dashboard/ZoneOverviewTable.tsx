@@ -2,9 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ZoneOverviewRow } from '../../api/dashboard';
 import { DataTable, FilterBar, FilterSelect, type Column } from '../../components/data';
 import { InactiveCountLink } from '../../components/domain';
-import { Button } from '../../components/ui';
 import { cn } from '../../lib/cn';
-import { downloadCsv, toCsv } from '../../lib/csv';
 import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_LABEL_RANGE, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
 
 /**
@@ -28,18 +26,6 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
       ),
     [rows, zoneFilter, bucketFilter],
   );
-
-  const exportCsv = () => {
-    const headers = ['Zone', 'Total inactive', 'Total devices', ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b]), 'Trend %'];
-    const body = visible.map((r) => [
-      r.zoneName,
-      r.totalInactive,
-      r.totalDevices,
-      ...SLA_BUCKETS.map((b) => r.byBucket[b] ?? 0),
-      r.trendPctVsPrevDay ?? '',
-    ]);
-    downloadCsv('zone-overview.csv', toCsv(headers, body));
-  };
 
   const columns: Column<ZoneOverviewRow>[] = [
     {
@@ -130,9 +116,6 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
               </option>
             ))}
           </FilterSelect>
-          <Button variant="secondary" size="sm" onClick={exportCsv}>
-            Export Zone Overview
-          </Button>
         </FilterBar>
       </div>
       <DataTable
