@@ -94,3 +94,11 @@ Also still open and now blocking: the storage mechanism decision (D-12). This is
 S3 presign citing CLAUDE.md, but **CLAUDE.md now states there is no S3 in the current stack**
 (no Redis/BullMQ/S3). Pick presign-against-an-object-store or local-disk multipart behind the same
 seam — the `photoRef` contract stays stable either way.
+
+### 2026-07-28 — #172 decision 6 ratified: slots are in the contract
+
+Confirmed against the images. `photoRef` **must carry slot/kind semantics**:
+Troubleshoot has **4** named slots (`Before`, `After`, `Part`, `Plate`), Vouchers has **3**
+(`Receipt`, `Photo`, `Bill`), Install has 1 unnamed. The PRD's unstructured "photo refs" wording is
+overridden. A flat `string[]` cannot express any of this, and retrofitting slots onto a shipped flat
+array is a breaking change for every photo screen.

@@ -53,7 +53,7 @@ a shipped Component Request (PRD §533 Flow 3 step 4) — previously unowned.
 
 ## Reference
 
-- `docs/ui/mobile/inventory.png.png`
+- `docs/ui/mobile/inventory.png`
 
 ## Tests (TDD targets — red first)
 
@@ -64,3 +64,19 @@ a shipped Component Request (PRD §533 Flow 3 step 4) — previously unowned.
 
 - #54, #21
 - (Confirm-Receipt leg) #22
+
+## Comments
+
+### 2026-07-28 — #172 decision 2: the full Inventory surface, not read-only
+
+Ratified: `docs/ui/mobile/inventory.png` overrides PRD Flow 12's *"Read-only — restocking arranged
+through ZM or Warehouse."* The screen keeps its per-row `Request` buttons, `Scan Serial`, the
+`Requests` list (`2 Active`, with Approved/Pending statuses), and the **Zone Warehouse** row shown
+among SE Stock rows. Backend owned by **#173**; the requests read side by **#163**.
+
+**`Use Part` stays deferred behind #101** — a consumption path arms the non-atomic van-stock
+decrement and the CONFLICT-path key-persistence defects.
+
+Useful detail from the image: the three tiles (`13 AVAILABLE / 3 LOW STOCK / 2 HEALTHY`) are Σ`qty`
+and the row count split by status — so **one per-row status field renders all three**. The
+Kit Complete/Incomplete badge lives here now, not on Home.

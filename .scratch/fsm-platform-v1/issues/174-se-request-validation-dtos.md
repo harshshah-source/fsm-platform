@@ -60,3 +60,11 @@ n/a.
 ## Blocked by
 
 - None. Should land with or just before #169.
+
+## Comments
+
+### 2026-07-28 — one enum added by #172
+
+`actionTakenCategory` moves from an unvalidated free string to a server enum (#172 decision 8),
+so its DTO gets the same membership validation `rootCauseCategory` already has at
+`troubleshoot.controller.ts:77`. Vocabulary is served/shared under #169.

@@ -63,7 +63,7 @@ one-time **ghost-assignment toast** when an offered insertion timed out while th
 
 ## Reference
 
-- `docs/ui/mobile/home-dashboard.png.png` (Day Plan / badge context); copy per PRD §541.
+- `docs/ui/mobile/home-dashboard.png` (Day Plan / badge context); copy per PRD §541.
 
 ## Tests (TDD targets — red first)
 

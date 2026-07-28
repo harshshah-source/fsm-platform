@@ -78,9 +78,11 @@ workflow UX, the reference images are **authoritative inputs** (authority order 
 - Desktop: `docs/ui/desktop/v2-reference/` (authoritative). `docs/ui/desktop/v1-legacy/` is superseded.
 - Mobile: `docs/ui/mobile/`.
 
-**File-name robustness:** mobile reference files carry a **double `.png.png` extension** (e.g.
-`home-dashboard.png.png`, `verification.png.png`). Reference and open them by their on-disk name —
-do not assume a single `.png`.
+**File names (corrected 2026-07-28, #172):** mobile reference files are plain **single `.png`** —
+`home-dashboard.png`, `verification.png`, and eight others in `docs/ui/mobile/`. This paragraph
+previously claimed a double `.png.png` extension, which was false and had propagated into the
+`## Reference` line of **22 mobile issues**, making every one of them a dead path. Those have been
+corrected. Reference and open images by their on-disk name; list the directory if unsure.
 
 ### UI discovery (before any UI implementation)
 

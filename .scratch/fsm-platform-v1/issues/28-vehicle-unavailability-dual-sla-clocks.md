@@ -25,7 +25,7 @@ Vehicle-access pauses and the dual SLA clock model. On mobile, when the vehicle 
 
 - `docs/ui/desktop/v2-reference/11-vehicle-unavailability.png` (ZM Vehicle Unavailability Review — this issue)
 - `docs/ui/desktop/v2-reference/10-readiness.png` (ZM Readiness conflicts → Issue 65)
-- Mobile: `docs/ui/mobile/troubleshooting.png.png` (SE file screen → Issue 64)
+- Mobile: `docs/ui/mobile/troubleshooting.png` (SE file screen → Issue 64)
 
 ## Blocked by
 

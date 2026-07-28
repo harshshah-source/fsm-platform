@@ -69,8 +69,8 @@ Issue 18 verification status.
 
 ## Reference
 
-- `docs/ui/mobile/ticket-detail-ready.png.png`
-- `docs/ui/mobile/ticket-detail-verification-pending.png.png`
+- `docs/ui/mobile/ticket-detail-ready.png`
+- `docs/ui/mobile/ticket-detail-verification-pending.png`
 
 ## Tests (TDD targets — red first)
 

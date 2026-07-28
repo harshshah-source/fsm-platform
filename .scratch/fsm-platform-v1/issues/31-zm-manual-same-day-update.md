@@ -23,7 +23,7 @@ The ZM manual same-day update path (distinct from the system-triggered CRITICAL 
 ## Reference
 
 - `docs/ui/desktop/v2-reference/13-intraday-queue.png` (Intra-day Queue — this issue)
-- Mobile: `docs/ui/mobile/home-dashboard.png.png` (SE Day Plan → Issue 66)
+- Mobile: `docs/ui/mobile/home-dashboard.png` (SE Day Plan → Issue 66)
 
 ## Blocked by
 

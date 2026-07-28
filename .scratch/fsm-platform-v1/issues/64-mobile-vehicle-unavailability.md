@@ -66,7 +66,7 @@ never shows a pause indicator and raw readiness never pauses the SLA.
 
 ## Reference
 
-- `docs/ui/mobile/troubleshooting.png.png` (Ticket Detail / unable-to-work path)
+- `docs/ui/mobile/troubleshooting.png` (Ticket Detail / unable-to-work path)
 - `docs/ui/desktop/v2-reference/11-vehicle-unavailability.png` (field parity reference for the report fields)
 
 ## Tests (TDD targets — red first)

@@ -52,8 +52,8 @@ already-built backend.
 
 ## Reference
 
-- `docs/ui/mobile/verification.png.png`
-- `docs/ui/mobile/ticket-detail-verification-pending.png.png`
+- `docs/ui/mobile/verification.png`
+- `docs/ui/mobile/ticket-detail-verification-pending.png`
 
 ## Tests (TDD targets — red first)
 
@@ -92,3 +92,26 @@ withholding both from the SE shape.
 
 Backend fields are owned by **#161/#162**; this comment records the contract mismatch so the mobile
 issue is not built against a payload that does not exist.
+
+### 2026-07-28 — #172 decision 4: generic checks array
+
+Ratified. The screen keeps its five named checks, but the payload exposes them **generically** so
+the verification algorithm stays free to change without breaking a deployed client:
+
+```
+GET /api/tickets/:id/verification
+  -> { outcome, phase, partialDeadline, startedAt, deviceId,
+       checks: [{ key, label, state: 'PASS'|'FAIL'|'PENDING' }] }
+```
+
+Five fixed booleans were rejected explicitly: they would freeze `verification-criteria.ts`'s internal
+steps into a client that cannot be recalled, so changing from five checks to four would be a field
+break. `deviceId` is required for the Device Guard card ("GPS909 only").
+
+**Open sub-question for the build:** the image lists four outcomes including **`Escalated`**, which
+is in neither the PRD's three-badge list nor the `VerifyOutcome` enum — it appears in the PRD only as
+a *ticket* badge (PRD:412). Decide whether it becomes a real verification outcome or is rendered
+from the ticket's `ESCALATED` state.
+
+Backend fields are owned by #161; the missing scoping on this route (unscoped for **every** role,
+not just SE) is #162.

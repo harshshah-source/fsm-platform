@@ -57,8 +57,8 @@ screens beyond the tab skeletons — those are the M-series (55–61).
 
 ## Reference
 
-- `docs/ui/mobile/home-dashboard.png.png`, `tickets-priority-view.png.png`, `inventory.png.png`,
-  `vouchers.png.png`, `profile.png.png` (tab structure, nav, kit styling)
+- `docs/ui/mobile/home-dashboard.png`, `tickets-priority-view.png`, `inventory.png`,
+  `vouchers.png`, `profile.png` (tab structure, nav, kit styling)
 
 ## Tests (TDD targets — red first)
 

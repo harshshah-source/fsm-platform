@@ -75,3 +75,16 @@ Also added:
 - `GET /api/notifications` needs `limit` passthrough (the controller never passes it,
   `notifications.controller.ts:17-19`), a cursor, a `since`, and a total. Note `unread` is a string
   compared to the literal `'true'` — `'1'`/`'TRUE'` silently mean "no filter". Fix under #174/#169.
+
+### 2026-07-28 — #172 decision 3: one list endpoint, not two
+
+The Tickets list is merged (assigned + pool in one urgency-grouped list), so the envelope work here
+targets **`GET /api/me/tickets`** with an `assigned` flag and a `workState` discriminator, rather
+than bounding `/schedules/me` and `/me/shared-pool` as separate shapes. One shape, one cursor, one
+client cache. The underlying day-plan/pool distinction becomes an implementation detail.
+
+This makes the envelope decision *more* load-bearing, not less: the merged list is the single
+highest-traffic read on the SE surface, and it is the one that must not ship as a bare array.
+
+Note `/api/me/work-history` (**#175**) and the dated rows for Daily Status follow the same envelope
+conventions.

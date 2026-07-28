@@ -92,3 +92,19 @@ n/a.
 ## Blocked by
 
 - None. Land with **#174** (validation) and before **#161/#163/#165** freeze their payloads.
+
+## Comments
+
+### 2026-07-28 — vocabularies pinned by #172
+
+Two naming decisions are now settled and belong in this issue's item 5/7 work:
+
+- **`workState`** is the SE list's derived bucket — `'VISIT_NOW' | 'PLAN' | 'IN_WORK' | 'VERIFY'`
+  (#172 decision 3). It is the image's row glyph and its filter chips, and it maps to none of the
+  three existing server enums (`Ticket.status`, `SoftStateType`, `AssignmentState`) — which is
+  exactly why it must be named explicitly rather than overloading `status`.
+- **`actionTakenCategory` becomes a server enum** (#172 decision 8). It is currently an unvalidated
+  free string (`troubleshoot.controller.ts:38`) while the UI renders a closed 10-option picker.
+- **Verification `checks[]`** is a generic `{key, label, state}` array (#172 decision 4), deliberately
+  *not* five fixed booleans, so the algorithm can change without a field break. Same principle this
+  issue applies elsewhere: the contract exposes shapes, not internals.

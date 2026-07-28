@@ -63,7 +63,7 @@ The SE has **no server "added/removed since" signal**: `GET /api/schedules/me` r
 
 ## Reference
 
-- `docs/ui/mobile/home-dashboard.png.png` (SE Day Plan / plant groups)
+- `docs/ui/mobile/home-dashboard.png` (SE Day Plan / plant groups)
 
 ## Tests (TDD targets — red first)
 

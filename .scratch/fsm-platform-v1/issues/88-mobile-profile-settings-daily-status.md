@@ -11,8 +11,8 @@ source is the one open question (see Dependencies).
 
 ## Business rules (authority)
 
-- PRD §479 (Screen Inventory — Profile, Daily Status). `docs/ui/mobile/profile.png.png`,
-  `docs/ui/mobile/daily-status.png.png`.
+- PRD §479 (Screen Inventory — Profile, Daily Status). `docs/ui/mobile/profile.png`,
+  `docs/ui/mobile/daily-status.png`.
 
 ## Acceptance criteria
 
@@ -51,7 +51,7 @@ source is the one open question (see Dependencies).
 
 ## Reference
 
-- `docs/ui/mobile/profile.png.png`, `docs/ui/mobile/daily-status.png.png`
+- `docs/ui/mobile/profile.png`, `docs/ui/mobile/daily-status.png`
 
 ## Tests (TDD targets — red first)
 
@@ -93,5 +93,30 @@ Separately, the **Profile** half of this issue is far larger than "profile detai
 (`me.controller.ts:18-23`). The backend fields are owned by **#161**; the PRD-vs-image scope conflict
 is **#172** item 10.
 
-Note also: this issue's `## Reference` line cites `.png.png`; the files on disk are `.png`
+Note also: this issue's `## Reference` line cites `.png`; the files on disk are `.png`
 (all 22 mobile issues have this) — fixed under **#172**.
+
+### 2026-07-28 — `needs-info` CLOSED on image evidence (#172)
+
+The parked question ("confirm the intended Daily Status content — do not invent") is **answered by
+`docs/ui/mobile/daily-status.png`**, read directly. No invention required, no operator escalation
+needed. Revised acceptance criteria:
+
+- [ ] Daily Status renders four counters — `ASSIGNED`, `COMPLETED`, `IN-PROGRESS`, `PENDING`
+- [ ] A completion percentage and an `X/Y Tickets done` line
+- [ ] Tab counts: `Done (n) / In-progress (n) / Pending (n)`
+- [ ] Day rows in the **same row shape as the Tickets list** (#172 decision 3): ticket number,
+      vehicle reg, per-ticket status pill, device id, transporter, SLA chip, technical hint
+- [ ] A date chip supporting **historical selection**, not just today
+
+**New dependency: [#175](./175-se-work-history-series.md).** `GET /api/schedules/me` resolves a
+single current schedule with no date predicate (`day-plan-query.service.ts:41-46`), so an arbitrary
+past date is unservable today. That is the same gap as the Home 7-day chart and is split out there.
+
+**Profile half — the PRD does not specify this screen at all.** Grep confirms zero PRD/workflow
+mentions of Profile as an SE screen, yet it is a primary bottom-nav tab in all ten images and
+`profile.png` renders **21 discrete data points**, including a 3-level reporting hierarchy with the
+ZM's name, phone and email, against a `GET /api/me` returning four primitives. Backend fields are
+owned by **#161**; treat the image as authority per the parity gate.
+
+Reference path corrected (`.png`, not `.png.png`) — see #172 housekeeping.

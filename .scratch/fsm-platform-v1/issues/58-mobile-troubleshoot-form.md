@@ -63,7 +63,7 @@ Idempotent submit via `client_submission_id`. Also hosts the resubmit form for t
 
 ## Reference
 
-- `docs/ui/mobile/troubleshooting.png.png`
+- `docs/ui/mobile/troubleshooting.png`
 
 ## Tests (TDD targets — red first)
 
@@ -76,3 +76,20 @@ Idempotent submit via `client_submission_id`. Also hosts the resubmit form for t
 
 - #54, #16
 - (photo AC) #81 — Media Upload API
+
+## Comments
+
+### 2026-07-28 — #172 decisions 6-8
+
+- **Photo slots (decision 6):** the form has **4 named slots** — `Before`, `After`, `Part`, `Plate`
+  — overriding the PRD's unstructured "photo refs". `photoRefs: string[]` cannot express them;
+  **#81** now owes slot semantics.
+- **Notes fields (decision 7):** the image shows two text areas against the PRD's three fields.
+  Map `ISSUE REMARKS` → `rootCauseNotes` and `COMPLETION NOTE` → `actionTakenNotes`. All three stay
+  server-side; `diagnosisNotes` is simply unused by mobile. Nothing is lost.
+- **Pickers (decision 8):** the image shows fixed 10+10 tiles. `rootCauseCategory` is a proper
+  server enum, but **`actionTakenCategory` is an unvalidated free string**
+  (`troubleshoot.controller.ts:38`) — it becomes an enum, and both vocabularies get served or
+  shared rather than hardcoded (**#169** item 7, validated by **#174**).
+- The form header's context strip (vehicle reg, `GPS502 · 39h inactive`, transporter, plant, zone,
+  state) all comes from **#161**.

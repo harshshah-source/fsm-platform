@@ -94,3 +94,34 @@ than "expand a ticket id":
 **Dependency added:** the Home-screen field list depends on **#172** (the reference image shows KPI
 tiles + a 7-day chart + a workload grid where the PRD describes a ticket list). Do not build the
 Home payload before that conflict is resolved.
+
+### 2026-07-28 — #172 ratified; contract shape changed
+
+[#172](./172-mobile-screen-contract-ratification.md) is decided. Three consequences land here:
+
+**1. The day-plan / shared-pool split is no longer a contract boundary.** Decision 3 merged the
+Tickets list, so this issue and #165 now owe **one** endpoint rather than two shapes:
+
+```
+GET /api/me/tickets
+  -> { items: [{ ticketId, assigned: boolean,
+                 workState: 'VISIT_NOW'|'PLAN'|'IN_WORK'|'VERIFY',
+                 ...row fields }],
+       cursor }
+```
+
+`workState` is the image's row glyph (V/P/W/✓) and its filter chips. Naming is pinned under #169.
+Coverage scoping is unchanged — the merged list is still "across all mapped plants".
+
+**2. Home is built from this issue's field list.** Decision 1 confirmed the KPI tiles, the Next
+Visit counts (`4 inactive · 3 urgent · 2 in work`) and the Plant Workload percentages all derive
+from **per-ticket status** plus the per-stop counts already scoped here. `Last sync` is `dataAsOf`.
+The one thing that does *not* derive is the 7-day chart → split out as **#175**, deferred.
+
+**3. New AC — `employeeCode` on `GET /api/me`.** The Home header renders `ID - ANV1012`; there is no
+such column on `User` (`schema.prisma:131-148`) or `EngineerMaster` (`:154-168`). Small additive
+column; decide whether it is FSM-owned or sourced.
+
+Also confirmed by the ratification: the telemetry/Technical-Health block and transporter tap-to-call
+are **not** spec conflicts — the PRD requires both explicitly, so they are pure gaps owned by **#84**
+and **#171** respectively. Do not re-litigate them here.

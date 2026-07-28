@@ -61,7 +61,7 @@ already implemented in this repo.
 
 **Before executing any issue that touches a dashboard, page, screen, form, table, drawer, queue,
 report, or navigation:** read the authoritative reference image(s) under
-`docs/ui/desktop/v2-reference/` (desktop) or `docs/ui/mobile/` (mobile — note the `.png.png`
+`docs/ui/desktop/v2-reference/` (desktop) or `docs/ui/mobile/` (mobile — plain single `.png`
 extension) and follow the UI-discovery steps in `docs/agents/workflow.md`. Match layout, hierarchy,
 role visibility, and navigation; do not redesign.
 

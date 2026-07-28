@@ -60,7 +60,7 @@ receipt), submission, and a status list. Drafts are **offline-capable** with a `
 
 ## Reference
 
-- `docs/ui/mobile/vouchers.png.png`
+- `docs/ui/mobile/vouchers.png`
 
 ## Tests (TDD targets — red first)
 
@@ -73,3 +73,12 @@ receipt), submission, and a status list. Drafts are **offline-capable** with a `
 - #54, #38
 - (offline-draft AC) #17 — Offline queue (which depends on #82 sync transport)
 - (photo AC) #81 — Media Upload API
+
+## Comments
+
+### 2026-07-28 — #172 decision 6
+
+The upload block has **3 named document types** — `Receipt`, `Photo`, `Bill` — not one opaque
+`photoRef` per item. **#81** owes the slot semantics. The claim-list half of this screen (rollups,
+statuses, rejection reason to act on) is unreadable by an SE today and is owned by **#163**; the
+item DTO also has no `description` field, which the form shows.

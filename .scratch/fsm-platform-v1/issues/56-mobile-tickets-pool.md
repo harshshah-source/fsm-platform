@@ -49,7 +49,7 @@ mockup. List rows open Ticket Detail (M3).
 
 ## Reference
 
-- `docs/ui/mobile/tickets-priority-view.png.png`
+- `docs/ui/mobile/tickets-priority-view.png`
 
 ## Tests (TDD targets — red first)
 
@@ -60,3 +60,16 @@ mockup. List rows open Ticket Detail (M3).
 ## Blocked by
 
 - #54, #07, #11, #12
+
+## Comments
+
+### 2026-07-28 — #172 decision 3: one merged list
+
+Ratified: the Tickets screen is a **single list grouped by urgency** (`Visit Now` / `Other Tickets`)
+with a Plant-wise/Priority toggle and `All / Visit Now / Plan / In Work / Verify` chips — **no
+Assigned/Pool visual separation**, overriding PRD §497. Coverage scoping is unchanged.
+
+Contract: one endpoint, `GET /api/me/tickets`, returning `assigned: boolean` and
+`workState: 'VISIT_NOW'|'PLAN'|'IN_WORK'|'VERIFY'` per row (the image's V/P/W/✓ glyph). Owned by
+**#161**/**#165**. Row fields incl. transporter name and the `Call`/`WhatsApp` buttons depend on
+**#171** (no phone column exists yet).

@@ -21,7 +21,7 @@ UI retrofit (screen exists) · **C** needs new UI follow-up (screen absent).
 | **01** Foundation/infra | auth, RBAC, Prisma, settings, app shells | Admin ✅ `LoginPage`/`AdminShell`/`AuthProvider`; Mobile 🟡 auth shell only | Admin: none. Mobile: the **shell itself** (bottom-tabs Home/Tickets/Stock/Vouchers/Profile, component kit, offline-aware client) | `desktop/v2-reference/00-login`; all `mobile/*` | Admin **01 (done)**; Mobile → **new Mobile Foundation issue** | A (admin) / **C** (mobile) |
 | **02** Org/reference config + Settings | zones/plants/users/companies/engineers/coverage/SLA/scoring/kit/geo CRUD | 🟡 `SettingsPage`+sections, `TerritoryPage` | Plants CRUD page; Company-update page; full user-mgmt UI; surface code-constant settings (geofence radius, PGI window, stuck-snapshot threshold) | `v2-reference/26-settings` | Retrofit `SettingsPage` (**02**) + **45** Plants, **46** Company, **49** deal_type | **B** + **C** |
 | **03** Notifications & audit spine | ❌ not built (HITL, ready-for-human) | ❌ | none yet — **no backend to surface** | (none) | **03** (when built) | n/a |
-| **04** Snapshot + data-as-of | ✅ ingestion + as-of | Admin ✅ `SnapshotBanner`; Mobile ❌ | Mobile: online / last-sync pill on Home | `mobile/home-dashboard.png.png` | Admin **04 (done)**; Mobile → **M1 Home** | A (admin) / **C** (mobile) |
+| **04** Snapshot + data-as-of | ✅ ingestion + as-of | Admin ✅ `SnapshotBanner`; Mobile ❌ | Mobile: online / last-sync pill on Home | `mobile/home-dashboard.png` | Admin **04 (done)**; Mobile → **M1 Home** | A (admin) / **C** (mobile) |
 | **05** Device state + ticket creation | ✅ inactivity + SLA bucket + auto-create | ✅ via `TicketsPage`/`DashboardHome` | none (system pipeline; no dedicated surface) | — | **05 (done)** | **A** |
 | **06** Zone Dashboard Home | ✅ aggregations + role access | 🟡 cards stubbed, no KPI strip, no role variants | Wire 8 live Action-Required cards; KPI metric strip (uptime % + counts); role-variant dashboards | `v2-reference/01` (+`02/03/04/05`) | Retrofit **06**; variants → **27** + new variant issue | **B** (+ **C** for variants) |
 | **07** Ticket List & Detail | ✅ list + detail + 6-tab drawer | Admin 🟡 4 of 6 drawer tabs stub; Mobile ❌ | Admin: fill Forms/Components/Assignment-History tabs, inline badge columns. Mobile: list + detail | `v2-reference/07,08,28`; `mobile/tickets-priority-view`, `ticket-detail-ready` | Admin retrofit **07**; Mobile → **M2/M3** | **B** (admin) / **C** (mobile) |
@@ -33,12 +33,12 @@ UI retrofit (screen exists) · **C** needs new UI follow-up (screen absent).
 | **13a/b** ZM Monitoring & Override | ✅ engine + API + admin UI | 🟡 near-complete | KPI strip; drag-reorder (position-based); reason-code vocab (domain decision first) | `v2-reference/12` | Retrofit **13** (polish) | **B** |
 | **14a/b** SE Planner | ✅ CRUD + recommender bias + grid UI | 🟡 minor gaps | Date-range/cadence picker; engineer display names; real drag | `v2-reference/16` | Retrofit **14** (minor) | **B** |
 | **15** Soft states + activity ping | ✅ soft-state machine + derived Activity Status | Admin ❌ no SE-activity board; Mobile ❌ no soft-state actions | Admin: SE Activity board. Mobile: VIEWED/ON_SITE/Start + geofence prompt | `v2-reference/15-se-activity`; `mobile/ticket-detail-ready` | Admin → **25**; Mobile → **M3** | **C** (both) |
-| **16** Troubleshoot form | ✅ form + structured root cause + idempotency | Admin 🟡 Forms tab stub; Mobile ❌ | Admin: submitted-form view. Mobile: full form | `mobile/troubleshooting.png.png`; `v2-reference/08` Forms tab | Admin retrofit **07/16**; Mobile → **M4** | **B** (admin) / **C** (mobile) |
+| **16** Troubleshoot form | ✅ form + structured root cause + idempotency | Admin 🟡 Forms tab stub; Mobile ❌ | Admin: submitted-form view. Mobile: full form | `mobile/troubleshooting.png`; `v2-reference/08` Forms tab | Admin retrofit **07/16**; Mobile → **M4** | **B** (admin) / **C** (mobile) |
 | **17** Offline queue | ❌ not built | n/a / Mobile ❌ | none yet — **no backend to surface** (build-from-scratch, owned by 17) | `mobile/*` offline states | **17** (exists) | n/a |
-| **18** GPS three-phase verification | ✅ three-phase + outcome | Admin ✅ (via 19); Mobile ❌ | Mobile: verification view + PARTIAL_RECOVERY badge + CTA | `v2-reference/14`; `mobile/verification.png.png`, `ticket-detail-verification-pending` | Admin **19 (done)**; Mobile → **M5** | A (admin) / **C** (mobile) |
+| **18** GPS three-phase verification | ✅ three-phase + outcome | Admin ✅ (via 19); Mobile ❌ | Mobile: verification view + PARTIAL_RECOVERY badge + CTA | `v2-reference/14`; `mobile/verification.png`, `ticket-detail-verification-pending` | Admin **19 (done)**; Mobile → **M5** | A (admin) / **C** (mobile) |
 | **19** Verification Review page | ✅ review + fraud flag | ✅ `VerificationReviewPage` | none | `v2-reference/14` | **19 (done)** | **A** |
 | **20** QR + Technical Hints | ❌ not built | n/a / Mobile ❌ | none yet — **no backend to surface** (build-from-scratch, owned by 20) | `mobile/*` | **20** (exists) | n/a |
-| **21** Van Stock + Component-Blocked | ✅ van stock + Common-Kit hard filter + Component-Blocked queue | Admin 🟡 page done, no AR cross-link / real WM status; Mobile ❌ | Admin: Action-Required cross-link, real WM status. Mobile: Stock screen + Home kit badge | `v2-reference/17`; `mobile/inventory.png.png`, `home` kit badge | Admin **53** (cross-link) + 22/23 (WM status); Mobile **52** (kit badge) + **M6** (stock) | **B** (admin) / **C** (mobile) |
+| **21** Van Stock + Component-Blocked | ✅ van stock + Common-Kit hard filter + Component-Blocked queue | Admin 🟡 page done, no AR cross-link / real WM status; Mobile ❌ | Admin: Action-Required cross-link, real WM status. Mobile: Stock screen + Home kit badge | `v2-reference/17`; `mobile/inventory.png`, `home` kit badge | Admin **53** (cross-link) + 22/23 (WM status); Mobile **52** (kit badge) + **M6** (stock) | **B** (admin) / **C** (mobile) |
 
 ### Part 1 roll-up
 
@@ -71,7 +71,7 @@ already implemented in this repo.
 
 **Before executing any issue that touches a dashboard, page, screen, form, table, drawer, queue,
 report, or navigation:** read the authoritative reference image(s) under
-`docs/ui/desktop/v2-reference/` (desktop) or `docs/ui/mobile/` (mobile — note the `.png.png`
+`docs/ui/desktop/v2-reference/` (desktop) or `docs/ui/mobile/` (mobile — note the `.png`
 extension) and follow the UI-discovery steps in `docs/agents/workflow.md`. Match layout, hierarchy,
 role visibility, and navigation; do not redesign.
 
@@ -175,7 +175,7 @@ Every issue file uses this skeleton:
 follow-up issue that owns it.
 
 **`## Reference`** lists the authoritative image(s) by on-disk name, e.g.
-`Reference: docs/ui/desktop/v2-reference/18-component-requests.png` (mobile: `.png.png`). "n/a"
+`Reference: docs/ui/desktop/v2-reference/18-component-requests.png` (mobile: `.png`). "n/a"
 only if the issue is backend/test-only with no user-facing surface.
 
 Acceptance criteria for any UI surface must be phrased against its reference image (layout,
@@ -239,13 +239,13 @@ authoring fixes:
 | New issue | Owns | Parent (done backend) | Reference |
 |---|---|---|---|
 | **Mobile Foundation** (file first; blocks all M-series) | RN shell, bottom-tabs Home/Tickets/Stock/Vouchers/Profile, component kit, offline-aware client | 01 | all `mobile/*` |
-| **M1 Home** | last-sync · Day Plan/Next Visit/Plant Workload · kit badge · Open Ticket Pool | 04/11/21/12 | `home-dashboard.png.png` |
+| **M1 Home** | last-sync · Day Plan/Next Visit/Plant Workload · kit badge · Open Ticket Pool | 04/11/21/12 | `home-dashboard.png` |
 | **M2 Tickets / Day-Plan / Pool** | list + day-plan + shared-pool entry | 07/11/12 | `tickets-priority-view` |
 | **M3 Ticket Detail (ready + verification-pending) + soft-state actions** | detail + VIEWED/ON_SITE/Start + geofence prompt | 07/15/18 | `ticket-detail-ready`, `ticket-detail-verification-pending` |
-| **M4 Troubleshoot form** | full mobile form | 16 | `troubleshooting.png.png` |
-| **M5 Verification** | verification view + PARTIAL_RECOVERY badge + CTA | 18 | `verification.png.png` |
-| **M6 Stock/Inventory** | van-stock screen | 21 (+22) | `inventory.png.png` |
-| **M7 Vouchers** | voucher capture | 38 | `vouchers.png.png` |
+| **M4 Troubleshoot form** | full mobile form | 16 | `troubleshooting.png` |
+| **M5 Verification** | verification view + PARTIAL_RECOVERY badge + CTA | 18 | `verification.png` |
+| **M6 Stock/Inventory** | van-stock screen | 21 (+22) | `inventory.png` |
+| **M7 Vouchers** | voucher capture | 38 | `vouchers.png` |
 
 *(M8 daily-status/Profile and Issue 20 QR are the deferred 20% — file but sequence last.)*
 
@@ -272,7 +272,7 @@ makes every future issue's mobile AC `blocked-by Mobile Foundation` rather than 
 
 1. **Screenshot usage.** Any issue touching a dashboard/page/screen/form/table/drawer/queue/report/nav
    must carry a `## Reference` line naming the exact on-disk image (desktop `v2-reference/`, mobile
-   `.png.png`). Run the workflow.md UI-discovery steps before writing the first test. No reference =
+   `.png`). Run the workflow.md UI-discovery steps before writing the first test. No reference =
    the issue is not ready-for-agent.
 
    | Reference image | AC for issue |

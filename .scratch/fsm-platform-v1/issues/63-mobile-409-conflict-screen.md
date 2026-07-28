@@ -58,7 +58,7 @@ Use and will be reconciled by the Warehouse." with **View Van Stock** / **Go Bac
 
 ## Reference
 
-- `docs/ui/mobile/ticket-detail-ready.png.png` (the submit context); 409 state copy per CONTEXT §Business 409 Conflict
+- `docs/ui/mobile/ticket-detail-ready.png` (the submit context); 409 state copy per CONTEXT §Business 409 Conflict
 
 ## Tests (TDD targets — red first)
 

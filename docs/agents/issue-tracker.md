@@ -41,8 +41,9 @@ Type: <AFK|HITL>
 follow-up issue that owns it. Backend/test-only issues record `n/a`.
 
 **`## Reference`** lists the authoritative image(s) by on-disk name, e.g.
-`docs/ui/desktop/v2-reference/18-component-requests.png` (mobile files carry a double `.png.png`
-extension). `n/a` only if the issue is backend/test-only with no user-facing surface.
+`docs/ui/desktop/v2-reference/18-component-requests.png`. Mobile files are plain single `.png` in
+`docs/ui/mobile/` (corrected 2026-07-28 under #172 — the previously documented `.png.png` double
+extension did not exist). `n/a` only if the issue is backend/test-only with no user-facing surface.
 
 Acceptance criteria for any UI surface must be phrased against its reference image (layout,
 hierarchy, role visibility) and are subject to the Parity gate in `docs/agents/workflow.md`.

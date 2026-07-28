@@ -57,7 +57,7 @@ Day Plan / Next Visit / Plant Workload (Issue 11 `/api/schedules/me`), Common-Ki
 
 ## Reference
 
-- `docs/ui/mobile/home-dashboard.png.png`
+- `docs/ui/mobile/home-dashboard.png`
 
 ## Tests (TDD targets — red first)
 
@@ -69,3 +69,16 @@ Day Plan / Next Visit / Plant Workload (Issue 11 `/api/schedules/me`), Common-Ki
 ## Blocked by
 
 - #54, #04, #11, #21, #12
+
+## Comments
+
+### 2026-07-28 — #172 decision 1: build Home from the image, without the chart
+
+Ratified: `docs/ui/mobile/home-dashboard.png` is authority over the PRD's "ordered Day Plan list".
+Home is KPI tiles + Next Visit card + Plant Workload grid + `Open Ticket Pool` + `Scan` FAB.
+All of it derives from **#161**'s per-ticket status and per-stop counts, except the **7-day
+Assigned vs Completed chart**, which is deferred to **#175** — ship Home without it.
+
+Two further ratifications touching this issue: the **Kit Complete/Incomplete badge moves to
+Inventory** (PRD Flow 12 put it on Home; the Home image has no kit badge), and the header's
+`ID - ANV1012` employee code needs a new column (AC added to #161).

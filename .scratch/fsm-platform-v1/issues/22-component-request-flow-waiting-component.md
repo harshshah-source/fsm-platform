@@ -30,7 +30,7 @@ The end-to-end component-unavailable loop. When an SE submits the form with `com
 
 - `docs/ui/desktop/v2-reference/18-component-requests.png` (WM Component Requests queue)
 - `docs/ui/desktop/v2-reference/08-ticket-detail.png` / `28-tickets-drawer.png` (Components tab)
-- Mobile: `docs/ui/mobile/troubleshooting.png.png`, `docs/ui/mobile/inventory.png.png`
+- Mobile: `docs/ui/mobile/troubleshooting.png`, `docs/ui/mobile/inventory.png`
 
 ## Blocked by
 

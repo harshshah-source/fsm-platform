@@ -67,3 +67,15 @@ n/a (backend; consumed by Mobile #60, which owns the screen).
 ## Blocked by
 
 - **#172** (Inventory scope conflict) for the field list; **#101** before any consumption path.
+
+## Comments
+
+### 2026-07-28 — #172 decision 2: this issue stands as filed
+
+The PRD-vs-image conflict is resolved **in the image's favour**, so nothing here shrinks: SE-initiated
+component-request create, van-stock enrichment, zone-warehouse visibility and the requests list are
+all in scope. `Use Part` remains deferred behind **#101**.
+
+The tiles (`13 AVAILABLE / 3 LOW STOCK / 2 HEALTHY`) are Σ`qty` and the row count split by status —
+so the per-row `status`/threshold field is the highest-leverage single item here: it renders all
+three tiles and both row pills.
