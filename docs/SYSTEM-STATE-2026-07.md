@@ -640,6 +640,17 @@ missing backend endpoints (#90 work-type mix, #94 ticket chrome, #74 scorecard c
 Known FE gaps: `window.prompt` reason legs (#80), Playwright visual baseline (FE-00 partial),
 `components/data/` untracked by git (#114).
 
+**#160 admin table & chrome UX pass (done, 2026-07-27/28):** `TopBar` renders a real breadcrumb
+(`shell/breadcrumb.ts` `resolveBreadcrumb`, off `buildNav` + a small detail-route table) — the former
+"FSM Command Console" eyebrow + stale `PAGE_TITLES` prefix table are retired. Every `DataTable`
+(38 render sites) plus the two bespoke drill-downs (`CompanyPlantTable`, `ZoneDispatchTable`) gained a
+leading, non-sortable `S.No.` column and one table-level download control (`TableDownloadButton`, a
+Radix dropdown over CSV/Excel/PDF/PNG) — a deliberate DOM read (`lib/tableExport.ts`), not a data-model
+read, so the export can only ever contain what is already rendered (the zone-scoping proof) and always
+matches the on-screen post-filter/post-sort view (fixing a real bug: every #122-era export silently
+ignored the active column sort). The five page-level `ExportMenu` instances this made redundant were
+removed.
+
 ---
 
 ## 4. DOCS vs CODE RECONCILIATION

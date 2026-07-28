@@ -15,10 +15,12 @@ Legend: `[T]` = file touched by the re-theme (item-by-item re-verify); `[U]` = f
   `aria-current`, collapsed icon rail + body-portal tooltips, "Admin Console v2.0" footer line.
 - [T] BrandLogo (`shell/BrandLogo.tsx`): red "autoplant Systems" wordmark + "FIELD MANAGEMENT
   SYSTEM" caption.
-- [T] TopBar (`shell/TopBar.tsx`): mobile menu button, eyebrow "FSM Command Console" +
-  page title, global search input, RunIngestionButton (OH-only, self-gated), "Assign SE"
-  button, Act-as-ZM input + Go (CSM/OH, not acting), divider, notifications bell, profile
-  chip (initials avatar + role + zone), Log out button.
+- [T] TopBar (`shell/TopBar.tsx`): mobile menu button, global search input, RunIngestionButton
+  (OH-only, self-gated), "Assign SE" button, Act-as-ZM input + Go (CSM/OH, not acting), divider,
+  notifications bell, profile chip (initials avatar + role + zone), Log out button.
+  **Superseded 2026-07-27 (#160, operator decision):** the eyebrow "FSM Command Console" + page-title
+  pair this line originally described is retired; TopBar now renders a real breadcrumb
+  (`nav aria-label="Breadcrumb"`, `resolveBreadcrumb` off `buildNav`) in that position instead.
 - [U] AppShell: acting-as-ZM warning banner + "Exit acting mode", main frame, SnapshotBanner.
 - [T] Footer (`shell/Footer.tsx`): brand block + tagline, 4 link columns (16 links), status row
   (4 items).

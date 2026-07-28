@@ -141,7 +141,10 @@ Small letter chips: `A` = teal/green, `B` = blue, `C` = gray. Also rendered as a
 
 ### 4.2 TopBar `[all desktop]` — **[N]**, fed by existing `useAuth().session`
 - Height ≈ 52px, `--surface-card`, border-bottom.
-- Left: breadcrumb `FSM Command Console › {page}` (muted › strong).
+- Left: real breadcrumb (`Dashboard › {ancestor} › {page}`, `resolveBreadcrumb` off `buildNav` + a small
+  detail-route table; muted ancestors, strong current page). **Documented deviation (#160, operator
+  decision, 2026-07-27):** the reference's `FSM Command Console › {page}` eyebrow is retired — the
+  sidebar wordmark already carries branding, and a second product name in the topbar read as clutter.
 - Center: full-width rounded search, magnifier icon, placeholder "Search ticket, vehicle, plant, device…".
 - Right: red **`+ Assign SE`** button · `Raise Concern` · `Support` · `Settings` gear · bell (red dot) · **user chip** = avatar + two-line `{Role} / {Zone}` `[ZM=West Zone, Ops-Head, WM=Zone Warehouse]`.
 

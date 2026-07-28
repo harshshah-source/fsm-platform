@@ -40,7 +40,13 @@ Flex row: `div.flex.min-h-screen` → `Sidebar` + `div.flex.min-w-0.flex-1.flex-
 Sticky (`top-0 z-20`), light (`bg-surface-card/90 backdrop-blur-xl`, bottom hairline, `shadow-card`), h-4.25rem. Left → right:
 
 1. Mobile hamburger (opens drawer; `lg:hidden`).
-2. Page identity block (desktop only): caps eyebrow "FSM Command Console" (`text-luxury-700`) over the **current page title** — resolved from `PAGE_TITLES` prefix table (longest-prefix match; `/` → "Dashboard", unknown → "Console"). This is the app's only breadcrumb.
+2. Real breadcrumb (desktop only, `nav aria-label="Breadcrumb"`): `Dashboard [› ancestor]* › {page}`, resolved
+   by `resolveBreadcrumb(pathname, role)` (`shell/breadcrumb.ts`) off `buildNav(role)` (longest-prefix match)
+   plus a small `DETAIL_CRUMBS` table for the ~6 detail routes absent from nav (ticket/schedule/dispatch-run/
+   batch detail, fleet directory); unmatched paths fall back to `Dashboard › Console`. Ancestors are links,
+   the current page carries `aria-current="page"`. **#160 (2026-07-27, operator decision):** this **replaces**
+   the former "FSM Command Console" eyebrow + `PAGE_TITLES` prefix table (both deleted) — the sidebar wordmark
+   already carries branding, so a second product name in the topbar was retired as clutter.
 3. Global search input (decorative — **no behavior wired**), placeholder "Search ticket, vehicle, plant, device…", `aria-label="Search"`, hidden below `md`.
 4. Right cluster: `RunIngestionButton` (renders null unless OH; pulsing red "cooking words" animation while running; confirm Modal; broadcasts `emitIngestionComplete` on success) · "Assign SE" primary button (`navigate('/')`) · **Act-as-ZM control** (CSM/OH only, when not acting): zone number input + "Go" → `setActingZone` · divider · notifications bell (decorative, no behavior) · profile chip (initials avatar from role label, role name + zone label) · "Log out" secondary button.
 
