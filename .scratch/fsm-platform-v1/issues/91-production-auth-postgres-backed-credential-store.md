@@ -315,3 +315,53 @@ not a basis for production sign-off.
 
 - 01 — Foundation skeleton & infrastructure (auth seam, JWT, guards, Prisma/DB)
 - 02 — Org / reference config + Settings (`POST /api/org/users` account registry)
+
+## Comments
+
+### 2026-07-28 — mobile-readiness extension (docs/status/backend-mobile-readiness-plan-2026-07-28.md §C)
+
+Re-verified 2026-07-28: zero auth commits since 07-22; every §2 finding of the 07-22 mobile
+assessment stands. Five additions **within this issue's scope** (the swap), none reopening its
+frozen decisions:
+
+1. **Async hashing must be explicit.** Scope 2 says keep scrypt "exactly as in `user-store.ts`" —
+   which as written preserves `scryptSync` (`user-store.ts:78`), the event-loop stall that makes a
+   1,000-device login burst a process-wide outage. Amend: same algorithm/salt/`timingSafeEqual`,
+   but promisified `crypto.scrypt`. Also hash a dummy on unknown email (`user-store.ts:75-76`
+   timing enumeration).
+2. **`revokeAllForUser` AC.** The store exposes only `issue`/`consume`; device-loss and
+   force-logout need user-keyed revocation. Add to the `refresh_tokens` design + one AC.
+3. **Reserve `device_id` on `refresh_tokens` before the table freezes.** One-device-vs-many
+   (HITL D4, plan doc §D) decides its semantics; adding the column later is a migration + fleet
+   re-login. Decide D4 first, then code the table.
+4. **Rotation self-lockout on lossy networks (new finding N1).** `consume()` revokes before the
+   response reaches the client (`refresh-token-store.ts:35`); a dropped response strands the device
+   — retry looks like token-theft reuse → 401 → password re-login mid-shift. Routine on rural 2G.
+   Design a rotation grace window or per-device token families into the table (the rotation-lineage
+   column already contemplated here is the natural hook).
+5. **Native contract invariant.** If the optional admin httpOnly-cookie cutover lands, the JSON-body
+   `/auth/refresh` contract must remain for mobile (ADR-0025 keychain path) — additive per-client,
+   never a replacement.
+
+Out of scope, tracked elsewhere: mobile access TTL (HITL D3 — this issue's 15-min freeze stands
+until the operator reopens it), `jti`/`kid` claims (would break this issue's byte-compat AC — own
+decision if ever needed), push/device-token registry (#76). Sequencing: **#162 (SE authz floor)
+must land no later than this issue's credential rollout** — 75 SEs gaining login today would each
+be able to write against all 13,941 OPEN troubleshoot tickets (measured 07-28).
+
+### 2026-07-28 — logout and revocation do not exist at all (freeze plan §1.1, F3.4)
+
+Sharper than the 07-28 extension's "no `revokeAllForUser`": **there is no logout endpoint.**
+`auth.controller.ts:16-26` exposes exactly two routes, `login` and `refresh`; a repo-wide grep for
+`logout|revoke|revocation|blacklist|denylist` across `apps/backend/src` hits only `auth.service.ts:27`
+and the store. `InMemoryRefreshTokenStore` has exactly `issue` and `consume` (`:19-38`) — `consume`
+revokes only the single token it rotates.
+
+Consequences: mobile's `logout()` clears the local keychain while the refresh token stays valid
+server-side for up to 30 days, and **a lost or stolen handset cannot be revoked by anyone**. For a
+field workforce with device turnover that is a security gap, not a papercut.
+
++1 AC: **`POST /api/auth/logout`** revoking the presented refresh token, plus the `revokeAllForUser`
+path for device loss. Both belong in this issue's `refresh_tokens` design, and the **device-model
+decision (D-2) must be made before that table is written** — retrofitting `device_id` later is a
+migration plus a fleet-wide re-login.

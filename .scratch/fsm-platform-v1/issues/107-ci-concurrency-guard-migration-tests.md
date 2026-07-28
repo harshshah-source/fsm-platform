@@ -145,3 +145,22 @@ committed, so a from-zero migrate reproduces the running schema) **before** buil
 
 Rationale: a CI job that is red on its first run gets muted, and #144's untracked migration would make
 the from-zero-migrate AC fail for a reason nobody could diagnose from the repository.
+
+## Comments
+
+### 2026-07-28 — add the mobile test step (freeze plan F0.1)
+
+**`ci.yml` never runs `apps/mobile`'s tests.** The two suite steps hardcode
+`working-directory: apps/backend` and `apps/admin`; `@fsm/mobile#test` exists in the Turbo graph
+(`apps/mobile/package.json` defines `"test": "jest"`) and is never invoked.
+
+Correction to an earlier claim: **the mobile suite is not broken** — executed 2026-07-28,
+`npx jest --ci` and `npm test` both exit 0, **6 suites / 20 tests passing**. The risk is that it
+rots invisibly, which is precisely the failure this workflow's own header says it was written to
+kill ("both suites were red and nobody knew"). Mobile would be the third instance.
+
+Also: the step labelled **"Typecheck (backend + admin)" is wrong** — it runs `pnpm turbo run
+typecheck`, which is workspace-wide and *does* cover mobile. Anyone reading the workflow to answer
+"is mobile in CI?" gets the wrong answer in both directions. Fix the label.
+
++1 AC: **a third test step for `apps/mobile`.** One line, and it must land before mobile work starts.

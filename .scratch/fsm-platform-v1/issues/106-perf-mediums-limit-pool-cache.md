@@ -36,3 +36,30 @@ n/a
 
 ## Blocked by
 None — can start immediately. MySQL-side timeouts are owned by #97.
+
+## Comments
+
+### 2026-07-28 — mobile-readiness extension (docs/status/backend-mobile-readiness-plan-2026-07-28.md §A-§5)
+
+Re-verified: `PrismaPg` still constructed with only `connectionString` + UTC options
+(`prisma.service.ts:26-40`); pg defaults `max:10` (measured in installed `pg/lib/defaults.js:42`),
+`connectionTimeoutMillis:0`; live DB (07-28): `statement_timeout=0`,
+`idle_in_transaction_session_timeout=0`, `max_connections=100`. Cron load grew: **11 business
+sweeps + dispatch + MV refresh = 13 in-process crons**, six co-firing on every hour mark, all on
+the same 10-connection pool.
+
+This issue's pool AC is the right owner — extend it with the named values and a mobile-scale AC:
+
+- pool `max` ≈ 25–50 (rationale: `max_connections=100` minus cron/admin/headroom);
+- `connectionTimeoutMillis` ≈ 5 s — acquisition fail-fast is **the backpressure signal** a retrying
+  mobile client needs; today excess requests queue forever and retries stack invisibly;
+- session options: `-c statement_timeout=30000 -c idle_in_transaction_session_timeout=60000`
+  (alongside the existing `-c timezone=UTC`), or env-driven equivalents;
+- AC: a pool-exhausted request fails fast with a distinct error (not unbounded queuing); a
+  deliberately slow query aborts (existing AC) *and* a stalled transaction is reaped.
+
+Quantified target (plan doc §A-§5/§6): 1,000 devices polling at 60 s ≈ 50 req/s ≈ 185 SQL/s —
+steady-state fits even today; the outage modes are the tails (shift-start burst ⇒ 9–18 s full-pool
+saturation stalling admin + sweeps; one stuck query permanently eating 1 of 10 connections). These
+config values are hours of work and convert silent latency collapse into bounded, observable
+errors — **do first in the mobile runway; no load test is meaningful before it.**

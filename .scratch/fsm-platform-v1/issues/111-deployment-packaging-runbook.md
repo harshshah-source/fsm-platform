@@ -62,3 +62,16 @@ n/a
 ## Blocked by
 HITL decisions above (infrastructure target + external access). #98 (env validation) and #107 (CI)
 land independently and are consumed by this issue.
+
+## Comments
+
+### 2026-07-28 — mobile-readiness notes (docs/status/backend-mobile-readiness-plan-2026-07-28.md §C/§D)
+
+Two items routed here:
+1. **Log durability prerequisite for #167**: correlation-ID + access-log work is worthless if
+   stdout evaporates — the runbook must land process-manager/file retention for backend logs.
+2. **Single-instance ceiling (HITL D8)**: in-memory auth stores, process-local sweep locks, and
+   13 in-process crons make the backend single-instance by construction. If the operator accepts
+   that for the 1,000-device pilot (plan doc recommends: yes, with #106-ext/#110/#165 landed),
+   this issue documents it as an explicit capacity/availability ceiling — including "every deploy
+   is a fleet-wide logout until #91 lands; schedule deploys off-shift."

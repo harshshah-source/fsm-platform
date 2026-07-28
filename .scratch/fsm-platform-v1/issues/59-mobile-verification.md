@@ -64,3 +64,31 @@ already-built backend.
 ## Blocked by
 
 - #54, #18
+
+## Comments
+
+### 2026-07-28 — this issue's pinned contract does not match the code (freeze plan F2.11)
+
+`partialDeadline` is in this issue's API contract, but the SE route does not return it.
+`verification-query.service.ts:94-109` (`forTicket`) returns
+`{ticketId, phase, pingsReceivedCount, outcome, fraudFlag, firstPingDistanceMeters, badge}`.
+`partialDeadline` is computed **only** on the manager review row (`:150-153`). The SE client has
+neither `partialDeadline` nor `startedAt`, so **it cannot compute the 24 h countdown this issue
+requires**.
+
+Further gaps against `docs/ui/mobile/verification.png`:
+- The image lists **five discretely-stated checks** (`Live GPS received`, `Multiple pings detected`,
+  `Stability window`, `Device mapping verified`, `Historical mapping checked`); the payload carries
+  an aggregate `phase` + `pingsReceivedCount`. A client can only fake these by reimplementing the
+  criteria — which forks them from `verification-criteria.ts`.
+- The `Device Guard` card ("GPS909 only — backup device cannot close this ticket") needs the anchored
+  `deviceId`; `VerificationView` carries no device id.
+- Note PRD §531/CONTEXT §9 describe **three** phases, the image shows **five** checks, and the code
+  has **one** aggregate — a three-way disagreement, filed as **#172** item 3.
+
+**Also worth a decision:** the SE variant returns `fraudFlag` and `firstPingDistanceMeters`
+(`:104-107`) — fraud-investigation data on the phone of the person under suspicion. Consider
+withholding both from the SE shape.
+
+Backend fields are owned by **#161/#162**; this comment records the contract mismatch so the mobile
+issue is not built against a payload that does not exist.

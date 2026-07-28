@@ -160,3 +160,24 @@ n/a
 
 ## Blocked by
 - [#144](./144-commit-dispatch-correctness-layer.md)
+
+## Comments
+
+### 2026-07-28 — mobile-readiness measurement: promoted to mobile-blocking (docs/status/backend-mobile-readiness-plan-2026-07-28.md §B N9)
+
+Verified fully open at HEAD and now quantified on the live dev DB (07-28):
+- **21 of 64 SEs' latest live schedule is entirely past-dated** (`date_to < current_date`) — a
+  third of the fleet would open the mobile app and see an old plan served as today's.
+- **190 live (`ACTIVE`+`OVERRIDDEN`) schedules accrete across 64 SEs** — nothing ever writes a
+  terminal status (grep re-confirmed: no `COMPLETED`/`PARTIAL` writer exists).
+- #153's liveness widening (correct in itself) **increased** the stale-serveable population: old
+  `OVERRIDDEN` plans now count as live too.
+- One live schedule holds **1,453 tickets** ([INFERRED] via the unbounded `assign-plants` flow) —
+  the read would serve it whole; the bound is #165's, the closure/date-filter is this issue's.
+
+Two interactions the fix must handle (from the 07-28 delta review): #127 APPEND does **not**
+refresh the `dispatchedAt` the read orders by — today that defect and the missing date filter mask
+each other, so fixing the date filter alone can change which schedule wins; and the payload already
+carries `dateFrom`/`dateTo`, so a client *could* self-defend, but the server semantics (and the
+capacity accounting behind them) are what must be right. **Reclassified: blocking for mobile
+development start** — it is the difference between the Home screen being trustworthy or not.

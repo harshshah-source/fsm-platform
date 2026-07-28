@@ -67,3 +67,27 @@ n/a
 
 ## Blocked by
 #100 (shares the guarded-transition helper; whichever lands first introduces it).
+
+## Comments
+
+### 2026-07-28 — mobile-readiness verification (docs/status/backend-mobile-readiness-plan-2026-07-28.md §A-§3)
+
+Both headline sub-findings re-confirmed at line level (shadow-use key persistence:
+`troubleshoot-submission.service.ts:107→116→276-301`; non-atomic decrement `:315-320`).
+**Reachability correction (N7):** the decrement paths are currently UNREACHABLE via HTTP —
+`consumedComponents` exists only on the service input (`:37`); `TroubleshootBody`
+(`troubleshoot.controller.ts:32-44`) has no such field and no caller passes it. Armed, not firing.
+**Hard sequencing consequence: this issue's persist-key-on-CONFLICT + atomic-decrement ACs must
+land before #82 (sync batch) or issue 21 wire the consumed-components leg** — both plan exactly
+that; #82's DUPLICATE guarantee is unsatisfiable on the CONFLICT path until then (noted in #82).
+
+Two sites added to the open list:
+- `confirmReceipt` status-unguarded two-step (`component-request.service.ts:177-183`) — same family
+  as the already-listed `confirmResubmit`; move status into the update WHERE (transitionOrConflict).
+  (Its missing *ownership* check is #162's, not this issue's.)
+- Vouchers concurrent duplicate: check-then-create (`vouchers.service.ts:157-178`) with no P2002
+  catch — a concurrent same-key pair returns 500 instead of DUPLICATE. Catch → re-read → DUPLICATE.
+
+Client-facing retry *contract* work (keys on VU/leave/availability, already-done replay,
+`alreadyDone` 409 discriminator) is deliberately split out as **#164** — this issue stays
+server-side race guards.

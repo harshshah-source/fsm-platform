@@ -65,3 +65,27 @@ domain logic the per-type endpoints already use, keyed by the existing `client_s
 ## Blocked by
 
 - #15, #16, #38
+
+## Comments
+
+### 2026-07-28 — mobile-readiness extension (docs/status/backend-mobile-readiness-plan-2026-07-28.md §A-§7, §B N6)
+
+Contract gaps found by the 07-28 verification — both must be settled **before this API is built**,
+or the sync contract freezes the offline incompatibility:
+
+1. **The item envelope has no timestamp.** `{submissionType, clientSubmissionId, payload}` +
+   "no new write semantics" means a 10:00-captured submission flushed at 16:00 is server-stamped
+   16:00 — and verification then excludes the 10:00–16:00 pings and can fraud-flag a genuine repair
+   on a moved vehicle (`verification.service.ts:203,283`; `verification-criteria.ts:80`). The
+   envelope must carry `capturedAt` per item, per **#166**'s dual-stamp decision (HITL D5). Blocked-by
+   #166's decision.
+2. **In-order application must be a server guarantee, not a client courtesy.** Only #17's client
+   promises FIFO flush; this contract never states items are applied in array order. Add it —
+   per-device ordering is what keeps the soft-state/transition machines coherent for queued writes.
+3. **Dependency on #101 recorded:** this issue's DUPLICATE guarantee is unsatisfiable for
+   TROUBLESHOOT items on the CONFLICT path until #101's persist-key-on-CONFLICT AC lands (the
+   conflict path never stores `clientSubmissionId`; every replay re-enters `handleConflict`).
+   #101 must land first.
+4. Scope note: the item set (TROUBLESHOOT/VOUCHER/SOFT_STATE) excludes VU, leave, availability,
+   recovery, install — #164 gives those their retry keys; extend the item set or document the
+   exclusion explicitly.

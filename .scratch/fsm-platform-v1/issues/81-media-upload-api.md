@@ -69,3 +69,28 @@ Recommended pattern (S3 presign — aligns with CLAUDE.md; no image bytes throug
 ## Blocked by
 
 - #01
+
+## Comments
+
+### 2026-07-28 — photo slots are a contract fact, not an implementation detail (freeze plan F2.7)
+
+The reference images show **named slots**, which a flat `string[]` cannot express:
+
+- `troubleshooting.png` — **4 labelled slots**: `Before`, `After`, `Part`, `Plate`, marked *Proof*.
+  Today `photoRefs?: string[]` (`ticketing/troubleshoot.controller.ts:42`) is an unordered array of
+  opaque strings with no slot semantics and no count cap.
+- `vouchers.png` — **3 labelled document types**: `Receipt`, `Photo`, `Bill`, marked *Required*.
+  Today one `photoRef` per item (`vouchers.controller.ts:47`).
+- Install — one unnamed `photoRef`.
+
+Note the spec conflict (**#172** item 7): PRD §513.4 says unstructured "photo refs" and §597.3 says
+"at least 1 photo", while the images specify named roles. Resolve there before freezing the shape.
+
++1 AC: **the `photoRef` contract carries slot/kind semantics** for each consuming form, and the
+consuming form endpoints validate against the expected set. Retrofitting slots onto a shipped flat
+array is a breaking change for every photo screen.
+
+Also still open and now blocking: the storage mechanism decision (D-12). This issue's body assumes
+S3 presign citing CLAUDE.md, but **CLAUDE.md now states there is no S3 in the current stack**
+(no Redis/BullMQ/S3). Pick presign-against-an-object-store or local-disk multipart behind the same
+seam — the `photoRef` contract stays stable either way.

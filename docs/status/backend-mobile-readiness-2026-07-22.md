@@ -1,5 +1,14 @@
 # Backend + Web-App Readiness for the SE Mobile Client (1,000+ concurrent devices)
 
+> **SUPERSEDED 2026-07-28 → [`mobile-backend-freeze-plan-2026-07-28.md`](./mobile-backend-freeze-plan-2026-07-28.md).**
+> This assessment was reconciled with two later ones into a single execution plan written against a
+> stricter bar (backend contract frozen *before* mobile starts). Its core framing held up — an SE
+> cannot read a ticket, cannot log in, and the process cannot hold the connections. Four of its
+> claims were corrected: the Shadow-Use double-decrement is armed-but-unreachable (`consumedComponents`
+> is never wired from the controller); soft-states are retry-safe, not opaque; the offline fraud path
+> needs ≥3 pings, not the first; and "no SE write accepts a client-supplied capture timestamp" is
+> false (`vouchers` accepts `expenseDatetime`). Historical — do not update.
+
 **Date:** 2026-07-22 · **Branch:** `feat/autoplant-integration` · **HEAD:** `ad03769`
 **Type:** READ-ONLY assessment. No code changed, no issues filed, no design proposed.
 **Scope:** backend + admin web app only. The mobile app is **not** being built; this asks what the

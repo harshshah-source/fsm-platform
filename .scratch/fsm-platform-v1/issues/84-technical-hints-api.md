@@ -64,3 +64,33 @@ the backend derivation + read that Issue 20 renders.
 ## Blocked by
 
 - #04, #07
+
+## Comments
+
+### 2026-07-28 — full scope from the reference images (freeze plan §1.1, F2.4)
+
+This issue is larger than "derive hints" and is **freeze-list blocking**: it is the single biggest
+block of missing payload on the SE surface.
+
+**Nothing exists.** `grep technicalHint|TechnicalHint|technical_hint` across `apps/backend/src` and
+`apps/admin/src` returns **zero hits**. The source table `raw_device_snapshots`
+(`prisma/schema.prisma:1320-1348`) is written by ingestion and **read by nothing** — `grep
+rawDeviceSnapshot` hits only generated Prisma and one comment
+(`ingestion/autoplant/autoplant-source-reader.ts:35`). It is a write-only table.
+
+**Two deliverables, not one:**
+
+1. **The raw telemetry read.** `ticket-detail-ready.png` renders a "Technical Health" block of
+   **13 named fields**, each mapping 1:1 to a snapshot column: `gpsValidity` (`:1329`), `mainsStatus`
+   (`:1327`), `mainsVoltage` (`:1328`), `csq` (`:1335`), `creg` (`:1333`), `cgreg` (`:1334`),
+   `ignitionStatus` (`:1331`), `unitNo`/IMEI (`:1339`), `deviceType` (`:1340`), `gpsDatetime`
+   (`:1324`), `lat`/`lon` (`:1325-1326`), `ipAddress`/`portNo` (`:1336-1337`), `simSubscriberName`
+   (`:1338`). PRD §660 additionally lists `gpsMode` (`:1330`) and `speed` (`:1332`). Plus the
+   **"Telemetry unavailable" empty state** (PRD §660.3, CONTEXT:491) and a `dataAsOf`.
+2. **The derived hints.** Chips appear on **4 screens** (Tickets list, both Ticket Detail states,
+   Daily Status) with strings like "No main power — check fuse", "Not on network", "Device not
+   reporting since 42h". Workflow:259 requires derivation **at API time** — server-side. Putting the
+   thresholds (e.g. CSQ ≤ 9 → weak) in the client forks them from the future ZM view.
+
+**Freeze-relevant:** the hint *vocabulary* is part of the frozen contract — a client that renders
+chips must know the closed set, or receive display-ready strings. Decide which under **#169**.

@@ -67,3 +67,31 @@ source is the one open question (see Dependencies).
 
 - #54, #01
 - (Daily Status data source) needs-info — to be confirmed before building that section
+
+## Comments
+
+### 2026-07-28 — the `needs-info` question is answerable from the reference image (freeze plan §1.3)
+
+This issue has been parked on "do not invent — confirm the intended Daily Status content."
+`docs/ui/mobile/daily-status.png` specifies it precisely:
+
+- **Four counters** — `ASSIGNED`, `COMPLETED`, `IN-PROGRESS`, `PENDING` — plus a completion
+  percentage (`86%`) and an `X/Y Tickets done` line.
+- **Tab counts**: `Done (n) / In-progress (n) / Pending (n)`.
+- **Day rows in the same shape as the Tickets list**: ticket number, vehicle reg, per-ticket status
+  pill, `DEVICE ID`, `TRANSPORTER`, SLA chip, technical hint.
+- **A date chip (`10 MAY`) implying historical selection** — `GET /api/schedules/me` serves only the
+  current live schedule (`day-plan-query.service.ts:41-46`, ordered by `dispatchedAt`, no date
+  param), so this needs a date parameter, not a new metric family.
+
+That is one query with a date filter reusing the Tickets row shape. **Close `needs-info` on this
+evidence and rewrite the ACs** rather than escalating (governed by **#172**).
+
+Separately, the **Profile** half of this issue is far larger than "profile details, app settings"
+(PRD §479): `profile.png` renders **21 data points** including a 3-level reporting hierarchy with the
+**ZM's name, phone and email** — against a `GET /api/me` that returns 4 primitives
+(`me.controller.ts:18-23`). The backend fields are owned by **#161**; the PRD-vs-image scope conflict
+is **#172** item 10.
+
+Note also: this issue's `## Reference` line cites `.png.png`; the files on disk are `.png`
+(all 22 mobile issues have this) — fixed under **#172**.

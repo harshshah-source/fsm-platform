@@ -52,3 +52,15 @@ n/a
 
 ## Blocked by
 None — can start immediately. Coordinates with #99 (global guard ordering: throttler runs before auth).
+
+## Comments
+
+### 2026-07-28 — mobile-readiness note (docs/status/backend-mobile-readiness-plan-2026-07-28.md §A-§2)
+
+Re-verified fully open: zero throttler code; `@Public()` now controller-wide
+(`auth.controller.ts:12`). Mobile reframes this issue from security control to **availability
+control**: deploy/restart wipes the in-memory session stores → 1,000 devices re-login at once →
+each attempt runs a blocking `scryptSync` (`user-store.ts:78`) → process-wide stall → clients retry
+harder. The existing ACs (login/refresh/non-op-confirm, per-email lockout) cover mobile needs;
+sequence immediately after #91 (which removes the sync hash and the restart-wipe trigger). No
+scope change — priority note only.
