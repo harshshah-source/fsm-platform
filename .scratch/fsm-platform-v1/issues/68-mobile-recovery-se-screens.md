@@ -77,3 +77,27 @@ the mobile screens that drive them. RECOVERY appears in the Day Plan as a first-
 
 - #54 (Mobile Foundation — RN/Expo shell)
 - #36 (done — backend + endpoints)
+
+## Comments
+
+### 2026-07-28 — data-needs spec (#172 D-9 closed; no mockup)
+
+Full spec: `docs/status/se-screen-data-needs-2026-07-28.md` §1. Three things this issue must absorb:
+
+1. 🔴 **This issue's premise is not satisfiable today.** "RECOVERY appears in the Day Plan as a
+   first-class work type" — `/api/schedules/me` reads `plantBatchAssignment` → `batchAssignmentTicket`
+   only (`day-plan-query.service.ts:49-60`), and the recommender selects `TROUBLESHOOT`
+   (`recommender.service.ts:113-115`) and `INSTALL` (`:477-479`) — **there is no RECOVERY path**.
+   `POST /api/recovery/:id/schedule` sets `assignedSeId` and creates no batch row
+   (`recovery.service.ts:92-98`). This is a **design decision**, not a field addition.
+2. **The expected device serial is unreadable.** `collected` compares
+   `deviceSerial === String(ticket.deviceId)` exactly (`recovery.service.ts:124`), and there is
+   **no `GET /api/recovery/:id`** — every read on that controller is WM/manager (`:85-111`). The SE
+   types blind against an exact-match check. Owned by **#163**.
+3. **Error codes:** this issue pins `INVALID_SERIAL`; the controller emits **`INVALID_DEVICE_SERIAL`**
+   (`recovery.controller.ts:146`). It also omits `CONDITION_NOTES_REQUIRED` (`:147`), which the
+   server *does* enforce. Freeze the server's codes (#169).
+
+Also (b) on `RecoveryView` itself (`recovery.service.ts:26-36`): `unableToCollectAt`
+(`schema.prisma:2056`) and `closureReason` (`:2058`) exist but are not in the view — so a ticket
+sitting at `ON_SITE` with an unable-to-collect already filed is indistinguishable from a fresh one.

@@ -77,3 +77,32 @@ one-time **ghost-assignment toast** when an offered insertion timed out while th
 - #54 (Mobile Foundation)
 - #29, #30 (done — backend + endpoints)
 - (push delivery of the offer) #89 / #76
+
+## Comments
+
+### 2026-07-28 — data-needs spec (#172 D-9 closed; no mockup)
+
+Full spec: `docs/status/se-screen-data-needs-2026-07-28.md` §3. **Worst-served of the six.**
+
+⚠ **This issue's API-contract line is factually wrong.** It states a `GET /api/intraday-insertions`
+row is "surfaced to the offered SE". That route is `@Roles(...MANAGER_ROLES)`
+(`intraday-insertion.controller.ts:37-38`). **An SE cannot read any insertion, ever** — including
+their own live offer after an app restart.
+
+- **No countdown is buildable.** `acceptanceDeadline` (`schema.prisma:429`) is not in the offer push
+  metadata — `pushOffer` sends only `{insertionId, ticketId, actions}` with generic title/body
+  (`intraday-insertion.service.ts:396-407`). **Ship it as an absolute ISO instant**, not a duration:
+  a client-side "10 minutes from receipt" drifts against `sweepTimeouts` (`:275-288`) and will show
+  a live countdown on a dead offer.
+- **The PRD's own push copy is not renderable** — PRD:543 says *"CRITICAL Ticket at [Plant]"* and
+  `plantName` is not in the metadata.
+- 🔴 **The ghost notification renders a raw UUID at the user**:
+  `` `routed to ${nextSeId}` `` (`:477`, `:482`), where PRD:547 requires "[SE Name]". `_now` is
+  accepted and discarded (`:476`), so neither `offeredAt` nor `routedAt` is available either.
+- `whatsappSent` exists on the manager row (`:49`) but not in the SE's `AcceptOutcome` (`:53-54`),
+  so the screen cannot honestly say "sent" per CONTEXT:508.
+- **Error code:** this issue pins `INVALID_REASON`; the controller emits **`INVALID_REASON_CODE`**
+  (`:85`). Recovery's equivalent *is* `INVALID_REASON` — freeze both distinctly (#169).
+- **Missing data (d):** expected component (D1) and SE live position (D5) — see the spec doc.
+
+Fix path: widen `pushOffer` metadata **and** add an SE-scoped offer read (**#163**) for cold start.

@@ -66,3 +66,30 @@ the admin side (Issue 26).
 ## Blocked by
 
 - #54, #26
+
+## Comments
+
+### 2026-07-28 — data-needs spec (#172 D-9 closed; no mockup)
+
+Full spec: `docs/status/se-screen-data-needs-2026-07-28.md` §4.
+
+⚠ **This issue's API-contract line is wrong and two ACs are unbuildable.** It states
+`GET /api/leave-requests` returns "the SE's own requests with status" — that route is
+`@Roles(...MANAGER_ROLES)` (`leave-request.controller.ts:66-67`) and returns `listForZone` (`:69`).
+**An SE cannot read their own leave requests**, so the PENDING-badge AC and the rejection-reason AC
+cannot be built as written.
+
+Good news: `LeaveRequestRow` (`leave-request.service.ts:27-38`) already carries `type`, `status`,
+`windowStart`, `windowEnd`, `reason`, `decisionReason`, `createdAt`. **This is purely a role gate
+plus a self-scope filter** — owned by **#163**.
+
+- `decidedAt` / `decidedBy` / `decidedByRole` exist (`schema.prisma:1194-1196`) but are absent even
+  from the manager row — add them.
+- The submit response is only `{result, id}` (`service:21-22`); it should **echo `status`** so the
+  PENDING badge renders without a second call.
+- **No notification is emitted on approve or reject**, though workflow:1474 requires one — only
+  cross-zone and intraday inject `NotificationService`. → **#76**.
+- Trust note: `seId` comes from the request **body**, not the token (`controller:49-50`); the service
+  does check `canActFor` (`service:63`). Pin that the client always sends self.
+- Nothing in doc or code covers **cancel/withdraw**, or overlapping requests (no uniqueness
+  constraint on `LeaveRequest`, `schema.prisma:1185-1206`).

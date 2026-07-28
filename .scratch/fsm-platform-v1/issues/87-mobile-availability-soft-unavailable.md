@@ -65,3 +65,39 @@ scoring; at `to_ts` availability auto-reverts to AVAILABLE (server-side).
 ## Blocked by
 
 - #54, #25
+
+## Comments
+
+### 2026-07-28 — data-needs spec (#172 D-9 closed; no mockup)
+
+Full spec: `docs/status/se-screen-data-needs-2026-07-28.md` §5.
+
+⚠ **This issue's API-contract line is wrong and two ACs are unbuildable.** It states
+`GET /api/engineers/:seId` (own) serves "current availability for display" — that route is
+`@Roles(...MANAGER_ROLES)` (`engineers.controller.ts:191-192`). **An SE cannot read their own
+availability**, so "current availability state + active window shown" cannot be built. The computed
+value exists (`SeAvailabilityService.currentStatus`, `se-availability.service.ts:33-39`, surfaced as
+`EngineerDetail.availabilityStatus`, `engineers-query.service.ts:70`) — it is manager-gated. Cheapest
+home is `GET /api/me` (**#161**), which today returns four primitives (`me.controller.ts:18-23`).
+
+🔴 **Business-rule violation, live in code — see #162.** `SETTABLE_STATUSES` includes `ON_LEAVE`,
+`OFF_SHIFT`, `WEEKLY_OFF` (`engineers.controller.ts:68`) and the service authorises an SE for any of
+them on themselves (`se-availability.service.ts:62`). Workflow:1338 is explicit — *"SE **cannot
+self-approve**. Only ZM (or acting role) can write `ON_LEAVE` or `WEEKLY_OFF`"* — and PRD:496 gives
+the SE only SOFT_UNAVAILABLE. **This screen must offer SOFT_UNAVAILABLE only**, and the server must
+enforce it, or the app bypasses the whole Leave Request flow (#86).
+
+**Error codes:** this issue lists only `INVALID_AVAILABILITY_STATUS` / `SE_NOT_FOUND`; the controller
+also emits `INVALID_WINDOW_START` (`:214`), `INVALID_WINDOW_END` (`:218`) and `AVAILABILITY_FORBIDDEN`
+(`:226`). It also marks `windowStart` optional — the controller makes it **mandatory** (`:212-215`).
+
+**Two open behaviours nothing specifies — decide before the freeze:**
+1. An **open-ended window** (`windowEnd: null`) is legal (`schema.prisma:1169`, matched at
+   `se-availability.service.ts:35`), so an SE can go SOFT_UNAVAILABLE permanently. PRD:615 assumes a
+   `to_ts` and does not contemplate this.
+2. **There is no way to clear a window early.** The model is append-only and the only mechanism —
+   setting an `AVAILABLE` window on top — is forbidden by `SETTABLE_STATUSES`.
+
+Also: `activity_sourced` (workflow:1658) does not exist (**D7**), so a derived `OFFLINE`
+(workflow:1348-1351) cannot be distinguished from a *set* availability. And **no ZM notification is
+emitted** despite PRD:614.

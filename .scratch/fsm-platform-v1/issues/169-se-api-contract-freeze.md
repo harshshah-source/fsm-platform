@@ -108,3 +108,34 @@ Two naming decisions are now settled and belong in this issue's item 5/7 work:
 - **Verification `checks[]`** is a generic `{key, label, state}` array (#172 decision 4), deliberately
   *not* five fixed booleans, so the algorithm can change without a field break. Same principle this
   issue applies elsewhere: the contract exposes shapes, not internals.
+
+### 2026-07-28 — error-code divergences found by the six-screen derivation
+
+The issue files and the code disagree on four codes. **Freeze the code's codes**, then correct the
+issue files — a client written from an issue file would branch on strings the server never emits.
+
+| Issue claims | Server actually emits | Site |
+|---|---|---|
+| `INVALID_SERIAL` (recovery) | **`INVALID_DEVICE_SERIAL`** | `recovery.controller.ts:146` |
+| — (unlisted) | **`CONDITION_NOTES_REQUIRED`** | `recovery.controller.ts:147` |
+| `INVALID_REASON` (intraday decline) | **`INVALID_REASON_CODE`** | `intraday-insertion.controller.ts:85` |
+| — (unlisted, #87) | **`INVALID_WINDOW_START`**, **`INVALID_WINDOW_END`**, **`AVAILABILITY_FORBIDDEN`** | `engineers.controller.ts:214,218,226` |
+
+Note recovery *does* emit `INVALID_REASON` for its own unable-to-collect reason
+(`recovery.controller.ts:74`) — so `INVALID_REASON` and `INVALID_REASON_CODE` are **two distinct
+live codes** meaning nearly the same thing on different endpoints. Decide whether to unify them
+(breaking, cheap now) or freeze both with a documented distinction.
+
+Two more contract facts to pin while here:
+- **`SERIAL_REQUIRED` maps only to a blank SIM serial** (`install-lifecycle.service.ts:127`); a blank
+  GPS serial falls through to `INVALID_SERIAL` (`:128`). The field→code mapping is undocumented.
+- **The 409 `TICKET_ALREADY_CLOSED` body's `status` field is the auto-recovery discriminator** —
+  with `CLOSED_AUTO_RECOVERY` there is no winning SE (`troubleshoot-submission.service.ts:266-271`)
+  and `winnerSeId` is null. It is already emitted (`troubleshoot.controller.ts:104`) but documented
+  nowhere.
+
+**Also:** workflow §26 (`workflow:1728-1754`) lists endpoint paths that do not exist —
+`/api/insertions/{id}/accept`, `/api/tickets/{id}/install-fitted`, `/api/tickets/{id}/recovery-collected`,
+`/api/me/day-plan`. The shipped routes are `/api/intraday-insertions/:id/accept`,
+`/api/install/:id/fitted`, `/api/recovery/:id/collected`, `/api/schedules/me`. Freeze the code's
+paths and correct the workflow doc.

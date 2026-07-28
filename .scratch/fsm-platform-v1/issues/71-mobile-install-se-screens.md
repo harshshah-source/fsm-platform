@@ -83,3 +83,33 @@ as the #68 Recovery mobile follow-up — never silently deferred.
 - #54 (Mobile Foundation)
 - #34 (done)
 - (optional-photo AC) #81 — Media Upload API
+
+## Comments
+
+### 2026-07-28 — data-needs spec (#172 D-9 closed; no mockup)
+
+Full spec: `docs/status/se-screen-data-needs-2026-07-28.md` §2. **Best-served of the six** — the
+expected GPS serial is genuinely readable (`InstallView.deviceId`, `install-lifecycle.service.ts:41`,
+via the SE-callable `GET /api/install/:ticketId`, `install.controller.ts:216-229`).
+
+Missing from `InstallView` (`install-lifecycle.service.ts:38-49`), all category (b): `vehicleNo` ·
+`plantName` — **already joined and then discarded** at `:260-262` · `installSimId`
+(`schema.prisma:2067`, the SIM the SE is meant to fit, with nothing to check `simSerial` against) ·
+`deviceType` · `installNotes` + `installTargetDate` (`:2068-2069`) · transporter name/phone.
+
+**The activation window needs two fields, and the client must not derive it.**
+`INSTALL_ACTIVATION_WINDOW_MS` is a server constant (`install-lifecycle.service.ts:30`), *and*
+expiry additionally requires the telemetry watermark to have advanced past `activatedAt` (`:236-239`).
+A client computing `activatedAt + 24h` will show "overdue" while the server correctly holds the
+ticket in `ACTIVATED`. Ship a server-computed **`activationDeadline`** plus a
+**`verificationBlockedByStaleTelemetry`** flag — otherwise a ticket sits in `ACTIVATED` indefinitely
+with nothing on screen explaining why.
+
+**Error codes:** `SERIAL_REQUIRED` fires only for a blank **SIM** serial (`:127`); a blank GPS serial
+falls through to `INVALID_SERIAL` (`:128`). This issue lists both without the mapping — pin it (#169).
+
+**(d) gap:** no failure discriminator on `FAILED_ACTIVATION` — `failActivation` writes status only
+(`:245-251`), so "no ping ever" and "window expired on stale telemetry" are indistinguishable, and
+the SE has no next-step guidance (PRD:565 does not say what they should do either).
+
+Photo leg still blocked on **#81** (no upload endpoint), now with slot semantics per #172 decision 6.

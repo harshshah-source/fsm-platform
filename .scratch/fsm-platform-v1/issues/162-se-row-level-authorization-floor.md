@@ -84,3 +84,31 @@ All four sites re-confirmed at HEAD by a fresh pass. Three corrections:
 
 **Exposure re-measured 2026-07-28: 14,019 OPEN troubleshoot tickets / 152 plants / 5 zones**
 (was 13,941 / 146). 75 active engineers.
+
+### 2026-07-28 — fifth site added: an SE can self-grant leave
+
+Found by the six-screen data-needs derivation (`docs/status/se-screen-data-needs-2026-07-28.md`).
+**Spec-vs-code, and it bypasses an entire approval flow.**
+
+`POST /api/engineers/:seId/availability` accepts `SETTABLE_STATUSES` = `['ON_LEAVE','OFF_SHIFT',
+'WEEKLY_OFF','SOFT_UNAVAILABLE']` (`engineers.controller.ts:68`), and the service authorises an SE
+for **any** of them on themselves — the only check is `actor.userId === input.seId`
+(`se-availability.service.ts:62`).
+
+The spec is unambiguous and says the opposite:
+- workflow:1338 — *"SE **cannot self-approve**. Only ZM (or acting role) can write `ON_LEAVE` or
+  `WEEKLY_OFF`."*
+- workflow:1360-1363 tabulates `ON_LEAVE`, `WEEKLY_OFF` and `OFF_SHIFT` as **ZM-only**.
+- PRD:496 gives the SE **only** SOFT_UNAVAILABLE.
+
+**Consequence:** the mobile app could write `ON_LEAVE` directly and skip the Leave Request flow
+(#86) — no ZM approval, no `decisionReason`, no audit of an approval that never happened. It also
+silently removes the SE from intraday candidate scoring (`intraday-insertion.service.ts:514`).
+
+**Fix:** restrict the SE role to `SOFT_UNAVAILABLE` at the service layer (managers keep the full
+set). Note this is an **authorization narrowing on an existing endpoint**, not a new scoping
+predicate like the other four sites — but it belongs here because it is the same class: a write an
+SE should not be able to make.
+
+Not exploitable today beyond one synthetic account (#91 mints 75), and unlike the troubleshoot gap
+it needs no guessed UUID — the SE simply calls it on themselves.

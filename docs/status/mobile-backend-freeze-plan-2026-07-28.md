@@ -206,6 +206,28 @@ either bar.
 | F3.4 | **Logout + revocation + rotation grace + async hashing** (#91 extension) | Lost handset unrevokable; deploy = fleet logout; dropped refresh response = forced password re-login on 2G | MBC | both |
 | F3.5 | **Rate limiting (#110)** | Deploy → mass logout → login storm × blocking KDF = self-inflicted outage | MBC | both |
 
+### Tier F2b — Schema gaps found by the six-screen data-needs derivation (2026-07-28)
+
+Added after #172 closed D-9 and the six imageless screens were spec'd from prose instead. Full
+detail: [`se-screen-data-needs-2026-07-28.md`](./se-screen-data-needs-2026-07-28.md). **These are
+category (d) — the data does not exist in the schema at all, so each needs a migration.** That is
+the expensive class and exactly what the freeze bar exists to catch early.
+
+| # | Missing | Screens | Authority | Bar |
+|---|---|---|---|---|
+| F2b.1 | **`expected_component` per ticket** — no column, no table | Intraday offer, Ticket Detail, Day Plan, Troubleshoot | CONTEXT:239, workflow:291-292, PRD:484/523 | **both** — three surfaces reference it |
+| F2b.2 | **`offline_submission_receipts`** `(se_id, submission_type, client_submission_id)` | all five write screens | workflow:1668; workflow:1689 — *"**All** SE-mobile write endpoints accept `client_submission_id`"* | **both** — offline is an AC on 5 of 6 |
+| F2b.3 | **`client_submission_id` on recovery / install / leave / availability writes** | 1, 2, 4, 5 | workflow:1752-1754 (explicit for install-fitted and recovery-collected) | **both** — overlaps #164 |
+| F2b.4 | **A Warehouse entity** (id, name, address) — `ZoneWarehouseStock` is `(zone, component, qty)` only | Recovery drop-off | PRD:573, workflow:1133-1137 | strict |
+| F2b.5 | **SE live position** | Intraday offer (`TRAVEL_TOO_FAR` is undecidable without it) | [INFERRED] from the decline enum | strict |
+| F2b.6 | **Install failure discriminator** on `FAILED_ACTIVATION` | Install | [INFERRED] from workflow:1176's troubleshoot precedent | strict |
+| F2b.7 | **`se_availability.activity_sourced`** | Availability | workflow:1658 lists it as a column | strict |
+
+**F2b.1 and F2b.2 are the two that will force a mid-build change if left.** Also promoted from the
+same derivation: **RECOVERY tickets cannot reach the SE day plan at all** — no recommender path
+exists (`recommender.service.ts:113-115`, `:477-479`) and `recovery/:id/schedule` creates no batch
+row (`recovery.service.ts:92-98`). That is a design decision for #68/#161, not a field addition.
+
 ### Tier F4 — Specification ratification (cheap, and it gates F2's field lists)
 
 | # | Item | Breaks if skipped | Bar |

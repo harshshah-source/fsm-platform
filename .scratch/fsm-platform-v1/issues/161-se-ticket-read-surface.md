@@ -125,3 +125,66 @@ column; decide whether it is FSM-owned or sourced.
 Also confirmed by the ratification: the telemetry/Technical-Health block and transporter tap-to-call
 are **not** spec conflicts — the PRD requires both explicitly, so they are pure gaps owned by **#84**
 and **#171** respectively. Do not re-litigate them here.
+
+### 2026-07-28 — D-4 answered: ticket display number
+
+**The spec never defines a format.** Grep across PRD, workflow and CONTEXT finds exactly two
+mentions, both incidental: the WhatsApp SE-Acceptance confirmation "carries the **Ticket number**"
+(`PRD:228`, `workflow:1461`). The `tickets` data-dictionary row (`workflow:1647`) lists no such
+column. `TCK-#####` exists **only** in the reference images. So the format is genuinely open.
+
+#### Recommendation — global monotonic sequence, `TCK-` + zero-padded integer
+
+Observed in the images: `TCK-10252`, `TCK-10265`, `TCK-10287`, `TCK-10291`, `TCK-10301`,
+`TCK-10302`, `TCK-10306` — five digits, flat, no zone or date segment.
+
+**Reject per-zone sequences (`TCK-W-####`), and not merely because the images don't show one:**
+**#158 lets an Operations Head move a plant to a different zone.** A zone-encoded ticket number
+would become *actively wrong* after any such move — the number would assert a zone the ticket no
+longer belongs to, on a label whose entire job is to be quoted in a phone call. That is a
+correctness argument, not an aesthetic one.
+
+Reject date-prefixed (`TCK-260728-###`): longer to read aloud, and `createdAt` already carries the
+date wherever it matters.
+
+**Global sequence it is.** The number's job is to be short, unique, and quotable — not to carry
+information. The schema already uses `@default(autoincrement())` BigInt on 8+ models, so a Postgres
+sequence is idiomatic here.
+
+#### Derivation
+
+Add `ticketNo BigInt @default(autoincrement()) @unique @map("ticket_no")` **alongside** the existing
+UUID primary key. Format `TCK-` + the number, zero-padded to 5 for display; the client formats, the
+server returns the integer and (recommended) the formatted string, so padding rules never fork.
+
+**`ticketId` stays the primary key and stays the API path parameter.** The display number is a
+*label*, not an identity — do not switch routes to it, and do not let it into foreign keys.
+
+#### Backfill
+
+**21,438 tickets exist today.** Backfill in creation order (`ORDER BY created_at ASC, ticket_id`) so
+numbers are chronologically monotonic — an SE reading two numbers should be able to infer which
+ticket is older. Set the sequence start above the backfilled maximum. Do it as a single migration
+transaction, or a batched idempotent one that can resume; a half-backfilled table with a live
+sequence is the failure mode to avoid.
+
+Note the images' numbers (~10 300) are below our real volume, so backfilled numbers will run to
+21 000+. Still five digits; no display change needed.
+
+#### Downstream that needs updating
+
+| Surface | Impact |
+|---|---|
+| **#161 / #165 payloads** | `ticketNo` on the ticket read **and** the merged list row — it appears on 5 screens. In scope here. |
+| **Admin ticket search** | `tickets.controller.ts:47` takes `@Query('q')`; the search must match a ticket number, not just vehicle/plant/device. A support call will quote `TCK-10306`. |
+| **Notifications / WhatsApp** | `notifications.entityId` carries the ticket **UUID** (`notification.service.ts:104`), but `workflow:1461` requires the WhatsApp confirmation to carry the **Ticket number**. Decide now whether to denormalise `ticketNo` into notification metadata at write time or resolve at send time — **#76** has not built the adapters yet, so the payload shape is still free. |
+| **Audit-trail route** | `audit-trail.controller.ts:23` validates `UUID_RE` on the path param. Fine to leave UUID-only (it is an internal deep link), but decide deliberately rather than by omission. |
+| **Admin ticket drawer / deep links** | Display the number, keep the UUID in the URL. |
+| **Exports** | **No change needed** — the OH entity-mapping export carries `open_ticket_count` only, no ticket identifiers (`exports/entity-mapping-export.service.ts:36`). Worth stating so nobody goes looking. |
+
+#### New acceptance criteria
+
+- [ ] `tickets.ticket_no` exists, unique, monotonic, backfilled in creation order for all existing rows
+- [ ] The SE ticket read and the merged list row both carry it; `ticketId` remains the PK and the route param
+- [ ] Admin ticket search matches a quoted ticket number
+- [ ] The notification/WhatsApp payload decision is recorded before #76 builds the adapters

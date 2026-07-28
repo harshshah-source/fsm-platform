@@ -71,3 +71,36 @@ Use and will be reconciled by the Warehouse." with **View Van Stock** / **Go Bac
 - #54
 - #24
 - #58 (the troubleshoot submit whose 409 response this screen renders/routes from)
+
+## Comments
+
+### 2026-07-28 — data-needs spec (#172 D-9 closed; no mockup)
+
+Full spec: `docs/status/se-screen-data-needs-2026-07-28.md` §6. The only screen whose copy the PRD
+gives verbatim (PRD:593), which makes its two gaps unusually concrete.
+
+🔴 **The headline field is unbuildable.** PRD:593 is *"already closed by **[SE Name]** at [time]"*,
+but the 409 carries `winnerSeId` — a bare UUID (`troubleshoot-submission.service.ts:269`, `:308`;
+emitted `troubleshoot.controller.ts:105`) — and **no SE-callable endpoint resolves an SE UUID to a
+name**: `/api/engineers/:seId` and `/api/engineers` are manager-only
+(`engineers.controller.ts:191-192`, `:91-92`), `/api/me` returns only the caller. Either add
+`winnerSeName` to the 409 body or the app renders a UUID at a field engineer. → **#161**/**#169**.
+
+🔴 **AC#2 (Shadow Use) cannot be demonstrated end-to-end.** `TroubleshootBody`
+(`troubleshoot.controller.ts:32-44`) has **no `consumedComponents` field** and the controller never
+passes one (`:81-96`), so `SubmitTroubleshootInput.consumedComponents`
+(`troubleshoot-submission.service.ts:37`) is always empty, `consumed.length > 0` (`:275`) is never
+true, and **`shadowUseRecorded` is permanently `false`** — no `SHADOW_USE` row (`:284-291`), no
+van-stock decrement (`:277`), ever, over HTTP. This independently confirms the freeze plan's
+"armed but unreachable" finding from the opposite direction. Fix is structural and belongs with
+**#101** before #82/#21 wire the consumption leg.
+
+**Good news — pin what already works.** The 409 body's existing `status` field
+(`troubleshoot.controller.ts:104`, from `handleConflict(status, …)` `:264`) **is** the auto-recovery
+discriminator: with `CLOSED_AUTO_RECOVERY` there is no winning SE at all
+(`troubleshoot-submission.service.ts:266-271` returns nothing), and rendering PRD:593's copy would
+be a lie. This issue's payload list omits `status` — add it.
+
+Also needed: `shadowUseComponents: [{componentId, name, qty}]` (PRD:593 says "components", plural),
+and for an offline-replay 409, which queued submission was rejected — that needs the
+`offline_submission_receipts` ledger (**D2**), which does not exist.

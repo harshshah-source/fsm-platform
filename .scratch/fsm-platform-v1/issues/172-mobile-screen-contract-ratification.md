@@ -1,7 +1,7 @@
 # 172 — Mobile screen-contract ratification (image vs PRD conflicts)
 
-Status: ready-for-human — **substantively RATIFIED 2026-07-28** (see Resolutions below); the only
-item still open is **D-9**, the optional mockup commission for the six imageless screens.
+Status: **DONE — fully ratified 2026-07-28.** All twelve items resolved and D-9 closed as
+not-taken (see Resolutions). Nothing here is open.
 Type: HITL · Docs / governance
 
 Filed 2026-07-28 (`docs/status/mobile-backend-freeze-plan-2026-07-28.md` §1.3, F4.1, D-5).
@@ -68,7 +68,7 @@ The material ones:
 - [x] Each of the 12 conflicts has a recorded decision and a pointer from the consuming issue — 4 operator decisions, 4 defaults, 2 withdrawn as non-conflicts, 2 spec holes recorded
 - [x] The 22 reference paths resolve to real files — verified: all 10 mobile images resolve; the `.png.png` convention was corrected at its three sources (`CLAUDE.md`, `workflow.md`, `issue-tracker.md`)
 - [x] #88 is out of `needs-info` with ACs derived from its image
-- [ ] A decision exists on mockups for the 6 imageless screens — **D-9, still open**
+- [x] A decision exists on mockups for the 6 imageless screens — **D-9 closed as NOT TAKEN**; data-needs specs written into the six issues instead
 
 ## UI surfaces
 
@@ -194,3 +194,22 @@ All ten referenced paths now resolve. `docs/archive/**` left untouched (write-on
 Leave Request, Availability, 409 Conflict). These were derived from prose only and are precisely
 where a field gets discovered mid-build. Optional under the compatibility bar; required under the
 strict bar.
+
+### D-9 — CLOSED, NOT TAKEN (operator, 2026-07-28)
+
+**Decision: no mockups will be commissioned for the six imageless screens.** Reasoning, recorded so
+a future session does not reopen this: **UI is cheap to change and will be iterated during the
+build; the visual design is not what forces a mid-build backend change — a missing field is.**
+Commissioning six mockups to de-risk a class of risk that a data-needs spec addresses more directly
+is the wrong trade.
+
+**What was done instead:** a short **data-needs spec** for each of the six — fields displayed,
+actions triggered, states handled — derived from PRD and workflow prose, with every field that does
+not exist in the backend today flagged. Those specs live in the six issues themselves
+(**#68** Recovery Collection · **#71** Install Form · **#77** Intraday offer · **#86** Leave Request
+· **#87** Availability · **#63** 409 Conflict) and the consolidated missing-field list feeds the
+freeze list.
+
+**Do not reopen** on the grounds that these screens lack reference images. They lack images *by
+decision*. If a genuinely new **data** need surfaces during the build, that is a normal additive
+change under the compatibility bar (#170), not a reason to revisit D-9.
