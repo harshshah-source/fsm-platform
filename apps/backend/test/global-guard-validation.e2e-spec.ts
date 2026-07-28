@@ -119,7 +119,12 @@ describe('#99 global guard + validation + body limits (e2e)', () => {
 
     const leaks: string[] = [];
     for (const { method, path } of routes) {
-      const key = `${method} ${path}`;
+      // #169 dual-serve versioning registers every route at BOTH `/api/...` and `/api/v1/...`.
+      // Normalise the version segment away so `PUBLIC` stays ONE conscious list of public routes
+      // instead of one per version — and so adding `/v2` later cannot slip a public alias past this
+      // sweep unnoticed. The allowlist's whole job (see the comment above) is that widening it is a
+      // deliberate edit; a per-version copy would defeat that.
+      const key = `${method} ${path.replace(/^\/api\/v\d+\//, '/api/')}`;
       if (PUBLIC.has(key)) continue;
       const concrete = path.replace(/:[^/]+/g, '1'); // substitute params; guard runs before lookup
       const res = await request(app.getHttpServer())[

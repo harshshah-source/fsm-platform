@@ -101,3 +101,29 @@ also emits `INVALID_WINDOW_START` (`:214`), `INVALID_WINDOW_END` (`:218`) and `A
 Also: `activity_sourced` (workflow:1658) does not exist (**D7**), so a derived `OFFLINE`
 (workflow:1348-1351) cannot be distinguished from a *set* availability. And **no ZM notification is
 emitted** despite PRD:614.
+
+### 2026-07-28 — both open behaviours SETTLED (operator)
+
+**1. Clearing early — add `AVAILABLE` to `SETTABLE_STATUSES`** (`engineers.controller.ts:68`).
+Uses the latest-window-wins semantics that already exist (`se-availability.service.ts:33-39`
+orders by `windowStart DESC`), so no new route joins the frozen contract and no migration is
+needed. **Purely service-layer.**
+
+> ⛔ **Must land together with #162's narrowing.** Shipping the unlock alone would let an SE write
+> an `AVAILABLE` window on top of a **ZM-set `ON_LEAVE`** and clear it. The SE must be restricted to
+> `SOFT_UNAVAILABLE`, and to clearing only their *own* `SOFT_UNAVAILABLE` windows. See #162.
+
+Note the current severity this fixes: `SETTABLE_STATUSES` is checked for **every role**
+(`engineers.controller.ts:210`), so `AVAILABLE` is unsettable by anyone — an open-ended
+`SOFT_UNAVAILABLE` is today **unrecoverable through the API entirely** and needs a DB edit. A ZM
+setting another status only masks it until that window expires.
+
+**2. Open-ended windows — `windowEnd` mandatory in the SE DTO only.** Managers keep `null` for
+indefinite leave, so the column stays nullable and **no migration is required**. Implied spec basis:
+**PRD:615** — *"At `to_ts`, availability automatically reverts to AVAILABLE"* — presumes a `to_ts`
+exists. The spec never says outright that an SE-set window must be bounded; this is the closest
+thing to an answer and it is what the auto-revert behaviour is written against.
+
+Both are service-layer. ACs to add: an SE cannot set a status other than `SOFT_UNAVAILABLE`; an SE
+can clear their own active `SOFT_UNAVAILABLE`; an SE cannot clear a manager-set window; an SE-set
+window without `windowEnd` is rejected; a manager-set window without `windowEnd` is accepted.

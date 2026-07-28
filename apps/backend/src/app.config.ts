@@ -1,3 +1,4 @@
+import { VERSION_NEUTRAL, VersioningType } from '@nestjs/common';
 import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 
@@ -15,6 +16,18 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
  */
 export function configureApp(app: INestApplication): void {
   app.setGlobalPrefix('api');
+  // #169 / Wave 0 — a version segment must exist BEFORE a mobile client ships, because adding `/v1`
+  // once v1 is in the field is itself the breaking change versioning exists to prevent, and there is
+  // no OTA channel to fix a client that hard-codes the wrong base path (#170).
+  //
+  // `defaultVersion: ['1', VERSION_NEUTRAL]` registers every route at BOTH `/api/v1/...` and
+  // `/api/...`. That is deliberate and load-bearing: 90 backend e2e specs and every `apps/admin` API
+  // module call the unversioned path today, so a hard switch would break both apps at once. The
+  // neutral alias is the migration window — do not remove it until the admin client is repointed.
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: ['1', VERSION_NEUTRAL],
+  });
   app.enableCors({
     origin: process.env.ADMIN_ORIGIN ?? 'http://localhost:5173',
     credentials: true,

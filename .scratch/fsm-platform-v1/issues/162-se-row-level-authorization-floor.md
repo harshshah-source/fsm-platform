@@ -112,3 +112,19 @@ SE should not be able to make.
 
 Not exploitable today beyond one synthetic account (#91 mints 75), and unlike the troubleshoot gap
 it needs no guessed UUID — the SE simply calls it on themselves.
+
+### 2026-07-28 — the fifth site is now COUPLED to #87's unlock
+
+**These two must ship in the same slice.** #87 settled that `AVAILABLE` will be added to
+`SETTABLE_STATUSES` so an SE can clear their own `SOFT_UNAVAILABLE` (today an open-ended one is
+unrecoverable via the API by any role). **Shipping that unlock without this issue's narrowing is
+strictly worse than today**: an SE would gain the ability to write `AVAILABLE` on top of a
+**ZM-set `ON_LEAVE`** and clear it — turning a self-grant bug into a self-*revoke* bug against a
+manager decision.
+
+The narrowing, precisely: an SE may set **only `SOFT_UNAVAILABLE`**, and may set `AVAILABLE` **only
+where the window it supersedes is their own `SOFT_UNAVAILABLE`**. Managers keep the full
+`SETTABLE_STATUSES` set. Enforced at the service layer (`se-availability.service.ts:62`), where the
+role check already lives.
+
+Order within the slice: narrowing first, unlock second — never the reverse, and never separately.

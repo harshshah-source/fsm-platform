@@ -164,3 +164,16 @@ typecheck`, which is workspace-wide and *does* cover mobile. Anyone reading the 
 "is mobile in CI?" gets the wrong answer in both directions. Fix the label.
 
 +1 AC: **a third test step for `apps/mobile`.** One line, and it must land before mobile work starts.
+
+### 2026-07-28 — Wave 0: mobile suite wired into CI ✅
+
+`.github/workflows/ci.yml` now runs a third suite step, `working-directory: apps/mobile`. Verified
+locally before wiring: **6 suites / 20 tests, exit 0** — the suite was never broken, it was simply
+never invoked, which is the silent-rot failure this workflow exists to prevent.
+
+Also corrected the step label `Typecheck (backend + admin)` → `Typecheck (all workspaces)`:
+`pnpm turbo run typecheck` is workspace-wide and has always covered mobile and shared. The old label
+gave the wrong answer to "is mobile in CI?" in both directions.
+
+The remaining #107 legs (from-zero migrated DB, concurrency, route-guard and migration tests) are
+unchanged.

@@ -63,3 +63,29 @@ steady-state fits even today; the outage modes are the tails (shift-start burst 
 saturation stalling admin + sweeps; one stuck query permanently eating 1 of 10 connections). These
 config values are hours of work and convert silent latency collapse into bounded, observable
 errors — **do first in the mobile runway; no load test is meaningful before it.**
+
+### 2026-07-28 — Wave 0: pool + timeout config LANDED ✅ (AC2 config leg)
+
+`prisma.service.ts` now builds its `PrismaPg` options from env with explicit defaults, replacing the
+node-postgres defaults it had been running on:
+
+| Setting | Was | Now (env-tunable) |
+|---|---|---|
+| pool `max` | 10 (pg default) | **25** — `DB_POOL_MAX` |
+| `connectionTimeoutMillis` | 0 = wait forever | **5 000** — `DB_POOL_ACQUIRE_TIMEOUT_MS` |
+| `statement_timeout` | 0 | **120 000** — `DB_STATEMENT_TIMEOUT_MS` |
+| `idle_in_transaction_session_timeout` | 0 | **60 000** — `DB_IDLE_IN_TX_TIMEOUT_MS` |
+
+**`statement_timeout` is deliberately 120 s, not the 30 s the freeze plan sketched.** The goal is to
+bound a *stuck* query, not police slow ones, and this process runs set-based recomputes, a
+materialized-view refresh and zone-wide dispatch transactions whose **per-statement** cost has never
+been measured. A 30 s cap risked killing legitimate sweep work — a self-inflicted outage in the name
+of preventing one. **Follow-up: measure per-statement timings on the sweep paths and tighten.**
+
+`idle_in_transaction_session_timeout` at 60 s is safe by construction — it fires only on a
+transaction that is open but not executing, i.e. exactly the leaked-connection case.
+
+Verified: backend `tsc` clean; `batch-dispatch`, `dispatch-concurrent` (advisory locks +
+transactions) and `tickets-api` all green under the new settings.
+
+Still open on this issue: the criticalQueue `LIMIT` and the dashboard cache legs.

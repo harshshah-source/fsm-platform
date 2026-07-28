@@ -82,7 +82,10 @@ jobs:
       - name: Build (shared + backend + admin)
         run: pnpm turbo run build
 
-      - name: Typecheck (backend + admin)
+      # Label corrected 2026-07-28 (#172): `turbo run typecheck` is workspace-wide and has always
+      # covered mobile and shared too. The old "(backend + admin)" label gave the wrong answer to
+      # "is mobile in CI?" in both directions — typechecked yes, tested no (fixed below).
+      - name: Typecheck (all workspaces)
         run: pnpm turbo run typecheck
 
       # --- #107 AC2: migrate-from-zero + drift gate -------------------------------------------
@@ -110,4 +113,13 @@ jobs:
 
       - name: Admin suite
         working-directory: apps/admin
+        run: pnpm test
+
+      # Wave 0 / #107 — `apps/mobile` has a working 6-suite/20-test jest setup that this workflow
+      # never invoked, so it could rot silently. That is the exact failure this file was written to
+      # kill (see the header): the backend was red for 43 commits and the admin for 3, and nobody
+      # knew. Mobile would have been the third instance. The suite is green today (verified
+      # 2026-07-28) — this step is what keeps that claim true.
+      - name: Mobile suite
+        working-directory: apps/mobile
         run: pnpm test

@@ -62,3 +62,31 @@ registry endpoint. Two additions:
 Mobile context: push-triggered refetch is the structural answer to the 1,000-poller load (plan doc
 §C fix ranking) — this issue plus #89 is preferred over any WS/SSE seam, which stays deliberately
 unbuilt.
+
+### 2026-07-28 — payload decision settled, plus two live UUID-leak bugs
+
+**Ticket number in the WhatsApp payload — settled: add `ticketNo` to `metadata` alongside
+`entityId`.** Additive and non-breaking; `entityId` stays the entity-resolution key used for
+deep-links. The rejected alternative — resolving the number at send time inside the adapter —
+would couple the adapter to the ticket table, which is precisely what this issue's gateway seam
+exists to avoid.
+
+**Sequencing (not a date):** `#161` mints `ticketNo` → the notify call sites add it to `metadata` →
+**this issue's adapters consume it**. The decision had to precede adapter design; it now has. Do not
+design the WhatsApp payload before `ticketNo` exists.
+
+**Two live UUID-leak bugs, folded in here** (same class, both user-visible today, both independent
+of `ticketNo`):
+
+1. `intraday-insertion.service.ts:214` — the SE-Acceptance confirmation body is
+   `` `Ticket ${ins.ticketId} added to your Day Plan.` ``, so the message reads *"Ticket
+   3f7a-…-… added to your Day Plan."* Required to carry the **Ticket number** by workflow:1461 and
+   PRD:228.
+2. `intraday-insertion.service.ts:477,:482` — the ghost notification interpolates the routed-to
+   SE's **UUID** into user-visible text (`` `routed to ${nextSeId}` ``) where PRD:547 requires
+   "[SE Name]". `_now` is also accepted and discarded at `:476`, so neither `offeredAt` nor
+   `routedAt` reaches the client.
+
+Both body templates can be fixed **before** `ticketNo` lands (fall back to plant/vehicle context and
+a resolved SE name); the `ticketNo` field is the follow-on. Folding these here rather than filing
+separately because they are notification-payload defects and this issue owns that surface.

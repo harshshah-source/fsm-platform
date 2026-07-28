@@ -139,3 +139,26 @@ Two more contract facts to pin while here:
 `/api/me/day-plan`. The shipped routes are `/api/intraday-insertions/:id/accept`,
 `/api/install/:id/fitted`, `/api/recovery/:id/collected`, `/api/schedules/me`. Freeze the code's
 paths and correct the workflow doc.
+
+### 2026-07-28 — Wave 0: item 3 (`/api/v1`) LANDED ✅ — non-breaking
+
+`configureApp` now calls `enableVersioning({ type: VersioningType.URI, defaultVersion: ['1',
+VERSION_NEUTRAL] })` (`app.config.ts`), which registers **every route at both `/api/v1/...` and
+`/api/...`**.
+
+Dual-serve rather than a hard switch because the blast radius of switching is total: **90 backend
+e2e specs and every `apps/admin` API module** call the unversioned path. The neutral alias is the
+migration window — **do not remove it until the admin client is repointed**, which is a deliberate
+follow-up, not a tidy-up.
+
+One regression surfaced and was fixed correctly rather than loosened: #99's route-guard sweep keys
+its public allowlist on exact paths, so the three `@Public()` routes' `/v1` aliases read as
+unguarded routes. The sweep now normalises the version segment out of the key
+(`global-guard-validation.e2e-spec.ts`), keeping the allowlist **one conscious list** rather than one
+per version — so adding `/v2` later still cannot slip a public alias past it.
+
+New spec `test/api-versioning.e2e-spec.ts` (4 tests, red-first) pins both halves, including that
+`/api/...` keeps working — that assertion is what will catch a future change that drops the neutral
+alias and silently 404s the admin app.
+
+Items 1, 2, 4–8 of this issue remain open.
