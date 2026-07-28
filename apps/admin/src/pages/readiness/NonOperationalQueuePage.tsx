@@ -118,6 +118,7 @@ export function NonOperationalQueuePage() {
     {
       key: 'actions',
       header: 'Actions',
+      exportable: false,
       render: (row) => (
         <div className="flex gap-2">
           {row.state === 'AWAITING_ZM_CONFIRMATION' && (

@@ -217,7 +217,7 @@ export function VoucherReviewPage() {
       ? [{ key: 'status', header: 'Status', render: (r: VoucherRow) => <StatusPill status={r.status} /> } satisfies Column<VoucherRow>]
       : []),
     ...(view === 'review'
-      ? [{ key: 'actions', header: 'Actions', render: reviewActions } satisfies Column<VoucherRow>]
+      ? [{ key: 'actions', header: 'Actions', exportable: false, render: reviewActions } satisfies Column<VoucherRow>]
       : []),
   ];
 

@@ -122,7 +122,7 @@ export function KitchenSink() {
       </SectionCard>
 
       <SectionCard title="DataTable">
-        <DataTable ariaLabel="Demo table" columns={cols} rows={DEMO_ROWS} rowKey={(r) => r.id} />
+        <DataTable ariaLabel="Demo table" columns={cols} rows={DEMO_ROWS} rowKey={(r) => r.id} downloadable={false} />
       </SectionCard>
 
       <SectionCard title="TicketCard">

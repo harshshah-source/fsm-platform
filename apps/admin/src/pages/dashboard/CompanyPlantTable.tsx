@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { CompanyPlantRow } from '../../api/dashboard';
-import { EmptyState, ExportMenu, FilterBar, FilterSelect, SearchInput, Skeleton } from '../../components/data';
+import { EmptyState, FilterBar, FilterSelect, SearchInput, Skeleton, TableDownloadButton } from '../../components/data';
 import { DurationBadge, InactiveCountLink, PlantName, StatusPill, TierBadge } from '../../components/domain';
 import { Badge } from '../../components/ui';
 import { IconChevronRight, IconTruck } from '../../components/ui/icons';
@@ -55,8 +55,8 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
 // from least to most severe. `SLA_BUCKETS` is most-severe-first, so reverse a copy.
 const SLA_BUCKETS_ASC = [...SLA_BUCKETS].reverse();
 
-// company + tier + plants + plant + inactive/total + one column per SLA bucket + fleet uptime %.
-const COLSPAN = 6 + SLA_BUCKETS_ASC.length;
+// S.No. + company + tier + plants + plant + inactive/total + one column per SLA bucket + fleet uptime %.
+const COLSPAN = 7 + SLA_BUCKETS_ASC.length;
 
 /** Inactive devices as a percentage of the fleet at that entity (inactive / total devices). One
  *  decimal; degrades to a dash when the denominator is unknown so it never renders `NaN%`. */
@@ -252,10 +252,11 @@ export function CompanyPlantTable({
     const plantsByCompany = new Map(companies.map((g) => [g.companyId, g.plants.length]));
     const chosen = companies.flatMap((g) => g.plants);
     const headers = [
-      'Company', 'Tier', 'Plants', 'Plant', 'Total inactive', 'Total devices', 'Inactive %',
+      'S.No.', 'Company', 'Tier', 'Plants', 'Plant', 'Total inactive', 'Total devices', 'Inactive %',
       'Fleet Uptime %', 'Critical', ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b]),
     ];
-    const body = chosen.map((r) => [
+    const body = chosen.map((r, i) => [
+      i + 1,
       r.companyName,
       r.companyTier,
       plantsByCompany.get(r.companyId) ?? '',
@@ -312,14 +313,21 @@ export function CompanyPlantTable({
             <option value="INACTIVE_DESC">Most inactive first</option>
             <option value="INACTIVE_ASC">Least inactive first</option>
           </FilterSelect>
-          <ExportMenu onExport={exportOverview} disabled={companies.length === 0} label="Download" />
+          <TableDownloadButton
+            ariaLabel="Company/Plant Overview"
+            disabled={companies.length === 0}
+            onSelectFormat={exportOverview}
+          />
         </FilterBar>
       </div>
       <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
         <table aria-label="Company/Plant Overview" className="w-full table-fixed border-collapse text-sm">
           <colgroup>
-            <col style={{ width: '15%' }} />
-            <col style={{ width: '8%' }} />
+            {/* Leading 3.5rem S.No. column (#160) — the percentage columns below are shaved down from
+                their pre-#160 total (100%) to leave it room. */}
+            <col style={{ width: '3.5rem' }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '7%' }} />
             <col style={{ width: '5%' }} />
             <col style={{ width: '8%' }} />
             <col style={{ width: '9%' }} />
@@ -330,6 +338,7 @@ export function CompanyPlantTable({
           </colgroup>
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900">
+              <th className={cn(th, 'text-right')}>S.No.</th>
               <th className={th}>Company</th>
               <th className={th}>Tier</th>
               <th className={cn(th, 'text-right')}>Plants</th>
@@ -347,7 +356,7 @@ export function CompanyPlantTable({
                 </td>
               </tr>
             )}
-            {companies.map((co) => {
+            {companies.map((co, index) => {
               // Auto-expand while a search is active — a matched company staying collapsed by default
               // hid the very plant/device the search found, making a working search look broken.
               const open = term !== '' || openCompanies.has(co.companyId);
@@ -358,6 +367,7 @@ export function CompanyPlantTable({
                     className="cursor-pointer border-b border-line bg-surface-sunken/50 hover:bg-surface-sunken"
                     onClick={() => toggleCompany(co.companyId)}
                   >
+                    <td className={cn(td, 'text-right tabular-nums text-ink')}>{index + 1}</td>
                     <td className={cn(td, 'font-semibold text-ink-strong')}>
                       <span className="flex min-w-0 items-center gap-1.5">
                         <IconChevronRight
@@ -436,20 +446,45 @@ function CompanyPlants({
   const th = `${cellPad} font-bold`;
   const thBucket = 'px-1 py-1.5 text-right text-[10px] font-bold';
   const tdBucket = 'px-1 py-1.5 text-right text-xs tabular-nums text-ink';
-  // The plant sub-table's expansion cell spans Plant · Inactive/Total · the SLA-bucket columns · Uptime.
-  const PLANT_COLSPAN = 3 + SLA_BUCKETS_ASC.length;
+  // The plant sub-table's expansion cell spans S.No. · Plant · Inactive/Total · the SLA-bucket columns
+  // · Uptime.
+  const PLANT_COLSPAN = 4 + SLA_BUCKETS_ASC.length;
+
+  // Own download, restricted to this company's plants — S.No. re-numbers from 1 (AC-20: sub-tables
+  // number independently).
+  const exportPlants = (format: ExportFormat) => {
+    const headers = [
+      'S.No.', 'Plant', 'Inactive', 'Total devices', 'Fleet Uptime %',
+      ...SLA_BUCKETS_ASC.map((b) => BUCKET_LABEL[b]),
+    ];
+    const body = company.plants.map((p, i) => [
+      i + 1,
+      formatPlantDisplayName(p.plantName),
+      p.totalInactive,
+      p.totalDevices,
+      fmtUptime(plantUptime?.get(p.plantId)),
+      ...SLA_BUCKETS_ASC.map((b) => p.byBucket[b] ?? 0),
+    ]);
+    exportTable(format, `plants-${company.companyName}`, `Plants — ${company.companyName}`, headers, body);
+  };
 
   return (
     <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
-      <div className="border-b border-line bg-surface-raised px-3 py-2">
+      <div className="flex items-center justify-between gap-2 border-b border-line bg-surface-raised px-3 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
           Plants — {company.companyName}
         </span>
+        <TableDownloadButton
+          ariaLabel={`Plants for ${company.companyName}`}
+          disabled={company.plants.length === 0}
+          onSelectFormat={exportPlants}
+        />
       </div>
       <table aria-label={`Plants for ${company.companyName}`} className="w-full table-fixed border-collapse text-sm">
         <colgroup>
-          <col style={{ width: '18%' }} />
-          <col style={{ width: '12%' }} />
+          <col style={{ width: '3.5rem' }} />
+          <col style={{ width: '17%' }} />
+          <col style={{ width: '11%' }} />
           {SLA_BUCKETS_ASC.map((b) => (
             <col key={b} style={{ width: '8%' }} />
           ))}
@@ -457,6 +492,7 @@ function CompanyPlants({
         </colgroup>
         <thead>
           <tr className="border-b border-chrome-700 bg-chrome-900 text-left text-[11px] uppercase tracking-wider text-white">
+            <th className={cn(th, 'text-right')}>S.No.</th>
             <th className={th}>Plant</th>
             <th className={cn(th, 'text-right')}>Inactive / Total</th>
             <BucketHeaderCells className={thBucket} />
@@ -464,7 +500,7 @@ function CompanyPlants({
           </tr>
         </thead>
         <tbody>
-          {company.plants.map((p) => (
+          {company.plants.map((p, index) => (
             <Fragment key={p.plantId}>
               <tr
                 onClick={() => onTogglePlant(p.plantId)}
@@ -478,6 +514,7 @@ function CompanyPlants({
                 }}
                 className="cursor-pointer border-b border-line/70 last:border-b-0 hover:bg-surface-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50"
               >
+                <td className={`${cellPad} text-right tabular-nums text-ink`}>{index + 1}</td>
                 <td className={`${cellPad} truncate text-ink`} title={formatPlantDisplayName(p.plantName)}>
                   <PlantName code={p.plantName} />
                 </td>
@@ -569,10 +606,11 @@ function OpenDeviceTickets({
 
   const exportTickets = (format: ExportFormat) => {
     const headers = [
-      'Device', 'Vehicle No.', 'Zone', 'Company', 'Plant', 'Transporter', 'Assignment', 'SE', 'Batch', 'SLA',
+      'S.No.', 'Device', 'Vehicle No.', 'Zone', 'Company', 'Plant', 'Transporter', 'Assignment', 'SE', 'Batch', 'SLA',
       'Status',
     ];
-    const body = view.map((d) => [
+    const body = view.map((d, i) => [
+      i + 1,
       d.deviceId,
       d.vehicleNo ?? '',
       d.zoneName ?? '',
@@ -622,7 +660,11 @@ function OpenDeviceTickets({
                 <option value="SLA_ASC">SLA: least severe</option>
                 <option value="DEVICE">Device A–Z</option>
               </FilterSelect>
-              <ExportMenu onExport={exportTickets} disabled={view.length === 0} label="Download" />
+              <TableDownloadButton
+                ariaLabel={`Open device tickets — ${plantLabel}`}
+                disabled={view.length === 0}
+                onSelectFormat={exportTickets}
+              />
             </span>
           )}
         </div>
@@ -659,6 +701,7 @@ function OpenDeviceTickets({
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900 text-left text-[11px] uppercase tracking-wider text-white">
+              <th className={cn(th, 'text-right')}>S.No.</th>
               <th className={th}>Device</th>
               <th className={th}>Vehicle No.</th>
               <th className={th}>Zone</th>
@@ -672,7 +715,7 @@ function OpenDeviceTickets({
             </tr>
           </thead>
           <tbody>
-            {view.map((d) => (
+            {view.map((d, index) => (
               <tr
                 key={d.ticketId}
                 onClick={() => openTicket(d.ticketId)}
@@ -685,6 +728,7 @@ function OpenDeviceTickets({
                 }}
                 className="cursor-pointer border-b border-line/70 last:border-b-0 hover:bg-surface-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50"
               >
+                <td className={`${cellPad} text-right tabular-nums text-ink`}>{index + 1}</td>
                 {/* For some companies AutoPlant's master sends the vehicle registration AS the device id
                     (verified against ap source 2026-07-14 — 1,950 devices, mostly Vasavadatta /
                     Saurashtra / Deepak). Not an FSM bug; flag it so operators aren't confused. */}

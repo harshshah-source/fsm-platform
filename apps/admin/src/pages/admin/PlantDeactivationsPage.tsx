@@ -53,6 +53,7 @@ export function PlantDeactivationsPage() {
       key: 'action',
       header: '',
       align: 'right',
+      exportable: false,
       render: (r) => (
         <Button variant="secondary" size="sm" data-testid={`reactivate-${r.plantId}`} onClick={() => setReactivateTarget(r)}>
           Reactivate

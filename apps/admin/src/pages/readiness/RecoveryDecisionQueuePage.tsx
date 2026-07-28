@@ -67,6 +67,7 @@ export function RecoveryDecisionQueuePage() {
     {
       key: 'actions',
       header: 'Actions',
+      exportable: false,
       render: (r) => (
         <div className="flex gap-2">
           <Button type="button" size="sm" variant="secondary" data-testid={`rdq-reschedule-${r.ticketId}`} onClick={() => reschedule(r.ticketId)}>

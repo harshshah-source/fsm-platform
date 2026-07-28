@@ -1,10 +1,11 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { DispatchBatchRow, PlantDeviceStats } from '../../api/dispatch-runs';
-import { EmptyState, FilterBar, FilterSelect, SearchInput } from '../../components/data';
+import { EmptyState, FilterBar, FilterSelect, SearchInput, TableDownloadButton } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { IconChevronRight, IconTruck } from '../../components/ui/icons';
 import { cn } from '../../lib/cn';
+import { exportTable, type ExportFormat } from '../../lib/exportFile';
 
 const ZERO_STATS: PlantDeviceStats = { totalDevices: 0, inactiveDevices: 0, assignedDevices: 0, unassignedDevices: 0 };
 
@@ -77,8 +78,8 @@ function groupByCompanyPlant(
 
 type SortOrder = '' | 'BATCH_DESC' | 'BATCH_ASC';
 
-// company + plant + inactive/total + assigned + unassigned + batches + expander.
-const COLSPAN = 7;
+// S.No. + company + plant + inactive/total + assigned + unassigned + batches + expander.
+const COLSPAN = 8;
 
 /** "inactive / total" fleet-health cell, muted when the plant has no devices on record. */
 function InactiveTotal({ stats }: { stats: PlantDeviceStats }) {
@@ -161,6 +162,33 @@ export function ZoneDispatchTable({
     setOpenPlant((cur) => (cur === p.plantId ? null : p.plantId));
   };
 
+  // Matches the on-screen tree exactly: a company's plant rows appear in the export only while that
+  // company is expanded, in the same running S.No. sequence as the rendered rows below.
+  const exportZoneDispatch = (format: ExportFormat) => {
+    const headers = ['S.No.', 'Company', 'Plant', 'Inactive', 'Total devices', 'Assigned', 'Unassigned', 'Batches'];
+    const body: (string | number)[][] = [];
+    let sno = 0;
+    for (const co of companies) {
+      const open = term !== '' || openCompanies.has(co.companyName);
+      body.push([
+        ++sno, co.companyName, '', co.stats.inactiveDevices, co.stats.totalDevices,
+        co.stats.assignedDevices, co.stats.unassignedDevices, co.batchCount,
+      ]);
+      if (open) {
+        for (const p of co.plants) {
+          body.push([
+            ++sno, '', p.plantName, p.stats.inactiveDevices, p.stats.totalDevices,
+            p.stats.assignedDevices, p.stats.unassignedDevices, p.batches.length,
+          ]);
+        }
+      }
+    }
+    exportTable(format, 'zone-companies-and-plants', 'Zone companies and plants', headers, body);
+  };
+  // Running S.No. counter for the rendered rows — shared across the company/plant `.map` below so
+  // every visible row (company or plant) gets the next sequential number, re-computed each render.
+  let snoCounter = 0;
+
   const th = 'whitespace-nowrap px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wider text-white';
 
   return (
@@ -194,6 +222,11 @@ export function ZoneDispatchTable({
             <option value="BATCH_DESC">Most batches first</option>
             <option value="BATCH_ASC">Fewest batches first</option>
           </FilterSelect>
+          <TableDownloadButton
+            ariaLabel="Zone companies and plants"
+            disabled={companies.length === 0}
+            onSelectFormat={exportZoneDispatch}
+          />
         </FilterBar>
       </div>
 
@@ -201,6 +234,7 @@ export function ZoneDispatchTable({
         <table aria-label="Zone companies and plants" className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900">
+              <th className={cn(th, 'text-right')}>S.No.</th>
               <th className={th}>Company</th>
               <th className={th}>Plant</th>
               <th className={cn(th, 'text-right')} title="Inactive devices / total devices on record">
@@ -233,6 +267,7 @@ export function ZoneDispatchTable({
                     onClick={() => toggleCompany(co.companyName)}
                     data-testid={`zone-company-row-${co.companyName}`}
                   >
+                    <td className="px-4 py-2.5 text-right tabular-nums text-ink">{++snoCounter}</td>
                     <td className="px-4 py-2.5 font-semibold text-ink-strong">
                       <span className="flex items-center gap-1.5">
                         <IconChevronRight
@@ -262,6 +297,7 @@ export function ZoneDispatchTable({
                           onClick={() => onPlantClick(p)}
                           data-testid={`zone-plant-row-${p.plantId}`}
                         >
+                          <td className="px-4 py-2.5 text-right tabular-nums text-ink">{++snoCounter}</td>
                           <td className="px-4 py-2.5 pl-10 text-ink-muted">—</td>
                           <td className="px-4 py-2.5 text-ink">{p.plantName}</td>
                           <td className="px-4 py-2.5 text-right">
@@ -284,7 +320,7 @@ export function ZoneDispatchTable({
                           <tr>
                             <td colSpan={COLSPAN} className="bg-surface-sunken/40 p-0">
                               <div className="px-6 py-3 sm:px-10">
-                                <PlantBatchList batches={p.batches} onOpen={openBatch} />
+                                <PlantBatchList plantLabel={p.plantName} batches={p.batches} onOpen={openBatch} />
                               </div>
                             </td>
                           </tr>
@@ -302,12 +338,45 @@ export function ZoneDispatchTable({
 }
 
 /** The batches formed at one plant — engineer, stop, status, tickets; a row opens the batch detail. */
-function PlantBatchList({ batches, onOpen }: { batches: DispatchBatchRow[]; onOpen: (batchId: string) => void }) {
+function PlantBatchList({
+  plantLabel,
+  batches,
+  onOpen,
+}: {
+  plantLabel: string;
+  batches: DispatchBatchRow[];
+  onOpen: (batchId: string) => void;
+}) {
+  const sorted = [...batches].sort((a, b) => a.stopSequence - b.stopSequence);
+
+  const exportBatches = (format: ExportFormat) => {
+    const headers = ['S.No.', 'Engineer', 'Stop', 'Status', 'Tickets'];
+    const body = sorted.map((b, i) => [
+      i + 1,
+      b.seName ?? b.seId,
+      b.stopSequence,
+      b.status,
+      b.ticketCount,
+    ]);
+    exportTable(format, `batches-${plantLabel}`, `Batches — ${plantLabel}`, headers, body);
+  };
+
   return (
     <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
+      <div className="flex items-center justify-between gap-2 border-b border-line bg-surface-raised px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
+          Batches — {plantLabel}
+        </span>
+        <TableDownloadButton
+          ariaLabel={`Batches for ${plantLabel}`}
+          disabled={sorted.length === 0}
+          onSelectFormat={exportBatches}
+        />
+      </div>
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-chrome-700 bg-chrome-900 text-left text-[11px] uppercase tracking-wider text-white">
+            <th className="px-4 py-2 text-right font-bold">S.No.</th>
             <th className="px-4 py-2 font-bold">Engineer</th>
             <th className="px-4 py-2 text-right font-bold">Stop</th>
             <th className="px-4 py-2 font-bold">Status</th>
@@ -315,9 +384,7 @@ function PlantBatchList({ batches, onOpen }: { batches: DispatchBatchRow[]; onOp
           </tr>
         </thead>
         <tbody>
-          {[...batches]
-            .sort((a, b) => a.stopSequence - b.stopSequence)
-            .map((b) => (
+          {sorted.map((b, index) => (
               <tr
                 key={b.batchId}
                 onClick={() => onOpen(b.batchId)}
@@ -331,6 +398,7 @@ function PlantBatchList({ batches, onOpen }: { batches: DispatchBatchRow[]; onOp
                 data-testid={`zone-batch-row-${b.batchId}`}
                 className="cursor-pointer border-b border-line/70 last:border-b-0 hover:bg-surface-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50"
               >
+                <td className="px-4 py-2.5 text-right tabular-nums text-ink">{index + 1}</td>
                 <td className="px-4 py-2.5 text-ink">
                   {b.seName ?? <span className="font-mono text-xs">{b.seId.slice(0, 8)}</span>}
                 </td>

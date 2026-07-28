@@ -115,7 +115,10 @@ describe('Dispatch zone detail — companies & plants overview', () => {
 
     const plant = within(await screen.findByTestId('zone-plant-row-10'));
     expect(plant.getByText('Kotputli Works')).toBeInTheDocument();
-    expect(plant.getByText('2')).toBeInTheDocument(); // 2 batches formed at this plant in the run
+    // Scoped to the Batches cell — issue #160's leading S.No. column also reads "2" for this row (it
+    // is the second visible row overall), so a bare getByText('2') is now ambiguous.
+    const cells = plant.getAllByRole('cell');
+    expect(cells[cells.length - 2]).toHaveTextContent('2'); // 2 batches formed at this plant in the run
     // Fleet-context columns from plantStats: inactive/total, assigned, unassigned.
     expect(plant.getByText('5')).toBeInTheDocument(); // inactive
     expect(plant.getByText('/ 40')).toBeInTheDocument(); // total

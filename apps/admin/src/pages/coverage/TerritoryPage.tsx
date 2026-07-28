@@ -109,6 +109,7 @@ export function TerritoryPage() {
       key: 'action',
       header: '',
       align: 'right',
+      exportable: false,
       render: (row) => (
         <Button size="sm" variant="secondary" onClick={() => void remove(row.id)}>
           Remove

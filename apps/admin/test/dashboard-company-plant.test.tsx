@@ -169,11 +169,16 @@ describe('Company/Plant Overview (Issue 06 AC#3 / Issue 122)', () => {
     expect(link).toHaveAttribute('href', '/batches/55');
   });
 
-  it('offers a multi-format download and an assignment-state filter', () => {
+  it('offers a table-level download control and an assignment-state filter (Issue 160)', async () => {
     stubTickets('5005');
     renderTable(rows);
-    expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/download format/i)).toBeInTheDocument();
+    const trigger = screen.getByRole('button', { name: 'Download Company/Plant Overview' });
+    expect(trigger).toBeInTheDocument();
+    await userEvent.click(trigger);
+    expect(screen.getByRole('menuitem', { name: 'CSV' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Excel' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'PDF' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Image (PNG)' })).toBeInTheDocument();
     expect(screen.getByLabelText(/assignment state/i)).toBeInTheDocument();
   });
 

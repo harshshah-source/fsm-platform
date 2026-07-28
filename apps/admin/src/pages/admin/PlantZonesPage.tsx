@@ -107,6 +107,7 @@ export function PlantZonesPage() {
       key: 'actions',
       header: '',
       align: 'right',
+      exportable: false,
       render: (p) => (
         <span className="flex justify-end gap-2">
           <Button

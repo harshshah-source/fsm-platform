@@ -134,6 +134,7 @@ export function WarehouseDashboard() {
             key: 'action',
             header: '',
             align: 'right' as const,
+            exportable: false,
             render: (r: WarehouseStockRow) => (
               <Button size="sm" variant="secondary" data-testid={`stock-adjust-${r.componentId}`} onClick={() => openAdjust(r)}>
                 Adjust

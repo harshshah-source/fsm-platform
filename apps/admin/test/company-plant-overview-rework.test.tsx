@@ -36,11 +36,12 @@ describe('Issue 135 — Company/Plant Overview rework', () => {
     expect(screen.getByRole('columnheader', { name: /tier/i })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /plants/i })).toBeInTheDocument();
     // The company aggregate row shows the tier chip and the plant count (2 plants) in those columns.
-    // Columns: 0 Company · 1 Tier · 2 Plants · 3 Plant · 4 Inactive/Total · 5 SLA · 6 Fleet Uptime.
+    // Columns (Issue 160 added the leading S.No.): 0 S.No. · 1 Company · 2 Tier · 3 Plants · 4 Plant ·
+    // 5 Inactive/Total · 6 SLA · 7 Fleet Uptime.
     const companyRow = screen.getByText('Acme').closest('tr')!;
     const cells = within(companyRow).getAllByRole('cell');
-    expect(cells[1]).toHaveTextContent('GOLD');
-    expect(cells[2]).toHaveTextContent('2');
+    expect(cells[2]).toHaveTextContent('GOLD');
+    expect(cells[3]).toHaveTextContent('2');
   });
 
   it('has a Fleet Uptime % column and no standalone Devices column', () => {

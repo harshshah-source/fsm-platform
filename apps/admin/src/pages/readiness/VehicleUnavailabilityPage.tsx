@@ -141,6 +141,7 @@ export function VehicleUnavailabilityPage() {
     {
       key: 'actions',
       header: 'Actions',
+      exportable: false,
       render: (row) =>
         editingId !== row.id ? (
           <div className="flex gap-2">

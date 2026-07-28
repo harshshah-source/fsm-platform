@@ -103,6 +103,7 @@ export function CrossZonePage() {
   const actionsColumn: Column<CrossZoneRow> = {
     key: 'actions',
     header: 'Actions',
+    exportable: false,
     render: (r) => (
       <div className="flex gap-2">
         <Button type="button" size="sm" variant="primary" data-testid={`cz-approve-${r.escalationId}`} onClick={() => approve(r.escalationId)}>

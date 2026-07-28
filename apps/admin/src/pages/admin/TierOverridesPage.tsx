@@ -89,6 +89,7 @@ export function TierOverridesPage() {
       key: 'actions',
       header: '',
       align: 'right',
+      exportable: false,
       render: (r) =>
         r.status === 'ACTIVE' ? (
           <span className="flex justify-end">

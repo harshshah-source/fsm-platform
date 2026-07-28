@@ -101,6 +101,7 @@ export function ComponentRequestsPage({ readOnly = false }: { readOnly?: boolean
     {
       key: 'actions',
       header: 'Actions',
+      exportable: false,
       render: (row) => {
         if (readOnly) return <span className="text-xs text-ink-muted">read-only</span>;
         if (row.status === 'REQUESTED' && rejectingId !== row.requestId) {

@@ -78,6 +78,7 @@ export function ShadowUseQueuePage() {
     {
       key: 'actions',
       header: 'Actions',
+      exportable: false,
       render: (row) =>
         disputingId !== row.id ? (
           <div className="flex gap-2">

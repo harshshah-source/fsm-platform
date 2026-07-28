@@ -288,6 +288,7 @@ export function InstallCreatePage() {
                 rows={rowErrors}
                 rowKey={(r) => `${r.line}-${r.code}`}
                 ariaLabel="CSV errors"
+                downloadable={false}
               />
             )}
           </div>

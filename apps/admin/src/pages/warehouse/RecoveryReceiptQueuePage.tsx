@@ -46,6 +46,7 @@ export function RecoveryReceiptQueuePage() {
     {
       key: 'actions',
       header: 'Actions',
+      exportable: false,
       render: (r) => (
         <Button type="button" size="sm" data-testid={`rcv-receipt-${r.ticketId}`} onClick={() => confirm(r.ticketId)}>
           Confirm Receipt
