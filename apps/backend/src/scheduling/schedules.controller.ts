@@ -16,6 +16,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { BadRequestException } from '@nestjs/common';
+import { type BulkUnassignRequest, type ExecuteOutcome, type PreviewResult, BulkUnassignService } from './bulk-unassign.service';
 import { DayPlanQueryService, type DayPlanView } from './day-plan-query.service';
 import { DispatchRunService, type DispatchRunSummary } from './dispatch-run.service';
 import { OverrideService, type AssignOutcome, type PlantAssignSummary } from './override.service';
@@ -25,6 +26,14 @@ import {
   type ZmScheduleRow,
   type ZoneEngineerRow,
 } from './zm-schedule-query.service';
+
+interface BulkUnassignRequestBody {
+  mode: 'PREVIEW' | 'EXECUTE';
+  scope: 'ZONE' | 'PAN_INDIA';
+  zoneId?: number;
+  reasonCode: string;
+  previewToken?: string;
+}
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 
@@ -43,6 +52,7 @@ export class SchedulesController {
     private readonly zm: ZmScheduleQueryService,
     private readonly override: OverrideService,
     private readonly dispatchRun: DispatchRunService,
+    private readonly bulkUnassign: BulkUnassignService,
   ) {}
 
   /**
@@ -59,6 +69,37 @@ export class SchedulesController {
       actorUserId: user.user_id,
       actorRole: user.role,
     });
+  }
+
+  /**
+   * #179 — OH bulk unassign (zone / Pan-India), mid-day rebalance. OH-only (D6, #119 precedent) —
+   * deliberately narrower than `dispatch-run`'s OH+CSM. `mode: PREVIEW` returns per-zone class
+   * counts + a signed token; `mode: EXECUTE` performs the unassign (Pan-India requires the token).
+   */
+  @Post('bulk-unassign')
+  @HttpCode(200)
+  @Roles('OPERATIONS_HEAD')
+  async bulkUnassignRoute(
+    @CurrentUser() user: AccessTokenClaims,
+    @Body() body: BulkUnassignRequestBody,
+  ): Promise<PreviewResult | ExecuteOutcome> {
+    if (body.scope === 'ZONE' && body.zoneId == null) throw new BadRequestException({ code: 'ZONE_ID_REQUIRED' });
+    if (!body.reasonCode) throw new BadRequestException({ code: 'REASON_CODE_REQUIRED' });
+
+    const req: BulkUnassignRequest = {
+      scope: body.scope,
+      zoneId: body.zoneId != null ? BigInt(body.zoneId) : undefined,
+      reasonCode: body.reasonCode,
+      previewToken: body.previewToken,
+    };
+
+    if (body.mode === 'PREVIEW') return this.bulkUnassign.preview(req);
+
+    const outcome = await this.bulkUnassign.execute(req, { userId: user.user_id, role: user.role });
+    if (outcome.result === 'TOKEN_REQUIRED') throw new ConflictException({ code: 'PREVIEW_TOKEN_REQUIRED' });
+    if (outcome.result === 'TOKEN_INVALID') throw new ConflictException({ code: 'PREVIEW_TOKEN_INVALID' });
+    if (outcome.result === 'TOKEN_STALE') throw new ConflictException({ code: 'PREVIEW_TOKEN_STALE', freshPreview: outcome.freshPreview });
+    return outcome;
   }
 
   @Get('me')

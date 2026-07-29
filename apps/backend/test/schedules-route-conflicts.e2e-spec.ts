@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AuthGuard } from '../src/common/guards/auth.guard';
 import { RoleGuard } from '../src/common/guards/role.guard';
+import { BulkUnassignService } from '../src/scheduling/bulk-unassign.service';
 import { DayPlanQueryService } from '../src/scheduling/day-plan-query.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
 import { OverrideService } from '../src/scheduling/override.service';
@@ -39,6 +40,7 @@ describe('Schedules route matching (e2e)', () => {
         { provide: OverrideService, useValue: override },
         { provide: ZmScheduleQueryService, useValue: zm },
         { provide: DispatchRunService, useValue: { runForActiveZones: vi.fn() } },
+        { provide: BulkUnassignService, useValue: { preview: vi.fn(), execute: vi.fn() } },
       ],
     })
       .overrideGuard(AuthGuard)
