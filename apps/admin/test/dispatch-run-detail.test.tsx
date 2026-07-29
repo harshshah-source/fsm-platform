@@ -133,4 +133,30 @@ describe('Dispatch run detail (Issue 123)', () => {
     await screen.findByTestId('config-in-effect');
     expect(screen.queryByTestId('stale-build-badge')).not.toBeInTheDocument();
   });
+
+  // #179 follow-up — the ledger is immutable history; read alone it implies the dispatched work is
+  // still on engineers' plans. When some has since been pulled back, the card must say so.
+  it('#179 — flags how much of a zone dispatched work has since been unassigned', async () => {
+    renderWith({
+      ...detail,
+      zones: [{ ...detail.zones[0], ticketsDispatched: 77, ticketsStillAssigned: 0, ticketsRemovedSince: 77 }],
+    });
+
+    const zone = within(await screen.findByTestId('dispatch-zone-card-1'));
+    // The ledger figure is untouched — scoped to the "Dispatched" stat, since the note repeats 77.
+    expect(zone.getByText('Dispatched').previousSibling).toHaveTextContent('77');
+    const note = zone.getByTestId('zone-removed-since');
+    expect(note).toHaveTextContent(/77/);
+    expect(note).toHaveTextContent(/no longer assigned|since unassigned|removed/i);
+  });
+
+  it('#179 — no removed-since note when every dispatched ticket is still assigned', async () => {
+    renderWith({
+      ...detail,
+      zones: [{ ...detail.zones[0], ticketsDispatched: 2, ticketsStillAssigned: 2, ticketsRemovedSince: 0 }],
+    });
+
+    await screen.findByTestId('dispatch-zone-card-1');
+    expect(screen.queryByTestId('zone-removed-since')).not.toBeInTheDocument();
+  });
 });

@@ -134,6 +134,16 @@ function ZoneCard({ zone, onOpen }: { zone: DispatchRunZoneCard; onOpen: () => v
               <span className="font-semibold text-ink">{reasons.ALL_DROPPED}</span>
             </p>
           )}
+          {/* #179 — the numbers above are what this run DID (immutable ledger). If work has since
+              been pulled off a day plan (bulk unassign / ZM override), say so, or the card reads as
+              "still assigned" when it isn't. Cause is deliberately not attributed — several actions
+              stamp the same column. */}
+          {(zone.ticketsRemovedSince ?? 0) > 0 && (
+            <p className="mt-2 text-xs text-warning" data-testid="zone-removed-since">
+              <span className="font-semibold">{zone.ticketsRemovedSince}</span> of these are no longer assigned
+              {(zone.ticketsStillAssigned ?? 0) > 0 && <> · {zone.ticketsStillAssigned} still on a day plan</>}
+            </p>
+          )}
         </>
       )}
     </Card>

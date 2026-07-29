@@ -36,6 +36,17 @@ export interface DispatchRunZoneCard {
   batches: number;
   ticketsDispatched: number;
   error: string | null;
+  /**
+   * #179 follow-up — LIVE counters beside the historical `ticketsDispatched`. The ledger is
+   * immutable ("this run dispatched X"), which read alone implies the work is still on engineers'
+   * plans; it is not, once a bulk unassign or a ZM override stamped `removed_at`. Derived from the
+   * run's own batch rows (`plant_batch_assignments.run_id`) — nothing in the ledger is rewritten.
+   * `removedSince` deliberately does NOT attribute a cause: bulk unassign, REMOVE_TICKET and
+   * DEFER_TICKET all stamp the same column, and guessing between them from timestamps would be
+   * fiction. Both are 0 for a pre-#batch-run-attribution run whose batches carry no `run_id`.
+   */
+  ticketsStillAssigned: number;
+  ticketsRemovedSince: number;
 }
 
 /**
@@ -268,20 +279,26 @@ export class DispatchTransparencyQueryService {
     });
     if (!run) return null;
 
-    const zoneCards: DispatchRunZoneCard[] = run.zoneRows.map((z) => ({
-      zoneId: z.zoneId.toString(),
-      zoneName: z.zone?.name ?? null,
-      mode: z.mode,
-      weightSetRef: z.weightSetRef,
-      ticketsConsidered: z.ticketsConsidered,
-      recommended: z.recommended,
-      unassignable: z.unassignable,
-      unassignableReasons: (z.unassignableReasons as Record<string, unknown> | null) ?? null,
-      schedules: z.schedules,
-      batches: z.batches,
-      ticketsDispatched: z.ticketsDispatched,
-      error: z.error,
-    }));
+    const liveByZone = await this.liveVsRemovedByZone(runId);
+    const zoneCards: DispatchRunZoneCard[] = run.zoneRows.map((z) => {
+      const live = liveByZone.get(z.zoneId.toString()) ?? { stillAssigned: 0, removedSince: 0 };
+      return {
+        zoneId: z.zoneId.toString(),
+        zoneName: z.zone?.name ?? null,
+        mode: z.mode,
+        weightSetRef: z.weightSetRef,
+        ticketsConsidered: z.ticketsConsidered,
+        recommended: z.recommended,
+        unassignable: z.unassignable,
+        unassignableReasons: (z.unassignableReasons as Record<string, unknown> | null) ?? null,
+        schedules: z.schedules,
+        batches: z.batches,
+        ticketsDispatched: z.ticketsDispatched,
+        error: z.error,
+        ticketsStillAssigned: live.stillAssigned,
+        ticketsRemovedSince: live.removedSince,
+      };
+    });
 
     const actorNames = await this.resolveActorNames([run.actorUserId]);
     return {
@@ -304,6 +321,30 @@ export class DispatchTransparencyQueryService {
       zones: zoneCards,
       build: await this.runBuildStamp(run.buildVersion, run.buildFingerprint),
     };
+  }
+
+  /**
+   * #179 follow-up — per zone, how many of the tickets THIS run put on a day plan are still there
+   * vs have since been pulled off. Reads the run's own batches (`plant_batch_assignments.run_id`)
+   * and their ticket rows' `removed_at`, so it is exact and needs no correlation with the audit
+   * log. One bounded query per run detail (scoped to that run's batches).
+   */
+  private async liveVsRemovedByZone(
+    runId: bigint,
+  ): Promise<Map<string, { stillAssigned: number; removedSince: number }>> {
+    const rows = await this.prisma.batchAssignmentTicket.findMany({
+      where: { batch: { runId } },
+      select: { removedAt: true, batch: { select: { schedule: { select: { zoneId: true } } } } },
+    });
+    const byZone = new Map<string, { stillAssigned: number; removedSince: number }>();
+    for (const r of rows) {
+      const key = r.batch.schedule.zoneId.toString();
+      const acc = byZone.get(key) ?? { stillAssigned: 0, removedSince: 0 };
+      if (r.removedAt === null) acc.stillAssigned++;
+      else acc.removedSince++;
+      byZone.set(key, acc);
+    }
+    return byZone;
   }
 
   /**
@@ -415,6 +456,10 @@ export class DispatchTransparencyQueryService {
       };
     });
 
+    const zoneLive = (await this.liveVsRemovedByZone(runId)).get(zoneRow.zoneId.toString()) ?? {
+      stillAssigned: 0,
+      removedSince: 0,
+    };
     return {
       runId: runId.toString(),
       zone: {
@@ -430,6 +475,8 @@ export class DispatchTransparencyQueryService {
         batches: zoneRow.batches,
         ticketsDispatched: zoneRow.ticketsDispatched,
         error: zoneRow.error,
+        ticketsStillAssigned: zoneLive.stillAssigned,
+        ticketsRemovedSince: zoneLive.removedSince,
       },
       batches,
       unassignable,

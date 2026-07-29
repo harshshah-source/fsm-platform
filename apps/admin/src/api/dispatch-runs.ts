@@ -58,6 +58,14 @@ export interface DispatchRunZoneCard {
   batches: number;
   ticketsDispatched: number;
   error: string | null;
+  /**
+   * #179 — LIVE counters beside the historical `ticketsDispatched`. The ledger records what the run
+   * dispatched and never changes; these say how much of it is still on a day plan now vs has since
+   * been pulled off (bulk unassign / ZM override — cause deliberately not attributed). Optional:
+   * absent when served by a backend build predating the addition, so the note simply does not render.
+   */
+  ticketsStillAssigned?: number;
+  ticketsRemovedSince?: number;
 }
 
 /** The run's config frozen AT RUN START. Empty priorityRules / missing settings ⇒ code defaults applied. */
