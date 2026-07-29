@@ -59,14 +59,19 @@ export class DayPlanQueryService {
       },
     });
 
-    const stops: DayPlanStop[] = batches.map((b) => ({
-      batchId: String(b.batchId),
-      stopSequence: b.stopSequence,
-      plantId: String(b.plantId),
-      plantName: b.plant.name,
-      deviceCount: b.tickets.length,
-      tickets: b.tickets.map((t) => ({ ticketId: t.ticketId, sortOrder: t.sortOrder })),
-    }));
+    // #179 slice 3 — a batch every one of whose tickets has been removed (a bulk unassign or an
+    // override) is a hollow stop: it would render above the SE's real remaining work with
+    // deviceCount 0. It carries no live work, so it is never shown, not just shown empty.
+    const stops: DayPlanStop[] = batches
+      .filter((b) => b.tickets.length > 0)
+      .map((b) => ({
+        batchId: String(b.batchId),
+        stopSequence: b.stopSequence,
+        plantId: String(b.plantId),
+        plantName: b.plant.name,
+        deviceCount: b.tickets.length,
+        tickets: b.tickets.map((t) => ({ ticketId: t.ticketId, sortOrder: t.sortOrder })),
+      }));
 
     return {
       dispatched: true,

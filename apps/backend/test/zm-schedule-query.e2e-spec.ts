@@ -170,4 +170,51 @@ describe('Issue 13a slice 1 — ZmScheduleQueryService', () => {
     expect(other).toBeDefined();
     expect(other!.partialRecovery).toBe(false);
   });
+
+  // #179 slice 3 — same hollow-stop defect as the SE day plan, on the ZM's view of the same schedule.
+  it('filters out a stop whose every ticket has been removed, keeping a partially-live stop', async () => {
+    const tag = randomUUID().slice(0, 8);
+    const u = await prisma.user.create({
+      data: { name: 'SE ' + tag, role: 'SERVICE_ENGINEER', phone: 'ph-' + tag, email: `${tag}@zm-hollow.test`, zoneId },
+    });
+    const hollowSe = u.userId;
+    const plantLiveId = (await prisma.plant.create({ data: { name: 'P-zm-live-' + NS, zoneId } })).plantId;
+    const plantHollowId = (await prisma.plant.create({ data: { name: 'P-zm-hollow-' + NS, zoneId } })).plantId;
+    await prisma.engineerMaster.create({ data: { engineerId: hollowSe, coverageType: 'MULTI_PLANT', zoneId, dailyCapacity: 10 } });
+    await prisma.seCoverage.create({ data: { seId: hollowSe, plantId: plantLiveId, coverageType: 'MULTI_PLANT' } });
+    await prisma.seCoverage.create({ data: { seId: hollowSe, plantId: plantHollowId, coverageType: 'MULTI_PLANT' } });
+
+    const liveTicket = await makeTicket(plantLiveId, 150);
+    const hollowTicket = await makeTicket(plantHollowId, 90);
+
+    try {
+      await rec.runForZone(zoneId, { now: NOW });
+      await dispatch.dispatchForZone(zoneId, { dateFrom: NOW, dateTo: NOW, now: NOW });
+
+      await prisma.batchAssignmentTicket.updateMany({
+        where: { ticketId: hollowTicket },
+        data: { removedAt: NOW, removedBy: hollowSe },
+      });
+
+      const detail = await zm.getScheduleDetail(hollowSe, { role: 'ZONAL_MANAGER', zoneId: Number(zoneId) });
+      expect(detail).not.toBeNull();
+      expect(detail!.stops).toHaveLength(1);
+      expect(detail!.stops[0].plantId).toBe(String(plantLiveId));
+      expect(detail!.stops[0].tickets.map((t) => t.ticketId)).toEqual([liveTicket]);
+    } finally {
+      const schedules = await prisma.workSchedule.findMany({ where: { zoneId, seId: hollowSe }, select: { scheduleId: true } });
+      const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } }, select: { batchId: true } });
+      await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
+      await prisma.plantBatchAssignment.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
+      await prisma.workSchedule.deleteMany({ where: { zoneId, seId: hollowSe } });
+      await prisma.recommendation.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
+      await prisma.dispatchDecisionTrace.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
+      await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
+      await prisma.ticket.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
+      await prisma.seCoverage.deleteMany({ where: { plantId: { in: [plantLiveId, plantHollowId] } } });
+      await prisma.engineerMaster.deleteMany({ where: { engineerId: hollowSe } });
+      await prisma.user.deleteMany({ where: { userId: hollowSe } });
+      await prisma.plant.deleteMany({ where: { plantId: { in: [plantLiveId, plantHollowId] } } });
+    }
+  });
 });

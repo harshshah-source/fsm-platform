@@ -140,20 +140,25 @@ export class ZmScheduleQueryService {
     const reasoning = await this.reasoningByTicket(ticketIds);
     const state = await this.stateByTicket(ticketIds);
 
-    const stops: ZmDetailStop[] = schedule.batches.map((b) => ({
-      batchId: String(b.batchId),
-      stopSequence: b.stopSequence,
-      plantId: String(b.plantId),
-      plantName: b.plant.name,
-      status: b.status,
-      deviceCount: b.tickets.length,
-      tickets: b.tickets.map((t) => ({
-        ticketId: t.ticketId,
-        sortOrder: t.sortOrder,
-        ...(state.get(t.ticketId) ?? { slaBucket: null, companyTier: null, partialRecovery: false }),
-        reasoning: reasoning.get(t.ticketId) ?? null,
-      })),
-    }));
+    // #179 slice 3 — same hollow-stop defect as the SE day plan (`day-plan-query.service.ts`): a
+    // batch every one of whose tickets has been removed (a bulk unassign or an override) carries no
+    // live work and must not render above the SE's real remaining stops.
+    const stops: ZmDetailStop[] = schedule.batches
+      .filter((b) => b.tickets.length > 0)
+      .map((b) => ({
+        batchId: String(b.batchId),
+        stopSequence: b.stopSequence,
+        plantId: String(b.plantId),
+        plantName: b.plant.name,
+        status: b.status,
+        deviceCount: b.tickets.length,
+        tickets: b.tickets.map((t) => ({
+          ticketId: t.ticketId,
+          sortOrder: t.sortOrder,
+          ...(state.get(t.ticketId) ?? { slaBucket: null, companyTier: null, partialRecovery: false }),
+          reasoning: reasoning.get(t.ticketId) ?? null,
+        })),
+      }));
 
     return {
       scheduleId: String(schedule.scheduleId),

@@ -139,4 +139,49 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
     expect(view.dispatched).toBe(false);
     expect(view.stops).toEqual([]);
   });
+
+  // #179 slice 3 — a hollow stop (every ticket removed, e.g. by a bulk unassign) must not render
+  // above the SE's real remaining work. Fully self-contained fixture (own SE/plants/tickets),
+  // cleaned up at the end of this test rather than via the shared afterAll.
+  it('filters out a stop whose every ticket has been removed, keeping a partially-live stop', async () => {
+    const hollowSe = await makeSe();
+    const plantLiveId = (await prisma.plant.create({ data: { name: 'P-dp-live-' + NS, zoneId } })).plantId;
+    const plantHollowId = (await prisma.plant.create({ data: { name: 'P-dp-hollow-' + NS, zoneId } })).plantId;
+    await prisma.seCoverage.create({ data: { seId: hollowSe, plantId: plantLiveId, coverageType: 'MULTI_PLANT' } });
+    await prisma.seCoverage.create({ data: { seId: hollowSe, plantId: plantHollowId, coverageType: 'MULTI_PLANT' } });
+
+    const liveTicket = await makeTicket(plantLiveId, 150);
+    const hollowTicket = await makeTicket(plantHollowId, 90);
+
+    try {
+      await rec.runForZone(zoneId, { now: NOW });
+      await dispatch.dispatchForZone(zoneId, { dateFrom: NOW, dateTo: NOW, now: NOW });
+
+      // Simulate a bulk unassign / override on the hollow plant's stop: stamp its ticket removed,
+      // exactly as `BulkUnassignService.execute` and `OverrideService.removeTicket` do — the
+      // schedule and the batch row both stay, only the ticket link is stamped.
+      await prisma.batchAssignmentTicket.updateMany({
+        where: { ticketId: hollowTicket },
+        data: { removedAt: NOW, removedBy: hollowSe },
+      });
+
+      const view = await dayPlan.getDayPlan(hollowSe);
+      expect(view.dispatched).toBe(true);
+      expect(view.stops).toHaveLength(1); // the hollow stop is gone, not rendered as deviceCount: 0
+      expect(view.stops[0].plantId).toBe(String(plantLiveId));
+      expect(view.stops[0].tickets.map((t) => t.ticketId)).toEqual([liveTicket]);
+    } finally {
+      const schedules = await prisma.workSchedule.findMany({ where: { zoneId, seId: hollowSe }, select: { scheduleId: true } });
+      const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } }, select: { batchId: true } });
+      await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
+      await prisma.plantBatchAssignment.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
+      await prisma.workSchedule.deleteMany({ where: { zoneId, seId: hollowSe } });
+      await prisma.recommendation.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
+      await prisma.dispatchDecisionTrace.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
+      await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
+      await prisma.ticket.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
+      await prisma.seCoverage.deleteMany({ where: { plantId: { in: [plantLiveId, plantHollowId] } } });
+      await prisma.plant.deleteMany({ where: { plantId: { in: [plantLiveId, plantHollowId] } } });
+    }
+  });
 });
