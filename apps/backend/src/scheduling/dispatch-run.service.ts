@@ -18,6 +18,11 @@ export interface DispatchRunOptions {
   trigger?: DispatchRunTrigger;
   actorUserId?: string;
   actorRole?: string;
+  /**
+   * #179 slice 2 — narrows the run to a single zone (the bulk-unassign rebalance's "Run dispatch"
+   * button, zone-scoped). Omitted → every active zone, exactly as before this option existed.
+   */
+  zoneId?: bigint;
 }
 
 export interface DispatchRunSummary {
@@ -73,7 +78,7 @@ export class DispatchRunService {
     const actorId = opts.actorUserId ?? 'SYSTEM';
     const actorRole = opts.actorRole ?? 'SYSTEM';
     const day = utcDayStart(now);
-    const zoneIds = await this.activeZoneIds();
+    const zoneIds = opts.zoneId != null ? [opts.zoneId] : await this.activeZoneIds();
 
     const run = await this.prisma.dispatchRun.create({
       data: {

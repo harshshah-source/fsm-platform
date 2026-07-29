@@ -52,4 +52,15 @@ describe('POST /api/schedules/dispatch-run (e2e)', () => {
   it('rejects an unauthenticated request', async () => {
     await request(app.getHttpServer()).post('/api/schedules/dispatch-run').expect(401);
   });
+
+  // #179 slice 2 — optional zoneId, narrowing the run to a single zone.
+  it('narrows the run to a single zone when zoneId is given in the body', async () => {
+    const token = await login('ops.head@fsm.test');
+    const res = await request(app.getHttpServer())
+      .post('/api/schedules/dispatch-run')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ zoneId: 1 })
+      .expect(200);
+    expect(res.body.zones).toBe(1);
+  });
 });

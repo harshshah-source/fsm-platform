@@ -58,16 +58,22 @@ export class SchedulesController {
   /**
    * Issue 113 — manual override for the daily Recommender → Day-Plan dispatch run: force a run now
    * without waiting for the cron. Reuses the exact `runForActiveZones` path the scheduler tick drives.
+   * #179 slice 2 — optional `zoneId` narrows the run to a single zone (the bulk-unassign rebalance's
+   * "Run dispatch" button, zone-scoped); omitted → every active zone, unchanged from before.
    */
   @Post('dispatch-run')
   @HttpCode(200)
   @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
-  dispatchRunNow(@CurrentUser() user: AccessTokenClaims): Promise<DispatchRunSummary> {
+  dispatchRunNow(
+    @CurrentUser() user: AccessTokenClaims,
+    @Body() body: { zoneId?: number } = {},
+  ): Promise<DispatchRunSummary> {
     // MANUAL + actor land on the dispatch_runs ledger row and its audit bracket.
     return this.dispatchRun.runForActiveZones(new Date(), {
       trigger: 'MANUAL',
       actorUserId: user.user_id,
       actorRole: user.role,
+      zoneId: body.zoneId != null ? BigInt(body.zoneId) : undefined,
     });
   }
 
