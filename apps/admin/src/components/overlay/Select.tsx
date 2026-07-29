@@ -56,7 +56,7 @@ export function Select({
         aria-expanded={open}
         aria-label={ariaLabel}
         onClick={() => setOpen((o) => !o)}
-        className="flex h-10 min-w-40 items-center gap-2 rounded-md border border-line bg-surface-card px-3 text-sm text-ink-strong shadow-sm transition-[background-color,border-color,box-shadow] hover:border-line-strong hover:bg-white focus-ring"
+        className="flex h-10 min-w-40 items-center gap-2 rounded-md border border-line bg-surface-card px-3 text-sm text-ink-strong shadow-sm transition-[background-color,border-color,box-shadow] hover:border-line-strong hover:bg-surface-raised focus-ring"
       >
         <span className={cn(!current && 'text-ink-muted')}>{current?.label ?? placeholder}</span>
         <span aria-hidden className="ml-auto text-ink-muted">
@@ -79,7 +79,7 @@ export function Select({
               }}
               className={cn(
                 'cursor-pointer px-3 py-2 text-sm transition-colors hover:bg-luxury-100/70',
-                o.value === value && 'font-medium text-brand-700',
+                o.value === value && 'font-medium text-link',
               )}
             >
               {o.label}

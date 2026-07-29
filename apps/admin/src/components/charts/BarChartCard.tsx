@@ -32,7 +32,7 @@ export function BarChartCard({
             axisLine={false}
             tickLine={false}
           />
-          <Tooltip cursor={{ fill: 'rgba(15,20,34,0.04)' }} />
+          <Tooltip cursor={{ fill: 'var(--color-surface-sunken)', fillOpacity: 0.55 }} />
           <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={14}>
             {data.map((d, i) => (
               <Cell key={i} fill={d.color ?? color} />

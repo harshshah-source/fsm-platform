@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { apiDispatchBatchDetail, type DispatchAssignmentRow, type DispatchBatchDetail } from '../../api/dispatch-runs';
-import { DataTable, EmptyState, ErrorState, FilterBar, FilterSelect, PageHeader, SearchInput, type Column } from '../../components/data';
+import { DataTable, EmptyState, ErrorState, FilterSelect, PageHeader, SearchInput, type Column } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { formatDateTimeWithYear } from '../../lib/datetime';
 import { formatInactiveDuration } from '../../lib/inactiveDuration';
@@ -144,29 +144,31 @@ export function DispatchBatchDetailPage() {
 
       {detail && (
         <>
-          <FilterBar>
-            <SearchInput
-              aria-label="Search by device id or vehicle number"
-              placeholder="Device ID or vehicle no…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-64"
-            />
-            <FilterSelect aria-label="Filter by transporter" value={transporter} onChange={(e) => setTransporter(e.target.value)}>
-              <option value="">All transporters</option>
-              {transporters.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </FilterSelect>
-          </FilterBar>
           <DataTable
             columns={columns}
             rows={rows}
             rowKey={(r) => r.ticketId}
             rowTestId={(r) => `dispatch-assignment-row-${r.ticketId}`}
             ariaLabel="Batch assignments"
+            toolbar={
+              <>
+                <SearchInput
+                  aria-label="Search by device id or vehicle number"
+                  placeholder="Device ID or vehicle no…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-64"
+                />
+                <FilterSelect aria-label="Filter by transporter" value={transporter} onChange={(e) => setTransporter(e.target.value)}>
+                  <option value="">All transporters</option>
+                  {transporters.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </FilterSelect>
+              </>
+            }
             exportName={`Batch #${detail?.batchId ?? batchId}`}
             tableLayout="fixed"
             empty={<EmptyState message="No tickets match this search." />}

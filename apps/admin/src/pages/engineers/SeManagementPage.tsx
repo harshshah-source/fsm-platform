@@ -111,7 +111,7 @@ export function SeManagementPage() {
         <button
           type="button"
           onClick={() => openDetail(r.seId)}
-          className="font-medium text-brand-700 hover:underline"
+          className="font-medium text-link hover:underline"
         >
           {r.name}
         </button>

@@ -132,7 +132,7 @@ function HelpTopicGrid({ topics }: { topics: HelpTopic[] }) {
           <p className="mt-1 flex-1 text-xs text-ink-muted">{t.description}</p>
           <Link
             to={t.to}
-            className="mt-3 text-xs font-medium text-brand-700 hover:text-brand-600"
+            className="mt-3 text-xs font-medium text-link hover:underline"
           >
             View Docs →
           </Link>

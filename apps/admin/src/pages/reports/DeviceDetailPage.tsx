@@ -15,8 +15,8 @@ import {
 } from '../../api/devices';
 import { useAuth } from '../../auth/AuthProvider';
 import { BarChartCard, ChartCard, type BarDatum } from '../../components/charts';
-import { DataTable, EmptyState, FilterBar, FilterSelect, PageHeader, type Column } from '../../components/data';
-import { Badge, Button, Field, Input, SectionCard } from '../../components/ui';
+import { DataTable, EmptyState, FilterSelect, PageHeader, SearchInput, type Column } from '../../components/data';
+import { Badge, Button, SectionCard } from '../../components/ui';
 import { PlantName, SLABadge } from '../../components/domain';
 import { formatDateTimeWithYear } from '../../lib/datetime';
 import { formatInactiveDuration } from '../../lib/inactiveDuration';
@@ -200,35 +200,41 @@ export function DeviceDetailPage() {
   // straight off the zone-scoped `/devices` payload (device → vehicle → plant → zone, company_master),
   // so no per-row fetch. Plant short codes (e.g. ACP-9106) are displayed verbatim (source-data issue).
   // Widths drive the fixed table layout (`tableLayout="fixed"` on the DataTable below) so all 11 columns
-  // fit the page and the operator never scrolls sideways; long ids/names wrap (`break-all` on the mono
-  // id columns). Re-proportioned down from 100% (#160) to leave room for the leading 3.5rem S.No. column.
+  // fit the page and the operator never scrolls sideways.
+  //
+  // The identifier columns (Device ID, Vehicle Number, IMSI) are `whitespace-nowrap` and sized to hold
+  // a full value: these are things an operator reads aloud, copies, and matches against a handset, and
+  // a 15-digit IMSI broken across two lines is unreadable. They previously carried `break-all`, which
+  // is what split them mid-number. The name columns still wrap — a long company name legitimately does.
   const listColumns: Column<DeviceListRow>[] = [
     {
       key: 'deviceId',
       header: 'Device ID',
-      width: '9%',
-      className: 'break-all',
-      render: (r) => <span className="font-medium text-ink-strong tabular-nums">{r.deviceId}</span>,
+      // 13% ≈ 148px at the 1440px shell — a 15-digit id at 13px tabular needs ~123px plus the cell's
+      // own padding. Sized from the widest real value, not eyeballed, because `whitespace-nowrap`
+      // turns "too narrow" into an overflow into the next column rather than a wrap.
+      width: '13%',
+      render: (r) => <span className="whitespace-nowrap font-medium text-ink-strong tabular-nums">{r.deviceId}</span>,
     },
-    { key: 'vehicleNo', header: 'Vehicle Number', width: '9%', className: 'break-all', render: (r) => r.vehicleNo ?? '—' },
+    { key: 'vehicleNo', header: 'Vehicle Number', width: '8%', render: (r) => <span className="whitespace-nowrap">{r.vehicleNo ?? '—'}</span> },
     // AutoPlant device identity, mirrored onto `devices` by the daily master sync. Both are sparse at
     // source (Device Type ~93%, IMSI ~85% of the deployed fleet), so "—" is a normal reading here.
-    { key: 'deviceType', header: 'Device Type', width: '7%', render: (r) => r.deviceType ?? '—' },
+    { key: 'deviceType', header: 'Device Type', width: '5%', render: (r) => <span className="whitespace-nowrap">{r.deviceType ?? '—'}</span> },
     {
       key: 'imsiNo',
       header: 'IMSI No',
-      width: '8%',
-      className: 'break-all',
-      render: (r) => (r.imsiNo ? <span className="tabular-nums">{r.imsiNo}</span> : '—'),
+      // Same 15-digit budget as Device ID.
+      width: '13%',
+      render: (r) => (r.imsiNo ? <span className="whitespace-nowrap tabular-nums">{r.imsiNo}</span> : '—'),
     },
-    { key: 'companyName', header: 'Company Name', width: '11%', render: (r) => r.companyName ?? '—' },
-    { key: 'plantName', header: 'Plant Name', width: '9%', render: (r) => (r.plantName ? <PlantName code={r.plantName} /> : '—') },
-    { key: 'zoneName', header: 'Zone', width: '7%', render: (r) => r.zoneName ?? '—' },
+    { key: 'companyName', header: 'Company Name', width: '9%', render: (r) => r.companyName ?? '—' },
+    { key: 'plantName', header: 'Plant Name', width: '11%', render: (r) => (r.plantName ? <PlantName code={r.plantName} /> : '—') },
+    { key: 'zoneName', header: 'Zone', width: '5%', render: (r) => <span className="whitespace-nowrap">{r.zoneName ?? '—'}</span> },
     {
       key: 'inactiveDuration',
       header: 'Inactive Duration',
       align: 'right',
-      width: '8%',
+      width: '7%',
       render: (r) => (
         <span className="tabular-nums text-ink">{formatInactiveDuration(r.latestGpsDatetime) ?? '—'}</span>
       ),
@@ -242,14 +248,14 @@ export function DeviceDetailPage() {
     {
       key: 'slaBucket',
       header: 'SLA Bucket',
-      width: '9%',
+      width: '6%',
       render: (r) =>
         r.slaBucket ? <SLABadge bucket={r.slaBucket} showRange /> : <span className="text-xs text-ink-muted">Active</span>,
     },
     {
       key: 'assignment',
       header: 'Assignment',
-      width: '11%',
+      width: '9%',
       render: (r) => (
         <span className="flex flex-col gap-0.5">
           <AssignmentBadge state={r.assignmentState} />
@@ -313,61 +319,6 @@ export function DeviceDetailPage() {
         </div>
       )}
 
-      <div className="mb-4 max-w-md">
-        <Field label="Search devices" htmlFor="device-search">
-          <Input id="device-search" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Device, vehicle, company or plant…" />
-        </Field>
-      </div>
-
-      <FilterBar>
-        <FilterSelect aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as DeviceSort)}>
-          {SORT_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              Sort: {o.label}
-            </option>
-          ))}
-        </FilterSelect>
-        <FilterSelect aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as DeviceStatusFilter)}>
-          <option value="ALL">All statuses</option>
-          <option value="INACTIVE">Inactive only</option>
-          <option value="ACTIVE">Active only</option>
-        </FilterSelect>
-        <FilterSelect aria-label="SLA bucket" value={bucket} onChange={(e) => setBucket(e.target.value)}>
-          <option value="">All SLA buckets</option>
-          {SLA_BUCKETS.map((b) => (
-            <option key={b} value={b}>
-              {BUCKET_LABEL_RANGE[b]}
-            </option>
-          ))}
-        </FilterSelect>
-        <FilterSelect aria-label="Zone" value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
-          <option value="">All zones</option>
-          {options.hasUnzoned && <option value="UNZONED">UNZONED</option>}
-          {options.zones.map((z) => (
-            <option key={z.zoneId} value={z.zoneId}>
-              {z.name}
-            </option>
-          ))}
-        </FilterSelect>
-        <FilterSelect aria-label="Company" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-          <option value="">All companies</option>
-          {options.companies.map((c) => (
-            <option key={c.companyId} value={c.companyId}>
-              {c.name}
-            </option>
-          ))}
-        </FilterSelect>
-        {/* Plant dropdown follows the company pick (Issue 122b) — only that company's plants list. */}
-        <FilterSelect aria-label="Plant" value={plantId} onChange={(e) => setPlantId(e.target.value)}>
-          <option value="">All plants</option>
-          {dedupedPlants.map((p) => (
-            <option key={p.plantId} value={String(p.plantId)}>
-              {formatPlantDisplayName(p.name)}
-            </option>
-          ))}
-        </FilterSelect>
-      </FilterBar>
-
       {assignOpen && (
         <AssignSePanel
           options={options}
@@ -376,15 +327,10 @@ export function DeviceDetailPage() {
         />
       )}
 
-      <ChartCard
-        title="Devices"
-        className="mb-5"
-        action={
-          <span data-testid="device-list-count" className="text-xs text-ink-muted tabular-nums">
-            {total === 0 ? 'No devices' : `Showing ${nf.format(fromRow)}–${nf.format(toRow)} of ${nf.format(total)}`}
-          </span>
-        }
-      >
+      {/* Search + every filter now ride in the table card's own toolbar. They used to sit in two
+          separate blocks above it (a lone search Field, then a bordered FilterBar), which cost two
+          bands of page and put the controls a long way from the rows they filter. */}
+      <div className="mb-5">
         <DataTable
           columns={listColumns}
           rows={rows}
@@ -394,6 +340,72 @@ export function DeviceDetailPage() {
           tableLayout="fixed"
           snoOffset={page * PAGE_SIZE}
           onRowClick={select}
+          toolbarTitle={
+            <span className="flex items-baseline gap-2">
+              Devices
+              <span data-testid="device-list-count" className="text-[11px] font-medium normal-case tracking-normal text-ink-muted tabular-nums">
+                {total === 0 ? 'No devices' : `Showing ${nf.format(fromRow)}–${nf.format(toRow)} of ${nf.format(total)}`}
+              </span>
+            </span>
+          }
+          toolbar={
+            <>
+              <SearchInput
+                id="device-search"
+                aria-label="Search devices"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Device, vehicle, company or plant…"
+                className="w-60"
+              />
+              <FilterSelect aria-label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as DeviceSort)}>
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    Sort: {o.label}
+                  </option>
+                ))}
+              </FilterSelect>
+              <FilterSelect aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as DeviceStatusFilter)}>
+                <option value="ALL">All statuses</option>
+                <option value="INACTIVE">Inactive only</option>
+                <option value="ACTIVE">Active only</option>
+              </FilterSelect>
+              <FilterSelect aria-label="SLA bucket" value={bucket} onChange={(e) => setBucket(e.target.value)}>
+                <option value="">All SLA buckets</option>
+                {SLA_BUCKETS.map((b) => (
+                  <option key={b} value={b}>
+                    {BUCKET_LABEL_RANGE[b]}
+                  </option>
+                ))}
+              </FilterSelect>
+              <FilterSelect aria-label="Zone" value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
+                <option value="">All zones</option>
+                {options.hasUnzoned && <option value="UNZONED">UNZONED</option>}
+                {options.zones.map((z) => (
+                  <option key={z.zoneId} value={z.zoneId}>
+                    {z.name}
+                  </option>
+                ))}
+              </FilterSelect>
+              <FilterSelect aria-label="Company" value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
+                <option value="">All companies</option>
+                {options.companies.map((c) => (
+                  <option key={c.companyId} value={c.companyId}>
+                    {c.name}
+                  </option>
+                ))}
+              </FilterSelect>
+              {/* Plant dropdown follows the company pick (Issue 122b) — only that company's plants list. */}
+              <FilterSelect aria-label="Plant" value={plantId} onChange={(e) => setPlantId(e.target.value)}>
+                <option value="">All plants</option>
+                {dedupedPlants.map((p) => (
+                  <option key={p.plantId} value={String(p.plantId)}>
+                    {formatPlantDisplayName(p.name)}
+                  </option>
+                ))}
+              </FilterSelect>
+            </>
+          }
           // A failed load must read as a failure with a Retry — never as "no devices" (Issue 122b:
           // an operator saw the empty state while the backend was mid-restart and reported a bug).
           error={error}
@@ -425,7 +437,7 @@ export function DeviceDetailPage() {
             </Button>
           </nav>
         )}
-      </ChartCard>
+      </div>
 
       {selected && (
         <div ref={detailRef}>

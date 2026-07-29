@@ -82,7 +82,7 @@ export function SnapshotBanner() {
           <div
             role="status"
             aria-label="Snapshot status"
-            className="flex items-center gap-2 border-b bg-slate-50 px-6 py-2 text-sm text-slate-600"
+            className="flex items-center gap-2 border-b border-line bg-surface-raised px-6 py-2 text-sm text-ink-muted"
           >
             <span className="font-medium text-slate-700">Snapshot:</span>
             {view.dataAsOf ? (

@@ -90,7 +90,7 @@ export function ComponentRequestsPage({ readOnly = false }: { readOnly?: boolean
         <button
           type="button"
           onClick={() => navigate(`/tickets/${r.ticketId}?tab=Components`)}
-          className="font-mono text-xs text-brand-700 hover:underline"
+          className="font-mono text-xs text-link hover:underline"
         >
           {r.ticketId.slice(0, 8)}
         </button>

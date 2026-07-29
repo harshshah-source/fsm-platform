@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { AuthProvider } from '../src/auth/AuthProvider';
 import { resolveBreadcrumb } from '../src/components/shell/breadcrumb';
 import { SidebarProvider } from '../src/components/shell/SidebarContext';
+import { ThemeProvider } from '../src/components/shell/ThemeContext';
 import { TopBar } from '../src/components/shell/TopBar';
 
 const zm: SessionView = { user_id: 'zm1', role: 'ZONAL_MANAGER', zone_id: 1, acted_as_role: null };
@@ -13,9 +14,13 @@ function renderTopBar(path: string, session: SessionView = zm) {
   return render(
     <AuthProvider initialSession={session}>
       <MemoryRouter initialEntries={[path]}>
-        <SidebarProvider>
-          <TopBar />
-        </SidebarProvider>
+        {/* The top bar hosts the theme toggle, so it needs the theme context as well as the sidebar's
+            — same two providers <AppShell> wraps it in. */}
+        <ThemeProvider>
+          <SidebarProvider>
+            <TopBar />
+          </SidebarProvider>
+        </ThemeProvider>
       </MemoryRouter>
     </AuthProvider>,
   );

@@ -70,7 +70,7 @@ export function SchedulesPage() {
       header: 'Service Engineer',
       render: (r) => (
         <div className="min-w-0">
-          <div className="font-medium text-brand-700">{r.seName ?? 'Unknown SE'}</div>
+          <div className="font-medium text-link">{r.seName ?? 'Unknown SE'}</div>
           <div className="font-mono text-[10px] text-ink-muted">{r.seId.slice(0, 8)}</div>
         </div>
       ),

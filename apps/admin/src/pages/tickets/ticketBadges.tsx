@@ -56,7 +56,7 @@ export function InlineBadges({ ticket }: { ticket: TicketRow }) {
   }
   if (ticket.status === 'CLOSED_AUTO_RECOVERY')
     badges.push(
-      <span key="auto" data-testid="badge-AUTO_RECOVERY" className="rounded bg-slate-200 px-1 text-xs text-slate-600">
+      <span key="auto" data-testid="badge-AUTO_RECOVERY" className="rounded bg-neutral-bg px-1 text-xs text-neutral">
         auto
       </span>,
     );

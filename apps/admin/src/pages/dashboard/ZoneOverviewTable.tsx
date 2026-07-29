@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { ZoneOverviewRow } from '../../api/dashboard';
-import { DataTable, FilterBar, FilterSelect, type Column } from '../../components/data';
+import { DataTable, FilterSelect, type Column } from '../../components/data';
 import { InactiveCountLink } from '../../components/domain';
 import { cn } from '../../lib/cn';
 import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_LABEL_RANGE, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
@@ -83,46 +83,46 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
   ];
 
   return (
-    <section aria-labelledby="zone-overview-heading" className="mb-8">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3
-          id="zone-overview-heading"
-          className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps"
-        >
-          Zone Overview
-        </h3>
-        <FilterBar className="mb-0">
-          <FilterSelect
-            aria-label="Filter by zone"
-            value={zoneFilter}
-            onChange={(e) => setZoneFilter(e.target.value)}
-          >
-            <option value="">All zones</option>
-            {[...new Set(rows.map((r) => r.zoneName))].map((z) => (
-              <option key={z} value={z}>
-                {z}
-              </option>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            aria-label="Filter by bucket"
-            value={bucketFilter}
-            onChange={(e) => setBucketFilter(e.target.value)}
-          >
-            <option value="">All buckets</option>
-            {SLA_BUCKETS.map((b) => (
-              <option key={b} value={b}>
-                {BUCKET_LABEL_RANGE[b]}
-              </option>
-            ))}
-          </FilterSelect>
-        </FilterBar>
-      </div>
+    // Heading is sr-only and the visible label moved into the table card's toolbar — the section
+    // label, its filters and the rows are now one block instead of three stacked ones.
+    <section aria-labelledby="zone-overview-heading" className="mb-6">
+      <h3 id="zone-overview-heading" className="sr-only">
+        Zone Overview
+      </h3>
       <DataTable
         ariaLabel="Zone Overview"
         rowKey={(r) => r.zoneId}
         columns={columns}
         rows={visible}
+        toolbarTitle="Zone Overview"
+        toolbar={
+          <>
+            <FilterSelect
+              aria-label="Filter by zone"
+              value={zoneFilter}
+              onChange={(e) => setZoneFilter(e.target.value)}
+            >
+              <option value="">All zones</option>
+              {[...new Set(rows.map((r) => r.zoneName))].map((z) => (
+                <option key={z} value={z}>
+                  {z}
+                </option>
+              ))}
+            </FilterSelect>
+            <FilterSelect
+              aria-label="Filter by bucket"
+              value={bucketFilter}
+              onChange={(e) => setBucketFilter(e.target.value)}
+            >
+              <option value="">All buckets</option>
+              {SLA_BUCKETS.map((b) => (
+                <option key={b} value={b}>
+                  {BUCKET_LABEL_RANGE[b]}
+                </option>
+              ))}
+            </FilterSelect>
+          </>
+        }
         empty="No inactive devices in scope."
       />
     </section>

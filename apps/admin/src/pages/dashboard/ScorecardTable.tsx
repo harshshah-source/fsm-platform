@@ -132,7 +132,10 @@ export function ScorecardTable({
               openZoneDevices(r.zoneId);
             }}
             disabled={count === 0}
-            className="tabular-nums font-semibold text-critical underline-offset-2 hover:underline disabled:cursor-default disabled:text-ink-muted disabled:no-underline"
+            // Same drill-down-count role as `InactiveCountLink`, so the same `text-link` token: a
+            // red count on the dark canvas is what the operator asked us to stop doing. The severity
+            // is already carried by the column itself ("Critical+"), not by the ink.
+            className="tabular-nums font-semibold text-link underline-offset-2 hover:underline disabled:cursor-default disabled:text-ink-muted disabled:no-underline"
             title={count > 0 ? 'View inactive devices in this zone' : undefined}
           >
             {count}

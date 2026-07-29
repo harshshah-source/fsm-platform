@@ -296,7 +296,7 @@ export function SeManagementDirectoryPage() {
           <button
             type="button"
             onClick={() => setSelectedId(r.seId)}
-            className="text-xs text-brand-700 hover:underline"
+            className="text-xs text-link hover:underline"
           >
             Manage coverage →
           </button>

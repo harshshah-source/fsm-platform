@@ -7,6 +7,7 @@ import { Button } from '../ui/Button';
 import { IconBell, IconMenu, IconPlus, IconSearch } from '../ui/icons';
 import { resolveBreadcrumb } from './breadcrumb';
 import { useSidebar } from './SidebarContext';
+import { ThemeToggle } from './ThemeToggle';
 import { ROLE_LABEL } from './nav';
 
 /** Light top bar: breadcrumb + global search + Assign SE + acting control + notifications + user chip. */
@@ -82,7 +83,10 @@ export function TopBar() {
         })}
       </nav>
 
-      <div className="relative hidden max-w-md flex-1 md:block">
+      {/* `min-w-0` matters: without it this flex item cannot shrink below the input's intrinsic size,
+          so on a long breadcrumb the overflow was pushed into the buttons on the right and wrapped
+          their labels ("Assign SE" over two lines). The search is the one item that should absorb it. */}
+      <div className="relative hidden min-w-0 max-w-md flex-1 md:block">
         <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-ink-muted" />
         <input
           aria-label="Search"
@@ -96,7 +100,7 @@ export function TopBar() {
             everyone else). On a completed run it broadcasts so the OH dashboard rolls its KPIs. */}
         <RunIngestionButton onSuccess={emitIngestionComplete} />
 
-        <Button size="sm" className="h-10 gap-1.5 px-4 shadow-sm" onClick={() => navigate('/')}>
+        <Button size="sm" className="h-10 shrink-0 gap-1.5 whitespace-nowrap px-4 shadow-sm" onClick={() => navigate('/')}>
           <IconPlus className="h-4 w-4" /> Assign SE
         </Button>
 
@@ -121,6 +125,8 @@ export function TopBar() {
 
         <span aria-hidden className="mx-0.5 hidden h-8 w-px bg-line sm:block" />
 
+        <ThemeToggle />
+
         <button
           type="button"
           aria-label="Notifications"
@@ -130,17 +136,19 @@ export function TopBar() {
         </button>
 
         {/* Profile section — initials avatar (brand-tinted) + identity, grouped as a distinct card. */}
-        <div className="flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface-card py-1 pl-1.5 pr-1.5 shadow-card sm:pr-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-300/40 text-[11px] font-bold text-brand-700 ring-1 ring-brand-300/70">
+        <div className="flex h-10 shrink-0 items-center gap-2.5 rounded-lg border border-line bg-surface-card py-1 pl-1.5 pr-1.5 shadow-card sm:pr-3">
+          {/* `text-brand-700` is the deep crimson that reads on the light pink wash; on the dark
+              card that wash resolves to a muted mauve, so the initials take the light end instead. */}
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-300/40 text-[11px] font-bold text-brand-700 ring-1 ring-brand-300/70 dark:bg-brand-600/25 dark:text-brand-300 dark:ring-brand-600/40">
             {initials}
           </span>
           <div className="hidden leading-tight sm:block">
-            <div className="text-sm font-semibold text-ink-strong">{roleLabel}</div>
+            <div className="whitespace-nowrap text-sm font-semibold text-ink-strong">{roleLabel}</div>
             <div className="text-xs text-ink-muted">{zoneLabel}</div>
           </div>
         </div>
 
-        <Button type="button" size="sm" variant="secondary" className="h-10" onClick={logout}>
+        <Button type="button" size="sm" variant="secondary" className="h-10 shrink-0 whitespace-nowrap" onClick={logout}>
           Log out
         </Button>
       </div>

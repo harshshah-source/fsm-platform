@@ -46,11 +46,13 @@ export function DashboardHero({
   const sideRows = Math.max(left.length, right.length);
   return (
     <section className="relative mb-8">
-      {/* Slim header row — replaces the old boxed PageHeader banner (title text preserved). */}
-      <div className="relative z-10 mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-semibold tracking-tight text-ink-strong">{title}</h2>
-        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
-      </div>
+      {/* Title is screen-reader-only, matching `PageHeader`: the breadcrumb already names the page,
+          and on the one screen where the hero itself is the headline a second text title just
+          pushed the KPI cards down. Actions keep their slim right-aligned row. */}
+      <h2 className="sr-only">{title}</h2>
+      {actions && (
+        <div className="relative z-10 mb-3 flex flex-wrap items-center justify-end gap-2">{actions}</div>
+      )}
 
       <div className="relative">
         {/* Truck backdrop (-z layer). The asset ships a baked-in studio-gray background, so a radial

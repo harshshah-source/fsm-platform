@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { DispatchBatchRow, PlantDeviceStats } from '../../api/dispatch-runs';
-import { EmptyState, FilterBar, FilterSelect, SearchInput, TableDownloadButton } from '../../components/data';
+import { EmptyState, FilterSelect, SearchInput, TableDownloadButton, TableToolbar } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { IconChevronRight, IconTruck } from '../../components/ui/icons';
 import { cn } from '../../lib/cn';
@@ -193,11 +193,22 @@ export function ZoneDispatchTable({
 
   return (
     <section aria-labelledby="zone-dispatch-heading" className="mb-6">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 id="zone-dispatch-heading" className="text-[0.82rem] font-semibold uppercase tracking-wider text-ink-caps">
-          Companies &amp; plants
-        </h3>
-        <FilterBar className="mb-0">
+      <h3 id="zone-dispatch-heading" className="sr-only">
+        Companies &amp; plants
+      </h3>
+
+      <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
+        {/* Label, filters and download ride inside the table's card (see `TableToolbar`). */}
+        <TableToolbar
+          title="Companies & plants"
+          trailing={
+            <TableDownloadButton
+              ariaLabel="Zone companies and plants"
+              disabled={companies.length === 0}
+              onSelectFormat={exportZoneDispatch}
+            />
+          }
+        >
           <SearchInput
             aria-label="Search company or plant"
             placeholder="Company, plant…"
@@ -222,15 +233,8 @@ export function ZoneDispatchTable({
             <option value="BATCH_DESC">Most batches first</option>
             <option value="BATCH_ASC">Fewest batches first</option>
           </FilterSelect>
-          <TableDownloadButton
-            ariaLabel="Zone companies and plants"
-            disabled={companies.length === 0}
-            onSelectFormat={exportZoneDispatch}
-          />
-        </FilterBar>
-      </div>
+        </TableToolbar>
 
-      <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
         <table aria-label="Zone companies and plants" className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900">
@@ -307,7 +311,7 @@ export function ZoneDispatchTable({
                           <td className="px-4 py-2.5 text-right tabular-nums text-ink">{p.stats.unassignedDevices}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums text-ink">{p.batches.length}</td>
                           <td className="px-4 py-2.5 text-right">
-                            <span className="whitespace-nowrap text-xs font-medium text-brand-700">
+                            <span className="whitespace-nowrap text-xs font-medium text-link">
                               {p.batches.length === 1
                                 ? 'View batch →'
                                 : openPlant === p.plantId

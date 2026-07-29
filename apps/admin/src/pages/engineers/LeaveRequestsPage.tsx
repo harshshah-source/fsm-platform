@@ -81,7 +81,7 @@ export function LeaveRequestsPage() {
             </tr>
           )}
           {rows.map((r) => (
-            <tr key={r.id} data-testid={`lr-row-${r.id}`} className="border-b align-top hover:bg-slate-50">
+            <tr key={r.id} data-testid={`lr-row-${r.id}`} className="border-b border-line align-top hover:bg-row-hover">
               <td className="py-2 pr-3 font-medium">{r.seName}</td>
               <td className="py-2 pr-3">{r.type}</td>
               <td className="py-2 pr-3 text-slate-600">

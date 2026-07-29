@@ -62,7 +62,7 @@ export function ShadowUseQueuePage() {
           <button
             type="button"
             onClick={() => navigate(`/tickets/${row.ticketId}?tab=Components`)}
-            className="font-mono text-xs text-brand-700 hover:underline"
+            className="font-mono text-xs text-link hover:underline"
           >
             {row.ticketId.slice(0, 8)}
           </button>

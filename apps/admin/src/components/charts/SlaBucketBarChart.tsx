@@ -159,7 +159,7 @@ export function SlaBucketBarChart({
               <XAxis
                 dataKey="bucket"
                 tickFormatter={(b: string) => BUCKET_LABEL[b as SlaBucket]}
-                tick={{ fontSize: 11, fill: '#6b6e76', fontWeight: 500 }}
+                tick={{ fontSize: 11, fill: 'var(--color-ink-muted)', fontWeight: 500 }}
                 axisLine={false}
                 tickLine={false}
                 interval={0}
@@ -172,7 +172,7 @@ export function SlaBucketBarChart({
                 tickFormatter={(v: number) => nf.format(v)}
               />
               <Tooltip
-                cursor={{ fill: 'rgba(16,17,20,0.05)' }}
+                cursor={{ fill: 'var(--color-surface-sunken)', fillOpacity: 0.55 }}
                 content={<PillTooltip selectedZone={selected?.zone ?? null} />}
               />
               {avg > 0 && (
@@ -199,7 +199,8 @@ export function SlaBucketBarChart({
                         key={b}
                         fill={BUCKET_HEX[b]}
                         fillOpacity={selected && selected.zone !== name ? 0.22 : 1}
-                        stroke={isClickedBar ? '#0a0a0c' : undefined}
+                        // Selection outline: the page ink, so it stays visible when the canvas inverts.
+                        stroke={isClickedBar ? 'var(--color-ink-strong)' : undefined}
                         strokeWidth={isClickedBar ? 1.5 : 0}
                       />
                     );

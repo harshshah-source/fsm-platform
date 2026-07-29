@@ -126,7 +126,7 @@ export function VoucherReviewPage() {
               type="button"
               aria-label="View photo"
               onClick={() => setLightbox(it.photoRef)}
-              className="ml-1 text-brand-700 hover:underline"
+              className="ml-1 text-link hover:underline"
             >
               📎
             </button>
@@ -142,7 +142,7 @@ export function VoucherReviewPage() {
         <button
           type="button"
           onClick={() => navigate(`/tickets/${row.activityCheck.linkedTicketId}`)}
-          className="font-mono text-brand-700 hover:underline"
+          className="font-mono text-link hover:underline"
         >
           {row.activityCheck.linkedTicketId.slice(0, 8)}
         </button>

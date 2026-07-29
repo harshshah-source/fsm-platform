@@ -8,4 +8,5 @@ export * from './MetricStrip';
 export * from './PageHeader';
 export * from './RollingNumber';
 export * from './TableDownloadButton';
+export * from './TableToolbar';
 export * from './Toast';

@@ -9,7 +9,6 @@ import {
 import {
   DataTable,
   EmptyState,
-  FilterBar,
   MetricStrip,
   PageHeader,
   SearchInput,
@@ -162,13 +161,36 @@ export function FleetDirectoryPage() {
       aria-selected={tab === t}
       onClick={() => setTab(t)}
       className={cn(
-        'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+        'rounded-md px-2.5 py-1 text-[13px] font-medium transition-colors',
         tab === t ? 'bg-surface-card text-ink-strong shadow-sm' : 'text-ink-muted hover:text-ink-strong',
       )}
     >
       {label}
       {count !== null && <span className="ml-1.5 text-xs tabular-nums text-ink-muted">{nf.format(count)}</span>}
     </button>
+  );
+
+  // Shared between the two tables below — the tab switch and the search are the same controls
+  // whichever tab is showing, and they ride inside that table's card.
+  const directoryToolbar = (
+    <>
+      <div role="tablist" aria-label="Directory tabs" className="flex gap-1 rounded-md bg-surface-sunken p-0.5">
+        {tabBtn('companies', 'Companies', dir ? companies.length : null)}
+        {tabBtn('plants', 'Plants', dir ? plants.length : null)}
+      </div>
+      <SearchInput
+        aria-label="Search directory"
+        placeholder={tab === 'companies' ? 'Search companies…' : 'Search plants or companies…'}
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="w-64"
+      />
+      {companyFilter && tab === 'plants' && (
+        <button type="button" className="text-xs text-link underline" onClick={() => setTab('plants')}>
+          Clear company filter
+        </button>
+      )}
+    </>
   );
 
   return (
@@ -186,25 +208,8 @@ export function FleetDirectoryPage() {
 
       <MetricStrip metrics={metrics} cols={3} />
 
-      <FilterBar>
-        <div role="tablist" aria-label="Directory tabs" className="flex gap-1 rounded-md bg-surface-sunken p-1">
-          {tabBtn('companies', 'Companies', dir ? companies.length : null)}
-          {tabBtn('plants', 'Plants', dir ? plants.length : null)}
-        </div>
-        <SearchInput
-          aria-label="Search directory"
-          placeholder={tab === 'companies' ? 'Search companies…' : 'Search plants or companies…'}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-64"
-        />
-        {companyFilter && tab === 'plants' && (
-          <button type="button" className="text-xs text-brand-700 underline" onClick={() => setTab('plants')}>
-            Clear company filter
-          </button>
-        )}
-      </FilterBar>
-
+      {/* Tabs + search live in whichever table is showing, so the controls stay attached to the rows
+          they act on rather than floating in a card of their own above them. */}
       {tab === 'companies' ? (
         <DataTable
           ariaLabel="Fleet companies"
@@ -213,6 +218,7 @@ export function FleetDirectoryPage() {
           rows={companies}
           loading={!dir && !error}
           onRowClick={(c) => setTab('plants', c.companyId)}
+          toolbar={directoryToolbar}
           empty={<EmptyState message="No companies match this search." />}
         />
       ) : (
@@ -223,6 +229,7 @@ export function FleetDirectoryPage() {
           rows={plants}
           loading={!dir && !error}
           onRowClick={(p) => navigate(`/reports/device?plantId=${p.plantId}`)}
+          toolbar={directoryToolbar}
           empty={<EmptyState message="No plants match this search." />}
         />
       )}

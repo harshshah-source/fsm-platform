@@ -4,14 +4,14 @@ import { apiComponentBlocked, type ComponentBlockedRow } from '../../api/invento
 import { Badge } from '../../components/ui/Badge';
 import { DataTable, type Column } from '../../components/data/DataTable';
 import { EmptyState } from '../../components/data/feedback';
-import { FilterBar, SearchInput } from '../../components/data/FilterBar';
+import { SearchInput } from '../../components/data/FilterBar';
 import { MetricStrip } from '../../components/data/MetricStrip';
 import { PageHeader } from '../../components/data/PageHeader';
 import { useApiResource } from '../../hooks';
 
 /**
  * Component-Blocked Queue (Issue 21, `/component-blocked`) — reskinned to the reference (17) recipe in
- * FE-03: PageHeader + MetricStrip + FilterBar + DataTable. The ZM read-only view of Tickets the
+ * FE-03: PageHeader + MetricStrip + DataTable (search rides the table toolbar). The ZM read-only view of Tickets the
  * Recommender dropped from a Day Plan because the eligible SE's Common Kit is incomplete. A row aged
  * > 7 days with no WM action carries a "Warehouse Overdue" badge. Zone-scoped server-side; row click
  * deep-links to the ticket Components tab. Data fetching, scoping, and selectors are unchanged.
@@ -91,20 +91,19 @@ export function ComponentBlockedPage() {
         ]}
       />
 
-      <FilterBar>
-        <SearchInput
-          aria-label="Search blocked tickets"
-          placeholder="Search company, zone, engineer…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </FilterBar>
-
       <DataTable
         ariaLabel="Component-Blocked Queue"
         columns={columns}
         rows={filtered}
         rowKey={(r) => r.id}
+        toolbar={
+          <SearchInput
+            aria-label="Search blocked tickets"
+            placeholder="Search company, zone, engineer…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        }
         rowTestId={(r) => `cbq-row-${r.ticketId}`}
         onRowClick={(r) => navigate(`/tickets/${r.ticketId}?tab=Components`)}
         loading={loading}

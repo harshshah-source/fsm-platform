@@ -60,7 +60,9 @@ export function MetricCard({
     'before:absolute before:inset-y-0 before:left-0 before:w-1 before:rounded-l-card',
     hero
       ? [glass ? 'border-chrome-700/70 bg-chrome-900/85 backdrop-blur-md' : 'border-chrome-700 bg-chrome-900', 'before:bg-brand-600']
-      : [ACCENT[tone], glass ? ['border-white/60 bg-gradient-to-br backdrop-blur-md', GLASS[tone]] : 'border-line bg-surface-card'],
+      // The glass edge is a token, not `white/60`: on the dark canvas a white hairline reads as a
+      // stray highlight, whereas `line-strong` stays the "slightly brighter than the fill" edge.
+      : [ACCENT[tone], glass ? ['border-line-strong/60 bg-gradient-to-br backdrop-blur-md', GLASS[tone]] : 'border-line bg-surface-card'],
     onClick && 'cursor-pointer focus-ring',
     onClick && !hero && 'hover:border-line-strong',
   );

@@ -199,7 +199,7 @@ export function VerificationReviewPage() {
               key={row.ticketId}
               data-testid={`vr-row-${row.ticketId}`}
               onClick={() => navigate(`/tickets/${row.ticketId}?tab=Verification`)}
-              className="cursor-pointer border-b hover:bg-slate-50"
+              className="cursor-pointer border-b border-line hover:bg-row-hover"
             >
               <td className="py-2 pr-3">{row.companyName}</td>
               <td className="py-2 pr-3 text-slate-600">{row.zoneName}</td>
@@ -224,7 +224,7 @@ export function VerificationReviewPage() {
                   <button
                     type="button"
                     onClick={() => void markAutoRecovery(row.ticketId)}
-                    className="rounded border px-2 py-0.5 text-xs text-slate-700 hover:bg-slate-100"
+                    className="rounded border border-line px-2 py-0.5 text-xs text-ink hover:bg-surface-sunken"
                   >
                     Mark auto-recovery
                   </button>
@@ -287,6 +287,6 @@ function OutcomeCell({ row }: { row: VerificationReviewRow }) {
     case 'CLOSED_AUTO_RECOVERY':
       return <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">Auto-recovery</span>;
     default:
-      return <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">Pending</span>;
+      return <span className="rounded bg-neutral-bg px-2 py-0.5 text-xs text-neutral">Pending</span>;
   }
 }

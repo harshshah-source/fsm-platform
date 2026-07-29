@@ -84,7 +84,7 @@ export function IntradayQueuePage() {
               e.stopPropagation();
               navigate(`/tickets/${row.ticketId}`);
             }}
-            className="font-mono text-xs text-brand-700 hover:underline"
+            className="font-mono text-xs text-link hover:underline"
           >
             {row.ticketId.slice(0, 8)}
           </button>

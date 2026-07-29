@@ -37,7 +37,7 @@ export function InactiveCountLink({
       onClick={(e) => e.stopPropagation()}
       title="View these inactive devices"
       className={cn(
-        'tabular-nums font-semibold text-brand-700 underline-offset-2 hover:underline',
+        'tabular-nums font-semibold text-link underline-offset-2 hover:underline',
         className,
       )}
     >

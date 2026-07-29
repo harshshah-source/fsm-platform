@@ -4,6 +4,7 @@ import { exportTable, type ExportCell, type ExportFormat } from '../../lib/expor
 import { extractTableExport, slugify } from '../../lib/tableExport';
 import { EmptyState, ErrorState, Skeleton } from './feedback';
 import { TableDownloadButton } from './TableDownloadButton';
+import { TableToolbar } from './TableToolbar';
 
 export interface Column<T> {
   key: string;
@@ -78,6 +79,14 @@ interface DataTableProps<T> {
   downloadable?: boolean;
   /** Export filename/title override; defaults to `ariaLabel`. */
   exportName?: string;
+  /**
+   * This table's own controls — search, filter selects, sort — rendered in the card's top strip on the
+   * same row as the download button. Pass them here instead of wrapping them in a separate `FilterBar`
+   * card above the table: the controls belong to the table, so they live in its card.
+   */
+  toolbar?: ReactNode;
+  /** Caps label shown at the left of that strip, for a table that needs naming inside its own card. */
+  toolbarTitle?: ReactNode;
 }
 
 /**
@@ -107,10 +116,14 @@ export function DataTable<T>({
   snoOffset = 0,
   downloadable = true,
   exportName,
+  toolbar,
+  toolbarTitle,
 }: DataTableProps<T>) {
   const isFixed = tableLayout === 'fixed';
   // Fixed layout tightens padding and (below) lets headers/cells wrap so many columns fit the width.
-  const cellPad = isFixed ? 'px-2.5 py-2.5' : 'px-4 py-3';
+  // Both were pulled in: horizontal padding is the cheapest width to give back to the cells, and on a
+  // fixed-layout table it is the difference between a device id fitting on one line and breaking.
+  const cellPad = isFixed ? 'px-2 py-2' : 'px-3 py-2.5';
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -178,14 +191,23 @@ export function DataTable<T>({
 
   return (
     <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-card">
-      {downloadable && (
-        <div className="flex items-center justify-end gap-2 border-b border-line bg-surface-raised px-3 py-2">
-          <TableDownloadButton
-            ariaLabel={ariaLabel}
-            disabled={downloadDisabled}
-            onSelectFormat={handleExport}
-          />
-        </div>
+      {/* One strip for everything that acts on this table — filters and download share a row rather
+          than each claiming its own band of page. */}
+      {(downloadable || toolbar || toolbarTitle) && (
+        <TableToolbar
+          title={toolbarTitle}
+          trailing={
+            downloadable ? (
+              <TableDownloadButton
+                ariaLabel={ariaLabel}
+                disabled={downloadDisabled}
+                onSelectFormat={handleExport}
+              />
+            ) : undefined
+          }
+        >
+          {toolbar}
+        </TableToolbar>
       )}
       <div
         className={cn('overflow-x-auto', stickyHeader && 'overflow-y-auto')}
@@ -344,7 +366,7 @@ export function DataTable<T>({
                       className={cn(
                         'border-b border-line/80 last:border-b-0 transition-colors',
                         activate &&
-                          'cursor-pointer hover:bg-surface-sunken/70 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50',
+                          'cursor-pointer hover:bg-row-hover focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50',
                         isOpen && 'bg-surface-sunken/50',
                         accent && `border-l-2 ${accent}`,
                         // Active tint wins over the hover wash; the inset bar marks it even when hovered.

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { DispatchUnassignableRow } from '../../api/dispatch-runs';
-import { DataTable, EmptyState, FilterBar, FilterSelect, SearchInput, type Column } from '../../components/data';
+import { DataTable, EmptyState, FilterSelect, SearchInput, type Column } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { POOL_EMPTY_LABEL } from './format';
 
@@ -66,39 +66,37 @@ export function ZoneUnassignableTable({ rows }: { rows: DispatchUnassignableRow[
   ];
 
   return (
-    <>
-      <div className="mb-3 mt-6 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[0.82rem] font-semibold uppercase tracking-wider text-ink-caps">
-          Unassignable ({rows.length})
-        </h3>
-        <FilterBar className="mb-0">
-          <SearchInput
-            aria-label="Search unassignable by company, plant or device"
-            placeholder="Company, plant, device…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-56"
-          />
-          <FilterSelect aria-label="Filter by reason" value={reason} onChange={(e) => setReason(e.target.value as ReasonFilter)}>
-            <option value="">All reasons</option>
-            <option value="NO_COVERAGE">No coverage</option>
-            <option value="ALL_DROPPED">All candidates dropped</option>
-          </FilterSelect>
-          <FilterSelect aria-label="Sort unassignable" value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
-            <option value="">Sort: default</option>
-            <option value="COMPANY">Company A–Z</option>
-            <option value="PLANT">Plant A–Z</option>
-          </FilterSelect>
-        </FilterBar>
-      </div>
+    <div className="mt-6">
       <DataTable
         columns={columns}
         rows={filtered}
         rowKey={(u) => u.ticketId}
         rowTestId={(u) => `dispatch-unassignable-row-${u.ticketId}`}
         ariaLabel="Unassignable tickets"
+        toolbarTitle={`Unassignable (${rows.length})`}
+        toolbar={
+          <>
+            <SearchInput
+              aria-label="Search unassignable by company, plant or device"
+              placeholder="Company, plant, device…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-56"
+            />
+            <FilterSelect aria-label="Filter by reason" value={reason} onChange={(e) => setReason(e.target.value as ReasonFilter)}>
+              <option value="">All reasons</option>
+              <option value="NO_COVERAGE">No coverage</option>
+              <option value="ALL_DROPPED">All candidates dropped</option>
+            </FilterSelect>
+            <FilterSelect aria-label="Sort unassignable" value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)}>
+              <option value="">Sort: default</option>
+              <option value="COMPANY">Company A–Z</option>
+              <option value="PLANT">Plant A–Z</option>
+            </FilterSelect>
+          </>
+        }
         empty={<EmptyState message="No unassignable tickets match this filter." />}
       />
-    </>
+    </div>
   );
 }

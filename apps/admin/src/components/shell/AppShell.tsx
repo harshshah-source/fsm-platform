@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { Footer } from './Footer';
 import { Sidebar } from './Sidebar';
 import { SidebarProvider, useSidebar } from './SidebarContext';
+import { ThemeProvider } from './ThemeContext';
 import { TopBar } from './TopBar';
 
 /**
@@ -19,9 +20,11 @@ export function AppShell() {
   }
 
   return (
-    <SidebarProvider>
-      <ShellFrame role={session.role} />
-    </SidebarProvider>
+    <ThemeProvider>
+      <SidebarProvider>
+        <ShellFrame role={session.role} />
+      </SidebarProvider>
+    </ThemeProvider>
   );
 }
 
@@ -68,7 +71,9 @@ function ShellFrame({ role }: { role: string }) {
           </div>
         )}
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8" onClick={collapseFromBackground}>
+        {/* Tight gutter by design: the shell already frames the content with the sidebar and top bar,
+            so a wide inner margin only steals width from the tables. */}
+        <main className="flex-1 px-3 py-4 sm:px-4 lg:px-5 lg:py-5" onClick={collapseFromBackground}>
           <div key={pathname} className="enterprise-page animate-page-in">
             <Outlet />
           </div>

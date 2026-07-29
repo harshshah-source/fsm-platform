@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { CompanyPlantRow } from '../../api/dashboard';
-import { EmptyState, FilterBar, FilterSelect, SearchInput, Skeleton, TableDownloadButton } from '../../components/data';
+import { EmptyState, FilterSelect, SearchInput, Skeleton, TableDownloadButton, TableToolbar } from '../../components/data';
 import { DurationBadge, InactiveCountLink, PlantName, StatusPill, TierBadge } from '../../components/domain';
 import { Badge } from '../../components/ui';
 import { IconChevronRight, IconTruck } from '../../components/ui/icons';
@@ -118,7 +118,7 @@ function BucketCountCells({
                 to={to}
                 onClick={(e) => e.stopPropagation()}
                 title={`View ${BUCKET_LABEL_RANGE[b]} inactive devices`}
-                className="font-semibold text-brand-700 underline-offset-2 hover:underline"
+                className="font-semibold text-link underline-offset-2 hover:underline"
               >
                 {n}
               </Link>
@@ -279,15 +279,22 @@ export function CompanyPlantTable({
   const tdBucket = 'px-1 py-2.5 text-right text-xs tabular-nums text-ink';
 
   return (
-    <section aria-labelledby="company-plant-heading" className="mb-8">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3
-          id="company-plant-heading"
-          className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps"
+    <section aria-labelledby="company-plant-heading" className="mb-6">
+      <h3 id="company-plant-heading" className="sr-only">
+        Company / Plant Overview
+      </h3>
+      <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
+        {/* Label, filters and download ride inside the table's card (see `TableToolbar`). */}
+        <TableToolbar
+          title="Company / Plant Overview"
+          trailing={
+            <TableDownloadButton
+              ariaLabel="Company/Plant Overview"
+              disabled={companies.length === 0}
+              onSelectFormat={exportOverview}
+            />
+          }
         >
-          Company / Plant Overview
-        </h3>
-        <FilterBar className="mb-0">
           <SearchInput
             aria-label="Search company, plant or ID"
             placeholder="Company, plant, ID, vehicle, device…"
@@ -313,14 +320,8 @@ export function CompanyPlantTable({
             <option value="INACTIVE_DESC">Most inactive first</option>
             <option value="INACTIVE_ASC">Least inactive first</option>
           </FilterSelect>
-          <TableDownloadButton
-            ariaLabel="Company/Plant Overview"
-            disabled={companies.length === 0}
-            onSelectFormat={exportOverview}
-          />
-        </FilterBar>
-      </div>
-      <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
+        </TableToolbar>
+
         <table aria-label="Company/Plant Overview" className="w-full table-fixed border-collapse text-sm">
           <colgroup>
             {/* Leading 3.5rem S.No. column (#160) — the percentage columns below are shaved down from
@@ -768,7 +769,7 @@ function OpenDeviceTickets({
                     <Link
                       to={`/batches/${d.batchId}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="whitespace-nowrap text-xs font-medium text-brand-700 hover:underline"
+                      className="whitespace-nowrap text-xs font-medium text-link hover:underline"
                     >
                       Batch #{d.batchId} →
                     </Link>

@@ -186,7 +186,7 @@ export function WarehouseDashboard() {
       <SectionCard
         title="Component Request Queue"
         action={
-          <Link to="/warehouse/requests" className="text-xs font-medium text-brand-700 hover:underline">
+          <Link to="/warehouse/requests" className="text-xs font-medium text-link hover:underline">
             Open queue →
           </Link>
         }
@@ -244,7 +244,7 @@ export function WarehouseDashboard() {
       <SectionCard
         title="Shadow-Use Reconciliation"
         action={
-          <Link to="/warehouse/shadow-use" className="text-xs font-medium text-brand-700 hover:underline">
+          <Link to="/warehouse/shadow-use" className="text-xs font-medium text-link hover:underline">
             Open queue →
           </Link>
         }

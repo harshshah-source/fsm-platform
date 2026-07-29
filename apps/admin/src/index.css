@@ -1,6 +1,14 @@
 @import "tailwindcss";
 
 /*
+ * Dark mode is driven by `data-theme` on <html> (set by `ThemeProvider`, persisted to localStorage,
+ * defaulting to the OS preference). This custom variant lets a component reach for `dark:…` in the
+ * handful of places where a token swap alone can't express the change (e.g. a tint that has to
+ * invert its foreground). Everything else flips automatically via the token block below.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
  * Safelist the responsive grid column counts. `MetricStrip` (and a few KPI strips) pick their column
  * count from a `cols` prop via a lookup object, so utilities like `lg:grid-cols-6` never appear as a
  * bare literal Tailwind's content scanner can see — without this they silently fall back to 2-up.
@@ -23,6 +31,14 @@
   --color-brand-300: #f3cbd3;
   --color-brand-600: #b9102b;
   --color-brand-700: #8f0f24;
+
+  /* Emphasis foreground for a drill-down count or an inline link sitting on a surface — the
+     `845 / 10758` in the Company/Plant Overview, the per-bucket counts, "View all", and friends.
+     A distinct token from `brand-700` because the two roles diverge in dark: `brand-700` must stay a
+     deep crimson (it is the bottom of the primary button's gradient), while a *foreground* crimson on
+     a near-black card is unreadable — a table of them reads as a wall of dark red. In dark this is
+     white, per the operator ask; the semibold weight plus hover-underline still mark it as a link. */
+  --color-link: #8f0f24;
 
   /* AutoPlant wordmark red — the legacy "autoplant Systems" logo lockup
      (docs/ui/desktop/v1-legacy). Sampled #b91c1c; kept distinct from the crimson
@@ -54,6 +70,10 @@
   --color-line: #e4e6ea;
   --color-line-strong: #cbcfd6;
 
+  /* Table row hover — a real surface step, not a 3% film, so the row under the cursor is
+     unmistakable at a glance. Overridden per theme; every table reads it (base layer + DataTable). */
+  --color-row-hover: #dae0e9;
+
   /* Ink */
   --color-ink-strong: #101114;
   --color-ink: #32343a;
@@ -81,6 +101,91 @@
   --shadow-card: 0 1px 2px rgb(16 17 20 / 0.04), 0 12px 30px rgb(16 17 20 / 0.05);
   --shadow-card-hover: 0 6px 18px rgb(16 17 20 / 0.07), 0 20px 48px rgb(16 17 20 / 0.08);
   --shadow-floating: 0 22px 70px rgb(10 10 12 / 0.3);
+
+  /* Page canvas wash — the body gradient's top stop. A token so dark mode can re-point it. */
+  --color-canvas-top: #f7f8fa;
+}
+
+/*
+ * DARK THEME — the same token names, re-pointed. Because no component may carry a raw hex (the rule
+ * above the light block), overriding the variables is the whole of dark mode: every card, table,
+ * badge, chart axis and piece of chrome inherits it with no per-component `dark:` sweep.
+ *
+ * Specificity note: `:root[data-theme="dark"]` (0,2,0) outranks Tailwind's `:root` (0,1,0), so this
+ * wins regardless of source order.
+ *
+ * It is a *modern* dark — a blue-cool near-black canvas with genuinely raised card surfaces, not an
+ * inverted greyscale. Foregrounds are lifted (a light-mode `#197a3d` is unreadable on near-black) and
+ * the semantic tints become deep washes rather than pastels.
+ */
+:root[data-theme="dark"] {
+  /* Brand — the crimson brightens just enough to hold 4.5:1 against the dark card. `brand-300` stays
+     light: it is the *tint* role (avatar wash, ::selection), which must read against the dark. */
+  --color-brand-300: #f0b8c3;
+  --color-brand-600: #d81f3c;
+  --color-brand-700: #a5122a;
+
+  /* Drill-down counts and inline links go WHITE here, not red. `brand-700` (#a5122a) as a foreground
+     on the #16191f card is ~1.9:1 — the Company/Plant Overview, which is nothing but these counts,
+     rendered as an unreadable field of dark red. */
+  --color-link: #ffffff;
+
+  /* Chrome — sidebar / footer / table header. Deliberately *lighter* than the canvas: on a dark page
+     an elevated rail reads as chrome, whereas a darker one reads as a hole. */
+  --color-chrome-900: #171b23;
+  --color-chrome-800: #1e232c;
+  --color-chrome-700: #2f3743;
+  --color-chrome-text: #e3e8f0;
+  --color-chrome-muted: #9aa4b3;
+
+  /* Quiet accent (hover washes + muted emphasis text) — inverted so 100 stays the subtlest step. */
+  --color-luxury-100: #232833;
+  --color-luxury-300: #3d434f;
+  --color-luxury-600: #a8afbb;
+  --color-luxury-700: #c2c8d2;
+
+  /* Surfaces — canvas → card → raised → sunken stays a monotonic ladder, as in light. */
+  --color-surface-app: #0e1014;
+  --color-surface-card: #16191f;
+  --color-surface-raised: #1c202a;
+  --color-surface-sunken: #232833;
+  --color-canvas-top: #12151b;
+
+  --color-line: #2b3039;
+  --color-line-strong: #3e4552;
+
+  --color-row-hover: #2b323e;
+
+  /* Deliberately brighter than a straight inversion. On a near-black canvas a "white" that is really
+     light grey reads as dimmed — headings go pure white and body text sits just under it, so the
+     table content is white first and grey only where it is genuinely secondary. */
+  --color-ink-strong: #ffffff;
+  --color-ink: #e3e8f0;
+  --color-ink-muted: #aab3c0;
+  --color-ink-caps: #9aa4b3;
+
+  /* Semantic — foreground lifted for contrast on near-black; `-bg` becomes a deep tint. Each `-fg`
+     also has to survive being used as a *fill* with white text (DataTable's `danger` active row uses
+     `bg-critical text-white`), which is why these sit mid-scale rather than pastel. */
+  --color-info: #5b8dff;
+  --color-info-bg: #17203a;
+  --color-success: #35b46a;
+  --color-success-bg: #12291d;
+  --color-verified: #9d7bf0;
+  --color-verified-bg: #211a3a;
+  --color-warning: #d99a2b;
+  --color-warning-bg: #2c2210;
+  --color-critical: #e5484d;
+  --color-critical-bg: #33191b;
+  --color-neutral: #9aa3b2;
+  --color-neutral-bg: #232833;
+
+  /* Elevation — over a dark canvas, depth comes from black shadow, not from a grey tint. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 30px rgb(0 0 0 / 0.4);
+  --shadow-card-hover: 0 6px 18px rgb(0 0 0 / 0.55), 0 20px 48px rgb(0 0 0 / 0.5);
+  --shadow-floating: 0 22px 70px rgb(0 0 0 / 0.7);
+
+  color-scheme: dark;
 }
 
 /* Right-rail drawer entrance (Ticket Detail). Respects reduced-motion. */
@@ -130,7 +235,7 @@
     scroll-behavior: smooth;
   }
   body {
-    background: linear-gradient(180deg, #f7f8fa 0%, var(--color-surface-app) 30rem);
+    background: linear-gradient(180deg, var(--color-canvas-top) 0%, var(--color-surface-app) 30rem);
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-feature-settings:
@@ -191,8 +296,10 @@
       background-color 160ms cubic-bezier(0.2, 0, 0, 1),
       box-shadow 160ms cubic-bezier(0.2, 0, 0, 1);
   }
+  /* Row hover — a full surface step (see `--color-row-hover`). The previous 3% ink film was too
+     faint to track the cursor across a wide, dense row. */
   tbody tr:hover {
-    background-color: rgb(16 17 20 / 0.03);
+    background-color: var(--color-row-hover);
   }
   input,
   select,
@@ -215,8 +322,13 @@
 }
 
 @layer utilities {
+  /* Content column. The cap exists only so text-heavy pages don't run to absurd line lengths on an
+     ultrawide — on any ordinary monitor this is effectively full-bleed, and the shell's own gutter
+     (see <main> in AppShell) is what separates content from the viewport edge. Widened from 1480px:
+     the old cap plus a 32px gutter was stealing the width dense tables need to keep an id or an
+     IMSI on one line. */
   .enterprise-page {
-    max-width: 1480px;
+    max-width: 1920px;
     margin-inline: auto;
   }
   .premium-panel {

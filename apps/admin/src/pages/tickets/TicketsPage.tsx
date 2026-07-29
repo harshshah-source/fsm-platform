@@ -5,7 +5,6 @@ import { apiDeviceFilterOptions, type DeviceFilterOptions } from '../../api/devi
 import {
   DataTable,
   EmptyState,
-  FilterBar,
   FilterSelect,
   PageHeader,
   SearchInput,
@@ -35,9 +34,10 @@ function ageDays(iso: string): number {
  * SLA bucket, and assignment state; the server returns rows already sorted SLA-bucket-descending and
  * zone-scoped. A row click opens the Detail Drawer (`/tickets/:ticketId`) inline via the nested Outlet.
  *
- * FE-08 is a presentation-only refactor onto `PageHeader` + `FilterBar` + the canonical `DataTable`;
- * the fetch logic, query params, the `Tickets` table `aria-label`, the filter `aria-label`s, the
- * `bucket-*` / `badge-*` test ids, and the row-click navigation are all preserved.
+ * FE-08 is a presentation-only refactor onto the canonical `DataTable` (the filters ride in its
+ * `toolbar`, inside the table card); the fetch logic, query params, the `Tickets` table `aria-label`,
+ * the filter `aria-label`s, the `bucket-*` / `badge-*` test ids, and the row-click navigation are all
+ * preserved.
  */
 export function TicketsPage() {
   const navigate = useNavigate();
@@ -216,62 +216,63 @@ export function TicketsPage() {
           }
         />
 
-        <FilterBar>
-          <SearchInput
-            aria-label="Search tickets"
-            placeholder="Search device, vehicle, plant or company…"
-            value={filters.q ?? ''}
-            onChange={set('q')}
-            className="w-64"
-          />
-          <FilterSelect aria-label="Work type" value={filters.workType ?? ''} onChange={set('workType')}>
-            <option value="">All work types</option>
-            {WORK_TYPES.map((w) => (
-              <option key={w} value={w}>{w}</option>
-            ))}
-          </FilterSelect>
-          <FilterSelect aria-label="Status" value={filters.status ?? ''} onChange={set('status')}>
-            <option value="">All statuses</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </FilterSelect>
-          <FilterSelect aria-label="SLA bucket" value={filters.bucket ?? ''} onChange={set('bucket')}>
-            <option value="">All buckets</option>
-            {SLA_BUCKETS.map((b) => (
-              <option key={b} value={b}>{BUCKET_LABEL_RANGE[b]}</option>
-            ))}
-          </FilterSelect>
-          <FilterSelect
-            aria-label="Assignment state"
-            value={filters.assignmentState ?? ''}
-            onChange={set('assignmentState')}
-          >
-            <option value="">All assignment states</option>
-            {ASSIGNMENT_STATES.map((a) => (
-              <option key={a} value={a}>{a}</option>
-            ))}
-          </FilterSelect>
-          <FilterSelect aria-label="Company" value={filters.companyId ?? ''} onChange={set('companyId')}>
-            <option value="">All companies</option>
-            {(options.companies ?? []).map((c) => (
-              <option key={c.companyId} value={String(c.companyId)}>
-                {c.name}
-              </option>
-            ))}
-          </FilterSelect>
-          <FilterSelect aria-label="Plant" value={filters.plantId ?? ''} onChange={set('plantId')}>
-            <option value="">All plants</option>
-            {dedupedPlants.map((p) => (
-              <option key={p.plantId} value={String(p.plantId)}>
-                {formatPlantDisplayName(p.name)}
-              </option>
-            ))}
-          </FilterSelect>
-        </FilterBar>
-
         <DataTable
           ariaLabel="Tickets"
+          toolbar={
+            <>
+              <SearchInput
+                aria-label="Search tickets"
+                placeholder="Search device, vehicle, plant or company…"
+                value={filters.q ?? ''}
+                onChange={set('q')}
+                className="w-64"
+              />
+              <FilterSelect aria-label="Work type" value={filters.workType ?? ''} onChange={set('workType')}>
+                <option value="">All work types</option>
+                {WORK_TYPES.map((w) => (
+                  <option key={w} value={w}>{w}</option>
+                ))}
+              </FilterSelect>
+              <FilterSelect aria-label="Status" value={filters.status ?? ''} onChange={set('status')}>
+                <option value="">All statuses</option>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </FilterSelect>
+              <FilterSelect aria-label="SLA bucket" value={filters.bucket ?? ''} onChange={set('bucket')}>
+                <option value="">All buckets</option>
+                {SLA_BUCKETS.map((b) => (
+                  <option key={b} value={b}>{BUCKET_LABEL_RANGE[b]}</option>
+                ))}
+              </FilterSelect>
+              <FilterSelect
+                aria-label="Assignment state"
+                value={filters.assignmentState ?? ''}
+                onChange={set('assignmentState')}
+              >
+                <option value="">All assignment states</option>
+                {ASSIGNMENT_STATES.map((a) => (
+                  <option key={a} value={a}>{a}</option>
+                ))}
+              </FilterSelect>
+              <FilterSelect aria-label="Company" value={filters.companyId ?? ''} onChange={set('companyId')}>
+                <option value="">All companies</option>
+                {(options.companies ?? []).map((c) => (
+                  <option key={c.companyId} value={String(c.companyId)}>
+                    {c.name}
+                  </option>
+                ))}
+              </FilterSelect>
+              <FilterSelect aria-label="Plant" value={filters.plantId ?? ''} onChange={set('plantId')}>
+                <option value="">All plants</option>
+                {dedupedPlants.map((p) => (
+                  <option key={p.plantId} value={String(p.plantId)}>
+                    {formatPlantDisplayName(p.name)}
+                  </option>
+                ))}
+              </FilterSelect>
+            </>
+          }
           rowKey={(t) => t.ticketId}
           columns={columns}
           rows={rows}
