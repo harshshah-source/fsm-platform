@@ -309,6 +309,9 @@ export class BulkUnassignService {
           metadata: {
             operationId,
             scope,
+            // D1 reversed 2026-07-29 — stated explicitly so a row is interpretable years later:
+            // rows written BEFORE the reversal swept today only and carry no `dateScope`.
+            dateScope: 'ALL_LIVE',
             targetDate: targetDate.toISOString().slice(0, 10),
             reasonCode,
             counts: classified.counts,
@@ -337,6 +340,7 @@ export class BulkUnassignService {
         metadata: {
           operationId,
           scope,
+          dateScope: 'ALL_LIVE',
           targetDate: targetDate.toISOString().slice(0, 10),
           reasonCode,
           skipped: true,
@@ -384,7 +388,7 @@ export class BulkUnassignService {
 
   /**
    * The scope predicate + the six report classes (`179-oh-bulk-unassign-rebalance.md`). Every
-   * FORMALLY_ASSIGNED ticket reachable via a live batch row on a live schedule for (zone, day)
+   * FORMALLY_ASSIGNED ticket reachable via a live batch row on a live schedule in this zone
    * partitions into: TROUBLESHOOT+OPEN (further split componentBlocked > onSite > eligible, in that
    * precedence — a ticket already resolved its soft states on form submission, `troubleshoot-
    * submission.service.ts:144-149`, so the overlap is normally empty; the precedence just keeps the
@@ -393,12 +397,19 @@ export class BulkUnassignService {
    * `deferredExcluded` is a separate informational count: a deferred ticket is already UNASSIGNED
    * with its batch row already removed, so it is never reachable through this query at all — this
    * tells the OH it exists and will not be touched, structurally.
+   *
+   * **D1 REVERSED 2026-07-29 (operator): no date predicate.** This originally filtered
+   * `dateFrom = targetDate` (today only), deferring the stale-plan backlog to #147. That left work
+   * on week-old ACTIVE schedules reading as "assigned" on every surface while nobody worked it —
+   * the operator's reason for widening. `liveScheduleFilter()` remains the boundary: COMPLETED and
+   * PARTIAL stay out, so widening cannot resurrect finished work. `targetDate` is still the run day
+   * and still gates `deferredExcluded` below, which is inherently date-relative.
    */
   private async classifyZone(db: Prisma.TransactionClient, zoneId: bigint, targetDate: Date): Promise<ZoneClassification> {
     const rows = await db.batchAssignmentTicket.findMany({
       where: {
         removedAt: null,
-        batch: { schedule: { zoneId, dateFrom: targetDate, ...liveScheduleFilter() } },
+        batch: { schedule: { zoneId, ...liveScheduleFilter() } },
         ticket: { assignmentState: 'FORMALLY_ASSIGNED' },
       },
       select: {

@@ -88,3 +88,16 @@ highest-traffic read on the SE surface, and it is the one that must not ship as 
 
 Note `/api/me/work-history` (**#175**) and the dated rows for Daily Status follow the same envelope
 conventions.
+
+### 2026-07-29 — #179 bulk unassign joins the planVersion mutator list
+
+[#179 (OH bulk unassign — mid-day rebalance)](./179-oh-bulk-unassign-rebalance.md) is a fourth
+mutator of an SE's day plan, same kind as APPEND / override / defer: it stamps `removed_at` across
+the plan's live batch rows mid-day. Extend the change-signal AC accordingly:
+
+- The day-plan `planVersion` (or `updatedAt`) must **provably change on a bulk unassign** (e2e),
+  exactly as required for APPEND/override/defer.
+
+Nothing else from #179 lands here: the unassign changes what the plan *says*, not its shape, and
+its hollow-stop read filter (#179 Slice 3) shares `day-plan-query.service.ts` with this issue and
+#147 — coordinate the file, keep the scopes separate.

@@ -85,7 +85,7 @@ export function BulkUnassignPage() {
     <section>
       <PageHeader
         title="Bulk Unassign"
-        subtitle="Mid-day rebalance: unassign today's assigned troubleshoot work for a zone or Pan-India, then re-run dispatch so tickets land freshly on engineers."
+        subtitle="Mid-day rebalance: unassign all currently-assigned troubleshoot work for a zone or Pan-India — including work still sitting on older, never-closed day plans — then re-run dispatch so tickets land freshly on engineers."
       />
 
       {error && (

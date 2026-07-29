@@ -87,11 +87,12 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
       return ticket.ticketId;
     };
 
-    const placeOnLiveBatch = async (ticketId: string): Promise<{ scheduleId: bigint; batchId: bigint }> => {
-      let schedule = await prisma.workSchedule.findFirst({ where: { zoneId, seId: u.userId, dateFrom: DAY, status: 'ACTIVE' } });
+    /** `on` defaults to today; pass an earlier date to build a stale-dated (past) live schedule. */
+    const placeOnLiveBatch = async (ticketId: string, on: Date = DAY): Promise<{ scheduleId: bigint; batchId: bigint }> => {
+      let schedule = await prisma.workSchedule.findFirst({ where: { zoneId, seId: u.userId, dateFrom: on, status: 'ACTIVE' } });
       if (!schedule) {
         schedule = await prisma.workSchedule.create({
-          data: { seId: u.userId, zoneId, dateFrom: DAY, dateTo: DAY, status: 'ACTIVE', source: 'SYSTEM_GENERATED', dispatchedAt: NOW },
+          data: { seId: u.userId, zoneId, dateFrom: on, dateTo: on, status: 'ACTIVE', source: 'SYSTEM_GENERATED', dispatchedAt: NOW },
         });
       }
       const batch = await prisma.plantBatchAssignment.create({
@@ -234,6 +235,51 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
       // Batch (PlantBatchAssignment) status is untouched — only the ticket row inside it is stamped.
       const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId } });
       expect(batches.every((b) => b.status === 'AUTO_ASSIGNED')).toBe(true);
+    } finally {
+      await f.teardown();
+    }
+  });
+
+  // D1 REVERSED 2026-07-29 (operator): the sweep covers every LIVE schedule regardless of date, not
+  // just today's. A ticket sitting on a week-old ACTIVE schedule is exactly the case that motivated
+  // the reversal — it reads as "assigned" on every surface while nobody is working it.
+  it('unassigns work on a stale-dated (past) live schedule, not just today', async () => {
+    const f = await makeFixture('stale-date');
+    const YESTERDAY = new Date(Date.UTC(2026, 6, 28));
+    const LAST_WEEK = new Date(Date.UTC(2026, 6, 21));
+    try {
+      const todayTicket = await f.makeTicket({});
+      await f.placeOnLiveBatch(todayTicket);
+
+      const yesterdayTicket = await f.makeTicket({});
+      const { scheduleId: staleScheduleId } = await f.placeOnLiveBatch(yesterdayTicket, YESTERDAY);
+
+      const lastWeekTicket = await f.makeTicket({});
+      await f.placeOnLiveBatch(lastWeekTicket, LAST_WEEK);
+
+      const outcome = await svc.execute({ scope: 'ZONE', zoneId: f.zoneId, reasonCode: 'FULL_REBALANCE' }, OH_ACTOR, NOW);
+      if (outcome.result !== 'OK') throw new Error(`expected OK, got ${outcome.result}`);
+      const zoneResult = outcome.zones.find((z) => z.zoneId === f.zoneId.toString());
+      expect(zoneResult?.ticketsUnassigned).toBe(3); // today + yesterday + last week
+
+      const all = await prisma.ticket.findMany({ where: { ticketId: { in: [todayTicket, yesterdayTicket, lastWeekTicket] } } });
+      expect(all.every((t) => t.assignmentState === 'UNASSIGNED')).toBe(true);
+
+      const rows = await prisma.batchAssignmentTicket.findMany({
+        where: { ticketId: { in: [todayTicket, yesterdayTicket, lastWeekTicket] } },
+      });
+      expect(rows.every((r) => r.removedAt !== null)).toBe(true);
+
+      // The stale schedule is stamped for provenance and stays ACTIVE (D3 holds regardless of date).
+      const staleSched = await prisma.workSchedule.findUniqueOrThrow({ where: { scheduleId: staleScheduleId } });
+      expect(staleSched.status).toBe('ACTIVE');
+      expect(staleSched.lastOverriddenBy).toBe(OH_ACTOR.userId);
+
+      // The audit row states the date scope explicitly, so history stays interpretable across the
+      // D1 reversal (rows written before it were implicitly today-only).
+      const auditRows = await prisma.auditLog.findMany({ where: { actingZone: f.zoneId, action: 'BULK_UNASSIGN_ZONE' } });
+      expect(auditRows).toHaveLength(1);
+      expect((auditRows[0].metadata as Record<string, unknown>).dateScope).toBe('ALL_LIVE');
     } finally {
       await f.teardown();
     }
