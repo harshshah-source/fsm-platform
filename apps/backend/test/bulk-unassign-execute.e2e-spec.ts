@@ -453,6 +453,12 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
 
       const touched = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: eligible } });
       expect(touched.assignmentState).toBe('UNASSIGNED');
+
+      // The audit row must record the ACTUAL scope of the operation ('PAN_INDIA'), not the literal
+      // 'ZONE' every prior test happened to pass with by coincidence (all of them used scope: 'ZONE').
+      const auditRows = await prisma.auditLog.findMany({ where: { actingZone: f.zoneId, action: 'BULK_UNASSIGN_ZONE' } });
+      expect(auditRows).toHaveLength(1);
+      expect((auditRows[0].metadata as Record<string, unknown>).scope).toBe('PAN_INDIA');
     } finally {
       await f.teardown();
     }

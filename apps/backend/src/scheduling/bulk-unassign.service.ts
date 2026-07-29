@@ -230,7 +230,7 @@ export class BulkUnassignService {
 
     const zoneResults: ExecuteZoneResult[] = [];
     for (const zone of zones) {
-      zoneResults.push(await this.executeZone(zone.zoneId, zone.name, targetDate, req.reasonCode, operationId, actor, now));
+      zoneResults.push(await this.executeZone(zone.zoneId, zone.name, req.scope, targetDate, req.reasonCode, operationId, actor, now));
     }
 
     return { result: 'OK', operationId, zones: zoneResults };
@@ -248,6 +248,7 @@ export class BulkUnassignService {
   private async executeZone(
     zoneId: bigint,
     zoneName: string,
+    scope: 'ZONE' | 'PAN_INDIA',
     targetDate: Date,
     reasonCode: string,
     operationId: string,
@@ -307,7 +308,7 @@ export class BulkUnassignService {
           entityId: zoneId.toString(),
           metadata: {
             operationId,
-            scope: 'ZONE',
+            scope,
             targetDate: targetDate.toISOString().slice(0, 10),
             reasonCode,
             counts: classified.counts,
@@ -335,7 +336,7 @@ export class BulkUnassignService {
         entityId: zoneId.toString(),
         metadata: {
           operationId,
-          scope: 'ZONE',
+          scope,
           targetDate: targetDate.toISOString().slice(0, 10),
           reasonCode,
           skipped: true,
