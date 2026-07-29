@@ -90,3 +90,16 @@ of `ticketNo`):
 Both body templates can be fixed **before** `ticketNo` lands (fall back to plant/vehicle context and
 a resolved SE name); the `ticketNo` field is the follow-on. Folding these here rather than filing
 separately because they are notification-payload defects and this issue owns that surface.
+
+### 2026-07-28 — WhatsApp delivery address: the column already exists
+
+Closing a question raised while settling D-2. WhatsApp is a **first-class channel** for the
+SE-Acceptance Confirmation (CONTEXT §16), so the adapter needs a number to send to. It has one:
+**`User.phone`** — `String @unique`, non-null (`schema.prisma:136`) — and `EngineerMaster` defers to
+it explicitly (*"SE identity + contact (name/phone/email) live on `users`"*), so an SE is reachable
+via their `users` row with no join gymnastics and **no new column**.
+
+**No new issue.** The datum is a *human contact* field and is unrelated to session/device binding
+(**#91**'s `refresh_tokens.device_id`) and to the push-token registry this issue owns — a device can
+hold a session with push disabled, and a push token can go stale while the number is fine. Its only
+other consumer is **#161**, which must expose it on `/api/me` for the Profile screen.

@@ -29,12 +29,38 @@ screens beyond the tab skeletons — those are the M-series (55–61).
 - [ ] Shared component kit primitives exist and render against the mockup styling (DESIGN-SYSTEM §6)
 - [ ] Offline-aware API client exposes a write-queue interface + connectivity state; auth/session reuse from Issue 01
 - [ ] Each tab shell registers its nav entry (no dead labels; role-visible tabs only)
+- [ ] 🔴 **The app generates a stable install id on first launch, persists it in the keychain, and sends it as `X-Device-Id` on every request — including `POST /api/auth/login` and `/refresh`.** See the warning below; this one cannot be added later.
+- [ ] The install id survives app restart and re-login, and is regenerated **only** on reinstall
+- [ ] The client sends `/api/v1/...` as its base path (both `/api/v1` and `/api/` are served — #169 Wave 0 — but v1 is the path to pin)
 
 ## API contract
 
 - Auth reuse (Issue 01, already wired in `apps/mobile/src/auth`): `POST /api/auth/login`,
   refresh/session via `tokenStore`. The client attaches the access token to every request.
 - No new endpoint is introduced by this issue.
+
+> ### 🔴 `X-Device-Id` must be in the FIRST build — it cannot be retrofitted
+>
+> **D-2 (settled 2026-07-28): one active device, replace-on-login.** Logging in on a handset revokes
+> the previous handset's session. The server binds each session to a device via `refresh_tokens.device_id`
+> (**#91**), and **the only source of that id is this client.**
+>
+> **This is the single non-additive item in the entire mobile contract freeze.** Everything else on
+> the backend side was deliberately shaped to be addable later. This one is not:
+>
+> - If v1 ships without `X-Device-Id`, the server **cannot attribute sessions to devices at all** —
+>   one-active degrades to "one session per user with no idea which phone holds it", and the
+>   lost/stolen-handset story stops working.
+> - Retrofitting means a **client update**, which needs an OTA channel that **does not exist**
+>   (**#170**, unbuilt). An installed APK cannot currently be updated or forced to update.
+>
+> **Requirements:** generate a UUID on first launch · persist it in the keychain beside the tokens ·
+> send it on **every** request including `login` and `refresh` (login especially — that is where the
+> server decides which prior session to revoke) · keep it stable across restart, logout and re-login ·
+> regenerate **only** on reinstall.
+>
+> Going to 2 or N live devices later is a **config change on the server, not a migration** — but only
+> because this header exists. Ship it in v1 even though v1's policy never shows the user a device list.
 
 ## Permissions
 

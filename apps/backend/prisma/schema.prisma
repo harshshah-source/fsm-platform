@@ -126,8 +126,10 @@ model Company {
 }
 
 /// Users — every system account; the RBAC actor and audit subject (schema D1). Credentials
-/// are intentionally NOT stored here (the login path keeps its own store for now); this is the
-/// account registry Operations Head manages. `zone_id` is NULL for fleet-wide roles.
+/// are intentionally NOT stored here — they live 1:1 in `user_credentials` (Issue 91, operator
+/// decision 2026-07-28), so this OH-managed account registry can never leak password material
+/// through a widened SELECT in `GET /api/org/users`, the admin surfaces, or #121's export.
+/// `zone_id` is NULL for fleet-wide roles.
 model User {
   userId    String     @id @default(uuid()) @map("user_id") @db.Uuid
   name      String
@@ -139,12 +141,78 @@ model User {
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  zone     Zone?           @relation(fields: [zoneId], references: [zoneId])
-  engineer EngineerMaster?
+  zone          Zone?           @relation(fields: [zoneId], references: [zoneId])
+  engineer      EngineerMaster?
+  credential    UserCredential?
+  refreshTokens RefreshToken[]
 
   @@index([role])
   @@index([zoneId])
   @@map("users")
+}
+
+/// Issue 91 — password material, split from the `users` account registry by operator decision
+/// (2026-07-28) so secret material never sits in the table the org-users API, the admin pages and
+/// the OH raw-data export all read. 1:1 with `users`; deleting an account deletes its credential.
+///
+/// `algo` + `params` are stored per row rather than assumed globally: a future scrypt-parameter bump
+/// can then re-hash lazily on next successful login instead of forcing a big-bang re-credential of
+/// every account. #110's brute-force counters belong here too when they land — this table can widen
+/// without touching `users`.
+model UserCredential {
+  userId         String   @id @map("user_id") @db.Uuid
+  passwordHash   String   @map("password_hash")
+  passwordSalt   String   @map("password_salt")
+  passwordAlgo   String   @default("scrypt") @map("password_algo")
+  /// scrypt cost params as {N, r, p, keylen}; NULL means "the defaults in force when this was written".
+  passwordParams Json?    @map("password_params") @db.JsonB
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("user_credentials")
+}
+
+/// Issue 91 — persistent, rotating refresh tokens, replacing `InMemoryRefreshTokenStore` (which was
+/// process-local, so every deploy logged out the whole fleet and no second instance could ever run).
+///
+/// **Only the hash is stored** — a database read can never yield a usable token.
+///
+/// `device_id` is present from day one by operator decision (D-2, 2026-07-28) even though the launch
+/// policy is ONE ACTIVE DEVICE, replace-on-login. The column is not the policy: max-devices is a
+/// count-at-login query, so **moving to 2 or N devices later is a config change, not a migration, and
+/// logs nobody out.** Do not rebuild this table to add multi-device — add the count rule and the two
+/// additive routes. Shipping without the column is what would force a fleet-wide re-login.
+///
+/// `rotated_from` keeps the rotation lineage that makes reuse detection possible, and is the hook for
+/// a future rotation grace window (a dropped refresh *response* on a lossy field network currently
+/// burns the session permanently).
+model RefreshToken {
+  id            BigInt    @id @default(autoincrement())
+  userId        String    @map("user_id") @db.Uuid
+  /// SHA-256 of the opaque token; the plaintext is returned to the client once and never persisted.
+  tokenHash     String    @unique @map("token_hash")
+  /// Opaque install id supplied by the client via `X-Device-Id`. Sessions are attributed per handset.
+  deviceId      String    @map("device_id")
+  /// Optional human label for a future device-list UI ("Rahul's Nokia"). Unused under one-active.
+  deviceLabel   String?   @map("device_label")
+  issuedAt      DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(6)
+  /// Why the session ended — ROTATED · REPLACED_BY_NEW_DEVICE · LOGOUT · REUSE_DETECTED · ADMIN_REVOKE.
+  /// Free text rather than an enum so a support answer never needs a migration.
+  revokedReason String?   @map("revoked_reason")
+  lastSeenAt    DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  rotatedFrom   BigInt?   @map("rotated_from")
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  /// Serves both the one-active revoke-previous-sessions write and any future device-list read.
+  @@index([userId, revokedAt])
+  /// Serves expired-row cleanup; the in-memory store never reclaimed anything, which was the leak.
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
 /// SE-only profile + Activity-Ping timestamp, kept off `users` to avoid wide nullable manager rows

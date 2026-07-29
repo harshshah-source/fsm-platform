@@ -188,3 +188,16 @@ Note the images' numbers (~10 300) are below our real volume, so backfilled numb
 - [ ] The SE ticket read and the merged list row both carry it; `ticketId` remains the PK and the route param
 - [ ] Admin ticket search matches a quoted ticket number
 - [ ] The notification/WhatsApp payload decision is recorded before #76 builds the adapters
+
+### 2026-07-28 — `/api/me` phone/email: column confirmed present, this is an exposure gap only
+
+Checked while settling D-2. `User.phone` (`String @unique`, non-null) and `User.email` both already
+exist on `schema.prisma:136-137`, and `EngineerMaster` explicitly defers to `users` for SE identity
+and contact. So the `name` / `phone` / `email` items on this issue's `/api/me` enrichment list need
+**no migration** — they are a pure exposure gap behind an endpoint that returns four primitives
+(`me.controller.ts:18-23`).
+
+Same applies to the Profile screen's **ZM contact block** (name, phone, email): resolvable via
+`Zone.zonalManagerUserId` (`schema.prisma:219`) → `users`. All present, none exposed.
+
+No new issue; the other consumer of the same field is **#76** (WhatsApp delivery address).

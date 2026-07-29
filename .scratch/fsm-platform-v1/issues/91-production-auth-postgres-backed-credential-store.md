@@ -365,3 +365,94 @@ field workforce with device turnover that is a security gap, not a papercut.
 path for device loss. Both belong in this issue's `refresh_tokens` design, and the **device-model
 decision (D-2) must be made before that table is written** — retrofitting `device_id` later is a
 migration plus a fleet-wide re-login.
+
+### 2026-07-28 — D-2 SETTLED: one active device, replace-on-login
+
+**Field reality confirmed by the operator:** an SE uses one phone with the app at a time; a second
+handset exists only as a **backup swapped in when the primary is unavailable**. There is no
+two-devices-live-at-once workflow.
+
+**Launch policy: one-active.** Logging in on a device revokes the previous device's session.
+Consequences that fall out for free and should not be rebuilt later:
+- **"Log out my other device" is implicit** — logging in anywhere does it. No endpoint needed.
+- A **stolen or lost handset is deauthorised the moment the SE logs in on a replacement**, with no
+  admin intervention — which is the common field case, and it is why this policy suits a fleet with
+  device turnover.
+- The broken-phone-mid-shift case is the one this handles best: pick up the spare, log in, done. No
+  device-limit wall at a plant gate.
+
+**Not in v1:** no device-list endpoint, no per-device logout route, no Profile → Devices screen.
+(That screen would be a *third* surface absent from the PRD's 17-screen inventory, alongside Profile
+and Daily Status.)
+
+#### `refresh_tokens` shape — carry `device_id` regardless of the policy
+
+```
+refresh_tokens
+  id · user_id · token_hash
+  device_id      NOT NULL   -- opaque install id sent by the client
+  device_label   NULL       -- e.g. "Rahul's Nokia", for a future logout UI
+  issued_at · expires_at · revoked_at · last_seen_at
+  rotated_from              -- rotation lineage / reuse detection; also the hook for the N1 grace window
+```
+
+> **The column is not the decision — it is what makes the decision reversible.**
+> **Going to 2 or N devices later is a CONFIG CHANGE, not a migration**, because the max-devices rule
+> is a count-at-login query, not a table shape. Nobody is logged out. **A future session must not
+> rebuild this table to add multi-device** — add the count rule, then the two additive routes
+> (`GET /api/me/devices`, `POST /api/me/devices/:id/logout`) and a screen, none of which break a
+> shipped client.
+>
+> Shipping *without* `device_id` — enforcing one-active by deleting the user's other rows — is what
+> would force a migration plus a **fleet-wide re-login**, because existing rows would carry no device
+> attribution and could only be resolved by invalidating them.
+
+#### ⚠ The one non-additive piece is on the client, not here
+
+The app must generate and send a **stable install id** (`X-Device-Id`) **from its very first build**.
+If v1 ships without it the server cannot attribute sessions to devices at all, and retrofitting needs
+an OTA channel that does not exist (**#170**). **Recorded as an AC on #54**, because that is where
+the mobile team will actually see it.
+
+#### Not this issue: the SE's phone number
+
+`User.phone` already exists (`String @unique`, non-null, `schema.prisma:136`) and `EngineerMaster`
+defers to it explicitly — *"SE identity + contact (name/phone/email) live on `users`"*. It is a
+**human contact datum, unrelated to session binding**. No new issue: its consumers are **#161**
+(expose on `/api/me` for the Profile screen) and **#76** (WhatsApp delivery address).
+
+### 2026-07-29 — Slice 1 LANDED: schema + migration ✅
+
+Migration `20260729120000_production_auth_credentials_refresh_tokens` creates both tables.
+The open HITL (credential-column placement) is **closed** — operator chose the dedicated
+`user_credentials` table; `users` is untouched and its doc comment now points at the new table
+instead of saying "the login path keeps its own store for now".
+
+**`user_credentials`** — `user_id` PK/FK (ON DELETE CASCADE), `password_hash`, `password_salt`,
+`password_algo` default `'scrypt'`, `password_params` JSONB, timestamps. Algo + params are per-row so
+a future scrypt-cost bump re-hashes lazily on next successful login rather than forcing a big-bang
+re-credential; **#110's brute-force counters belong here too** and can widen this table without ever
+touching the account registry.
+
+**`refresh_tokens`** — hash-only storage (`token_hash` UNIQUE; plaintext is returned once and never
+persisted, so a DB read cannot yield a usable token), `device_id` NOT NULL per D-2, `device_label`,
+`issued_at`/`expires_at`/`revoked_at`/`revoked_reason`/`last_seen_at`, and `rotated_from` for
+rotation lineage. Indexes: `(user_id, revoked_at)` for the one-active revoke-previous write, and
+`(expires_at)` for reclamation — the in-memory store never reclaimed anything, which was the leak.
+
+Verified: `prisma generate` clean · migration applies to `fsm_test` · both tables and all five
+indexes confirmed present via information_schema · backend `tsc` exit 0 · `auth`,
+`per-zone-zm-logins`, `zone-scope`, `prisma-session-timezone` and `api-versioning` **14/14 green**
+(the timezone spec matters here — it proves the UTC session option survived Wave 0's pool-options
+refactor).
+
+**Not verified locally: the from-zero migrate.** The local `fsm` role lacks CREATEDB so `fsm_drift`
+could not be built. The DDL is purely additive (two CREATE TABLEs plus indexes and FKs, depending
+only on `users` already existing), so the risk is minimal — but **CI's drift gate is the actual
+check** and this claim rests on it, not on a local run.
+
+**Slices remaining:** S2 DB-backed login (`PostgresUserStore`, async scrypt, credential seeding for
+existing accounts) · S3 persistent refresh with device binding + one-active replace-on-login · S4
+retire `InMemoryUserStore`/`InMemoryRefreshTokenStore`/`DevZoneResolver`, add logout +
+`revokeAllForUser`. The admin httpOnly-cookie leg is **split to a fast-follow** (agent call, permitted
+by this issue's last AC) — #91 was already the largest Wave 1 item before D-2 added device binding.
