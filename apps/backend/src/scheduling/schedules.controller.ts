@@ -16,7 +16,13 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { BadRequestException } from '@nestjs/common';
-import { type BulkUnassignRequest, type ExecuteOutcome, type PreviewResult, BulkUnassignService } from './bulk-unassign.service';
+import {
+  type BulkUnassignHistoryRow,
+  type BulkUnassignRequest,
+  type ExecuteOutcome,
+  type PreviewResult,
+  BulkUnassignService,
+} from './bulk-unassign.service';
 import { DayPlanQueryService, type DayPlanView } from './day-plan-query.service';
 import { DispatchRunService, type DispatchRunSummary } from './dispatch-run.service';
 import { OverrideService, type AssignOutcome, type PlantAssignSummary } from './override.service';
@@ -106,6 +112,13 @@ export class SchedulesController {
     if (outcome.result === 'TOKEN_INVALID') throw new ConflictException({ code: 'PREVIEW_TOKEN_INVALID' });
     if (outcome.result === 'TOKEN_STALE') throw new ConflictException({ code: 'PREVIEW_TOKEN_STALE', freshPreview: outcome.freshPreview });
     return outcome;
+  }
+
+  /** #179 slice 4 — the admin page's history list, `BULK_UNASSIGN_ZONE` audit rows newest first. */
+  @Get('bulk-unassign/history')
+  @Roles('OPERATIONS_HEAD')
+  bulkUnassignHistory(): Promise<BulkUnassignHistoryRow[]> {
+    return this.bulkUnassign.history();
   }
 
   @Get('me')

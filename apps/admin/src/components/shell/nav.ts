@@ -116,6 +116,7 @@ export function buildNav(role: string): NavGroup[] {
       items: [
         { label: 'Coverage', to: '/coverage', icon: IconMapPin },
         { label: 'CSM Backup Share', to: '/reports/csm-approval-share', icon: IconShare },
+        { label: 'Bulk Unassign', to: '/bulk-unassign', icon: IconShuffle },
         { label: 'Plant Deactivations', to: '/plant-deactivations', icon: IconBoxAlert },
         { label: 'Plant Zones', to: '/plant-zones', icon: IconMapPin },
         { label: 'Exports', to: '/exports', icon: IconClipboard },

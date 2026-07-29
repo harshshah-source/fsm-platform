@@ -84,3 +84,44 @@ describe('POST /api/schedules/bulk-unassign (e2e)', () => {
       .expect(400);
   });
 });
+
+describe('GET /api/schedules/bulk-unassign/history (e2e, #179 slice 4)', () => {
+  let app: INestApplication;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const login = async (email: string): Promise<string> => {
+    const res = await request(app.getHttpServer()).post('/api/auth/login').send({ email, password: 'correct-password' }).expect(200);
+    return res.body.accessToken as string;
+  };
+
+  it('lets Operations Head read the history list', async () => {
+    const token = await login('ops.head@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get('/api/schedules/bulk-unassign/history')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it('forbids a Central Service Manager', async () => {
+    const token = await login('csm@fsm.test');
+    await request(app.getHttpServer())
+      .get('/api/schedules/bulk-unassign/history')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(403);
+  });
+
+  it('rejects an unauthenticated request', async () => {
+    await request(app.getHttpServer()).get('/api/schedules/bulk-unassign/history').expect(401);
+  });
+});

@@ -62,6 +62,22 @@ export type ExecuteOutcome =
   | { result: 'TOKEN_INVALID' }
   | { result: 'TOKEN_STALE'; freshPreview: PreviewResult };
 
+/** One `BULK_UNASSIGN_ZONE` audit_logs row, read back for the admin page's history list. */
+export interface BulkUnassignHistoryRow {
+  id: string;
+  operationId: string | null;
+  actorId: string;
+  scope: string;
+  zoneId: string;
+  zoneName: string | null;
+  reasonCode: string | null;
+  skipped: boolean;
+  skipReason: string | null;
+  counts: ZoneClassCounts | null;
+  ticketsUnassigned: number;
+  createdAt: string;
+}
+
 /** #179 preview-token TTL — short enough that a stale click is refused rather than acted on blind. */
 const PREVIEW_TOKEN_TTL_SEC = 10 * 60;
 
@@ -156,6 +172,40 @@ export class BulkUnassignService {
     );
 
     return { operationId, previewToken, targetDate: targetDate.toISOString().slice(0, 10), zones: results };
+  }
+
+  /** The admin page's history list — every `BULK_UNASSIGN_ZONE` audit row, newest first. */
+  async history(limit = 50): Promise<BulkUnassignHistoryRow[]> {
+    const rows = await this.prisma.auditLog.findMany({
+      where: { action: 'BULK_UNASSIGN_ZONE' },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+
+    const zoneIds = [...new Set(rows.map((r) => r.actingZone).filter((z): z is bigint => z != null))];
+    const zones = await this.prisma.zone.findMany({ where: { zoneId: { in: zoneIds } }, select: { zoneId: true, name: true } });
+    const zoneNameById = new Map(zones.map((z) => [z.zoneId.toString(), z.name]));
+
+    return rows.map((r) => {
+      const meta = (r.metadata ?? {}) as Record<string, unknown>;
+      const counts = (meta.counts as ZoneClassCounts | undefined) ?? null;
+      const skipped = meta.skipped === true;
+      const zoneId = r.actingZone != null ? r.actingZone.toString() : '';
+      return {
+        id: r.id.toString(),
+        operationId: typeof meta.operationId === 'string' ? meta.operationId : null,
+        actorId: r.actorId,
+        scope: typeof meta.scope === 'string' ? meta.scope : 'ZONE',
+        zoneId,
+        zoneName: zoneId ? (zoneNameById.get(zoneId) ?? null) : null,
+        reasonCode: typeof meta.reasonCode === 'string' ? meta.reasonCode : null,
+        skipped,
+        skipReason: typeof meta.skipReason === 'string' ? meta.skipReason : null,
+        counts,
+        ticketsUnassigned: counts ? counts.eligible + counts.onSite + counts.componentBlocked : 0,
+        createdAt: r.createdAt.toISOString(),
+      };
+    });
   }
 
   async execute(req: BulkUnassignRequest, actor: BulkUnassignActor, now: Date = new Date()): Promise<ExecuteOutcome> {

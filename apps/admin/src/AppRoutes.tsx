@@ -31,6 +31,7 @@ import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { ExportsPage } from './pages/exports/ExportsPage';
+import { BulkUnassignPage } from './pages/admin/BulkUnassignPage';
 import { PlantDeactivationsPage } from './pages/admin/PlantDeactivationsPage';
 import { PlantZonesPage } from './pages/admin/PlantZonesPage';
 import { TierOverridesPage } from './pages/admin/TierOverridesPage';
@@ -202,6 +203,15 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['OPERATIONS_HEAD']}>
                 <CsmApprovalSharePage />
+              </RoleRoute>
+            }
+          />
+          {/* Bulk Unassign — Operations Head only (#179, mid-day rebalance). */}
+          <Route
+            path="/bulk-unassign"
+            element={
+              <RoleRoute roles={['OPERATIONS_HEAD']}>
+                <BulkUnassignPage />
               </RoleRoute>
             }
           />
