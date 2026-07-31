@@ -240,6 +240,20 @@ worth keeping permanently — see AC-5.
 
 ## Acceptance criteria
 
+> **2026-07-31 — AC-5 and AC-6 landed as part of #180; AC-1/2/3/4/7 (the actual crash diagnosis)
+> untouched.** `scripts/run-tests.mjs` (AC-5) now wraps every `pnpm test` invocation and fails loudly
+> if `failed+passed+skipped != collected` for either the file or test summary line. Three consecutive
+> full runs (`BUSINESS_SWEEPS_ENABLED="true"`) all reported `(315)` files / `(1295)` tests with no
+> reconciliation gap and no `Errors N errors` line — AC-6 satisfied jointly with #180 AC-1 (see that
+> issue for the full counts). Both previously-crashing files passed clean, individually, on all three
+> runs: `settings-write.e2e-spec.ts` (3/3 tests) and `plant-zone-change-impact.e2e-spec.ts` (4/4
+> tests) — bearing on AC-7 and AC-8 (H3) below, but **three green runs is not the same as AC-2's
+> 20-loop measured-rate requirement**, and no exit-code/signal capture (AC-1) was attempted, so this
+> issue stays open. Do not read "no crash in 3 runs" as "fixed" — the issue's own R6 records the crash
+> as intermittent (2 in 315, 0 in two others); three more clean runs is consistent with either "fixed
+> by #180 R1.2 (H3)" or "just didn't roll this time," and AC-3 requires discriminating those with
+> evidence, not a clean streak.
+
 - [ ] **AC-1 — the exit is characterised, not guessed.** The child's **exit code and signal** are
       captured and recorded in the completion report, together with whatever it wrote to stderr. Until
       this exists, no fix may be proposed. (R4: vitest 2 does not print it; instrument
@@ -254,21 +268,29 @@ worth keeping permanently — see AC-5.
       OOM exit.
 - [ ] **AC-4 — fixed, and the fix is shown to work against the measured rate** from AC-2: the same
       loop count, zero crashes. A fix validated on fewer loops than the repro used is not validated.
-- [ ] **AC-5 — the class cannot be silent again.** The suite fails loudly when a file disappears: a
+- [x] **AC-5 — the class cannot be silent again.** The suite fails loudly when a file disappears: a
       check asserting `failed + passed + skipped === collected` for both files and tests, wired into
       the test command (a reporter, a wrapper script, or a `globalTeardown`). This is what turns the
       next occurrence from "the passed count drifted by 7" into a named failure. **Ship this even if
-      AC-3 stalls** — it is independently valuable and much cheaper than the diagnosis.
-- [ ] **AC-6 — three consecutive full runs report `(315)` files and `(1295)` tests with
+      AC-3 stalls** — it is independently valuable and much cheaper than the diagnosis. **Landed**:
+      `scripts/run-tests.mjs`, wired as the `pnpm test` entry point.
+- [x] **AC-6 — three consecutive full runs report `(315)` files and `(1295)` tests with
       `failed + passed + skipped` summing to each, and `Errors 0`.** Jointly with
       [#180](./180-test-db-determinism-truncate-reseed.md) AC-1 this is the actual "the suite is a
-      measurement instrument" gate. Neither issue can claim it alone.
+      measurement instrument" gate. Neither issue can claim it alone. **Verified 2026-07-31** — see
+      #180 AC-1 for the full counts; identical across all three runs, no `Errors` line in any.
 - [ ] **AC-7 — `settings-write.e2e-spec.ts` specifically.** It has now crashed twice, nine days apart
       (`156-test-db-orphan-accumulation.md:45` and run 2 here). It survives 20 consecutive runs of the
-      R6 window, and the completion report states whether its `AppModule` boot was causal.
+      R6 window, and the completion report states whether its `AppModule` boot was causal. **Not
+      attempted** — 3 clean full-suite runs is not the 20-loop measured rate this AC asks for; stays
+      open.
 - [ ] **AC-8 — #180 interplay recorded.** After #180 R1.2 lands, state whether
       `plant-zone-change-impact` still crashes (H3). If the unique-violation fix removes it, say so —
-      that halves the issue and is worth knowing before chasing H1.
+      that halves the issue and is worth knowing before chasing H1. **Partial signal, not closure**:
+      passed clean on all 3 post-#180 full runs (previously crashed run 2 of the original 3, threw in
+      `beforeAll` in run 3). Consistent with H3 but the crash was already known intermittent (2/315
+      observed) — do not close this AC on 3 green runs; needs the R6 20-loop window to actually
+      discriminate "fixed" from "didn't roll this time."
 
 ## Out of scope — do not do these here
 

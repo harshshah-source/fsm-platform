@@ -71,7 +71,6 @@ describe('DispatchRunService.runForActiveZones — optional zoneId (#179 slice 2
     const allZoneIds = [zoneA, zoneB];
     const allPlantIds = [plantA, plantB];
     const allCompanyIds = [companyA, companyB];
-    await prisma.dispatchDecisionTrace.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.recommendation.deleteMany({ where: { ticketId: { in: ticketIds } } });
     const schedules = await prisma.workSchedule.findMany({ where: { zoneId: { in: allZoneIds } }, select: { scheduleId: true } });
     const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } }, select: { batchId: true } });
@@ -79,6 +78,11 @@ describe('DispatchRunService.runForActiveZones — optional zoneId (#179 slice 2
     await prisma.plantBatchAssignment.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
     await prisma.workSchedule.deleteMany({ where: { zoneId: { in: allZoneIds } } });
     await prisma.dispatchRunZone.deleteMany({ where: { runId: { in: runIds } } });
+    // #180 R1.1 — keyed on ticketId this deleted only THIS spec's own traces; an unnarrowed
+    // runForActiveZones (the second test) sweeps every plant-bearing zone and can write a decision
+    // trace for a foreign ticket under this run's runId, which then blocks dispatchRun.deleteMany's
+    // FK. Key on runId (what the FK actually constrains) instead, immediately before that delete.
+    await prisma.dispatchDecisionTrace.deleteMany({ where: { runId: { in: runIds } } });
     await prisma.dispatchRun.deleteMany({ where: { runId: { in: runIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'dispatch_run', entityId: { in: runIds.map(String) } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });

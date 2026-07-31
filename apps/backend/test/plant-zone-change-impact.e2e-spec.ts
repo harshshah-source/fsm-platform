@@ -48,10 +48,46 @@ describe('#158 — zone change impact probe', () => {
     await prisma.company.deleteMany({ where: { name: `Impact Other Co ${NS}` } });
   };
 
+  // #180 R1.2 — self-heal regardless of DB history: SRC_PLANT is a fixed constant (not namespaced
+  // by NS), so a plant left behind by an earlier crashed run collides on plant.create's unique
+  // source_plant_id below. Deliberately does NOT call cleanup() here: cleanup() closes over
+  // `plantId`/`seId`, which are still unassigned this early in beforeAll, and a Prisma filter value
+  // of `undefined` means "no filter on this field" (verified empirically), not "no rows match" —
+  // e.g. `workSchedule.deleteMany({ where: { seId: undefined } })` deletes every row in the table,
+  // not zero. So this looks up the leftover's OWN ids first and scopes every delete to those.
+  const cleanupLeftoverPlant = async (): Promise<void> => {
+    const leftover = await prisma.plant.findUnique({ where: { sourcePlantId: SRC_PLANT } });
+    if (!leftover) return;
+    const leftoverPlantId = leftover.plantId;
+    const coverage = await prisma.seCoverage.findMany({
+      where: { plantId: leftoverPlantId },
+      select: { seId: true },
+    });
+    const leftoverSeIds = coverage.map((c) => c.seId);
+    await prisma.batchAssignmentTicket.deleteMany({ where: { batch: { plantId: leftoverPlantId } } }).catch(() => undefined);
+    await prisma.plantBatchAssignment.deleteMany({ where: { plantId: leftoverPlantId } }).catch(() => undefined);
+    if (leftoverSeIds.length > 0) {
+      await prisma.workSchedule.deleteMany({ where: { seId: { in: leftoverSeIds } } }).catch(() => undefined);
+      await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: leftoverSeIds } } }).catch(() => undefined);
+    }
+    await prisma.seCoverage.deleteMany({ where: { plantId: leftoverPlantId } }).catch(() => undefined);
+    await prisma.deviceState.deleteMany({ where: { deviceId: DEVICE_ID } });
+    await prisma.ticket.deleteMany({ where: { plantId: leftoverPlantId } });
+    await prisma.failureCycle.deleteMany({ where: { deviceId: DEVICE_ID } });
+    await prisma.device.deleteMany({ where: { deviceId: DEVICE_ID } });
+    await prisma.vehicle.deleteMany({ where: { plantId: leftoverPlantId } });
+    await prisma.plant.deleteMany({ where: { plantId: leftoverPlantId } });
+    if (leftoverSeIds.length > 0) {
+      await prisma.user.deleteMany({ where: { userId: { in: leftoverSeIds } } });
+    }
+  };
+
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
     service = new ZoneMappingService(prisma, new AuditService(prisma));
+
+    await cleanupLeftoverPlant();
 
     const east = await prisma.zone.upsert({ where: { name: 'East' }, create: { name: 'East' }, update: {} });
     eastId = east.zoneId;

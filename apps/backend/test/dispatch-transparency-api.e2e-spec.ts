@@ -240,7 +240,11 @@ describe('/api/dispatch-runs (e2e)', () => {
   it('OH sees the run in the list with cross-zone totals', async () => {
     const token = await login('ops.head@fsm.test');
     const res = await request(app.getHttpServer())
-      .get('/api/dispatch-runs')
+      // #180 R1.3 — the list is capped at limit=30 (DispatchTransparencyQueryService default); this
+      // fixture run's frozen-past startedAt sorts behind any real-clock run created since, so an
+      // unbounded request can page it out once 30 newer rows accumulate. Bound it explicitly instead
+      // of relying on staying in the newest page.
+      .get('/api/dispatch-runs?limit=200')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const row = res.body.find((r: any) => r.runId === runId.toString());
@@ -263,7 +267,8 @@ describe('/api/dispatch-runs (e2e)', () => {
   it('ZM list totals are clamped to their zone slice', async () => {
     const token = await login('zm.north@fsm.test');
     const res = await request(app.getHttpServer())
-      .get('/api/dispatch-runs')
+      // #180 R1.3 — same unbounded-list risk as the OH case above.
+      .get('/api/dispatch-runs?limit=200')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const row = res.body.find((r: any) => r.runId === runId.toString());

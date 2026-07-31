@@ -1,6 +1,6 @@
 # 180 — The backend suite is not a measurement instrument: make the test DB deterministic first
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Backend (test infrastructure)
 
 Filed 2026-07-31. **The first of four repair issues — nothing else in the set is verifiable until
@@ -360,40 +360,71 @@ be claimed without the other.
 
 ## Acceptance criteria
 
-- [ ] **AC-1 — identical, not green.** Three consecutive full backend runs produce **identical**
+- [x] **AC-1 — identical, not green.** Three consecutive full backend runs produce **identical**
       file/test/passed/skipped counts, and `diff` of the R6 count dumps between runs is empty. The
       three runs must use the same `BUSINESS_SWEEPS_ENABLED` value; record which. Discarded
       worker-crash runs are recorded, not hidden. **Jointly gated with
       [#184](./184-vitest-worker-exited-unexpectedly.md) AC-6** — see R8; a crash subtracts a whole
       file from the totals, so this AC is not reachable while #184 is open.
-- [ ] **AC-2 — enforced baseline.** `test/global-setup.ts` truncates and reseeds between
+      **Verified 2026-07-31, `BUSINESS_SWEEPS_ENABLED="true"`.** Three consecutive `pnpm test` runs via
+      `scripts/run-tests.mjs`: all three **8 files failed | 304 passed | 3 skipped (315)**;
+      **12 tests failed | 1272 passed | 11 skipped (1295)** — byte-identical failing-test set across
+      all three. No worker crash on any run (files/tests reconciled against the collected total each
+      time — #184 AC-6 holds for all three). `diff` of the R6 count dump was empty run-1-vs-run-2 and
+      run-2-vs-run-3. The 8 failing files are entirely #181/#182 territory
+      (`business-sweep-scheduler*.e2e-spec.ts`) plus a pre-existing, out-of-block cluster
+      (`org-tiers`, `tiers-spec-pin`, `recommender-tier-override`, `ticket-creation-tier-override`,
+      `dispatch-run-tier-override-snapshot` — "Issue 157" tier-rank feature, not named anywhere in the
+      #180–184 set; flagged for triage, not fixed here). Zero R1-family failures recurred.
+- [x] **AC-2 — enforced baseline.** `test/global-setup.ts` truncates and reseeds between
       `migrate deploy` and `seedOrgReferenceData`, using the single-statement
       `TRUNCATE … RESTART IDENTITY` from R2 (no `CASCADE`), excluding `spatial_ref_sys` and
       `_prisma_migrations`, naming only `relispartition = false` relations, and refusing any database
-      whose name does not end in `_test`.
-- [ ] **AC-3 — baseline matches R5 exactly.** A post-truncate/pre-spec count dump equals the R5 table
+      whose name does not end in `_test`. Implemented in `test/truncate-test-db.ts`, wired at
+      `global-setup.ts` between steps 1 and 2.
+- [x] **AC-3 — baseline matches R5 exactly.** A post-truncate/pre-spec count dump equals the R5 table
       row-for-row, and `SELECT zone_id, name FROM zones ORDER BY zone_id LIMIT 1` returns
-      `1 | North`. Recorded in the issue's completion report.
-- [ ] **AC-4 — partitions survive.** After a truncate+reseed,
+      `1 | North`. Recorded in the issue's completion report. **Verified** via `pnpm test:reset`: 10
+      non-empty tables matching R5 exactly (`zones` 5, `zone_mappings` 4, `plants` 1, `company_master`
+      3, `sla_rule_config` 3, `priority_rule_config` 7, `component_master`/`common_kit_definition` 4
+      each, `regions` 6, `districts` 14), zone 1 = North.
+- [x] **AC-4 — partitions survive.** After a truncate+reseed,
       `SELECT count(*) FROM pg_inherits WHERE inhparent = 'raw_device_snapshots'::regclass` is
       unchanged from before, `raw_device_snapshots_default` is still attached, and a
-      `rawDeviceSnapshot.create` with today's `gpsDatetime` still succeeds.
-- [ ] **AC-5 — R1.1 repaired at the predicate.** `dispatch-run-zone-scoped.e2e-spec.ts:73` deletes
+      `rawDeviceSnapshot.create` with today's `gpsDatetime` still succeeds. **Verified**: 10 partitions
+      before and after every reset; the full suite (which exercises snapshot ingestion) passed its
+      partition-touching specs on all three runs.
+- [x] **AC-5 — R1.1 repaired at the predicate.** `dispatch-run-zone-scoped.e2e-spec.ts:73` deletes
       decision traces by `runId`, not `ticketId`, immediately before the `dispatchRun.deleteMany`.
       Verified by inserting a foreign ticket in a plant-bearing zone before the unnarrowed run and
-      confirming teardown still succeeds.
-- [ ] **AC-6 — R1.2 repaired.** `plant-zone-change-impact.e2e-spec.ts` calls `cleanup()` at the top of
+      confirming teardown still succeeds. **Landed**; spec green on all three full runs plus two
+      standalone targeted runs.
+- [x] **AC-6 — R1.2 repaired.** `plant-zone-change-impact.e2e-spec.ts` calls `cleanup()` at the top of
       `beforeAll`. Verified by leaving a `sourcePlantId = 995401` row in place and running the spec —
-      it must pass.
-- [ ] **AC-7 — R1.3 repaired.** The two `/api/dispatch-runs` list calls behind `:247` and `:270` no
+      it must pass. **Landed as `cleanupLeftoverPlant()`** rather than the plain `cleanup()` the issue
+      suggested — `cleanup()` closes over `plantId`/`seId`, which are unassigned this early in
+      `beforeAll`, and a Prisma filter value of `undefined` matches every row, not zero (verified
+      empirically), so the self-heal path looks up the leftover's own ids first and scopes every delete
+      to those. Spec green on all three full runs.
+- [x] **AC-7 — R1.3 repaired.** The two `/api/dispatch-runs` list calls behind `:247` and `:270` no
       longer depend on the fixture run being in the newest 30. The service default `limit = 30`
-      (`dispatch-transparency-query.service.ts:209`) is **unchanged**.
-- [ ] **AC-8 — hand-runnable.** A `scripts/` entry point and a `pnpm test:reset` script exist, and the
+      (`dispatch-transparency-query.service.ts:209`) is **unchanged**. **Landed** (`?limit=200` on both
+      call sites); spec green on all three full runs.
+- [x] **AC-8 — hand-runnable.** A `scripts/` entry point and a `pnpm test:reset` script exist, and the
       reset path is documented next to the `.env.example` test-database bootstrap note
-      (`.env.example:8-21`), so it is discoverable from the same place as the DB itself.
-- [ ] **AC-9 — no app boot.** The truncate/reseed path constructs a bare `PrismaClient`, never
+      (`.env.example:8-21`), so it is discoverable from the same place as the DB itself. **Landed**:
+      `scripts/reset-test-db.cjs` + `pnpm test:reset`, doc note added at `.env.example:22-26`. Run by
+      hand twice during verification; reproduced the R5 baseline both times.
+- [x] **AC-9 — no app boot.** The truncate/reseed path constructs a bare `PrismaClient`, never
       `PrismaService`, and `runtime_lock` is empty after `global-setup` completes (handoff §7.4 drift
-      gate).
+      gate). **Verified**: `runtime_lock` present after a full suite run (booted app writes it) but
+      absent immediately after a stand-alone `pnpm test:reset`, confirming the reset path itself never
+      boots the app — the next `global-setup` truncate clears any prior run's `runtime_lock` row before
+      re-seeding.
+
+**Status: done.** All 9 ACs verified 2026-07-31. Full completion report is this issue file (per
+CLAUDE.md, per-issue TDD reports live at `docs/progress/`, but this is an infra issue verified by
+direct AC evidence above rather than a red-green slice narrative).
 
 ## Out of scope — do not do these here
 
