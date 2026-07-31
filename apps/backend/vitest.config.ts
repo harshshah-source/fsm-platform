@@ -6,9 +6,10 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['**/*.{spec,e2e-spec}.ts'],
-    // dotenv/config loads apps/backend/.env (DATABASE_URL) before any PrismaService boots; setup-env
-    // then clears AUTOPLANT_MYSQL_* so a developer's live creds never change test behaviour (the
-    // integration is designed UNSET in dev/test/CI). Order matters — dotenv loads, then we neutralize.
+    // dotenv/config loads apps/backend/.env before any PrismaService boots; setup-env then applies
+    // the app-namespace ALLOWLIST (#182) — deletes every var in the app's own namespace, then re-sets
+    // the handful the suite needs to a fixed test value — so a developer's local `.env` never changes
+    // test outcomes. Order matters — dotenv loads, then we sanitize.
     setupFiles: ['reflect-metadata', 'dotenv/config', './test/setup-env.ts'],
     // globalSetup runs ONCE before any worker: it migrates + seeds the ISOLATED test database
     // (DATABASE_URL with the db name suffixed `_test`) so the suite never runs against the

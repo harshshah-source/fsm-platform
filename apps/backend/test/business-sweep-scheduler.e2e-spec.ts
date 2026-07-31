@@ -6,6 +6,7 @@ import type { RootCauseAnalyticsAggregationService } from '../src/reports/root-c
 import type { SoftInactiveCountService } from '../src/reports/soft-inactive-count.service';
 import type { SystemEfficiencyAggregationService } from '../src/reports/system-efficiency-aggregation.service';
 import type { ZmPerformanceAggregationService } from '../src/reports/zm-performance-aggregation.service';
+import type { TierOverrideExpiryService } from '../src/org/tier-override-expiry.service';
 import type { InstallLifecycleService } from '../src/ticketing/install-lifecycle.service';
 import type { RepeatEscalationService } from '../src/ticketing/repeat-escalation.service';
 import type { VerificationService } from '../src/verification/verification.service';
@@ -19,6 +20,7 @@ import {
   DEFAULT_ROOT_CAUSE_CRON,
   DEFAULT_SOFT_INACTIVE_CRON,
   DEFAULT_SYSTEM_EFFICIENCY_CRON,
+  DEFAULT_TIER_OVERRIDE_EXPIRY_CRON,
   DEFAULT_VERIFICATION_CRON,
   DEFAULT_ZM_PERFORMANCE_CRON,
   readBusinessSweepSchedulerConfig,
@@ -35,13 +37,14 @@ import {
  * DISABLED. Handlers are driven directly here; the cron trigger itself is the library's concern.
  */
 
-/** All 10 sweep collaborators as vi.fn() stubs — every method returns a benign shape. */
+/** All 11 sweep collaborators as vi.fn() stubs — every method returns a benign shape. */
 const makeSweeps = () => ({
   verification: { runVerification: vi.fn(async () => ({ closed: 0, failed: 0, fraud: 0, pending: 0 })) },
   intraday: { sweepTimeouts: vi.fn(async () => ({ timedOut: 0, rerouted: 0, escalated: 0 })) },
   crossZone: { sweepAutoEscalations: vi.fn(async () => ({ escalated: 0 })) },
   installLifecycle: { runInstallVerification: vi.fn(async () => ({ verified: 0, failed: 0, pending: 0 })) },
   repeatEscalation: { runEscalationScan: vi.fn(async () => ({ escalated: 0 })) },
+  tierOverrideExpiry: { sweepExpiredOverrides: vi.fn(async () => ({ expired: 0 })) },
   softInactive: { recompute: vi.fn(async () => ({ capturedAt: '2026-07-07T00:00:00.000Z', zones: 0 })) },
   fleetUptime: { computeMonth: vi.fn(async () => ({ month: '2026-07', devices: 0 })) },
   rootCause: { computeMonth: vi.fn(async () => ({ month: '2026-07', submissions: 0 })) },
@@ -58,6 +61,7 @@ const makeScheduler = (sweeps: Sweeps, enabled: boolean): BusinessSweepScheduler
     sweeps.crossZone as unknown as CrossZoneEscalationService,
     sweeps.installLifecycle as unknown as InstallLifecycleService,
     sweeps.repeatEscalation as unknown as RepeatEscalationService,
+    sweeps.tierOverrideExpiry as unknown as TierOverrideExpiryService,
     sweeps.softInactive as unknown as SoftInactiveCountService,
     sweeps.fleetUptime as unknown as FleetUptimeAggregationService,
     sweeps.rootCause as unknown as RootCauseAnalyticsAggregationService,
@@ -76,6 +80,7 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
         intradayTimeoutCron: DEFAULT_INTRADAY_TIMEOUT_CRON,
         crossZoneCron: DEFAULT_CROSS_ZONE_CRON,
         repeatEscalationCron: DEFAULT_REPEAT_ESCALATION_CRON,
+        tierOverrideExpiryCron: DEFAULT_TIER_OVERRIDE_EXPIRY_CRON,
         softInactiveCron: DEFAULT_SOFT_INACTIVE_CRON,
         systemEfficiencyCron: DEFAULT_SYSTEM_EFFICIENCY_CRON,
         fleetUptimeCron: DEFAULT_FLEET_UPTIME_CRON,
@@ -124,6 +129,25 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
 
       expect(sweeps.verification.runVerification).not.toHaveBeenCalled();
       expect(outcome).toEqual({ ran: false, reason: 'DISABLED' });
+    });
+
+    it('#181 AC-6 — the explicit config argument wins over the ambient env, in both directions', async () => {
+      // Regression for the arity drift: config used to land on the wrong parameter and silently
+      // fall back to process.env.BUSINESS_SWEEPS_ENABLED. Flip the ambient value opposite to the
+      // explicit `enabled` argument in each direction and assert the argument wins every time.
+      const prior = process.env.BUSINESS_SWEEPS_ENABLED;
+      try {
+        process.env.BUSINESS_SWEEPS_ENABLED = 'true';
+        expect(await makeScheduler(sweeps, false).verificationTick()).toEqual({ ran: false, reason: 'DISABLED' });
+        expect(sweeps.verification.runVerification).not.toHaveBeenCalled();
+
+        process.env.BUSINESS_SWEEPS_ENABLED = 'false';
+        expect(await makeScheduler(sweeps, true).verificationTick()).toEqual({ ran: true });
+        expect(sweeps.verification.runVerification).toHaveBeenCalledTimes(1);
+      } finally {
+        if (prior === undefined) delete process.env.BUSINESS_SWEEPS_ENABLED;
+        else process.env.BUSINESS_SWEEPS_ENABLED = prior;
+      }
     });
 
     it('a throwing sweep never escapes the cron context — logged and reported as ERROR', async () => {
@@ -222,7 +246,7 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
   });
 
   describe('cron registration (AC#4 — every sweep is on the clock, dormant by default)', () => {
-    it('registers all ten named business-sweep cron jobs under ScheduleModule', async () => {
+    it('registers all eleven named business-sweep cron jobs under ScheduleModule', async () => {
       const { Test } = await import('@nestjs/testing');
       const { ScheduleModule, SchedulerRegistry } = await import('@nestjs/schedule');
 
@@ -242,6 +266,7 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
           'business-intraday-timeout',
           'business-cross-zone',
           'business-repeat-escalation',
+          'business-tier-override-expiry',
           'business-soft-inactive',
           'business-system-efficiency',
           'business-fleet-uptime',

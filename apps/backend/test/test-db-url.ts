@@ -9,11 +9,11 @@
  * The sibling DB is a one-time superuser bootstrap (it needs the PostGIS extension, per
  * `20260621140000_add_geography_postgis`) — see `.env.example`.
  */
-export function testDatabaseUrl(): string {
-  const explicit = process.env.TEST_DATABASE_URL?.trim();
+export function testDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env.TEST_DATABASE_URL?.trim();
   if (explicit) return explicit;
 
-  const base = process.env.DATABASE_URL;
+  const base = env.DATABASE_URL;
   if (!base) throw new Error('DATABASE_URL is not set; cannot derive the isolated test database URL.');
 
   const url = new URL(base);

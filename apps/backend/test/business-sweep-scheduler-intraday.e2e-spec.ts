@@ -9,6 +9,7 @@ import { BusinessSweepSchedulerService } from '../src/scheduling/business-sweep-
 import { LoggingDayPlanNotifier } from '../src/scheduling/day-plan-notifier';
 import { OverrideService } from '../src/scheduling/override.service';
 import type { CrossZoneEscalationService } from '../src/cross-zone/cross-zone-escalation.service';
+import type { TierOverrideExpiryService } from '../src/org/tier-override-expiry.service';
 import type { FleetUptimeAggregationService } from '../src/reports/fleet-uptime-aggregation.service';
 import type { RootCauseAnalyticsAggregationService } from '../src/reports/root-cause-aggregation.service';
 import type { SoftInactiveCountService } from '../src/reports/soft-inactive-count.service';
@@ -97,6 +98,7 @@ describe('Issue 108 AC#5(a) — intraday acceptance-timeout runs on the schedule
       unused<CrossZoneEscalationService>(),
       unused<InstallLifecycleService>(),
       unused<RepeatEscalationService>(),
+      unused<TierOverrideExpiryService>(),
       unused<SoftInactiveCountService>(),
       unused<FleetUptimeAggregationService>(),
       unused<RootCauseAnalyticsAggregationService>(),
@@ -155,9 +157,9 @@ describe('Issue 108 AC#5(a) — intraday acceptance-timeout runs on the schedule
   it('is dormant when the master switch is off — a stale offer is left untouched', async () => {
     const off = new BusinessSweepSchedulerService(
       unused<VerificationService>(), intraday, unused<CrossZoneEscalationService>(), unused<InstallLifecycleService>(),
-      unused<RepeatEscalationService>(), unused<SoftInactiveCountService>(), unused<FleetUptimeAggregationService>(),
-      unused<RootCauseAnalyticsAggregationService>(), unused<ZmPerformanceAggregationService>(),
-      unused<SystemEfficiencyAggregationService>(), { enabled: false },
+      unused<RepeatEscalationService>(), unused<TierOverrideExpiryService>(), unused<SoftInactiveCountService>(),
+      unused<FleetUptimeAggregationService>(), unused<RootCauseAnalyticsAggregationService>(),
+      unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), { enabled: false },
     );
     const ticketId = await makeCriticalTicket();
     await intraday.fireForZone(zoneId, BASE);

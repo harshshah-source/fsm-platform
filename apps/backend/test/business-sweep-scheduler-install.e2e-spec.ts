@@ -6,6 +6,7 @@ import { InstallLifecycleService } from '../src/ticketing/install-lifecycle.serv
 import type { InstallNotifier } from '../src/ticketing/install-notifier';
 import type { CrossZoneEscalationService } from '../src/cross-zone/cross-zone-escalation.service';
 import type { IntradayInsertionService } from '../src/intraday/intraday-insertion.service';
+import type { TierOverrideExpiryService } from '../src/org/tier-override-expiry.service';
 import type { FleetUptimeAggregationService } from '../src/reports/fleet-uptime-aggregation.service';
 import type { RootCauseAnalyticsAggregationService } from '../src/reports/root-cause-aggregation.service';
 import type { SoftInactiveCountService } from '../src/reports/soft-inactive-count.service';
@@ -67,7 +68,7 @@ describe('Issue 108 AC#5(b) — install verification runs on the scheduler tick'
     install = new InstallLifecycleService(prisma, new AuditService(prisma), spyNotifier);
     scheduler = new BusinessSweepSchedulerService(
       unused<VerificationService>(), unused<IntradayInsertionService>(), unused<CrossZoneEscalationService>(),
-      install, unused<RepeatEscalationService>(), unused<SoftInactiveCountService>(),
+      install, unused<RepeatEscalationService>(), unused<TierOverrideExpiryService>(), unused<SoftInactiveCountService>(),
       unused<FleetUptimeAggregationService>(), unused<RootCauseAnalyticsAggregationService>(),
       unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), { enabled: true },
     );
@@ -106,7 +107,7 @@ describe('Issue 108 AC#5(b) — install verification runs on the scheduler tick'
   it('is dormant when the master switch is off — an ACTIVATED ticket stays ACTIVATED', async () => {
     const off = new BusinessSweepSchedulerService(
       unused<VerificationService>(), unused<IntradayInsertionService>(), unused<CrossZoneEscalationService>(),
-      install, unused<RepeatEscalationService>(), unused<SoftInactiveCountService>(),
+      install, unused<RepeatEscalationService>(), unused<TierOverrideExpiryService>(), unused<SoftInactiveCountService>(),
       unused<FleetUptimeAggregationService>(), unused<RootCauseAnalyticsAggregationService>(),
       unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), { enabled: false },
     );

@@ -6,7 +6,7 @@ import { VerificationService } from '../src/verification/verification.service';
 /**
  * #148 — a verification window must not expire on STALE telemetry.
  *
- * The sweep runs every 5 minutes (`BUSINESS_SWEEPS_ENABLED="true"` in `.env:38`) and expires its
+ * The sweep runs every 5 minutes (`BUSINESS_SWEEPS_ENABLED="true"` in `.env:41`) and expires its
  * 24-hour window on wall-clock alone, while `INGESTION_SCHEDULER_ENABLED="false"` means nothing
  * automatically writes the `raw_device_snapshots` it reads. A submission made during an ingestion
  * pause therefore ages into an IRREVERSIBLE `FAILED_VERIFICATION` — with its `PRE_VERIFICATION`

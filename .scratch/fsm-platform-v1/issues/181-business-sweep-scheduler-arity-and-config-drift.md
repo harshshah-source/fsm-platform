@@ -1,6 +1,6 @@
 # 181 — `BusinessSweepSchedulerService`: TWO defects, not one — constructor-arity drift and config-shape drift
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Backend (test repair)
 
 Filed 2026-07-31. **Second in the repair set, landed together with
@@ -218,30 +218,42 @@ expiry sweep and it is wired, registered (`:177`) and documented (`:23-25`). The
 
 ## Acceptance criteria
 
-- [ ] **AC-1 (A1)** — all four `new BusinessSweepSchedulerService(...)` call sites pass **12**
+- [x] **AC-1 (A1)** — all four `new BusinessSweepSchedulerService(...)` call sites pass **12**
       arguments: 11 collaborators in the R1 order, then the config object. Verified by
       `grep -A14 "new BusinessSweepSchedulerService" test/*.ts` showing `tierOverrideExpiry` in
-      position 6 at every site.
-- [ ] **AC-2 (A1)** — `business-sweep-scheduler.e2e-spec.ts` `:183-194`, `:196-203`, `:205-215` and
+      position 6 at every site. **Landed** across `business-sweep-scheduler.e2e-spec.ts` (1 site),
+      `business-sweep-scheduler-install.e2e-spec.ts` (2 sites), `business-sweep-scheduler-intraday.e2e-spec.ts`
+      (2 sites).
+- [x] **AC-2 (A1)** — `business-sweep-scheduler.e2e-spec.ts` `:183-194`, `:196-203`, `:205-215` and
       `:217-221` pass, and the spies `softInactive.recompute`, `systemEfficiency.computeDay` and
-      `fleetUptime.computeMonth` each record **1** call, not 0.
-- [ ] **AC-3 (A1)** — `makeSweeps()` (`:39-50`) exposes a `tierOverrideExpiry` stub and its docstring
-      says 11, not 10.
-- [ ] **AC-4 (A1)** — the cron-registration test (`:224-257`) asserts **eleven** job names including
-      `'business-tier-override-expiry'`, and its title no longer says "ten".
-- [ ] **AC-5 (A2)** — `business-sweep-scheduler.e2e-spec.ts:71-85` passes with a **12**-key literal
+      `fleetUptime.computeMonth` each record **1** call, not 0. **Verified green.**
+- [x] **AC-3 (A1)** — `makeSweeps()` (`:39-50`) exposes a `tierOverrideExpiry` stub and its docstring
+      says 11, not 10. **Landed.**
+- [x] **AC-4 (A1)** — the cron-registration test (`:224-257`) asserts **eleven** job names including
+      `'business-tier-override-expiry'`, and its title no longer says "ten". **Landed** — title now
+      "registers all eleven named business-sweep cron jobs".
+- [x] **AC-5 (A2)** — `business-sweep-scheduler.e2e-spec.ts:71-85` passes with a **12**-key literal
       including `tierOverrideExpiryCron: DEFAULT_TIER_OVERRIDE_EXPIRY_CRON`, and the const is imported.
-- [ ] **AC-6 — the `enabled` argument is honoured again.** A direct assertion that the fix reconnected
+      **Landed and green.**
+- [x] **AC-6 — the `enabled` argument is honoured again.** A direct assertion that the fix reconnected
       the config parameter: with `BUSINESS_SWEEPS_ENABLED` set to `"true"` in the ambient environment,
       `makeScheduler(sweeps, false).verificationTick()` returns `{ ran: false, reason: 'DISABLED' }`.
       This is the regression test for the whole class — without it, the same drift can recur silently.
-- [ ] **AC-7 — production wiring untouched.** `src/scheduling/business-sweep-scheduler.service.ts` and
+      **Landed** as a new test flipping the ambient value in both directions (`true`→explicit `false`
+      wins DISABLED; `false`→explicit `true` wins dispatch) and restoring the prior value in `finally`.
+- [x] **AC-7 — production wiring untouched.** `src/scheduling/business-sweep-scheduler.service.ts` and
       `src/scheduling/business-sweep-scheduler.module.ts` are byte-identical before and after
-      (`git diff --stat src/` shows nothing under `src/scheduling/`).
-- [ ] **AC-8 — no new red.** `business-sweep-scheduler-install.e2e-spec.ts` and
+      (`git diff --stat src/` shows nothing under `src/scheduling/`). **Verified** — `git diff --stat`
+      for this change touches only files under `test/`.
+- [x] **AC-8 — no new red.** `business-sweep-scheduler-install.e2e-spec.ts` and
       `business-sweep-scheduler-intraday.e2e-spec.ts` pass in full, both their `{ enabled: true }` and
       `{ enabled: false }` tests, **regardless of the ambient `BUSINESS_SWEEPS_ENABLED` value** —
-      check both by running the targeted command twice with the flag flipped.
+      check both by running the targeted command twice with the flag flipped. **Verified**: the
+      4-file targeted command (19 tests) is byte-identical with `.env:41="true"` and with
+      `BUSINESS_SWEEPS_ENABLED=false` overriding it.
+
+**Status: done.** All 8 ACs verified 2026-07-31, landed together with [#182](./182-hermetic-test-env-allowlist.md)
+per the mandated order.
 
 ## Out of scope — do not do these here
 

@@ -1,6 +1,6 @@
 # 182 — `test/setup-env.ts` is a deny-list, so the developer's `.env` decides test outcomes — invert it to an allowlist
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Backend (test infrastructure)
 
 Filed 2026-07-31. **Second in the repair set, landed together with
@@ -242,34 +242,54 @@ insufficient.
 
 ## Acceptance criteria
 
-- [ ] **AC-1** — `test/setup-env.ts` is an allowlist: it deletes every `process.env` key in the
+- [x] **AC-1** — `test/setup-env.ts` is an allowlist: it deletes every `process.env` key in the
       application namespace (R3 step 1–2) and then sets the R1.a fixed values. Verified by a new unit
       spec that seeds `process.env` with a junk app-namespace key (e.g. `BUSINESS_SWEEP_FUTURE_FLAG`)
-      and asserts it is gone after the harness runs.
-- [ ] **AC-2** — `BUSINESS_SWEEPS_ENABLED` is `'false'` inside the suite regardless of `.env`.
+      and asserts it is gone after the harness runs. **Landed**: `sanitizeTestEnv` exported from
+      `test/setup-env.ts`, exercised by `test/setup-env-allowlist.spec.ts` (5 tests, all green) —
+      including a key from each prefix family that is named nowhere in the implementation, proving
+      the class is closed.
+- [x] **AC-2** — `BUSINESS_SWEEPS_ENABLED` is `'false'` inside the suite regardless of `.env`.
       Verified by running the targeted command with `.env:41` set to `"true"` — the three dormancy
       assertions (`business-sweep-scheduler.e2e-spec.ts:125-126`,
-      `-install:116`, `-intraday:166`) pass.
-- [ ] **AC-3** — `INGESTION_SCHEDULER_ENABLED` and `PARTITION_MAINTENANCE_ENABLED` are pinned to
+      `-install:116`, `-intraday:166`) pass. **Verified** (subsumed by #181's own fix reconnecting the
+      config parameter, but the allowlist is what makes it durable against the *next* flag).
+- [x] **AC-3** — `INGESTION_SCHEDULER_ENABLED` and `PARTITION_MAINTENANCE_ENABLED` are pinned to
       `'false'`, and `DEV_AUTH_ZONE` is deleted. Verified by setting `DEV_AUTH_ZONE='EAST'` in `.env`
       and confirming `dispatch-transparency-api.e2e-spec.ts` (which hardcodes `ZM_ZONE = 1n` at `:23`)
-      still passes.
-- [ ] **AC-4** — `PG*` is neutralised and `TZ` is pinned to `'UTC'`, each with a one-line comment
+      still passes. **Verified** — targeted 8-file/50-test command byte-identical with
+      `DEV_AUTH_ZONE=EAST` set vs unset.
+- [x] **AC-4** — `PG*` is neutralised and `TZ` is pinned to `'UTC'`, each with a one-line comment
       recording the decision. If pinning `TZ` reddens any spec, that spec is listed in the completion
-      report as a new finding (do **not** silently drop the pin).
-- [ ] **AC-5 — nothing outside the app namespace is touched.** `PATH`, `NODE_ENV`, `CI`, `TEMP`,
+      report as a new finding (do **not** silently drop the pin). **Landed** — both in `sanitizeTestEnv`
+      with rationale comments. **No new red from the `TZ` pin**: full-suite run post-landing shows the
+      same failure set as pre-#182 (business-sweep-scheduler cluster gone per #181; only the
+      pre-existing, separately-filed [#185](./185-tiers-reference-table-never-seeded.md) and #183
+      clusters remain).
+- [x] **AC-5 — nothing outside the app namespace is touched.** `PATH`, `NODE_ENV`, `CI`, `TEMP`,
       `USER`/`USERNAME`, `BOOK8_RUN` and `BOOK_DATASET` are present and unchanged after the harness
       runs (assert in the AC-1 spec). Verified functionally by
       `BOOK8_RUN=1 npx vitest run test/env/book8/book8-env.e2e-spec.ts` still executing rather than
-      skipping.
-- [ ] **AC-6 — the class is closed, not the instance.** `test/setup-env.ts` carries a comment stating
+      skipping. **Verified both ways**: unset → 1 skipped; `BOOK8_RUN=1` → 1 executed (reached the
+      real CSV-load step; failed only on a missing local data fixture, unrelated to this issue).
+- [x] **AC-6 — the class is closed, not the instance.** `test/setup-env.ts` carries a comment stating
       that new `BUSINESS_SWEEP*` / `INGESTION_*` / `PARTITION_*` / `*_ENABLED` variables are
       neutralised **by default** and that a spec needing one ON must pass it through the constructor
       seam (R5), not the environment. `.env.example` gains a pointer to that rule next to the master
-      switches.
-- [ ] **AC-7** — the stale citation at `test/verification-staleness.e2e-spec.ts:9` reads `.env:41`.
-- [ ] **AC-8 — the suite is env-independent.** The targeted command below is fully green with
+      switches. **Landed** — `.env.example` gained a new "Business-sweep scheduler / partition
+      maintenance" section (previously undocumented there at all) ending with the allowlist-rule
+      pointer.
+- [x] **AC-7** — the stale citation at `test/verification-staleness.e2e-spec.ts:9` reads `.env:41`.
+      **Landed.**
+- [x] **AC-8 — the suite is env-independent.** The targeted command below is fully green with
       `.env:41` set to `"true"` **and** with it set to `"false"`, with byte-identical output.
+      **Verified three ways** — `"true"`, `"false"`, and `DEV_AUTH_ZONE=EAST` — all three: 8 files /
+      50 tests, byte-identical.
+
+**Status: done.** All 8 ACs verified 2026-07-31, landed together with [#181](./181-business-sweep-scheduler-arity-and-config-drift.md)
+per the mandated order. `apps/backend/.env` restored to `BUSINESS_SWEEPS_ENABLED="true"` with no
+`DEV_AUTH_ZONE` line (all flag variations were shell-scoped for the verification run, never written
+to the file).
 
 ## Out of scope — do not do these here
 
