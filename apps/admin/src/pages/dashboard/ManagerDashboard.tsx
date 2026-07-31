@@ -63,7 +63,7 @@ export function ManagerDashboard() {
       .catch(() => alive && setError('Failed to load dashboard'));
     // Fleet-summary KPI counts — an older backend without the endpoint just leaves the cards at "—".
     apiFleetSummary()
-      .then((f) => alive && typeof f?.devices === 'number' && setFleet(f))
+      .then((f) => alive && typeof f?.operationalDevices === 'number' && setFleet(f))
       .catch(() => undefined);
     // Current-month Fleet Uptime % for the hero card (BE-39). Left at "—" until the monthly summary is
     // computed (report reports 0 eligible devices) or on a backend without the endpoint.
@@ -108,7 +108,7 @@ export function ManagerDashboard() {
     setCompanyPlants(cp);
     setCritical(cq);
     apiFleetSummary()
-      .then((f) => typeof f?.devices === 'number' && setFleet(f))
+      .then((f) => typeof f?.operationalDevices === 'number' && setFleet(f))
       .catch(() => undefined);
     apiFleetUptime({ groupBy: 'zone' })
       .then((r) => {

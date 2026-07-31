@@ -1,14 +1,19 @@
 import { useMemo, useState } from 'react';
 import type { ZoneOverviewRow } from '../../api/dashboard';
-import { DataTable, FilterSelect, type Column } from '../../components/data';
+import { ColumnHeader, DataTable, FilterSelect, type Column } from '../../components/data';
 import { InactiveCountLink } from '../../components/domain';
 import { cn } from '../../lib/cn';
+import { formatCount, formatPct } from '../../lib/fleetFormat';
 import { BUCKET_CLASS, BUCKET_LABEL, BUCKET_LABEL_RANGE, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
 
 /**
- * Zone Overview table (Issue 06 AC#2/#5 · FE-06). One row per zone: total inactive + per-SLA-bucket
- * counts in severity order with the reference colour coding, plus a trend-vs-previous-day cell (a
- * neutral "—" placeholder until the daily-history table lands, Issue 40) and a CSV export.
+ * Zone Overview table (Issue 06 AC#2/#5 · FE-06). One row per zone: the operational breakdown
+ * (Operational · Inactive Operational · Healthy · Warehouse · Inactive % · Fleet Health %) plus the
+ * per-SLA-bucket counts in severity order with the reference colour coding, a trend-vs-previous-day
+ * cell (a neutral "—" placeholder until the daily-history table lands, Issue 40) and a CSV export.
+ *
+ * Every rate divides by Operational, never by the mirrored total; warehouse devices are shown in their
+ * own column and excluded from both sides of every ratio.
  *
  * Presentation-only refactor (FE-06): re-skinned onto the canonical `DataTable`; the `aria-label`,
  * the `bucket-<B>` / `trend` test ids, the filter labels, and the export button are all preserved.
@@ -34,12 +39,66 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
       render: (r) => <span className="font-medium text-ink-strong">{r.zoneName}</span>,
     },
     {
+      key: 'operational',
+      header: <ColumnHeader label="Operational" kpi="operationalDevices" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="zone-operational" className="tabular-nums text-ink">
+          {formatCount(r.operationalDevices)}
+        </span>
+      ),
+    },
+    {
       key: 'total',
-      header: 'Inactive / Total Device',
+      header: <ColumnHeader label="Inactive Operational" kpi="inactiveOperational" />,
       align: 'right',
       render: (r) => (
         <span data-testid="zone-inactive-total" className="tabular-nums">
-          <InactiveCountLink inactive={r.totalInactive} total={r.totalDevices} scope={{ zoneId: r.zoneId }} />
+          <InactiveCountLink
+            inactive={r.inactiveOperational}
+            operational={r.operationalDevices}
+            scope={{ zoneId: r.zoneId }}
+          />
+        </span>
+      ),
+    },
+    {
+      key: 'healthy',
+      header: <ColumnHeader label="Healthy" kpi="healthyOperational" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="zone-healthy" className="tabular-nums text-ink">
+          {formatCount(r.healthyOperational)}
+        </span>
+      ),
+    },
+    {
+      key: 'warehouse',
+      header: <ColumnHeader label="Warehouse" kpi="warehouseDevices" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="zone-warehouse" className="tabular-nums text-ink-muted">
+          {formatCount(r.warehouseDevices)}
+        </span>
+      ),
+    },
+    {
+      key: 'inactivePct',
+      header: <ColumnHeader label="Inactive %" kpi="inactivePct" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="zone-inactive-pct" className="tabular-nums font-semibold text-ink">
+          {formatPct(r.inactivePct)}
+        </span>
+      ),
+    },
+    {
+      key: 'fleetHealthPct',
+      header: <ColumnHeader label="Fleet Health %" kpi="fleetHealthPct" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="zone-health-pct" className="tabular-nums font-semibold text-ink">
+          {formatPct(r.fleetHealthPct)}
         </span>
       ),
     },
@@ -123,7 +182,9 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
             </FilterSelect>
           </>
         }
-        empty="No inactive devices in scope."
+        // Rows are now driven by the operational population, not by the inactive one — a zone with a
+        // fleet but no inactive devices renders `0 / N` rather than vanishing.
+        empty="No zones in scope."
       />
     </section>
   );

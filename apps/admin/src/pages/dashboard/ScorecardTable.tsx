@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ZoneOverviewRow } from '../../api/dashboard';
 import { listSeDirectory } from '../../api/engineersAdmin';
-import { DataTable, type Column } from '../../components/data';
+import { ColumnHeader, DataTable, type Column } from '../../components/data';
 import { InactiveCountLink } from '../../components/domain';
+import { formatCount, formatPct } from '../../lib/fleetFormat';
 import { criticalPlusCount } from '../../lib/slaBucket';
 
 /** The FSM holding-zone name (mirrors the backend `UNZONED_ZONE_NAME`); it has no assigned ZM. */
@@ -36,10 +37,14 @@ function UptimeMeter({ pct }: { pct: number }) {
  * existing `zone-overview` aggregation — no new endpoint. Shared by the Central Tower (CSM) and
  * Pan-India Fleet Command (OH) variants.
  *
- * Columns: Zone · Zonal Manager · Inactive / Total · Inactive > 24Hr (all bands at/above CRITICAL, i.e.
- * every device inactive 24h or longer) · Assigned SEs (dedicated + floating, from the SE directory) ·
- * % Successful Troubleshoot (no backend source yet — NA) · Fleet Uptime. The inactive count and the
- * whole row are click-throughs to that zone's inactive devices.
+ * Columns: Zone · Zonal Manager · Operational Devices · Inactive Operational · Healthy Devices ·
+ * Warehouse Devices · Inactive % · Fleet Health % · Inactive > 24Hr (all bands at/above CRITICAL) ·
+ * Assigned SEs · % Successful Troubleshoot (no backend source yet — NA) · Fleet Uptime. The inactive
+ * count and the whole row are click-throughs to that zone's inactive devices.
+ *
+ * Every count column sums to the matching card in the Operational Fleet strip above, because both read
+ * the same server-side aggregate. The rates divide by Operational Devices, never by the mirrored
+ * total: warehouse stock is reported in its own column and stays out of every ratio.
  */
 export function ScorecardTable({
   rows,
@@ -105,16 +110,80 @@ export function ScorecardTable({
       sortValue: (r) => (r.zoneName === UNZONED_ZONE_NAME ? '' : (r.zonalManagerName ?? '')),
     },
     {
-      key: 'total',
-      header: 'Inactive / Total',
+      key: 'operational',
+      header: <ColumnHeader label="Operational Devices" kpi="operationalDevices" />,
       align: 'right',
       render: (r) => (
-        <span data-testid="scorecard-inactive-total" className="tabular-nums">
-          <InactiveCountLink inactive={r.totalInactive} total={r.totalDevices} scope={{ zoneId: r.zoneId }} />
+        <span data-testid="scorecard-operational" className="tabular-nums text-ink">
+          {formatCount(r.operationalDevices)}
         </span>
       ),
       sortable: true,
-      sortValue: (r) => r.totalInactive,
+      sortValue: (r) => r.operationalDevices,
+    },
+    {
+      key: 'total',
+      // Renamed from "Inactive / Total": the denominator is the operational fleet, and saying so is
+      // the difference between 874/4,093 (21.4%) and the truth, 874/2,482 (35.2%).
+      header: <ColumnHeader label="Inactive Operational" kpi="inactiveOperational" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="scorecard-inactive-total" className="tabular-nums">
+          <InactiveCountLink
+            inactive={r.inactiveOperational}
+            operational={r.operationalDevices}
+            scope={{ zoneId: r.zoneId }}
+          />
+        </span>
+      ),
+      sortable: true,
+      sortValue: (r) => r.inactiveOperational,
+    },
+    {
+      key: 'healthy',
+      header: <ColumnHeader label="Healthy Devices" kpi="healthyOperational" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="scorecard-healthy" className="tabular-nums text-ink">
+          {formatCount(r.healthyOperational)}
+        </span>
+      ),
+      sortable: true,
+      sortValue: (r) => r.healthyOperational,
+    },
+    {
+      key: 'warehouse',
+      header: <ColumnHeader label="Warehouse Devices" kpi="warehouseDevices" />,
+      align: 'right',
+      // Muted on purpose: warehouse stock is not a performance signal and must not read as one — it
+      // sits outside every rate in this table.
+      render: (r) => (
+        <span data-testid="scorecard-warehouse" className="tabular-nums text-ink-muted">
+          {formatCount(r.warehouseDevices)}
+        </span>
+      ),
+      sortable: true,
+      sortValue: (r) => r.warehouseDevices,
+    },
+    {
+      key: 'inactivePct',
+      header: <ColumnHeader label="Inactive %" kpi="inactivePct" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="scorecard-inactive-pct" className="tabular-nums font-semibold text-ink">
+          {formatPct(r.inactivePct)}
+        </span>
+      ),
+      sortable: true,
+      sortValue: (r) => r.inactivePct ?? -1,
+    },
+    {
+      key: 'fleetHealthPct',
+      header: <ColumnHeader label="Fleet Health %" kpi="fleetHealthPct" />,
+      align: 'right',
+      render: (r) => (r.fleetHealthPct != null ? <span data-testid="scorecard-health-pct"><UptimeMeter pct={r.fleetHealthPct} /></span> : <span className="text-ink-muted">—</span>),
+      sortable: true,
+      sortValue: (r) => r.fleetHealthPct ?? -1,
     },
     {
       key: 'inactive24h',

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CompanyPlantRow, ZoneOverviewRow } from '../src/api/dashboard';
 import { CompanyPlantTable } from '../src/pages/dashboard/CompanyPlantTable';
 import { ZoneOverviewTable } from '../src/pages/dashboard/ZoneOverviewTable';
+import { companyPlantRow, zoneRow } from './fixtures/fleet';
 
 // The overview tables now deep-link their inactive counts into the Device Detail list, so each render
 // needs a Router in scope for the <Link>s (same requirement the Scorecard table already carries).
@@ -16,13 +17,13 @@ const inRouter = (ui: JSX.Element) => render(<MemoryRouter>{ui}</MemoryRouter>);
  * are scoped to the table so the filter <option> labels (which echo the same names) don't collide.
  */
 const zoneRows: ZoneOverviewRow[] = [
-  { zoneId: '1', zoneName: 'NORTH', totalInactive: 3, totalDevices: 10, byBucket: { CRITICAL: 3 }, trendPctVsPrevDay: null },
-  { zoneId: '2', zoneName: 'SOUTH', totalInactive: 2, totalDevices: 8, byBucket: { WARNING: 2 }, trendPctVsPrevDay: null },
+  zoneRow({ zoneId: '1', zoneName: 'NORTH', operational: 10, inactive: 3, byBucket: { CRITICAL: 3 } }),
+  zoneRow({ zoneId: '2', zoneName: 'SOUTH', operational: 8, inactive: 2, byBucket: { WARNING: 2 } }),
 ];
 
 const cpRows: CompanyPlantRow[] = [
-  { companyId: '1', companyName: 'Acme', companyTier: 'PLATINUM', zoneId: '1', plantId: '7', plantName: 'Yard-1', totalInactive: 1, totalDevices: 20, byBucket: { CRITICAL: 1 } },
-  { companyId: '2', companyName: 'Globex', companyTier: 'SILVER', zoneId: '1', plantId: '8', plantName: 'Yard-2', totalInactive: 1, totalDevices: 15, byBucket: { WARNING: 1 } },
+  companyPlantRow({ companyId: '1', companyName: 'Acme', companyTier: 'PLATINUM', plantId: '7', plantName: 'Yard-1', operational: 20, inactive: 1, byBucket: { CRITICAL: 1 } }),
+  companyPlantRow({ companyId: '2', companyName: 'Globex', companyTier: 'SILVER', plantId: '8', plantName: 'Yard-2', operational: 15, inactive: 1, byBucket: { WARNING: 1 } }),
 ];
 
 afterEach(() => {

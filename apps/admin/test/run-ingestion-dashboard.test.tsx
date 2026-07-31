@@ -36,9 +36,9 @@ function stubFetch() {
     if (url.includes('/integration/run-pipeline') && opts?.method === 'POST') return json(summary);
     if (url.includes('dashboard/zone-overview')) {
       zoneCalls += 1;
-      const totalInactive = zoneCalls === 1 ? 40 : 55; // pre-run vs post-run refetch
+      const inactiveOperational = zoneCalls === 1 ? 40 : 55; // pre-run vs post-run refetch
       return json([
-        { zoneId: '1', zoneName: 'NORTH', totalInactive, totalDevices: 100, byBucket: { CRITICAL: 3 }, trendPctVsPrevDay: null },
+        { zoneId: '1', zoneName: 'NORTH', inactiveOperational, operationalDevices: 100, healthyOperational: 100 - inactiveOperational, warehouseDevices: 12, mirroredDevices: 112, inactivePct: inactiveOperational, fleetHealthPct: 100 - inactiveOperational, byBucket: { CRITICAL: 3 }, trendPctVsPrevDay: null },
       ]);
     }
     return json([]);

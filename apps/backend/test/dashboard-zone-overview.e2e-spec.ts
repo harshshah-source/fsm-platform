@@ -80,7 +80,7 @@ describe('Issue 06 slice 1 — /api/dashboard/zone-overview', () => {
 
     const rows = res.body as Array<{
       zoneId: string;
-      totalInactive: number;
+      inactiveOperational: number;
       byBucket: Record<string, number>;
       trendPctVsPrevDay: number | null;
     }>;

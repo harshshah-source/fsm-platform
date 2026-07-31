@@ -1,13 +1,17 @@
 import { Link } from 'react-router-dom';
 import { cn } from '../../lib/cn';
-import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
+import { formatInactiveOfOperational } from '../../lib/fleetFormat';
 
 /**
- * The `inactive / total` count as a click-through into the Device Detail list, pre-filtered to exactly
- * the inactive devices the count represents. `scope` carries the entity params the Device Detail page
- * already reads from the query string (`zoneId`, `companyId`, `plantId`, …); `status=INACTIVE` is added
- * here so the destination opens showing only those devices — the same deep-link contract the Zone
- * Scorecard's Critical count uses.
+ * The `inactive / operational` count as a click-through into the Device Detail list, pre-filtered to
+ * exactly the inactive devices the count represents. `scope` carries the entity params the Device
+ * Detail page already reads from the query string (`zoneId`, `companyId`, `plantId`, …);
+ * `status=INACTIVE` is added here so the destination opens showing only those devices — the same
+ * deep-link contract the Zone Scorecard's Critical count uses.
+ *
+ * The denominator is the OPERATIONAL fleet, never the mirrored total. Both figures now come from the
+ * same aggregate on the server, so this ratio no longer divides an operational numerator by a
+ * denominator that quietly included warehouse stock.
  *
  * The whole `N / M` string is one link (never split across nodes) so it reads as a single affordance
  * and existing text assertions keep matching. A zero inactive count is not a link — there is nothing to
@@ -16,17 +20,18 @@ import { formatInactiveOfTotal } from '../../lib/inactiveDuration';
  */
 export function InactiveCountLink({
   inactive,
-  total,
+  operational,
   scope,
   className,
 }: {
   inactive: number;
-  total: number | null | undefined;
+  /** The entity's operational device count — the denominator. */
+  operational: number | null | undefined;
   /** Device Detail query params identifying the scope, e.g. `{ zoneId }`, `{ companyId }`, `{ plantId }`. */
   scope: Record<string, string>;
   className?: string;
 }) {
-  const label = formatInactiveOfTotal(inactive, total);
+  const label = formatInactiveOfOperational(inactive, operational);
   if (inactive <= 0) {
     return <span className={cn('tabular-nums text-ink-muted', className)}>{label}</span>;
   }

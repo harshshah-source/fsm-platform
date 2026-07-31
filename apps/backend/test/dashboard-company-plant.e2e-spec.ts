@@ -94,7 +94,7 @@ describe('Issue 06 slice 2 — /api/dashboard/company-plant-overview', () => {
       companyTier: string;
       plantId: string;
       zoneId: string;
-      totalInactive: number;
+      inactiveOperational: number;
       byBucket: Record<string, number>;
     }>;
     const coAOther = rows.find(

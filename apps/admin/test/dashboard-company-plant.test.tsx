@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CompanyPlantRow } from '../src/api/dashboard';
 import { CompanyPlantTable } from '../src/pages/dashboard/CompanyPlantTable';
+import { companyPlantRow } from './fixtures/fleet';
 
 // A device-ticket row navigates to `/tickets/:ticketId`, so the table needs a Router in scope.
 const renderTable = (rows: CompanyPlantRow[]) =>
@@ -18,17 +19,16 @@ const renderTable = (rows: CompanyPlantRow[]) =>
  * Companies group their plants; expanding a plant loads its devices from the ticket list. CSV export.
  */
 const rows: CompanyPlantRow[] = [
-  {
+  companyPlantRow({
     companyId: '10',
     companyName: 'Acme Logistics',
     companyTier: 'PLATINUM',
-    zoneId: '1',
     plantId: '7',
     plantName: 'Yard-1',
-    totalInactive: 2,
-    totalDevices: 25,
+    operational: 25,
+    inactive: 2,
     byBucket: { CRITICAL: 2 },
-  },
+  }),
 ];
 
 function stubTickets(deviceId: string) {
@@ -49,28 +49,26 @@ function stubTickets(deviceId: string) {
 
 /** Two companies, neither named or ID'd after the device we'll search for — only the ticket search resolves it. */
 const twoCompanyRows: CompanyPlantRow[] = [
-  {
+  companyPlantRow({
     companyId: '10',
     companyName: 'Acme Logistics',
     companyTier: 'PLATINUM',
-    zoneId: '1',
     plantId: '7',
     plantName: 'Yard-1',
-    totalInactive: 2,
-    totalDevices: 25,
+    operational: 25,
+    inactive: 2,
     byBucket: { CRITICAL: 2 },
-  },
-  {
+  }),
+  companyPlantRow({
     companyId: '20',
     companyName: 'Globex Freight',
     companyTier: 'SILVER',
-    zoneId: '1',
     plantId: '9',
     plantName: 'Yard-2',
-    totalInactive: 1,
-    totalDevices: 10,
+    operational: 10,
+    inactive: 1,
     byBucket: { WARNING: 1 },
-  },
+  }),
 ];
 
 /** Stubs `/tickets?q=...` to resolve a device id to Globex's plant (id 9); everything else empty. */

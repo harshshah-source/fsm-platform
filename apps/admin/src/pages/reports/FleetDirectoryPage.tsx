@@ -7,6 +7,7 @@ import {
   type FleetDirectoryPlant,
 } from '../../api/dashboard';
 import {
+  ColumnHeader,
   DataTable,
   EmptyState,
   MetricStrip,
@@ -17,16 +18,21 @@ import {
 } from '../../components/data';
 import { PlantName, TierBadge } from '../../components/domain';
 import { cn } from '../../lib/cn';
+import { formatCount, formatPct, formatStamp } from '../../lib/fleetFormat';
 import { formatPlantDisplayName } from '../../lib/plantNames';
-
-const nf = new Intl.NumberFormat('en-IN');
 
 type Tab = 'companies' | 'plants';
 
 /**
  * Fleet Directory (Issue 122b — the Companies / Plants KPI cards' click-through). Every company and
- * plant in the caller's scope BY NAME with device counts, searchable, exportable, and cross-linked:
- * a company row jumps to its plants; a plant row deep-links into the Device Detail list.
+ * plant in the caller's scope BY NAME, with the full operational breakdown (Mirrored · Operational ·
+ * Warehouse · Inactive · Healthy · Inactive %) and two freshness stamps — Last Snapshot (when FSM last
+ * re-derived the rows) and Last Activity (when the fleet last pinged). Searchable, sortable, and
+ * cross-linked: a company row jumps to its plants; a plant row deep-links into the Device Detail list.
+ *
+ * The column totals reconcile exactly with the dashboard KPI strip. They previously did not: this page
+ * selected a bare device count that included warehouse stock, so it summed to 23,238 against an
+ * "Active Fleet" KPI of 17,415 — while the endpoint's own docstring claimed the two always agreed.
  */
 export function FleetDirectoryPage() {
   const navigate = useNavigate();
@@ -77,19 +83,113 @@ export function FleetDirectoryPage() {
     [dir, term, companyFilter],
   );
 
-  const metrics: Metric[] = useMemo(
-    () => [
-      { label: 'Companies', value: dir ? nf.format(dir.companies.length) : '—', tone: 'info' },
-      { label: 'Plants', value: dir ? nf.format(dir.plants.length) : '—', tone: 'info' },
+  // Column totals across the whole directory — these are the same figures the dashboard KPI strip
+  // shows, because both are the same server-side aggregate at different group-by levels. Summed from
+  // the unfiltered directory so the strip describes the fleet, not the current search.
+  const metrics: Metric[] = useMemo(() => {
+    const total = (pick: (p: FleetDirectoryPlant) => number) =>
+      dir ? formatCount(dir.plants.reduce((s, p) => s + pick(p), 0)) : '—';
+    return [
+      { label: 'Companies', value: dir ? formatCount(dir.companies.length) : '—', tone: 'info', kpi: 'companies' },
+      { label: 'Plants', value: dir ? formatCount(dir.plants.length) : '—', tone: 'info', kpi: 'plants' },
       {
-        label: 'Devices',
-        value: dir ? nf.format(dir.plants.reduce((s, p) => s + p.deviceCount, 0)) : '—',
-        hint: 'tracked fleet',
+        label: 'Operational Devices',
+        value: total((p) => p.operationalDevices),
+        hint: 'deployed & tracked',
         tone: 'brand',
+        kpi: 'operationalDevices',
+        testId: 'directory-operational-total',
       },
-    ],
-    [dir],
-  );
+      {
+        label: 'Warehouse Devices',
+        value: total((p) => p.warehouseDevices),
+        hint: 'removed from field ops',
+        tone: 'neutral',
+        kpi: 'warehouseDevices',
+        testId: 'directory-warehouse-total',
+      },
+      {
+        label: 'Inactive Operational',
+        value: total((p) => p.inactiveOperational),
+        hint: 'silent past the threshold',
+        tone: 'warning',
+        kpi: 'inactiveOperational',
+      },
+      {
+        label: 'Healthy Operational',
+        value: total((p) => p.healthyOperational),
+        hint: 'reporting normally',
+        tone: 'success',
+        kpi: 'healthyOperational',
+      },
+    ];
+  }, [dir]);
+
+  /** The count columns shared by both tabs — same order, same definitions, whichever entity is listed. */
+  const countColumns = <T extends FleetDirectoryCompany | FleetDirectoryPlant>(): Column<T>[] => [
+    {
+      key: 'mirrored',
+      header: <ColumnHeader label="Mirrored" kpi="mirroredDevices" />,
+      align: 'right',
+      render: (r) => <span className="tabular-nums text-ink-muted">{formatCount(r.mirroredDevices)}</span>,
+      sortable: true,
+      sortValue: (r) => r.mirroredDevices,
+    },
+    {
+      key: 'operational',
+      header: <ColumnHeader label="Operational" kpi="operationalDevices" />,
+      align: 'right',
+      render: (r) => <span className="tabular-nums font-semibold text-ink-strong">{formatCount(r.operationalDevices)}</span>,
+      sortable: true,
+      sortValue: (r) => r.operationalDevices,
+    },
+    {
+      key: 'warehouse',
+      header: <ColumnHeader label="Warehouse" kpi="warehouseDevices" />,
+      align: 'right',
+      render: (r) => <span className="tabular-nums text-ink-muted">{formatCount(r.warehouseDevices)}</span>,
+      sortable: true,
+      sortValue: (r) => r.warehouseDevices,
+    },
+    {
+      key: 'inactive',
+      header: <ColumnHeader label="Inactive" kpi="inactiveOperational" />,
+      align: 'right',
+      render: (r) => <span className="tabular-nums text-ink">{formatCount(r.inactiveOperational)}</span>,
+      sortable: true,
+      sortValue: (r) => r.inactiveOperational,
+    },
+    {
+      key: 'healthy',
+      header: <ColumnHeader label="Healthy" kpi="healthyOperational" />,
+      align: 'right',
+      render: (r) => <span className="tabular-nums text-ink">{formatCount(r.healthyOperational)}</span>,
+      sortable: true,
+      sortValue: (r) => r.healthyOperational,
+    },
+    {
+      key: 'inactivePct',
+      header: <ColumnHeader label="Inactive %" kpi="inactivePct" />,
+      align: 'right',
+      render: (r) => <span className="tabular-nums font-semibold text-ink">{formatPct(r.inactivePct)}</span>,
+      sortable: true,
+      sortValue: (r) => r.inactivePct ?? -1,
+    },
+    {
+      key: 'lastSnapshot',
+      header: <ColumnHeader label="Last Snapshot" kpi="lastSnapshotAt" align="left" />,
+      render: (r) => <span className="whitespace-nowrap text-xs tabular-nums text-ink-muted">{formatStamp(r.lastSnapshotAt)}</span>,
+      sortable: true,
+      sortValue: (r) => r.lastSnapshotAt ?? '',
+    },
+    {
+      key: 'lastActivity',
+      header: <ColumnHeader label="Last Activity" kpi="lastActivityAt" align="left" />,
+      render: (r) => <span className="whitespace-nowrap text-xs tabular-nums text-ink-muted">{formatStamp(r.lastActivityAt)}</span>,
+      sortable: true,
+      sortValue: (r) => r.lastActivityAt ?? '',
+    },
+  ];
 
   const companyColumns: Column<FleetDirectoryCompany>[] = [
     {
@@ -109,18 +209,11 @@ export function FleetDirectoryPage() {
       key: 'plants',
       header: 'Plants',
       align: 'right',
-      render: (c) => <span className="tabular-nums">{nf.format(c.plantCount)}</span>,
+      render: (c) => <span className="tabular-nums">{formatCount(c.plantCount)}</span>,
       sortable: true,
       sortValue: (c) => c.plantCount,
     },
-    {
-      key: 'devices',
-      header: 'Devices',
-      align: 'right',
-      render: (c) => <span className="tabular-nums">{nf.format(c.deviceCount)}</span>,
-      sortable: true,
-      sortValue: (c) => c.deviceCount,
-    },
+    ...countColumns<FleetDirectoryCompany>(),
   ];
 
   const plantColumns: Column<FleetDirectoryPlant>[] = [
@@ -144,14 +237,7 @@ export function FleetDirectoryPage() {
       sortValue: (p) => p.companyName ?? '',
     },
     { key: 'zone', header: 'Zone', render: (p) => <span className="text-ink-muted">{p.zoneName ?? '—'}</span> },
-    {
-      key: 'devices',
-      header: 'Devices',
-      align: 'right',
-      render: (p) => <span className="tabular-nums">{nf.format(p.deviceCount)}</span>,
-      sortable: true,
-      sortValue: (p) => p.deviceCount,
-    },
+    ...countColumns<FleetDirectoryPlant>(),
   ];
 
   const tabBtn = (t: Tab, label: string, count: number | null) => (
@@ -166,7 +252,7 @@ export function FleetDirectoryPage() {
       )}
     >
       {label}
-      {count !== null && <span className="ml-1.5 text-xs tabular-nums text-ink-muted">{nf.format(count)}</span>}
+      {count !== null && <span className="ml-1.5 text-xs tabular-nums text-ink-muted">{formatCount(count)}</span>}
     </button>
   );
 

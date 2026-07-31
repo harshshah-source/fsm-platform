@@ -49,7 +49,13 @@ describe('Zone Operations Dashboard — Zone Overview (Issue 06 AC#2/#5)', () =>
         {
           zoneId: '1',
           zoneName: 'NORTH',
-          totalInactive: 5,
+          operationalDevices: 100,
+          inactiveOperational: 5,
+          healthyOperational: 95,
+          warehouseDevices: 12,
+          mirroredDevices: 112,
+          inactivePct: 5,
+          fleetHealthPct: 95,
           byBucket: { CRITICAL: 3, WARNING: 2 },
           trendPctVsPrevDay: null,
         },
@@ -61,7 +67,11 @@ describe('Zone Operations Dashboard — Zone Overview (Issue 06 AC#2/#5)', () =>
 
     const table = await screen.findByRole('table', { name: /zone overview/i });
     const row = within(table).getByText('NORTH').closest('tr')!;
-    expect(within(row).getByText('5')).toBeInTheDocument(); // total inactive
+    // Inactive Operational reads `inactive / operational` in one cell — the denominator is the
+    // operational fleet (100), never the mirrored total (112, which includes 12 warehouse devices).
+    expect(within(row).getByTestId('zone-inactive-total')).toHaveTextContent('5 / 100');
+    expect(within(row).getByTestId('zone-operational')).toHaveTextContent('100');
+    expect(within(row).getByTestId('zone-warehouse')).toHaveTextContent('12');
     // CRITICAL bucket cell carries the bucket identity for colour coding.
     const critical = within(row).getByTestId('bucket-CRITICAL');
     expect(critical).toHaveTextContent('3');

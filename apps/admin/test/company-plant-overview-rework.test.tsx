@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CompanyPlantRow } from '../src/api/dashboard';
 import { CompanyPlantTable } from '../src/pages/dashboard/CompanyPlantTable';
+import { companyPlantRow } from './fixtures/fleet';
 
 // The plant-row drill-down loads open tickets — stub the client so a plant click is deterministic.
 const listMock = vi.fn(async (..._args: unknown[]) => [] as unknown[]);
@@ -11,14 +12,14 @@ vi.mock('../src/api/tickets', () => ({
   apiTicketsList: (...args: unknown[]) => listMock(...args),
 }));
 
-const plantA: CompanyPlantRow = {
-  companyId: '9', companyName: 'Acme', companyTier: 'GOLD', zoneId: '1',
-  plantId: '5', plantName: 'Yard-1', totalInactive: 2, totalDevices: 40, byBucket: { CRITICAL: 2 },
-};
-const plantB: CompanyPlantRow = {
-  companyId: '9', companyName: 'Acme', companyTier: 'GOLD', zoneId: '1',
-  plantId: '6', plantName: 'Yard-2', totalInactive: 1, totalDevices: 10, byBucket: { WARNING: 1 },
-};
+const plantA: CompanyPlantRow = companyPlantRow({
+  companyId: '9', companyName: 'Acme', plantId: '5', plantName: 'Yard-1',
+  operational: 40, inactive: 2, byBucket: { CRITICAL: 2 },
+});
+const plantB: CompanyPlantRow = companyPlantRow({
+  companyId: '9', companyName: 'Acme', plantId: '6', plantName: 'Yard-2',
+  operational: 10, inactive: 1, byBucket: { WARNING: 1 },
+});
 
 function renderTable(uptime?: Map<string, number>) {
   return render(
@@ -44,9 +45,11 @@ describe('Issue 135 — Company/Plant Overview rework', () => {
     expect(cells[3]).toHaveTextContent('2');
   });
 
-  it('has a Fleet Uptime % column and no standalone Devices column', () => {
+  it('has an Uptime % column and no standalone Devices column', () => {
     renderTable();
-    expect(screen.getByRole('columnheader', { name: /fleet uptime/i })).toBeInTheDocument();
+    // Shortened from "Fleet Uptime %" so it fits this table's dense header row without wrapping onto
+    // the neighbouring column's info icon.
+    expect(screen.getByRole('columnheader', { name: /uptime/i })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /^devices$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /view devices/i })).not.toBeInTheDocument();
   });

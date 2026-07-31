@@ -71,9 +71,10 @@ function ShellFrame({ role }: { role: string }) {
           </div>
         )}
 
-        {/* Tight gutter by design: the shell already frames the content with the sidebar and top bar,
-            so a wide inner margin only steals width from the tables. */}
-        <main className="flex-1 px-3 py-4 sm:px-4 lg:px-5 lg:py-5" onClick={collapseFromBackground}>
+        {/* Minimal gutter by design: the shell already frames the content with the sidebar and top bar,
+            so a wide inner margin only steals width from the tables — trimmed again (was
+            px-3/sm:px-4/lg:px-5) after the dense Company/Plant Overview table needed the room. */}
+        <main className="flex-1 px-2 py-3 sm:px-3 lg:px-4 lg:py-4" onClick={collapseFromBackground}>
           <div key={pathname} className="enterprise-page animate-page-in">
             <Outlet />
           </div>

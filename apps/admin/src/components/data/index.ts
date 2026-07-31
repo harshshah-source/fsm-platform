@@ -4,6 +4,7 @@ export * from './EditableCell';
 export * from './ExportMenu';
 export * from './feedback';
 export * from './FilterBar';
+export * from './KpiInfo';
 export * from './MetricStrip';
 export * from './PageHeader';
 export * from './RollingNumber';

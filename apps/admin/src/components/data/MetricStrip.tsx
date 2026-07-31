@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { cn } from '../../lib/cn';
+import { KpiInfo } from './KpiInfo';
 
 export type MetricTone = 'brand' | 'info' | 'success' | 'warning' | 'critical' | 'neutral' | 'verified';
 
@@ -8,6 +9,12 @@ export interface Metric {
   value: ReactNode;
   hint?: ReactNode;
   tone?: MetricTone;
+  /**
+   * A `lib/kpiCatalog` key. Renders the info affordance beside the label, so every KPI carries its own
+   * definition, exclusions, source and formula (Part 10 transparency). Omit only for cards that are
+   * not a metric (e.g. the Fleet-directory composite card).
+   */
+  kpi?: string;
   /** Optional stable hook for tests / analytics to target a specific KPI card. */
   testId?: string;
   /** When set, the whole card is a click-through (rendered as a button with hover affordance). */
@@ -50,6 +57,7 @@ export function MetricCard({
   value,
   hint,
   tone = 'neutral',
+  kpi,
   testId,
   onClick,
   hero = false,
@@ -73,16 +81,25 @@ export function MetricCard({
       {hint && <div className={cn('mt-0.5 text-xs', hero ? 'text-white/45' : 'text-ink-muted')}>{hint}</div>}
     </div>
   );
-  if (onClick) {
-    return (
-      <button type="button" data-testid={testId} onClick={onClick} className={className}>
-        {body}
-      </button>
-    );
-  }
-  return (
+  const card = onClick ? (
+    <button type="button" data-testid={testId} onClick={onClick} className={className}>
+      {body}
+    </button>
+  ) : (
     <div data-testid={testId} className={className}>
       {body}
+    </div>
+  );
+  if (!kpi) return card;
+  // The info trigger is a SIBLING of the card, not a child: a clickable card renders as a <button>,
+  // and a button inside a button is invalid HTML (React warns, and the inner click target is
+  // unreliable). Overlaying it in the corner keeps both affordances real.
+  return (
+    <div className="relative">
+      {card}
+      <span className="absolute right-2.5 top-3 z-20">
+        <KpiInfo kpi={kpi} tone={hero ? 'muted' : 'default'} />
+      </span>
     </div>
   );
 }

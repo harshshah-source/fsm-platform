@@ -6,16 +6,16 @@ import type { CompanyPlantRow, ZoneOverviewRow } from '../src/api/dashboard';
 import { ScorecardTable } from '../src/pages/dashboard/ScorecardTable';
 import { ZoneOverviewTable } from '../src/pages/dashboard/ZoneOverviewTable';
 import { CompanyPlantTable } from '../src/pages/dashboard/CompanyPlantTable';
+import { companyPlantRow, zoneRow } from './fixtures/fleet';
 
-/** Issue 2 — every inactive-device count renders its `inactive / total` denominator. */
-const zone: ZoneOverviewRow = {
-  zoneId: '1', zoneName: 'NORTH', totalInactive: 3, totalDevices: 10,
-  byBucket: { CRITICAL: 3 }, trendPctVsPrevDay: null,
-};
-const plant: CompanyPlantRow = {
-  companyId: '9', companyName: 'Acme', companyTier: 'GOLD', zoneId: '1',
-  plantId: '5', plantName: 'Yard-1', totalInactive: 2, totalDevices: 40, byBucket: { CRITICAL: 2 },
-};
+/** Issue 2 — every inactive-device count renders its `inactive / operational` denominator. */
+const zone: ZoneOverviewRow = zoneRow({
+  zoneId: '1', zoneName: 'NORTH', operational: 10, inactive: 3, byBucket: { CRITICAL: 3 },
+});
+const plant: CompanyPlantRow = companyPlantRow({
+  companyId: '9', companyName: 'Acme', plantId: '5', plantName: 'Yard-1',
+  operational: 40, inactive: 2, byBucket: { CRITICAL: 2 },
+});
 
 describe('Issue 2 — inactive / total presentation', () => {
   it('Scorecard shows inactive / total per zone', () => {

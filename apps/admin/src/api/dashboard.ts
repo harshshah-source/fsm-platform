@@ -13,28 +13,44 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export interface ZoneOverviewRow {
+/**
+ * The device counts for one entity, over a SINGLE operational population (mirrors the backend
+ * `FleetCounts`). Every `inactive / total` on the dashboard reads `inactiveOperational /
+ * operationalDevices` — never `mirroredDevices`, which includes warehouse stock and so silently
+ * understated every inactivity rate before 2026-07-29.
+ */
+export interface FleetCounts {
+  /** Operational + warehouse. What FSM mirrors for this entity — NOT the AutoPlant catalog. */
+  mirroredDevices: number;
+  /** Deployed and tracked (`is_departed = false`) — the denominator for every rate. */
+  operationalDevices: number;
+  /** Removed from field operations. Reconciles separately; never in a rate. */
+  warehouseDevices: number;
+  /** Operational devices currently inactive. Equals the sum of the per-SLA-bucket columns. */
+  inactiveOperational: number;
+  /** `healthyOperational + inactiveOperational === operationalDevices`, at every level. */
+  healthyOperational: number;
+  /** Percentage of the OPERATIONAL fleet; null when the entity has no operational devices. */
+  inactivePct: number | null;
+  fleetHealthPct: number | null;
+}
+
+export interface ZoneOverviewRow extends FleetCounts {
   zoneId: string;
   zoneName: string;
   /** The zone's Zonal Manager display name (Issue 122 scorecard column); null when unset. */
   zonalManagerName?: string | null;
-  totalInactive: number;
-  /** All devices (active + inactive) in the zone — denominator for `inactive / total` (Issue 2). */
-  totalDevices: number;
   byBucket: Record<string, number>;
   trendPctVsPrevDay: number | null;
 }
 
-export interface CompanyPlantRow {
+export interface CompanyPlantRow extends FleetCounts {
   companyId: string;
   companyName: string;
   companyTier: string;
   zoneId: string;
   plantId: string;
   plantName: string;
-  totalInactive: number;
-  /** All devices (active + inactive) at this plant — denominator for `inactive / total` (Issue 2). */
-  totalDevices: number;
   byBucket: Record<string, number>;
 }
 
@@ -68,32 +84,39 @@ export interface ActionRequiredCard {
   source: string;
 }
 
-/** Headline fleet counts for the KPI strip (Issue 122b): companies / plants / devices in scope. */
-export interface FleetSummary {
+/** Headline fleet counts for the KPI strip: companies / plants / the operational breakdown in scope. */
+export interface FleetSummary extends FleetCounts {
   companies: number;
   plants: number;
-  /** ACTIVE (deployed) fleet in scope — departed devices excluded. Rendered as "Active Fleet". */
-  devices: number;
-  /** Raw AutoPlant device-catalog total from the last master sync (pan-India). Null until recorded;
-   *  rendered as "Total Devices" on the OH dashboard. */
-  sourceDevices: number | null;
+  /**
+   * SOURCE metric: the raw AutoPlant device-catalog total from the last successful master sync,
+   * pan-India, all deployment statuses. Rendered as "AutoPlant Catalog" — never compared against the
+   * operational counts, which come from a different system as of a different moment.
+   */
+  catalogDevices: number | null;
+  /** ISO timestamp of the master sync that produced `catalogDevices`. */
+  lastMasterSyncAt: string | null;
+  /** ISO timestamp of the latest successful telemetry snapshot — how fresh the inactivity ages are. */
+  lastSnapshotAt: string | null;
 }
 
 /** One company / plant row in the Fleet Directory (the Companies/Plants KPI click-through). */
-export interface FleetDirectoryCompany {
+export interface FleetDirectoryCompany extends FleetCounts {
   companyId: string;
   name: string;
   tier: string | null;
   plantCount: number;
-  deviceCount: number;
+  lastSnapshotAt: string | null;
+  lastActivityAt: string | null;
 }
-export interface FleetDirectoryPlant {
+export interface FleetDirectoryPlant extends FleetCounts {
   plantId: string;
   name: string;
   companyId: string | null;
   companyName: string | null;
   zoneName: string | null;
-  deviceCount: number;
+  lastSnapshotAt: string | null;
+  lastActivityAt: string | null;
 }
 export interface FleetDirectory {
   companies: FleetDirectoryCompany[];

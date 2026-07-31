@@ -1,13 +1,14 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import type { CompanyPlantRow } from '../../api/dashboard';
-import { EmptyState, FilterSelect, SearchInput, Skeleton, TableDownloadButton, TableToolbar } from '../../components/data';
+import type { CompanyPlantRow, FleetCounts } from '../../api/dashboard';
+import { ColumnHeader, EmptyState, FilterSelect, SearchInput, Skeleton, TableDownloadButton, TableToolbar } from '../../components/data';
 import { DurationBadge, InactiveCountLink, PlantName, StatusPill, TierBadge } from '../../components/domain';
 import { Badge } from '../../components/ui';
 import { IconChevronRight, IconTruck } from '../../components/ui/icons';
 import { apiTicketsList, type TicketRow } from '../../api/tickets';
 import { cn } from '../../lib/cn';
 import { exportTable, type ExportFormat } from '../../lib/exportFile';
+import { formatCount, formatPct } from '../../lib/fleetFormat';
 import {
   BUCKET_LABEL,
   BUCKET_LABEL_RANGE,
@@ -17,13 +18,19 @@ import {
 } from '../../lib/slaBucket';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 
-interface CompanyGroup {
+/**
+ * A company's roll-up of its plant rows. The counts are plain sums of the plant rows — which are
+ * themselves slices of the same server aggregate the zone table and the KPI strip use — so a company
+ * total, a zone total and the dashboard KPI are the same number viewed at three group-by levels.
+ *
+ * The two rates are re-derived here rather than averaged: averaging per-plant percentages would weight
+ * a 4-device plant the same as a 4,000-device one.
+ */
+interface CompanyGroup extends FleetCounts {
   companyId: string;
   companyName: string;
   companyTier: string;
   plants: CompanyPlantRow[];
-  totalInactive: number;
-  totalDevices: number;
   byBucket: Record<string, number>;
 }
 
@@ -37,16 +44,29 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
         companyName: r.companyName,
         companyTier: r.companyTier,
         plants: [],
-        totalInactive: 0,
-        totalDevices: 0,
+        mirroredDevices: 0,
+        operationalDevices: 0,
+        warehouseDevices: 0,
+        inactiveOperational: 0,
+        healthyOperational: 0,
+        inactivePct: null,
+        fleetHealthPct: null,
         byBucket: {},
       };
       byCompany.set(r.companyId, g);
     }
     g.plants.push(r);
-    g.totalInactive += r.totalInactive;
-    g.totalDevices += r.totalDevices;
+    g.mirroredDevices += r.mirroredDevices;
+    g.operationalDevices += r.operationalDevices;
+    g.warehouseDevices += r.warehouseDevices;
+    g.inactiveOperational += r.inactiveOperational;
+    g.healthyOperational += r.healthyOperational;
     for (const b of SLA_BUCKETS) g.byBucket[b] = (g.byBucket[b] ?? 0) + (r.byBucket[b] ?? 0);
+  }
+  for (const g of byCompany.values()) {
+    const op = g.operationalDevices;
+    g.inactivePct = op > 0 ? Math.round((g.inactiveOperational / op) * 1000) / 10 : null;
+    g.fleetHealthPct = op > 0 ? Math.round((g.healthyOperational / op) * 1000) / 10 : null;
   }
   return [...byCompany.values()];
 }
@@ -55,15 +75,9 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
 // from least to most severe. `SLA_BUCKETS` is most-severe-first, so reverse a copy.
 const SLA_BUCKETS_ASC = [...SLA_BUCKETS].reverse();
 
-// S.No. + company + tier + plants + plant + inactive/total + one column per SLA bucket + fleet uptime %.
-const COLSPAN = 7 + SLA_BUCKETS_ASC.length;
-
-/** Inactive devices as a percentage of the fleet at that entity (inactive / total devices). One
- *  decimal; degrades to a dash when the denominator is unknown so it never renders `NaN%`. */
-function inactivePct(inactive: number, total: number | null | undefined): string {
-  if (typeof total !== 'number' || !Number.isFinite(total) || total <= 0) return '—';
-  return `${((inactive / total) * 100).toFixed(1)}%`;
-}
+// S.No. + company + tier + plants + plant + operational + inactive/operational + healthy + warehouse
+// + inactive % + fleet health % + one column per SLA bucket + fleet uptime %.
+const COLSPAN = 12 + SLA_BUCKETS_ASC.length;
 
 /** Fleet Uptime % for one plant — one decimal, or a dash when the monthly summary has no value yet
  *  (the report is empty until an OH recompute runs — Issue 135). */
@@ -213,8 +227,8 @@ export function CompanyPlantTable({
     // most (or least) inactive company floats to the top with its worst plants first.
     const dir = sortOrder === 'INACTIVE_DESC' ? -1 : 1;
     return filtered
-      .map((g) => ({ ...g, plants: [...g.plants].sort((a, b) => (a.totalInactive - b.totalInactive) * dir) }))
-      .sort((a, b) => (a.totalInactive - b.totalInactive) * dir);
+      .map((g) => ({ ...g, plants: [...g.plants].sort((a, b) => (a.inactiveOperational - b.inactiveOperational) * dir) }))
+      .sort((a, b) => (a.inactiveOperational - b.inactiveOperational) * dir);
   }, [rows, term, sortOrder, deviceMatchPlantIds]);
 
   const toggleCompany = (companyId: string) => {
@@ -252,7 +266,8 @@ export function CompanyPlantTable({
     const plantsByCompany = new Map(companies.map((g) => [g.companyId, g.plants.length]));
     const chosen = companies.flatMap((g) => g.plants);
     const headers = [
-      'S.No.', 'Company', 'Tier', 'Plants', 'Plant', 'Total inactive', 'Total devices', 'Inactive %',
+      'S.No.', 'Company', 'Tier', 'Plants', 'Plant', 'Operational devices', 'Inactive operational',
+      'Healthy devices', 'Warehouse devices', 'Inactive %', 'Fleet Health %',
       'Fleet Uptime %', 'Critical', ...SLA_BUCKETS.map((b) => BUCKET_LABEL[b]),
     ];
     const body = chosen.map((r, i) => [
@@ -261,9 +276,12 @@ export function CompanyPlantTable({
       r.companyTier,
       plantsByCompany.get(r.companyId) ?? '',
       formatPlantDisplayName(r.plantName),
-      r.totalInactive,
-      r.totalDevices,
-      inactivePct(r.totalInactive, r.totalDevices),
+      r.operationalDevices,
+      r.inactiveOperational,
+      r.healthyOperational,
+      r.warehouseDevices,
+      formatPct(r.inactivePct),
+      formatPct(r.fleetHealthPct),
       fmtUptime(plantUptime?.get(r.plantId)),
       criticalOnlyCount(r.byBucket),
       ...SLA_BUCKETS.map((b) => r.byBucket[b] ?? 0),
@@ -274,6 +292,11 @@ export function CompanyPlantTable({
   // Fixed layout (`table-fixed` + colgroup below) keeps the whole table at 100% of the card width so the
   // 8 SLA-bucket columns never force a horizontal scroll; headers/cells stay compact and truncate/wrap.
   const th = 'px-2.5 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-white';
+  // Tighter horizontal padding for the narrow operational-breakdown columns (Operational / Inactive /
+  // Healthy / Warehouse / Inactive % / Health %) — this table packs 12+ columns into the viewport, and
+  // the standard `th` padding alone left too little room for a label + its info icon to sit without
+  // wrapping into each other.
+  const thDense = 'px-1.5';
   const thBucket = 'px-1 py-2.5 text-right text-[10px] font-bold uppercase tracking-tight text-white';
   const td = 'px-2.5 py-2.5';
   const tdBucket = 'px-1 py-2.5 text-right text-xs tabular-nums text-ink';
@@ -327,15 +350,20 @@ export function CompanyPlantTable({
             {/* Leading 3.5rem S.No. column (#160) — the percentage columns below are shaved down from
                 their pre-#160 total (100%) to leave it room. */}
             <col style={{ width: '3.5rem' }} />
-            <col style={{ width: '13%' }} />
+            <col style={{ width: '11%' }} />
+            <col style={{ width: '5%' }} />
+            <col style={{ width: '4%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '5%' }} />
             <col style={{ width: '7%' }} />
             <col style={{ width: '5%' }} />
-            <col style={{ width: '8%' }} />
-            <col style={{ width: '9%' }} />
+            <col style={{ width: '5%' }} />
             {SLA_BUCKETS_ASC.map((b) => (
-              <col key={b} style={{ width: '6%' }} />
+              <col key={b} style={{ width: '4%' }} />
             ))}
-            <col style={{ width: '7%' }} />
+            <col style={{ width: '6%' }} />
           </colgroup>
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900">
@@ -344,9 +372,29 @@ export function CompanyPlantTable({
               <th className={th}>Tier</th>
               <th className={cn(th, 'text-right')}>Plants</th>
               <th className={th}>Plant</th>
-              <th className={cn(th, 'text-right')}>Inactive / Total</th>
+              <th className={cn(th, thDense, 'text-right')}>
+                <ColumnHeader label="Operational" kpi="operationalDevices" stacked />
+              </th>
+              {/* Renamed from "Inactive / Total": the denominator is the operational fleet, so a
+                  warehouse-heavy company no longer reads as healthier than it is. "Inactive" alone
+                  reads unambiguously beside the "Operational" column it sits next to. */}
+              <th className={cn(th, thDense, 'text-right')}>
+                <ColumnHeader label="Inactive" kpi="inactiveOperational" stacked />
+              </th>
+              <th className={cn(th, thDense, 'text-right')}>
+                <ColumnHeader label="Healthy" kpi="healthyOperational" stacked />
+              </th>
+              <th className={cn(th, thDense, 'text-right')}>
+                <ColumnHeader label="Warehouse" kpi="warehouseDevices" stacked />
+              </th>
+              <th className={cn(th, thDense, 'text-right')}>
+                <ColumnHeader label="Inactive %" kpi="inactivePct" stacked />
+              </th>
+              <th className={cn(th, thDense, 'text-right')}>
+                <ColumnHeader label="Health %" kpi="fleetHealthPct" stacked />
+              </th>
               <BucketHeaderCells className={thBucket} />
-              <th className={cn(th, 'text-right')}>Fleet Uptime %</th>
+              <th className={cn(th, thDense, 'text-right')}>Uptime %</th>
             </tr>
           </thead>
           <tbody>
@@ -382,12 +430,28 @@ export function CompanyPlantTable({
                     </td>
                     <td className={cn(td, 'text-right tabular-nums text-ink')}>{co.plants.length}</td>
                     <td className={cn(td, 'text-ink-muted')}>—</td>
+                    <td data-testid="company-operational" className={cn(td, 'text-right tabular-nums text-ink')}>
+                      {formatCount(co.operationalDevices)}
+                    </td>
                     <td className={cn(td, 'text-right tabular-nums text-ink')}>
                       <InactiveCountLink
-                        inactive={co.totalInactive}
-                        total={co.totalDevices}
+                        inactive={co.inactiveOperational}
+                        operational={co.operationalDevices}
                         scope={{ companyId: co.companyId }}
                       />
+                    </td>
+                    <td data-testid="company-healthy" className={cn(td, 'text-right tabular-nums text-ink')}>
+                      {formatCount(co.healthyOperational)}
+                    </td>
+                    {/* Muted: warehouse stock is not a performance signal and sits outside every rate. */}
+                    <td data-testid="company-warehouse" className={cn(td, 'text-right tabular-nums text-ink-muted')}>
+                      {formatCount(co.warehouseDevices)}
+                    </td>
+                    <td data-testid="company-inactive-pct" className={cn(td, 'text-right tabular-nums font-semibold text-ink')}>
+                      {formatPct(co.inactivePct)}
+                    </td>
+                    <td data-testid="company-health-pct" className={cn(td, 'text-right tabular-nums font-semibold text-ink')}>
+                      {formatPct(co.fleetHealthPct)}
                     </td>
                     <BucketCountCells byBucket={co.byBucket} className={tdBucket} scope={{ companyId: co.companyId }} />
                     <td className={td} />
@@ -447,22 +511,27 @@ function CompanyPlants({
   const th = `${cellPad} font-bold`;
   const thBucket = 'px-1 py-1.5 text-right text-[10px] font-bold';
   const tdBucket = 'px-1 py-1.5 text-right text-xs tabular-nums text-ink';
-  // The plant sub-table's expansion cell spans S.No. · Plant · Inactive/Total · the SLA-bucket columns
-  // · Uptime.
-  const PLANT_COLSPAN = 4 + SLA_BUCKETS_ASC.length;
+  // The plant sub-table's expansion cell spans S.No. · Plant · Operational · Inactive Operational ·
+  // Healthy · Warehouse · Inactive % · Fleet Health % · the SLA-bucket columns · Uptime.
+  const PLANT_COLSPAN = 9 + SLA_BUCKETS_ASC.length;
 
   // Own download, restricted to this company's plants — S.No. re-numbers from 1 (AC-20: sub-tables
   // number independently).
   const exportPlants = (format: ExportFormat) => {
     const headers = [
-      'S.No.', 'Plant', 'Inactive', 'Total devices', 'Fleet Uptime %',
+      'S.No.', 'Plant', 'Operational devices', 'Inactive operational', 'Healthy devices',
+      'Warehouse devices', 'Inactive %', 'Fleet Health %', 'Fleet Uptime %',
       ...SLA_BUCKETS_ASC.map((b) => BUCKET_LABEL[b]),
     ];
     const body = company.plants.map((p, i) => [
       i + 1,
       formatPlantDisplayName(p.plantName),
-      p.totalInactive,
-      p.totalDevices,
+      p.operationalDevices,
+      p.inactiveOperational,
+      p.healthyOperational,
+      p.warehouseDevices,
+      formatPct(p.inactivePct),
+      formatPct(p.fleetHealthPct),
       fmtUptime(plantUptime?.get(p.plantId)),
       ...SLA_BUCKETS_ASC.map((b) => p.byBucket[b] ?? 0),
     ]);
@@ -484,10 +553,15 @@ function CompanyPlants({
       <table aria-label={`Plants for ${company.companyName}`} className="w-full table-fixed border-collapse text-sm">
         <colgroup>
           <col style={{ width: '3.5rem' }} />
-          <col style={{ width: '17%' }} />
-          <col style={{ width: '11%' }} />
+          <col style={{ width: '14%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '9%' }} />
+          <col style={{ width: '6%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '6%' }} />
+          <col style={{ width: '7%' }} />
           {SLA_BUCKETS_ASC.map((b) => (
-            <col key={b} style={{ width: '8%' }} />
+            <col key={b} style={{ width: '4%' }} />
           ))}
           <col style={{ width: '6%' }} />
         </colgroup>
@@ -495,9 +569,26 @@ function CompanyPlants({
           <tr className="border-b border-chrome-700 bg-chrome-900 text-left text-[11px] uppercase tracking-wider text-white">
             <th className={cn(th, 'text-right')}>S.No.</th>
             <th className={th}>Plant</th>
-            <th className={cn(th, 'text-right')}>Inactive / Total</th>
+            <th className={cn(th, 'text-right')}>
+              <ColumnHeader label="Operational" kpi="operationalDevices" stacked />
+            </th>
+            <th className={cn(th, 'text-right')}>
+              <ColumnHeader label="Inactive" kpi="inactiveOperational" stacked />
+            </th>
+            <th className={cn(th, 'text-right')}>
+              <ColumnHeader label="Healthy" kpi="healthyOperational" stacked />
+            </th>
+            <th className={cn(th, 'text-right')}>
+              <ColumnHeader label="Warehouse" kpi="warehouseDevices" stacked />
+            </th>
+            <th className={cn(th, 'text-right')}>
+              <ColumnHeader label="Inactive %" kpi="inactivePct" stacked />
+            </th>
+            <th className={cn(th, 'text-right')}>
+              <ColumnHeader label="Health %" kpi="fleetHealthPct" stacked />
+            </th>
             <BucketHeaderCells className={thBucket} />
-            <th className={cn(th, 'text-right')}>Fleet Uptime %</th>
+            <th className={cn(th, 'text-right')}>Uptime %</th>
           </tr>
         </thead>
         <tbody>
@@ -519,8 +610,27 @@ function CompanyPlants({
                 <td className={`${cellPad} truncate text-ink`} title={formatPlantDisplayName(p.plantName)}>
                   <PlantName code={p.plantName} />
                 </td>
+                <td data-testid="plant-operational" className={`${cellPad} text-right tabular-nums text-ink`}>
+                  {formatCount(p.operationalDevices)}
+                </td>
                 <td data-testid="plant-inactive-total" className={`${cellPad} text-right tabular-nums text-ink`}>
-                  <InactiveCountLink inactive={p.totalInactive} total={p.totalDevices} scope={{ plantId: p.plantId }} />
+                  <InactiveCountLink
+                    inactive={p.inactiveOperational}
+                    operational={p.operationalDevices}
+                    scope={{ plantId: p.plantId }}
+                  />
+                </td>
+                <td data-testid="plant-healthy" className={`${cellPad} text-right tabular-nums text-ink`}>
+                  {formatCount(p.healthyOperational)}
+                </td>
+                <td data-testid="plant-warehouse" className={`${cellPad} text-right tabular-nums text-ink-muted`}>
+                  {formatCount(p.warehouseDevices)}
+                </td>
+                <td data-testid="plant-inactive-pct" className={`${cellPad} text-right tabular-nums font-semibold text-ink`}>
+                  {formatPct(p.inactivePct)}
+                </td>
+                <td data-testid="plant-health-pct" className={`${cellPad} text-right tabular-nums font-semibold text-ink`}>
+                  {formatPct(p.fleetHealthPct)}
                 </td>
                 <BucketCountCells byBucket={p.byBucket} className={tdBucket} scope={{ plantId: p.plantId }} />
                 <td data-testid="plant-fleet-uptime" className={`${cellPad} text-right tabular-nums text-ink-muted`}>
@@ -535,7 +645,7 @@ function CompanyPlants({
                         plantLabel={formatPlantDisplayName(p.plantName)}
                         loading={loadingPlant === p.plantId}
                         tickets={devices[p.plantId] ?? []}
-                        totalDevices={p.totalDevices}
+                        operationalDevices={p.operationalDevices}
                       />
                     </div>
                   </td>
@@ -570,12 +680,13 @@ function OpenDeviceTickets({
   plantLabel,
   loading,
   tickets,
-  totalDevices,
+  operationalDevices,
 }: {
   plantLabel: string;
   loading: boolean;
   tickets: TicketRow[];
-  totalDevices: number | null | undefined;
+  /** The plant's OPERATIONAL device count — the population these tickets are raised against. */
+  operationalDevices: number | null | undefined;
 }) {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<TicketAssignmentFilter>('');
@@ -591,7 +702,7 @@ function OpenDeviceTickets({
   const summary: Array<{ key: string; label: string; value: number | string }> = [
     { key: 'tickets', label: 'Tickets created', value: tickets.length },
     { key: 'assigned', label: 'SE assigned', value: assignedCount },
-    { key: 'devices', label: 'Total devices', value: totalDevices ?? '—' },
+    { key: 'devices', label: 'Operational devices', value: operationalDevices ?? '—' },
     { key: 'unassigned', label: 'Unassigned', value: unassignedCount },
   ];
 

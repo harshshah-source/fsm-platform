@@ -7,30 +7,90 @@ import { PrismaService } from '../prisma/prisma.service';
  *  aggregation joined to `plants p`. */
 const EXCLUDE_DEACTIVATED_PLANTS = Prisma.sql`AND p.plant_id NOT IN (SELECT plant_id FROM plant_deactivations WHERE reactivated_at IS NULL)`;
 
-export interface ZoneOverviewRow {
+/**
+ * The ONE aggregate projection every fleet count on the dashboard is derived from — zone rows,
+ * company×plant rows, the Fleet Directory, and the headline KPI strip all select exactly this
+ * fragment over `device_states ds`, differing only in their `GROUP BY`.
+ *
+ * That sameness is the point. The 2026-07-29 defect was a numerator and a denominator computed by
+ * two *separate* statements that disagreed about whether a departed (warehoused) device counts:
+ * `is_inactive` is false for every departed device by construction (`DeviceStateService.recompute`
+ * forces `is_inactive = NOT departed AND …`), but the denominator query had no `is_departed`
+ * predicate, so `inactive / total` divided an operational numerator by an operational+warehouse
+ * denominator. Deriving every level from one expression makes that class of drift unrepresentable:
+ * a population change edits one fragment and moves every layer together.
+ *
+ * The five counts partition the scope exactly:
+ *   mirrored = operational + warehouse
+ *   operational = healthy + inactive        (complementary predicates over the same non-departed set)
+ *
+ * `inactive` keeps the historical predicate `is_inactive AND sla_bucket IS NOT NULL` — identical to
+ * the pre-fix numerator, so this change moves denominators only and never restates what "inactive"
+ * means. It also keeps `byBucket` summing to exactly `inactiveOperational`, since both read the same
+ * bucketed rows.
+ */
+const FLEET_COUNT_COLUMNS = Prisma.sql`
+  COUNT(*)::int AS "mirroredDevices",
+  COUNT(*) FILTER (WHERE ds.is_departed = false)::int AS "operationalDevices",
+  COUNT(*) FILTER (WHERE ds.is_departed = true)::int AS "warehouseDevices",
+  COUNT(*) FILTER (WHERE ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL)::int AS "inactiveOperational",
+  COUNT(*) FILTER (WHERE ds.is_departed = false AND NOT (ds.is_inactive = true AND ds.sla_bucket IS NOT NULL))::int AS "healthyOperational"`;
+
+/**
+ * The device counts for one entity (a zone, a company, a plant, or the whole scope), over the single
+ * operational population defined by {@link FLEET_COUNT_COLUMNS}. Every consumer of `inactive / total`
+ * reads `inactiveOperational / operationalDevices` — never a mirrored total.
+ */
+export interface FleetCounts {
+  /** Every device FSM mirrors for this entity: operational + warehouse. NOT the AutoPlant catalog. */
+  mirroredDevices: number;
+  /** Deployed and tracked — the denominator for every rate on the dashboard. `is_departed = false`. */
+  operationalDevices: number;
+  /** Removed from field operations (an open `device_departures` row) — in a warehouse, not broken. */
+  warehouseDevices: number;
+  /** Operational devices currently inactive (silent ≥ the inactivity threshold, so SLA-bucketed). */
+  inactiveOperational: number;
+  /** Operational devices that are NOT inactive. `healthyOperational + inactiveOperational = operationalDevices`. */
+  healthyOperational: number;
+  /** `inactiveOperational / operationalDevices × 100`, 1dp; null when the entity has no operational devices. */
+  inactivePct: number | null;
+  /** `healthyOperational / operationalDevices × 100`, 1dp; null when the entity has no operational devices. */
+  fleetHealthPct: number | null;
+}
+
+/** The raw five counts as selected by {@link FLEET_COUNT_COLUMNS}, before the rates are derived. */
+type RawFleetCounts = Omit<FleetCounts, 'inactivePct' | 'fleetHealthPct'>;
+
+/**
+ * Derive the two rates from the counts. Both are percentages of the OPERATIONAL fleet — a warehouse
+ * device is neither healthy nor inactive, so it belongs in neither the numerator nor the denominator.
+ * Null (rendered "—") rather than 0 when there is nothing to divide by, so an entity with no
+ * operational devices never reads as "0% healthy".
+ */
+function withRates(counts: RawFleetCounts): FleetCounts {
+  const op = counts.operationalDevices;
+  const pct = (n: number) => (op > 0 ? Math.round((n / op) * 1000) / 10 : null);
+  return { ...counts, inactivePct: pct(counts.inactiveOperational), fleetHealthPct: pct(counts.healthyOperational) };
+}
+
+export interface ZoneOverviewRow extends FleetCounts {
   zoneId: string;
   zoneName: string;
   /** The zone's Zonal Manager display name (`zones.zonal_manager_user_id` → `users.name`); null if unset. */
   zonalManagerName: string | null;
-  totalInactive: number;
-  /** All devices (active + inactive) whose plant is in this zone — the denominator for `inactive / total`. */
-  totalDevices: number;
-  /** Count of inactive devices per SLA bucket. ACTIVE devices (null bucket) never appear. */
+  /** Count of inactive devices per SLA bucket. Sums to `inactiveOperational`; healthy devices never appear. */
   byBucket: Record<string, number>;
   /** Trend % vs previous day — null until the daily-history table lands (Issue 40). */
   trendPctVsPrevDay: number | null;
 }
 
-export interface CompanyPlantRow {
+export interface CompanyPlantRow extends FleetCounts {
   companyId: string;
   companyName: string;
   companyTier: string;
   zoneId: string;
   plantId: string;
   plantName: string;
-  totalInactive: number;
-  /** All devices (active + inactive) at this plant for this company — the denominator for `inactive / total`. */
-  totalDevices: number;
   byBucket: Record<string, number>;
 }
 
@@ -57,47 +117,80 @@ export interface CriticalQueueGroup {
   tickets: CriticalQueueTicket[];
 }
 
-/** Headline fleet counts for the dashboard KPI strip (Issue 122b): companies / plants / devices in scope. */
-export interface FleetSummary {
+/**
+ * Headline fleet counts for the dashboard KPI strip. Extends {@link FleetCounts}, so the KPI cards and
+ * the zone / company tables below them are literally the same aggregate at different `GROUP BY`
+ * levels — `Σ zone.operationalDevices == fleet.operationalDevices` holds by construction.
+ */
+export interface FleetSummary extends FleetCounts {
   companies: number;
   plants: number;
   /**
-   * The ACTIVE (deployed) fleet in scope: mirrored devices whose deployment is live (`is_departed =
-   * false`). Departed devices linger in `device_states` but are excluded here so this is the fleet
-   * FSM is actually tracking. Rendered as the "Active Fleet" KPI.
+   * SOURCE metric, not an operational one: the raw AutoPlant device-catalog size from the last
+   * successful master sync — every fitted `device_id` the source read observed, all deployment
+   * statuses, pan-India. NOT scope-filtered (the source read is not zone-attributed) and NOT
+   * comparable to the operational counts above: it is a different system's inventory, as of a
+   * different moment. Null until a master sync has recorded it. Rendered as "AutoPlant Catalog".
    */
-  devices: number;
-  /**
-   * The RAW AUTOPLANT device catalog size from the last successful master sync — every fitted
-   * `device_id` the source read observed, all deployment statuses, pan-India (NOT scope-filtered:
-   * the source read is not zone-attributed, and non-operational devices are never mirrored). Null
-   * until a master sync has recorded it. Rendered as the "Total Devices" KPI on the OH dashboard.
-   */
-  sourceDevices: number | null;
+  catalogDevices: number | null;
+  /** When the master sync that produced {@link catalogDevices} finished. Null when there is none. */
+  lastMasterSyncAt: string | null;
+  /** When the most recent successful telemetry snapshot finished — how fresh the inactivity ages are. */
+  lastSnapshotAt: string | null;
 }
 
 /** One company in the Fleet Directory (Issue 122b KPI click-through). */
-export interface FleetDirectoryCompany {
+export interface FleetDirectoryCompany extends FleetCounts {
   companyId: string;
   name: string;
   tier: string | null;
   plantCount: number;
-  deviceCount: number;
+  /** Latest `device_states.computed_at` across this company's devices — when FSM last re-derived them. */
+  lastSnapshotAt: string | null;
+  /** Latest GPS ping across this company's devices — when its fleet last reported from the field. */
+  lastActivityAt: string | null;
 }
 
 /** One plant in the Fleet Directory. */
-export interface FleetDirectoryPlant {
+export interface FleetDirectoryPlant extends FleetCounts {
   plantId: string;
   name: string;
   companyId: string | null;
   companyName: string | null;
   zoneName: string | null;
-  deviceCount: number;
+  lastSnapshotAt: string | null;
+  lastActivityAt: string | null;
 }
 
 export interface FleetDirectory {
   companies: FleetDirectoryCompany[];
   plants: FleetDirectoryPlant[];
+}
+
+/**
+ * The Fleet Composition funnel — AutoPlant's catalog narrowed, one accounted-for step at a time, to
+ * the healthy/inactive split the dashboard reports on. Every step states what it drops, so the chain
+ * has no unexplained losses:
+ *
+ *   catalogDevices                                  (AutoPlant, all deployment statuses)
+ *     − notMirrored              → mirroredTotal    (never mirrored: non-operational + never known)
+ *     − onDeactivatedPlants      → mirroredDevices  (plant deactivated, Issue 119)
+ *     → operationalDevices + warehouseDevices
+ *     operationalDevices → healthyOperational + inactiveOperational
+ *
+ * `catalogDevices` / `notMirrored` are pan-India by nature and are null for a zone-scoped caller (a
+ * ZM), whose funnel starts at "Mirrored into FSM" instead.
+ */
+export interface FleetComposition extends FleetCounts {
+  catalogDevices: number | null;
+  notMirrored: number | null;
+  /** Every `device_states` row in scope, INCLUDING devices on deactivated plants. */
+  mirroredTotal: number;
+  onDeactivatedPlants: number;
+  /** True when the caller is clamped to one zone, so the catalog steps are omitted. */
+  zoneScoped: boolean;
+  lastMasterSyncAt: string | null;
+  lastSnapshotAt: string | null;
 }
 
 export interface ActionRequiredCard {
@@ -195,31 +288,41 @@ type CompanyPlantGroupedRow = {
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Zone Overview / Zone Performance Scorecard rows — one per zone that has ANY mirrored device on a
+   * live plant, carrying the full operational breakdown ({@link FleetCounts}) plus the per-SLA-bucket
+   * inactive split.
+   *
+   * Rows are driven by the COUNTS query, not by the bucket query. Previously a zone only existed if it
+   * had at least one inactive device, so a zone at 100% health silently vanished from the scorecard —
+   * and its operational devices vanished from the column totals with it, breaking
+   * `Σ zone.operationalDevices == fleet.operationalDevices`. A healthy zone now renders `0 / N`.
+   */
   async zoneOverview(scope: ZoneScope): Promise<ZoneOverviewRow[]> {
     const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
     const zoneFilter =
       restrictZone !== null ? Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
 
+    const counts = await this.prisma.$queryRaw<Array<RawFleetCounts & { zoneId: string; zoneName: string }>>(Prisma.sql`
+      SELECT z.zone_id::text AS "zoneId", z.name AS "zoneName", ${FLEET_COUNT_COLUMNS}
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
+      GROUP BY z.zone_id, z.name
+      ORDER BY z.zone_id`);
+
+    // The per-bucket split of the SAME inactive population the counts query measures (identical
+    // predicate + identical scope), so `Σ byBucket == inactiveOperational` for every row.
     const grouped = await this.prisma.$queryRaw<GroupedRow[]>(Prisma.sql`
       SELECT z.zone_id::text AS "zoneId", z.name AS "zoneName",
              ds.sla_bucket::text AS "slaBucket", COUNT(*)::int AS "count"
       FROM device_states ds
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
-      WHERE ds.is_inactive = true AND ds.sla_bucket IS NOT NULL ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
-      GROUP BY z.zone_id, z.name, ds.sla_bucket
-      ORDER BY z.zone_id`);
-
-    // Total devices (active + inactive) per zone — the `inactive / total` denominator (Issue 2). Same
-    // zone scope as the inactive aggregation; only zones already surfaced (≥1 inactive device) read it.
-    const totals = await this.prisma.$queryRaw<{ zoneId: string; total: number }[]>(Prisma.sql`
-      SELECT z.zone_id::text AS "zoneId", COUNT(*)::int AS "total"
-      FROM device_states ds
-      JOIN plants p ON p.plant_id = ds.plant_id
-      JOIN zones z ON z.zone_id = p.zone_id
-      WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
-      GROUP BY z.zone_id`);
-    const totalByZone = new Map(totals.map((t) => [t.zoneId, t.total]));
+      WHERE ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL
+        ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
+      GROUP BY z.zone_id, z.name, ds.sla_bucket`);
 
     // Zonal Manager display name per zone (Issue 122 scorecard column) — tiny unconditional read.
     const zms = await this.prisma.$queryRaw<{ zoneId: string; zmName: string | null }[]>(Prisma.sql`
@@ -228,106 +331,204 @@ export class DashboardService {
     const zmByZone = new Map(zms.map((z) => [z.zoneId, z.zmName]));
 
     const byZone = new Map<string, ZoneOverviewRow>();
+    for (const { zoneId, zoneName, ...raw } of counts) {
+      byZone.set(zoneId, {
+        zoneId,
+        zoneName,
+        zonalManagerName: zmByZone.get(zoneId) ?? null,
+        ...withRates(raw),
+        byBucket: {},
+        trendPctVsPrevDay: null,
+      });
+    }
     for (const r of grouped) {
-      let row = byZone.get(r.zoneId);
-      if (!row) {
-        row = {
-          zoneId: r.zoneId,
-          zoneName: r.zoneName,
-          zonalManagerName: zmByZone.get(r.zoneId) ?? null,
-          totalInactive: 0,
-          totalDevices: totalByZone.get(r.zoneId) ?? 0,
-          byBucket: {},
-          trendPctVsPrevDay: null,
-        };
-        byZone.set(r.zoneId, row);
-      }
-      row.byBucket[r.slaBucket] = r.count;
-      row.totalInactive += r.count;
+      const row = byZone.get(r.zoneId);
+      if (row) row.byBucket[r.slaBucket] = r.count;
     }
     return [...byZone.values()];
   }
 
   /**
-   * Headline fleet counts (Issue 122b KPI cards): distinct companies, distinct plants, and the ACTIVE
-   * (deployed) device fleet in the caller's scope, plus the pan-India source-catalog total. The
-   * companies/plants/devices figures are derived from `device_states` (same ZM zone scoping,
-   * deactivated plants excluded); `devices` excludes departed devices so it is the live operational
-   * fleet. `sourceDevices` is the raw AutoPlant catalog size from the last successful master sync —
-   * pan-India by nature, so it is NOT scope-filtered (see {@link sourceDeviceTotal}).
+   * Headline fleet counts (the KPI strip): distinct companies, distinct plants, and the full
+   * operational breakdown in the caller's scope, plus the pan-India source-catalog total and the two
+   * freshness stamps.
+   *
+   * The operational counts come from {@link FLEET_COUNT_COLUMNS} — the same fragment
+   * {@link zoneOverview} and {@link companyPlantOverview} group by — so the KPI cards and the tables
+   * beneath them cannot disagree. `catalogDevices` is the odd one out and is labelled as such: a
+   * SOURCE metric from another system, pan-India, never scope-filtered (see {@link sourceDeviceTotal}).
    */
   async fleetSummary(scope: ZoneScope): Promise<FleetSummary> {
     const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
     const zoneFilter =
       restrictZone !== null ? Prisma.sql`AND p.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
 
-    const rows = await this.prisma.$queryRaw<{ companies: number; plants: number; devices: number }[]>(Prisma.sql`
+    const rows = await this.prisma.$queryRaw<Array<RawFleetCounts & { companies: number; plants: number }>>(Prisma.sql`
       SELECT COUNT(DISTINCT ds.company_id)::int AS "companies",
              COUNT(DISTINCT ds.plant_id)::int AS "plants",
-             COUNT(*) FILTER (WHERE ds.is_departed = false)::int AS "devices"
+             ${FLEET_COUNT_COLUMNS}
       FROM device_states ds
       JOIN plants p ON p.plant_id = ds.plant_id
       WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}`);
-    const base = rows[0] ?? { companies: 0, plants: 0, devices: 0 };
-    return { ...base, sourceDevices: await this.sourceDeviceTotal() };
+    const { companies = 0, plants = 0, ...raw } = rows[0] ?? {};
+    const [sync, snapshotAt] = await Promise.all([this.latestMasterSync(), this.latestSnapshotAt()]);
+    return {
+      companies,
+      plants,
+      ...withRates({
+        mirroredDevices: raw.mirroredDevices ?? 0,
+        operationalDevices: raw.operationalDevices ?? 0,
+        warehouseDevices: raw.warehouseDevices ?? 0,
+        inactiveOperational: raw.inactiveOperational ?? 0,
+        healthyOperational: raw.healthyOperational ?? 0,
+      }),
+      catalogDevices: sync.observed,
+      lastMasterSyncAt: sync.finishedAt,
+      lastSnapshotAt: snapshotAt,
+    };
+  }
+
+  /**
+   * The Fleet Composition funnel (see {@link FleetComposition}) — every step from the AutoPlant
+   * catalog down to the healthy/inactive split, with each drop named. `mirroredTotal` deliberately
+   * drops the `EXCLUDE_DEACTIVATED_PLANTS` predicate so the deactivated-plant step is a visible,
+   * quantified loss rather than an invisible one.
+   */
+  async fleetComposition(scope: ZoneScope): Promise<FleetComposition> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+    const zoneFilter =
+      restrictZone !== null ? Prisma.sql`AND p.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+
+    const [live] = await this.prisma.$queryRaw<RawFleetCounts[]>(Prisma.sql`
+      SELECT ${FLEET_COUNT_COLUMNS}
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}`);
+    // Same scope, WITHOUT the deactivated-plant exclusion — the difference is the funnel's step 3.
+    const [all] = await this.prisma.$queryRaw<{ mirroredTotal: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS "mirroredTotal"
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      WHERE true ${zoneFilter}`);
+
+    const counts = withRates({
+      mirroredDevices: live?.mirroredDevices ?? 0,
+      operationalDevices: live?.operationalDevices ?? 0,
+      warehouseDevices: live?.warehouseDevices ?? 0,
+      inactiveOperational: live?.inactiveOperational ?? 0,
+      healthyOperational: live?.healthyOperational ?? 0,
+    });
+    const mirroredTotal = all?.mirroredTotal ?? 0;
+    const [sync, snapshotAt] = await Promise.all([this.latestMasterSync(), this.latestSnapshotAt()]);
+    // The catalog is a pan-India source counter with no zone attribution, so a zone-scoped funnel
+    // cannot honestly open with it — it starts at "Mirrored into FSM" instead.
+    const zoneScoped = restrictZone !== null;
+    const catalogDevices = zoneScoped ? null : sync.observed;
+    return {
+      ...counts,
+      catalogDevices,
+      notMirrored: catalogDevices === null ? null : catalogDevices - mirroredTotal,
+      mirroredTotal,
+      onDeactivatedPlants: mirroredTotal - counts.mirroredDevices,
+      zoneScoped,
+      lastMasterSyncAt: sync.finishedAt,
+      lastSnapshotAt: snapshotAt,
+    };
   }
 
   /**
    * The raw AutoPlant device-catalog size recorded by the most recent SUCCESSFUL master sync
    * (`entity_stats -> 'devices' -> 'observed'`) — every fitted `device_id` the source read saw,
-   * across all deployment statuses. This is the "Total Devices" KPI; the mirrored operational fleet
-   * ({@link fleetSummary} `devices`) is a subset of it. Null until a sync has recorded the counter
+   * across all deployment statuses — together with when that sync finished. This is the "AutoPlant
+   * Catalog" KPI; the mirrored fleet is a subset of it. Null until a sync has recorded the counter
    * (older runs, or a fresh DB), which the UI renders as "—".
    */
-  private async sourceDeviceTotal(): Promise<number | null> {
-    const rows = await this.prisma.$queryRaw<{ observed: number | null }[]>(Prisma.sql`
-      SELECT (entity_stats -> 'devices' ->> 'observed')::int AS "observed"
+  private async latestMasterSync(): Promise<{ observed: number | null; finishedAt: string | null }> {
+    const rows = await this.prisma.$queryRaw<{ observed: number | null; finishedAt: Date | null }[]>(Prisma.sql`
+      SELECT (entity_stats -> 'devices' ->> 'observed')::int AS "observed",
+             finished_at AS "finishedAt"
       FROM master_sync_runs
       WHERE status = 'SUCCESS' AND entity_stats -> 'devices' ->> 'observed' IS NOT NULL
       ORDER BY finished_at DESC NULLS LAST
       LIMIT 1`);
-    return rows[0]?.observed ?? null;
+    return { observed: rows[0]?.observed ?? null, finishedAt: rows[0]?.finishedAt?.toISOString() ?? null };
   }
 
   /**
-   * The Fleet Directory (Issue 122b — the Companies/Plants KPI cards' click-through): every company
-   * and plant in the caller's scope BY NAME, with plant/device counts. Same population as
-   * {@link fleetSummary} (tracked devices, ZM zone-scoped, deactivated plants excluded), so the
-   * directory row counts always reconcile with the KPI numbers.
+   * When the most recent SUCCESSFUL telemetry snapshot finished — the freshness of every inactivity
+   * age, and therefore of every inactive count on the dashboard. Surfaced beside the operational KPIs
+   * so a manager can tell "0 inactive" from "we haven't heard from the source since Tuesday".
+   */
+  private async latestSnapshotAt(): Promise<string | null> {
+    const rows = await this.prisma.$queryRaw<{ finishedAt: Date | null }[]>(Prisma.sql`
+      SELECT finished_at AS "finishedAt"
+      FROM snapshot_runs
+      WHERE status = 'SUCCESS' AND finished_at IS NOT NULL
+      ORDER BY finished_at DESC
+      LIMIT 1`);
+    return rows[0]?.finishedAt?.toISOString() ?? null;
+  }
+
+  /**
+   * The Fleet Directory (the Companies/Plants KPI click-through): every company and plant in the
+   * caller's scope BY NAME, with the full operational breakdown and two freshness stamps —
+   * `lastSnapshotAt` (when FSM last re-derived the entity's device rows) and `lastActivityAt` (when
+   * its fleet last pinged from the field).
+   *
+   * Same {@link FLEET_COUNT_COLUMNS} aggregate as the KPI strip and the zone table, so
+   * `Σ company.operationalDevices == Σ plant.operationalDevices == fleet.operationalDevices`. The
+   * pre-fix directory selected a bare `COUNT(*)` and so summed to the MIRRORED total (23,238) while
+   * claiming in its own docstring to reconcile with the Active Fleet KPI (17,415) — it never did.
    */
   async fleetDirectory(scope: ZoneScope): Promise<FleetDirectory> {
     const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
     const zoneFilter =
       restrictZone !== null ? Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+    const freshness = Prisma.sql`
+      MAX(ds.computed_at) AS "lastSnapshotAt",
+      MAX(ds.latest_gps_datetime) AS "lastActivityAt"`;
 
     const companies = await this.prisma.$queryRaw<
-      Array<{ companyId: string; name: string; tier: string | null; plantCount: number; deviceCount: number }>
+      Array<RawFleetCounts & { companyId: string; name: string; tier: string | null; plantCount: number; lastSnapshotAt: Date | null; lastActivityAt: Date | null }>
     >(Prisma.sql`
       SELECT c.company_id::text AS "companyId", c.name AS "name", c.company_tier::text AS "tier",
-             COUNT(DISTINCT ds.plant_id)::int AS "plantCount", COUNT(*)::int AS "deviceCount"
+             COUNT(DISTINCT ds.plant_id)::int AS "plantCount", ${FLEET_COUNT_COLUMNS}, ${freshness}
       FROM device_states ds
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
       JOIN company_master c ON c.company_id = ds.company_id
       WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
       GROUP BY c.company_id, c.name, c.company_tier
-      ORDER BY "deviceCount" DESC`);
+      ORDER BY "operationalDevices" DESC`);
 
     const plants = await this.prisma.$queryRaw<
-      Array<{ plantId: string; name: string; companyId: string | null; companyName: string | null; zoneName: string | null; deviceCount: number }>
+      Array<RawFleetCounts & { plantId: string; name: string; companyId: string | null; companyName: string | null; zoneName: string | null; lastSnapshotAt: Date | null; lastActivityAt: Date | null }>
     >(Prisma.sql`
       SELECT p.plant_id::text AS "plantId", p.name AS "name",
              c.company_id::text AS "companyId", c.name AS "companyName",
-             z.name AS "zoneName", COUNT(*)::int AS "deviceCount"
+             z.name AS "zoneName", ${FLEET_COUNT_COLUMNS}, ${freshness}
       FROM device_states ds
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
       LEFT JOIN company_master c ON c.company_id = ds.company_id
       WHERE true ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
       GROUP BY p.plant_id, p.name, c.company_id, c.name, z.name
-      ORDER BY "deviceCount" DESC`);
+      ORDER BY "operationalDevices" DESC`);
 
-    return { companies, plants };
+    return {
+      companies: companies.map(({ lastSnapshotAt, lastActivityAt, ...r }) => ({
+        ...r,
+        ...withRates(r),
+        lastSnapshotAt: lastSnapshotAt?.toISOString() ?? null,
+        lastActivityAt: lastActivityAt?.toISOString() ?? null,
+      })),
+      plants: plants.map(({ lastSnapshotAt, lastActivityAt, ...r }) => ({
+        ...r,
+        ...withRates(r),
+        lastSnapshotAt: lastSnapshotAt?.toISOString() ?? null,
+        lastActivityAt: lastActivityAt?.toISOString() ?? null,
+      })),
+    };
   }
 
   async companyPlantOverview(
@@ -343,6 +544,25 @@ export class DashboardService {
       conds.push(Prisma.sql`AND p.plant_id = ${BigInt(filters.plantId)}`);
     const extra = conds.length ? Prisma.join(conds, ' ') : Prisma.empty;
 
+    // Rows are driven by the COUNTS query (every company×plant with a mirrored device on a live
+    // plant), not by the inactive query — a plant at 100% health used to disappear from this table
+    // entirely, taking its operational devices out of the column totals and breaking
+    // `Σ company.operationalDevices == Σ zone.operationalDevices`.
+    const counts = await this.prisma.$queryRaw<
+      Array<RawFleetCounts & { companyId: string; companyName: string; companyTier: string; zoneId: string; plantId: string; plantName: string }>
+    >(Prisma.sql`
+      SELECT c.company_id::text AS "companyId", c.name AS "companyName",
+             c.company_tier::text AS "companyTier", z.zone_id::text AS "zoneId",
+             p.plant_id::text AS "plantId", p.name AS "plantName", ${FLEET_COUNT_COLUMNS}
+      FROM device_states ds
+      JOIN plants p ON p.plant_id = ds.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      JOIN company_master c ON c.company_id = ds.company_id
+      WHERE true ${extra} ${EXCLUDE_DEACTIVATED_PLANTS}
+      GROUP BY c.company_id, c.name, c.company_tier, z.zone_id, p.plant_id, p.name
+      ORDER BY c.company_tier, c.name, p.name`);
+
+    // The per-bucket split of the same inactive population, identical predicate + scope.
     const grouped = await this.prisma.$queryRaw<CompanyPlantGroupedRow[]>(Prisma.sql`
       SELECT c.company_id::text AS "companyId", c.name AS "companyName",
              c.company_tier::text AS "companyTier", z.zone_id::text AS "zoneId",
@@ -352,42 +572,26 @@ export class DashboardService {
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
       JOIN company_master c ON c.company_id = ds.company_id
-      WHERE ds.is_inactive = true AND ds.sla_bucket IS NOT NULL ${extra} ${EXCLUDE_DEACTIVATED_PLANTS}
-      GROUP BY c.company_id, c.name, c.company_tier, z.zone_id, p.plant_id, p.name, ds.sla_bucket
-      ORDER BY c.company_tier, c.name, p.name`);
-
-    // Total devices (active + inactive) per company×plant — the `inactive / total` denominator (Issue 2).
-    // Reuses the exact same scope filters (`extra`) as the inactive aggregation above.
-    const totals = await this.prisma.$queryRaw<{ companyId: string; plantId: string; total: number }[]>(Prisma.sql`
-      SELECT c.company_id::text AS "companyId", p.plant_id::text AS "plantId", COUNT(*)::int AS "total"
-      FROM device_states ds
-      JOIN plants p ON p.plant_id = ds.plant_id
-      JOIN zones z ON z.zone_id = p.zone_id
-      JOIN company_master c ON c.company_id = ds.company_id
-      WHERE true ${extra} ${EXCLUDE_DEACTIVATED_PLANTS}
-      GROUP BY c.company_id, p.plant_id`);
-    const totalByKey = new Map(totals.map((t) => [`${t.companyId}:${t.plantId}`, t.total]));
+      WHERE ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL
+        ${extra} ${EXCLUDE_DEACTIVATED_PLANTS}
+      GROUP BY c.company_id, c.name, c.company_tier, z.zone_id, p.plant_id, p.name, ds.sla_bucket`);
 
     const byKey = new Map<string, CompanyPlantRow>();
+    for (const { companyId, companyName, companyTier, zoneId, plantId, plantName, ...raw } of counts) {
+      byKey.set(`${companyId}:${plantId}`, {
+        companyId,
+        companyName,
+        companyTier,
+        zoneId,
+        plantId,
+        plantName,
+        ...withRates(raw),
+        byBucket: {},
+      });
+    }
     for (const r of grouped) {
-      const key = `${r.companyId}:${r.plantId}`;
-      let row = byKey.get(key);
-      if (!row) {
-        row = {
-          companyId: r.companyId,
-          companyName: r.companyName,
-          companyTier: r.companyTier,
-          zoneId: r.zoneId,
-          plantId: r.plantId,
-          plantName: r.plantName,
-          totalInactive: 0,
-          totalDevices: totalByKey.get(key) ?? 0,
-          byBucket: {},
-        };
-        byKey.set(key, row);
-      }
-      row.byBucket[r.slaBucket] = r.count;
-      row.totalInactive += r.count;
+      const row = byKey.get(`${r.companyId}:${r.plantId}`);
+      if (row) row.byBucket[r.slaBucket] = r.count;
     }
     return [...byKey.values()];
   }

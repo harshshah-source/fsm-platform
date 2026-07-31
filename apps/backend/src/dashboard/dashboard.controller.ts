@@ -11,6 +11,7 @@ import {
   type ActivityTrendReport,
   type CompanyPlantRow,
   type CriticalQueueGroup,
+  type FleetComposition,
   type FleetDirectory,
   type FleetSummary,
   type ZoneOverviewRow,
@@ -58,7 +59,18 @@ export class DashboardController {
     return this.dashboard.actionRequired({ role: user.role, zoneId: user.zone_id });
   }
 
-  /** Headline fleet counts for the KPI strip (Issue 122b): companies / plants / devices in scope. */
+  /**
+   * The Fleet Composition funnel: AutoPlant catalog → mirrored → operational → healthy/inactive, with
+   * every drop between steps named and counted. A ZM's funnel is zone-scoped and omits the catalog
+   * steps (the source counter has no zone attribution).
+   */
+  @Get('fleet-composition')
+  @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
+  fleetComposition(@CurrentUser() user: AccessTokenClaims): Promise<FleetComposition> {
+    return this.dashboard.fleetComposition({ role: user.role, zoneId: user.zone_id });
+  }
+
+  /** Headline fleet counts for the KPI strip: companies / plants / operational breakdown in scope. */
   @Get('fleet-summary')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   fleetSummary(@CurrentUser() user: AccessTokenClaims): Promise<FleetSummary> {

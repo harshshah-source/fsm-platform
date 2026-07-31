@@ -16,7 +16,7 @@ const fleet = {
 };
 
 const zones = [
-  { zoneId: '1', zoneName: 'West', totalInactive: 46, byBucket: { CRITICAL: 10, HIGH_CRITICAL: 5, WARNING: 7 }, trendPctVsPrevDay: null },
+  { zoneId: '1', zoneName: 'West', operationalDevices: 200, inactiveOperational: 46, healthyOperational: 154, warehouseDevices: 30, mirroredDevices: 230, inactivePct: 23, fleetHealthPct: 77, byBucket: { CRITICAL: 10, HIGH_CRITICAL: 5, WARNING: 7 }, trendPctVsPrevDay: null },
 ];
 
 const softTrend = {

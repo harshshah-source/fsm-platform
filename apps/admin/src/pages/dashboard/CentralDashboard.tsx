@@ -1,12 +1,13 @@
 import { useMemo } from 'react';
 import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
-import { ZoneOperatingModeTable } from '../../components/dashboard/ZoneOperatingModeTable';
 import { Badge } from '../../components/ui';
+import { formatCount } from '../../lib/fleetFormat';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
 import { EscalationQueueList } from './EscalationQueueList';
+import { OperationalFleetSection } from './OperationalFleetSection';
 import { ScorecardTable } from './ScorecardTable';
 import type { DashboardData } from './ZmDashboard';
 
@@ -15,9 +16,10 @@ import type { DashboardData } from './ZmDashboard';
  * pan-zone KPI strip, the cross-zone Escalation Queue, the Zone Performance Scorecard, and the
  * Company/Plant overview — all over the existing role-scoped aggregations (CSM receives every zone).
  */
-export function CentralDashboard({ zones, companyPlants, critical, actions, fleetUptime, zoneUptime, plantUptime, error }: DashboardData) {
+export function CentralDashboard({ zones, companyPlants, critical, actions, fleet, fleetUptime, zoneUptime, plantUptime, error }: DashboardData) {
   const metrics: Metric[] = useMemo(() => {
-    const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
+    // Same operational source as the scorecard column below it.
+    const inactive = zones.reduce((s, z) => s + z.inactiveOperational, 0);
     const escalations = critical.reduce((s, g) => s + g.tickets.length, 0);
     const liveSources = actions.filter((a) => a.available && a.count > 0);
     const actionTotal = liveSources.reduce((s, a) => s + a.count, 0);
@@ -28,10 +30,18 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
         hint: fleetUptime != null ? 'this month, eligible devices' : 'awaiting Fleet Uptime run',
         tone: 'brand',
         hero: true,
+        kpi: 'fleetUptime',
         testId: 'kpi-uptime',
       },
       { label: 'Zones Covered', value: zones.length, hint: 'cross-zone scope', tone: 'info' },
-      { label: 'Inactive Devices', value: inactive, hint: 'all zones', tone: 'warning' },
+      {
+        label: 'Inactive Operational Devices',
+        value: formatCount(inactive),
+        hint: 'all zones',
+        tone: 'warning',
+        kpi: 'inactiveOperational',
+        testId: 'kpi-inactive-operational-hero',
+      },
       { label: 'Escalations', value: escalations, hint: `${actionTotal} action items`, tone: 'critical' },
     ];
   }, [zones, critical, actions, fleetUptime]);
@@ -58,13 +68,10 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
         </p>
       )}
 
+      <OperationalFleetSection fleet={fleet} />
+
       {/* Inactive vs Troubleshoot vs Installation over time (Issue 134) — Pan-India / Zone-wise. */}
       <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone />
-
-      {/* Cross-zone operating mode (Issue 136) — every zone's Catch-up / Steady status, sortable. */}
-      <div className="mb-8">
-        <ZoneOperatingModeTable />
-      </div>
 
       {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),
           over the cross-zone rows the CSM already receives. Rendered above the Escalation Queue —

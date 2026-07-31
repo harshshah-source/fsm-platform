@@ -97,7 +97,7 @@ export function ReportsPage() {
 
   const loading = fleet === null && zones === null && error === null;
 
-  const totalInactive = useMemo(() => (zones ?? []).reduce((s, z) => s + z.totalInactive, 0), [zones]);
+  const totalInactive = useMemo(() => (zones ?? []).reduce((s, z) => s + z.inactiveOperational, 0), [zones]);
 
   const criticalPlus = useMemo(
     () =>
@@ -172,7 +172,7 @@ export function ReportsPage() {
     return (zones ?? []).map((z) => ({
       zoneId: z.zoneId,
       zoneName: z.zoneName,
-      inactive: z.totalInactive,
+      inactive: z.inactiveOperational,
       criticalPlus: CRITICAL_PLUS.reduce((b, k) => b + (z.byBucket[k] ?? 0), 0),
       uptimePct: uptimeById.get(z.zoneId) ?? uptimeByName.get(z.zoneName) ?? null,
     }));

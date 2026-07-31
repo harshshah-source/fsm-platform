@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RollingNumber, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
-import { ZoneOperatingModeTable } from '../../components/dashboard/ZoneOperatingModeTable';
+import { formatStamp } from '../../lib/fleetFormat';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
 import { onIngestionComplete } from './ingestionEvents';
+import { OperationalFleetSection } from './OperationalFleetSection';
 import { ScorecardTable } from './ScorecardTable';
 import type { DashboardData } from './ZmDashboard';
 function CompanyPlantCard({ companies, plants, onCompaniesClick, onPlantsClick }: { companies: React.ReactNode; plants: React.ReactNode; onCompaniesClick: () => void; onPlantsClick: () => void }) {
@@ -54,9 +55,10 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
   useEffect(() => onIngestionComplete(() => void handleRunSuccess()), [handleRunSuccess]);
 
   const kpis: Metric[] = useMemo(() => {
-    const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
+    // Read off the zone rows' operational breakdown, so this card and the "Inactive Operational"
+    // column in the scorecard below are the same number by construction.
+    const inactive = zones.reduce((s, z) => s + z.inactiveOperational, 0);
     const roll = (value: number) => <RollingNumber value={value} runToken={lastRunAt} />;
-    // The Action-Required card was replaced by the fleet counts (Issue 122b).
     return [
       {
         label: 'Fleet Uptime',
@@ -64,9 +66,17 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
         hint: fleetUptime != null ? 'this month, eligible devices' : 'awaiting Fleet Uptime run',
         tone: 'brand',
         hero: true,
+        kpi: 'fleetUptime',
         testId: 'kpi-uptime',
       },
-      { label: 'Inactive Devices', value: roll(inactive), hint: `${zones.length} zones`, tone: 'warning' },
+      {
+        label: 'Inactive Operational Devices',
+        value: roll(inactive),
+        hint: `${zones.length} zones`,
+        tone: 'warning',
+        kpi: 'inactiveOperational',
+        testId: 'kpi-inactive-operational-hero',
+      },
       // Strictly the CRITICAL band (Issue 122 HITL decision) — same zone-overview `byBucket` source as
       // the scorecard's "Inactive > 24Hr" column, which is deliberately a SUPERSET (CRITICAL + worse).
       // Removed in error by ad03769's hero rework and restored by #143; the guarding test
@@ -77,14 +87,32 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
         value: roll(sumCriticalDevices(zones)),
         hint: 'pan-India, CRITICAL band',
         tone: 'critical',
+        kpi: 'criticalDevices',
         testId: 'kpi-critical',
       },
-      { label: 'Active Fleet', value: fleet ? roll(fleet.devices) : '—', hint: 'deployed devices', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
       {
-        label: 'Total Devices',
-        value: fleet && fleet.sourceDevices != null ? roll(fleet.sourceDevices) : '—',
-        hint: 'AutoPlant catalog · pan-India',
+        label: 'Operational Fleet',
+        value: fleet ? roll(fleet.operationalDevices) : '—',
+        hint: 'deployed & tracked by FSM',
+        tone: 'brand',
+        kpi: 'operationalDevices',
+        testId: 'kpi-devices',
+        onClick: () => navigate('/reports/device'),
+      },
+      {
+        // Renamed from "Total Devices": it is NOT a total of anything FSM tracks — it is another
+        // system's catalog, at another moment, including devices FSM deliberately never mirrors.
+        // Sitting unlabelled beside the operational counts, it invited exactly the subtraction that
+        // started this rework. The sync stamp is part of the card for the same reason.
+        label: 'AutoPlant Catalog',
+        value: fleet && fleet.catalogDevices != null ? roll(fleet.catalogDevices) : '—',
+        hint: (
+          <span data-testid="kpi-catalog-sync">
+            Last sync: <span className="tabular-nums">{formatStamp(fleet?.lastMasterSyncAt)}</span>
+          </span>
+        ),
         tone: 'info',
+        kpi: 'autoplantCatalog',
         testId: 'kpi-total-devices',
       },
     ];
@@ -123,10 +151,9 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
       )}
 
 
-      {/* Cross-zone operating mode (Issue 136) — every zone's Catch-up / Steady status, sortable. */}
-      <div className="mb-8">
-        <ZoneOperatingModeTable />
-      </div>
+      {/* The one strip where every card is the same kind of number, and the column totals of the
+          Scorecard and Company/Plant tables further down. */}
+      <OperationalFleetSection fleet={fleet} />
 
       <section aria-labelledby="sla-distribution-heading" className="mb-8">
         <h3

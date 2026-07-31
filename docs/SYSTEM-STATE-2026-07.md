@@ -651,6 +651,42 @@ matches the on-screen post-filter/post-sort view (fixing a real bug: every #122-
 ignored the active column sort). The five page-level `ExportMenu` instances this made redundant were
 removed.
 
+**#176 dashboard KPI transparency (done, 2026-07-29):** every operational count on the dashboard —
+fleet KPI strip, zone rows, company×plant rows, Fleet Directory companies and plants — is now selected
+by a **single shared SQL fragment**, `FLEET_COUNT_COLUMNS` in `dashboard.service.ts`, differing only in
+`GROUP BY`:
+
+```
+mirroredDevices      COUNT(*)
+operationalDevices   COUNT(*) FILTER (WHERE is_departed = false)
+warehouseDevices     COUNT(*) FILTER (WHERE is_departed = true)
+inactiveOperational  COUNT(*) FILTER (WHERE is_departed = false AND is_inactive AND sla_bucket IS NOT NULL)
+healthyOperational   COUNT(*) FILTER (WHERE is_departed = false AND NOT (is_inactive AND sla_bucket IS NOT NULL))
+```
+
+This closed a live correctness defect: the zone/company denominators had **no `is_departed`
+predicate** while their numerators excluded departed devices structurally (§3c forces
+`is_inactive = NOT departed AND …`), so `inactive / total` mixed populations — pan-India 3,476 / 23,238
+against a 17,415 "Active Fleet" KPI. Warehouse stock is uneven (West 14.7% departed, South 39.4%), so
+it **re-ordered the Zone Performance Scorecard**: South showed 21.4% inactive against an actual 35.2%.
+A latent second defect went with it — zone/company rows were built from the *inactive* query, so an
+entity at 100% health vanished from the table and its devices dropped out of the column totals; rows
+are now driven by the counts query (company×plant 135 → 205 live).
+
+Current pan-India funnel (dev DB, master sync run 90): catalog **50,270** → mirrored 24,225 (−26,045
+never mirrored) → on live plants 23,238 (−987 deactivated plants) → operational **17,415** + warehouse
+**5,823**; operational splits 13,939 healthy + 3,476 inactive. New `GET /api/dashboard/fleet-composition`
+serves that funnel with every drop named; a ZM's copy omits the catalog steps (the source counter has
+no zone attribution).
+
+Naming is now explicit per Part 9 of the operator spec: **AutoPlant Catalog** (was "Total Devices",
+now carrying its sync timestamp), **Operational Fleet** (was "Active Fleet"), **Inactive Operational**
+(was "Inactive / Total"). `apps/admin/src/lib/kpiCatalog.ts` is the single source of truth for every
+KPI's definition / exclusions / source table / refresh trigger / formula, rendered in-product by
+`components/data/KpiInfo.tsx` on every card and counted column header, and restated with the SQL in
+**`docs/kpi-definitions.md`**. The reconciliation identities are enforced over the whole database by
+`apps/backend/test/dashboard-kpi-reconciliation.e2e-spec.ts` (14 tests), not by a fixture.
+
 ---
 
 ## 4. DOCS vs CODE RECONCILIATION

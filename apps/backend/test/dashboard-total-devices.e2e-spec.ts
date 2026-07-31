@@ -5,11 +5,12 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
- * Issue 2 — Total Devices alongside Inactive Devices. `zone-overview` and `company-plant-overview` must
- * additively report `totalDevices` (all device_states for the entity, active + inactive) so the UI can
- * render `inactive / total`. The inactive counts and byBucket breakdown are unchanged.
+ * Issue 2 — the `inactive / total` denominator. `zone-overview` and `company-plant-overview` must report
+ * `operationalDevices` (non-departed device_states for the entity) beside `inactiveOperational`, so the UI
+ * renders a ratio over ONE population. Reworked 2026-07-29 (#176): the denominator used to include
+ * warehouse devices while the numerator never did. The inactive counts and byBucket breakdown are unchanged.
  */
-describe('Issue 2 — /api/dashboard totalDevices', () => {
+describe('Issue 2 — /api/dashboard operational denominator', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let zoneId: bigint;
@@ -73,31 +74,33 @@ describe('Issue 2 — /api/dashboard totalDevices', () => {
     await app.close();
   });
 
-  it('zone-overview reports totalDevices (active + inactive) beside totalInactive', async () => {
+  it('zone-overview reports operationalDevices beside inactiveOperational', async () => {
     const token = await login('ops.head@fsm.test');
     const res = await request(app.getHttpServer())
       .get('/api/dashboard/zone-overview')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const row = (res.body as Array<{ zoneId: string; totalInactive: number; totalDevices: number }>).find(
-      (r) => r.zoneId === zoneId.toString(),
-    );
+    const row = (
+      res.body as Array<{ zoneId: string; inactiveOperational: number; operationalDevices: number; healthyOperational: number }>
+    ).find((r) => r.zoneId === zoneId.toString());
     expect(row).toBeDefined();
-    expect(row!.totalInactive).toBe(3);
-    expect(row!.totalDevices).toBe(5);
+    expect(row!.inactiveOperational).toBe(3);
+    expect(row!.operationalDevices).toBe(5);
+    expect(row!.healthyOperational).toBe(2);
   });
 
-  it('company-plant-overview reports totalDevices beside totalInactive', async () => {
+  it('company-plant-overview reports operationalDevices beside inactiveOperational', async () => {
     const token = await login('ops.head@fsm.test');
     const res = await request(app.getHttpServer())
       .get('/api/dashboard/company-plant-overview')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const row = (res.body as Array<{ plantId: string; totalInactive: number; totalDevices: number }>).find(
-      (r) => r.plantId === plantId.toString(),
-    );
+    const row = (
+      res.body as Array<{ plantId: string; inactiveOperational: number; operationalDevices: number; healthyOperational: number }>
+    ).find((r) => r.plantId === plantId.toString());
     expect(row).toBeDefined();
-    expect(row!.totalInactive).toBe(3);
-    expect(row!.totalDevices).toBe(5);
+    expect(row!.inactiveOperational).toBe(3);
+    expect(row!.operationalDevices).toBe(5);
+    expect(row!.healthyOperational).toBe(2);
   });
 });

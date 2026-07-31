@@ -113,10 +113,11 @@ describe('Issue 122b — fleet summary + plant filter + multi-plant assign', () 
     // Absolute values depend on the shared dev DB — assert shape + that our seed is included.
     expect(res.body.companies).toBeGreaterThanOrEqual(1);
     expect(res.body.plants).toBeGreaterThanOrEqual(2);
-    expect(res.body.devices).toBeGreaterThanOrEqual(2); // Active Fleet — departed devices excluded.
-    // Total Devices (raw AutoPlant catalog) — null until a master sync records `entity_stats.devices.observed`.
-    expect(res.body).toHaveProperty('sourceDevices');
-    expect(res.body.sourceDevices === null || typeof res.body.sourceDevices === 'number').toBe(true);
+    // Operational Fleet — departed (warehouse) devices excluded.
+    expect(res.body.operationalDevices).toBeGreaterThanOrEqual(2);
+    // AutoPlant Catalog — null until a master sync records `entity_stats.devices.observed`.
+    expect(res.body).toHaveProperty('catalogDevices');
+    expect(res.body.catalogDevices === null || typeof res.body.catalogDevices === 'number').toBe(true);
   });
 
   it('fleet-directory lists the seeded company and plants by name with device counts', async () => {
@@ -126,13 +127,13 @@ describe('Issue 122b — fleet summary + plant filter + multi-plant assign', () 
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     const co = res.body.companies.find((c: { companyId: string }) => c.companyId === String(companyId));
-    expect(co).toMatchObject({ name: 'Co-i122b-' + NS, tier: 'GOLD', plantCount: 2, deviceCount: 2 });
+    expect(co).toMatchObject({ name: 'Co-i122b-' + NS, tier: 'GOLD', plantCount: 2, operationalDevices: 2 });
     const plant = res.body.plants.find((p: { plantId: string }) => p.plantId === String(plantA));
     expect(plant).toMatchObject({
       name: 'PlantA-i122b-' + NS,
       companyName: 'Co-i122b-' + NS,
       zoneName: 'Z-i122b-' + NS,
-      deviceCount: 1,
+      operationalDevices: 1,
     });
   });
 

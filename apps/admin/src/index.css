@@ -114,9 +114,11 @@
  * Specificity note: `:root[data-theme="dark"]` (0,2,0) outranks Tailwind's `:root` (0,1,0), so this
  * wins regardless of source order.
  *
- * It is a *modern* dark — a blue-cool near-black canvas with genuinely raised card surfaces, not an
- * inverted greyscale. Foregrounds are lifted (a light-mode `#197a3d` is unreadable on near-black) and
- * the semantic tints become deep washes rather than pastels.
+ * It is a *pitch-black* dark (2026-07-29 operator ask): the page canvas is true #000, and every step
+ * above it is a neutral grey — no blue tint anywhere, since even a few points of hue stop the canvas
+ * reading as black. Depth still comes from a monotonic surface ladder (canvas → card → raised →
+ * sunken), just one anchored at zero. Foregrounds are lifted (a light-mode `#197a3d` is unreadable on
+ * black) and the semantic tints become deep washes rather than pastels.
  */
 :root[data-theme="dark"] {
   /* Brand — the crimson brightens just enough to hold 4.5:1 against the dark card. `brand-300` stays
@@ -126,59 +128,60 @@
   --color-brand-700: #a5122a;
 
   /* Drill-down counts and inline links go WHITE here, not red. `brand-700` (#a5122a) as a foreground
-     on the #16191f card is ~1.9:1 — the Company/Plant Overview, which is nothing but these counts,
+     on the near-black card is ~1.9:1 — the Company/Plant Overview, which is nothing but these counts,
      rendered as an unreadable field of dark red. */
   --color-link: #ffffff;
 
-  /* Chrome — sidebar / footer / table header. Deliberately *lighter* than the canvas: on a dark page
-     an elevated rail reads as chrome, whereas a darker one reads as a hole. */
-  --color-chrome-900: #171b23;
-  --color-chrome-800: #1e232c;
-  --color-chrome-700: #2f3743;
-  --color-chrome-text: #e3e8f0;
-  --color-chrome-muted: #9aa4b3;
+  /* Chrome — sidebar / footer / table header. Deliberately *lighter* than the canvas: on a black page
+     an elevated rail reads as chrome, whereas a darker one is indistinguishable from the void. */
+  --color-chrome-900: #171717;
+  --color-chrome-800: #202020;
+  --color-chrome-700: #2e2e2e;
+  --color-chrome-text: #e6e6e6;
+  --color-chrome-muted: #9a9a9a;
 
   /* Quiet accent (hover washes + muted emphasis text) — inverted so 100 stays the subtlest step. */
-  --color-luxury-100: #232833;
-  --color-luxury-300: #3d434f;
-  --color-luxury-600: #a8afbb;
-  --color-luxury-700: #c2c8d2;
+  --color-luxury-100: #1c1c1c;
+  --color-luxury-300: #363636;
+  --color-luxury-600: #adadad;
+  --color-luxury-700: #c8c8c8;
 
-  /* Surfaces — canvas → card → raised → sunken stays a monotonic ladder, as in light. */
-  --color-surface-app: #0e1014;
-  --color-surface-card: #16191f;
-  --color-surface-raised: #1c202a;
-  --color-surface-sunken: #232833;
-  --color-canvas-top: #12151b;
+  /* Surfaces — canvas is true black; card → raised → sunken stays a monotonic ladder above it, as in
+     light. The steps are small but real, so a card still separates from the page without greying it. */
+  --color-surface-app: #000000;
+  --color-surface-card: #0d0d0d;
+  --color-surface-raised: #161616;
+  --color-surface-sunken: #1f1f1f;
+  --color-canvas-top: #000000;
 
-  --color-line: #2b3039;
-  --color-line-strong: #3e4552;
+  --color-line: #262626;
+  --color-line-strong: #3d3d3d;
 
-  --color-row-hover: #2b323e;
+  --color-row-hover: #292929;
 
-  /* Deliberately brighter than a straight inversion. On a near-black canvas a "white" that is really
-     light grey reads as dimmed — headings go pure white and body text sits just under it, so the
-     table content is white first and grey only where it is genuinely secondary. */
+  /* Deliberately brighter than a straight inversion. On a black canvas a "white" that is really light
+     grey reads as dimmed — headings go pure white and body text sits just under it, so the table
+     content is white first and grey only where it is genuinely secondary. */
   --color-ink-strong: #ffffff;
-  --color-ink: #e3e8f0;
-  --color-ink-muted: #aab3c0;
-  --color-ink-caps: #9aa4b3;
+  --color-ink: #e6e6e6;
+  --color-ink-muted: #ababab;
+  --color-ink-caps: #9a9a9a;
 
   /* Semantic — foreground lifted for contrast on near-black; `-bg` becomes a deep tint. Each `-fg`
      also has to survive being used as a *fill* with white text (DataTable's `danger` active row uses
      `bg-critical text-white`), which is why these sit mid-scale rather than pastel. */
   --color-info: #5b8dff;
-  --color-info-bg: #17203a;
+  --color-info-bg: #101a30;
   --color-success: #35b46a;
-  --color-success-bg: #12291d;
+  --color-success-bg: #0c2216;
   --color-verified: #9d7bf0;
-  --color-verified-bg: #211a3a;
+  --color-verified-bg: #1a1430;
   --color-warning: #d99a2b;
-  --color-warning-bg: #2c2210;
+  --color-warning-bg: #251c0a;
   --color-critical: #e5484d;
-  --color-critical-bg: #33191b;
-  --color-neutral: #9aa3b2;
-  --color-neutral-bg: #232833;
+  --color-critical-bg: #2c1315;
+  --color-neutral: #a3a3a3;
+  --color-neutral-bg: #1f1f1f;
 
   /* Elevation — over a dark canvas, depth comes from black shadow, not from a grey tint. */
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 30px rgb(0 0 0 / 0.4);

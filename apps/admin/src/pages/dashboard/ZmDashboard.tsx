@@ -10,13 +10,14 @@ import type {
 import type { ZoneEngineer } from '../../api/schedules';
 import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
-import { ZoneOperatingModeCard } from '../../components/dashboard/ZoneOperatingModeCard';
 import { Badge } from '../../components/ui';
+import { formatCount } from '../../lib/fleetFormat';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
+import { OperationalFleetSection } from './OperationalFleetSection';
 import { ZoneOverviewTable } from './ZoneOverviewTable';
 
 export interface DashboardData {
@@ -24,7 +25,7 @@ export interface DashboardData {
   companyPlants: CompanyPlantRow[];
   critical: CriticalQueueGroup[];
   actions: ActionRequiredCard[];
-  /** Headline fleet counts (Issue 122b); null until loaded (or on an older backend). */
+  /** Headline fleet counts; null until loaded (or on an older backend). */
   fleet: FleetSummary | null;
   /** Current-month fleet uptime % (BE-39 Fleet Uptime report); null until loaded / no computed data. */
   fleetUptime: number | null;
@@ -54,11 +55,12 @@ export function ZmDashboard({
   error,
 }: DashboardData) {
   const navigate = useNavigate();
-  // KPI strip derived from already-loaded data. Uptime comes from the Fleet Uptime report (BE-39). The
-  // Action-Required card was replaced by the fleet counts (Issue 122b) — its queue lives on in the panel below.
-  const nf = useMemo(() => new Intl.NumberFormat('en-IN'), []);
+  // KPI strip derived from already-loaded data. Uptime comes from the Fleet Uptime report (BE-39); the
+  // Action-Required queue lives on in the panel below.
   const metrics: Metric[] = useMemo(() => {
-    const inactive = zones.reduce((s, z) => s + z.totalInactive, 0);
+    // Read straight off the zone rows, which now carry the operational breakdown — so this card and the
+    // "Inactive Operational" column beneath it are the same number by construction.
+    const inactive = zones.reduce((s, z) => s + z.inactiveOperational, 0);
     // Strictly the CRITICAL band (Issue 122) — same device-based source as the scorecard's Critical
     // column, so KPI == scorecard column sum by construction. Worse bands stay in the Zone Overview.
     const criticalDevices = sumCriticalDevices(zones);
@@ -69,26 +71,30 @@ export function ZmDashboard({
         hint: fleetUptime != null ? 'this month, eligible devices' : 'awaiting Fleet Uptime run',
         tone: 'brand',
         hero: true,
+        kpi: 'fleetUptime',
         testId: 'kpi-uptime',
       },
       {
-        label: 'Inactive Devices',
-        value: inactive,
+        label: 'Inactive Operational Devices',
+        value: formatCount(inactive),
         hint: `across ${zones.length} zone${zones.length === 1 ? '' : 's'}`,
         tone: 'warning',
+        kpi: 'inactiveOperational',
+        testId: 'kpi-inactive-operational-hero',
       },
       {
         label: 'Critical Devices',
-        value: criticalDevices,
+        value: formatCount(criticalDevices),
         hint: 'in the CRITICAL band',
         tone: 'critical',
+        kpi: 'criticalDevices',
         testId: 'kpi-critical',
       },
-      { label: 'Companies', value: fleet ? nf.format(fleet.companies) : '—', hint: 'in your scope', tone: 'info', testId: 'kpi-companies', onClick: () => navigate('/reports/fleet?tab=companies') },
-      { label: 'Plants', value: fleet ? nf.format(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', testId: 'kpi-plants', onClick: () => navigate('/reports/fleet?tab=plants') },
-      { label: 'Active Fleet', value: fleet ? nf.format(fleet.devices) : '—', hint: 'deployed devices', tone: 'brand', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
+      { label: 'Companies', value: fleet ? formatCount(fleet.companies) : '—', hint: 'in your scope', tone: 'info', kpi: 'companies', testId: 'kpi-companies', onClick: () => navigate('/reports/fleet?tab=companies') },
+      { label: 'Plants', value: fleet ? formatCount(fleet.plants) : '—', hint: 'with tracked devices', tone: 'info', kpi: 'plants', testId: 'kpi-plants', onClick: () => navigate('/reports/fleet?tab=plants') },
+      { label: 'Operational Fleet', value: fleet ? formatCount(fleet.operationalDevices) : '—', hint: 'deployed & tracked', tone: 'brand', kpi: 'operationalDevices', testId: 'kpi-devices', onClick: () => navigate('/reports/device') },
     ];
-  }, [zones, fleet, fleetUptime, nf, navigate]);
+  }, [zones, fleet, fleetUptime, navigate]);
 
   return (
     <div>
@@ -112,14 +118,13 @@ export function ZmDashboard({
         </p>
       )}
 
+      {/* The one strip where every card is the same kind of number, and the column totals of the two
+          tables at the bottom of the page. */}
+      <OperationalFleetSection fleet={fleet} />
+
       {/* Inactive vs Troubleshoot vs Installation over time (Issue 134), scoped to the ZM's own zone
           (the backend clamps) — between the KPI hero and the SLA Bucket Distribution. */}
       <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone={false} />
-
-      {/* Zone operating mode (Issue 136) — plain-language "Catch-up / Steady" + why, for this ZM's zone. */}
-      <div className="mb-8">
-        <ZoneOperatingModeCard />
-      </div>
 
       <ActionRequiredPanel cards={actions} />
 

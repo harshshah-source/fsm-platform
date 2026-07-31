@@ -46,7 +46,7 @@ describe('#158 — downstream effects of a plant zone change', () => {
   /** The real read a Zonal Manager's dashboard performs for their own zone. */
   const zmInactiveCount = async (zoneId: bigint): Promise<number> => {
     const rows = await dashboard.zoneOverview({ role: 'ZONAL_MANAGER', zoneId: Number(zoneId) });
-    return rows.find((r) => r.zoneId === zoneId.toString())?.totalInactive ?? 0;
+    return rows.find((r) => r.zoneId === zoneId.toString())?.inactiveOperational ?? 0;
   };
 
   /** Every zone-scoped consumer in the codebase filters tickets exactly this way — via the plant join. */

@@ -6,21 +6,21 @@ import type { CompanyPlantRow, ZoneOverviewRow } from '../src/api/dashboard';
 import { ScorecardTable } from '../src/pages/dashboard/ScorecardTable';
 import { ZoneOverviewTable } from '../src/pages/dashboard/ZoneOverviewTable';
 import { CompanyPlantTable } from '../src/pages/dashboard/CompanyPlantTable';
+import { companyPlantRow, zoneRow } from './fixtures/fleet';
 
 /**
  * The inactive-device count in every overview table is a click-through into the Device Detail list,
  * pre-filtered to exactly those inactive devices (`status=INACTIVE` + the entity id). Asserts the href
  * carries the right scope at each level (zone / company / plant).
  */
-const zone: ZoneOverviewRow = {
-  zoneId: '1', zoneName: 'NORTH', totalInactive: 3, totalDevices: 10,
-  byBucket: { CRITICAL: 3 }, trendPctVsPrevDay: null,
-};
-const plant: CompanyPlantRow = {
-  companyId: '9', companyName: 'Acme', companyTier: 'GOLD', zoneId: '1',
-  plantId: '5', plantName: 'Yard-1', totalInactive: 2, totalDevices: 40, byBucket: { CRITICAL: 2 },
-};
-const zeroZone: ZoneOverviewRow = { ...zone, zoneId: '2', zoneName: 'SOUTH', totalInactive: 0 };
+const zone: ZoneOverviewRow = zoneRow({
+  zoneId: '1', zoneName: 'NORTH', operational: 10, inactive: 3, byBucket: { CRITICAL: 3 },
+});
+const plant: CompanyPlantRow = companyPlantRow({
+  companyId: '9', companyName: 'Acme', plantId: '5', plantName: 'Yard-1',
+  operational: 40, inactive: 2, byBucket: { CRITICAL: 2 },
+});
+const zeroZone: ZoneOverviewRow = zoneRow({ zoneId: '2', zoneName: 'SOUTH', operational: 10, inactive: 0 });
 
 const inRouter = (ui: JSX.Element) => render(<MemoryRouter>{ui}</MemoryRouter>);
 

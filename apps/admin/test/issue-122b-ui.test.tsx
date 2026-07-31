@@ -42,13 +42,13 @@ beforeEach(() => {
     const u = String(url);
     if (u.includes('/schedules/assign-plants') && init?.method === 'POST')
       return json({ seId: 'se-1', assigned: 3, alreadyAssigned: 0, perPlant: [{ plantId: '100', assigned: 2, openUnassigned: 2 }, { plantId: '101', assigned: 1, openUnassigned: 1 }] });
-    if (u.includes('/dashboard/fleet-summary')) return json({ companies: 42, plants: 1180, devices: 19301, sourceDevices: 54210 });
+    if (u.includes('/dashboard/fleet-summary')) return json({ companies: 42, plants: 1180, operationalDevices: 19301, warehouseDevices: 5823, mirroredDevices: 25124, inactiveOperational: 3476, healthyOperational: 15825, inactivePct: 18, fleetHealthPct: 82, catalogDevices: 54210, lastMasterSyncAt: '2026-07-29T05:49:04.756Z', lastSnapshotAt: '2026-07-29T06:02:02.248Z' });
     if (u.includes('/dashboard/fleet-directory'))
       return json({
-        companies: [{ companyId: '7', name: 'UltraTech', tier: 'PLATINUM', plantCount: 2, deviceCount: 120 }],
+        companies: [{ companyId: '7', name: 'UltraTech', tier: 'PLATINUM', plantCount: 2, mirroredDevices: 120, operationalDevices: 100, warehouseDevices: 20, inactiveOperational: 10, healthyOperational: 90, inactivePct: 10, fleetHealthPct: 90, lastSnapshotAt: null, lastActivityAt: null }],
         plants: [
-          { plantId: '100', name: 'UT Plant A', companyId: '7', companyName: 'UltraTech', zoneName: 'North', deviceCount: 80 },
-          { plantId: '200', name: 'Prism Plant', companyId: '8', companyName: 'Prism', zoneName: 'East', deviceCount: 40 },
+          { plantId: '100', name: 'UT Plant A', companyId: '7', companyName: 'UltraTech', zoneName: 'North', mirroredDevices: 80, operationalDevices: 70, warehouseDevices: 10, inactiveOperational: 7, healthyOperational: 63, inactivePct: 10, fleetHealthPct: 90, lastSnapshotAt: null, lastActivityAt: null },
+          { plantId: '200', name: 'Prism Plant', companyId: '8', companyName: 'Prism', zoneName: 'East', mirroredDevices: 40, operationalDevices: 30, warehouseDevices: 10, inactiveOperational: 3, healthyOperational: 27, inactivePct: 10, fleetHealthPct: 90, lastSnapshotAt: null, lastActivityAt: null },
         ],
       });
     if (u.includes('/devices/filter-options')) return json(filterOptions);
