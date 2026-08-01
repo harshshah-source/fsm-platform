@@ -52,6 +52,11 @@ describe('Issue 157 Slice 3 — TicketCreationService stamps the effective tier'
         zoneId,
         tier: 'PLATINUM',
         reason: 'Ticket-creation stamp fixture — company is globally GOLD, overridden here',
+        // #183 — createdAt defaults to CURRENT_TIMESTAMP (a live clock); expiresAt is pinned to a
+        // frozen NOW. Left to the default, created_at drifts past this frozen expiresAt and violates
+        // company_tier_overrides_expiry_window_chk permanently once NOW is in the past. Pin it
+        // relative to NOW instead (precedent: tier-override-expiry-sweep.e2e-spec.ts:38-40).
+        createdAt: new Date(NOW.getTime() - 60 * 60 * 1000),
         expiresAt: new Date(NOW.getTime() + 24 * 60 * 60 * 1000),
         status: 'ACTIVE',
       },

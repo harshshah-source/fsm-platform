@@ -43,6 +43,8 @@ describe('Issue 157 Slice 2 — resolveEffectiveTier', () => {
 
   it('applies an ACTIVE unexpired override for the (company, zone) pair', async () => {
     const now = new Date();
+    // tier-override-fixture-guard-ok: `now` is a live new Date(), not a frozen constant — the
+    // created_at default and this expiresAt stay in sync as real time advances (#183 R5).
     await prisma.companyTierOverride.create({
       data: {
         companyId,
@@ -76,6 +78,7 @@ describe('Issue 157 Slice 2 — resolveEffectiveTier', () => {
         createdAt: new Date(now.getTime() - 60 * 60 * 1000),
       },
     });
+    // tier-override-fixture-guard-ok: `now` is a live new Date(), not a frozen constant (#183 R5).
     await prisma.companyTierOverride.create({
       data: {
         companyId,
@@ -98,6 +101,9 @@ describe('Issue 157 Slice 2 — resolveEffectiveTier', () => {
     // expiresAt must be > createdAt to satisfy the DB CHECK (an override can never be created
     // already-expired); the sweep-lag scenario is simulated by resolving at a LATER `now`, not by
     // backdating expiresAt below creation time.
+    // tier-override-fixture-guard-ok: `createdAt` here is a live new Date(), not a frozen constant
+    // (#183 R5) — this is the local var used to compute expiresAt, the column itself takes the DB
+    // default which resolves to the same real instant.
     await prisma.companyTierOverride.create({
       data: {
         companyId,
@@ -117,6 +123,7 @@ describe('Issue 157 Slice 2 — resolveEffectiveTier', () => {
   it('ignores a CANCELLED override even if its expiresAt has not passed', async () => {
     await prisma.companyTierOverride.deleteMany({ where: { companyId, zoneId } });
     const now = new Date();
+    // tier-override-fixture-guard-ok: `now` is a live new Date(), not a frozen constant (#183 R5).
     await prisma.companyTierOverride.create({
       data: {
         companyId,

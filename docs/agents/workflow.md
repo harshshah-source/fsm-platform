@@ -69,6 +69,19 @@ After each slice, report:
 
 If RED was skipped, stop and redo the slice test-first.
 
+## Fixtures against a server-evaluated CHECK constraint (#183)
+
+**Fixtures for tables with a `CURRENT_TIMESTAMP` default must set that column explicitly whenever
+another column in the same row is compared against it by a CHECK constraint.** Never derive one half
+of a constrained pair from a frozen absolute date and leave the other to the database default — such
+a row is valid on the day it is written and rejected forever afterwards. Faking timers does not help:
+the default is evaluated by Postgres, not Node.
+
+Precedent: `apps/backend/test/tier-override-expiry-sweep.e2e-spec.ts:38-40,55-57` pins `createdAt`
+relative to its own frozen `NOW` for exactly this reason (`company_tier_overrides_expiry_window_chk`).
+Three sibling specs missed this for a week (#183) — `beforeAll` silently started throwing the moment
+the frozen `expiresAt` fell behind the live `created_at` default, and stayed broken until diagnosed.
+
 ## UI reference system
 
 For any issue touching a dashboard, page, screen, form, table, drawer, queue, report, navigation, or

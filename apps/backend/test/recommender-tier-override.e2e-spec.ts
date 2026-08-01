@@ -80,6 +80,12 @@ describe('Issue 157 Slice 3 — effective-tier engine bite (AC-4)', () => {
         zoneId: zoneA,
         tier: 'PLATINUM',
         reason: 'AC-4 fixture — Silver raised to Platinum in zone A only',
+        // #183 — pin createdAt relative to NOW (do NOT switch NOW itself to a live clock: the
+        // reorder assertion at :121 below is load-bearing on both tickets sharing this identical
+        // frozen lastStateChangedAt). createdAt defaults to CURRENT_TIMESTAMP otherwise, which
+        // drifts past this frozen expiresAt and violates company_tier_overrides_expiry_window_chk
+        // permanently once NOW is in the past (precedent: tier-override-expiry-sweep.e2e-spec.ts:38-40).
+        createdAt: new Date(NOW.getTime() - 60 * 60 * 1000),
         expiresAt: new Date(NOW.getTime() + 24 * 60 * 60 * 1000),
         status: 'ACTIVE',
       },

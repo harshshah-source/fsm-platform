@@ -1,6 +1,6 @@
 # 183 — Calendar time-bomb: three tier-override specs have been dead since 2026-07-24 (frozen `expiresAt` vs a live `created_at`)
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Backend (test repair)
 
 Filed 2026-07-31. **Last of four in the repair set.** Sequence:
@@ -239,31 +239,64 @@ opts out with a named comment the guard recognises.
 
 ## Acceptance criteria
 
-- [ ] **AC-1** — the fixture insert in each of the three specs sets `createdAt` explicitly, relative
+- [x] **AC-1** — the fixture insert in each of the three specs sets `createdAt` explicitly, relative
       to that spec's own `NOW` const: `dispatch-run-tier-override-snapshot.e2e-spec.ts:39-46`,
       `recommender-tier-override.e2e-spec.ts:78-85`, `ticket-creation-tier-override.e2e-spec.ts:50-57`.
-- [ ] **AC-2** — all six previously-dead tests **execute and pass**: 1 in
+      **Landed** — `createdAt: new Date(NOW.getTime() - 60 * 60 * 1000)` in all three, cited to the
+      `tier-override-expiry-sweep.e2e-spec.ts:38-40` precedent.
+- [x] **AC-2** — all six previously-dead tests **execute and pass**: 1 in
       `dispatch-run-tier-override-snapshot`, 4 in `recommender-tier-override`, 1 in
-      `ticket-creation-tier-override`. No `beforeAll` throws a `DriverAdapterError`.
-- [ ] **AC-3 — the constraint is untouched.** `git diff --stat prisma/` is empty. No new migration.
+      `ticket-creation-tier-override`. No `beforeAll` throws a `DriverAdapterError`. **Verified** —
+      6/6 pass, plus the three regression files (`tier-override-expiry-sweep`, `org-tier-overrides`,
+      `org-tier-overrides-winning-mark`) unaffected: 9 files / 38 tests green together.
+- [x] **AC-3 — the constraint is untouched.** `git diff --stat prisma/` is empty. No new migration.
       Verified positively: inserting a row with `expiresAt < createdAt` still fails, and one with
-      `expiresAt = createdAt + 3 months` still fails.
-- [ ] **AC-4 — no live clock was introduced.** The `NOW` const in each of the three specs is
+      `expiresAt = createdAt + 3 months` still fails. **Verified** with a throwaway probe (raw SQL in
+      a rolled-back transaction against `fsm_test`): both invalid windows rejected with
+      `violates check constraint "company_tier_overrides_expiry_window_chk"`; a valid window (`+1
+      day`) accepted as a sanity check. `git diff --stat prisma/` confirmed empty.
+- [x] **AC-4 — no live clock was introduced.** The `NOW` const in each of the three specs is
       unchanged, and `recommender-tier-override.e2e-spec.ts:121`
       (`silverRec.processingRank < goldRec.processingRank`) still compares two tickets that share one
       identical `lastStateChangedAt`. Verified by running that file **five times consecutively** —
-      all five green, no flake. This is the AC that guards against the naive fix.
+      all five green, no flake. This is the AC that guards against the naive fix. **Verified**: 5/5
+      runs, 4/4 tests each, byte-identical.
 - [ ] **AC-5 — time-proof, demonstrated not asserted.** Re-run the targeted command with the system
       clock advanced by three months (a container/VM with a shifted date, or `faketime` if
       available). All six tests still pass. If no clock-shifting facility is available, state that
       explicitly in the completion report rather than claiming the AC — **UNRESOLVED — implementer
       must determine** whether this environment can shift the clock; a `libfaketime` equivalent on
       Windows was not verified while filing.
-- [ ] **AC-6 — the convention is written down** in `docs/agents/workflow.md`, in the R5 wording,
+      **UNRESOLVED, confirmed as anticipated.** This is a Windows/MSYS host; `faketime`/`libfaketime`
+      are not present (checked `which faketime`, `which libfaketime` — neither found), and there is
+      no container available for an isolated clock shift. Deliberately did **not** change the shared
+      machine's real system clock to test this — that is a global, hard-to-reverse action on infra
+      this session doesn't own outright, out of proportion to what the AC needs. **Reasoned
+      alternative, not a substitute for the demonstration**: after AC-1, both `createdAt` and
+      `expiresAt` on every fixture row are literal `Date` objects computed once from each spec's own
+      frozen `NOW` and passed explicitly — nothing in the insert or in `EffectiveTierResolver` /
+      `DispatchRunService.captureConfigSnapshot`'s query reads the wall clock for the CHECK's own
+      evaluation (Postgres evaluates the constraint against the two column *values* actually written,
+      not against `now()`). So a system-clock shift during the run has no code path left to affect
+      the constraint. This closes the mechanism the AC worries about, but is analysis, not the
+      demonstration the AC asks for — left unchecked, and flagged for a human to actually run under
+      a shifted clock if that guarantee is ever needed at higher confidence.
+- [x] **AC-6 — the convention is written down** in `docs/agents/workflow.md`, in the R5 wording,
       including the "faking timers does not help, the default is evaluated by Postgres" sentence.
-- [ ] **AC-7 — the guard exists.** `test/tier-override-fixture-guard.spec.ts` fails when a
+      **Landed** as a new "Fixtures against a server-evaluated CHECK constraint (#183)" section,
+      placed alongside the TDD report format per the issue's instruction.
+- [x] **AC-7 — the guard exists.** `test/tier-override-fixture-guard.spec.ts` fails when a
       `companyTierOverride.create(` call omits `createdAt`, and passes on the repaired tree. Proven by
-      temporarily removing one `createdAt` and observing the guard go red.
+      temporarily removing one `createdAt` and observing the guard go red. **Landed and proven**: a
+      static scan (balanced-paren extraction, no DB) over every `.ts` file in `test/`; temporarily
+      stripped `ticket-creation-tier-override.e2e-spec.ts`'s `createdAt` and confirmed the guard
+      failed with the exact file:line, then restored it and confirmed green again. Also covers two
+      call sites the issue's own R1 table didn't enumerate — `effective-tier-resolver.spec.ts` (4
+      sites) and `plant-zone-change-impact.e2e-spec.ts` (4 sites, already correct). The resolver spec
+      legitimately omits `createdAt` (every date in it derives from a live `new Date()`, never a
+      frozen constant, so `created_at`'s default and its `expiresAt` values stay in sync on their
+      own) — opted out via the guard's `tier-override-fixture-guard-ok:` comment marker, one per call
+      site, rather than silently special-cased in the guard itself.
 
 ## Out of scope — do not do these here
 

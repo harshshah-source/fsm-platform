@@ -41,6 +41,11 @@ describe('Issue 157 Slice 3 — dispatch-run config_snapshot carries active tier
         zoneId,
         tier: 'PLATINUM',
         reason: 'AC-6 fixture — must appear in the run config_snapshot',
+        // #183 — createdAt defaults to CURRENT_TIMESTAMP (a live clock); expiresAt is pinned to a
+        // frozen NOW. Left to the default, created_at drifts past the frozen expiresAt and violates
+        // company_tier_overrides_expiry_window_chk permanently once NOW is in the past. Pin it
+        // relative to NOW instead (precedent: tier-override-expiry-sweep.e2e-spec.ts:38-40).
+        createdAt: new Date(NOW.getTime() - 60 * 60 * 1000),
         expiresAt: new Date(NOW.getTime() + 24 * 60 * 60 * 1000),
         status: 'ACTIVE',
       },
