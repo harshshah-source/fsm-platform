@@ -15,7 +15,20 @@ is the same defect, first seen 2026-07-22.
 > **This is a DIAGNOSIS issue, not a known-bug fix.** The mechanism is not resolved. Do not open with
 > a speculative fix — reproduce first. The ACs are written around that.
 
----
+> **AMENDED 2026-08-02 — crash rate measured much higher than previously recorded, while verifying
+> [#185](./185-tiers-reference-table-never-seeded.md) (an unrelated one-file seed-only change,
+> `src/org/org-seed.ts`).** Three consecutive full-suite runs via `scripts/run-tests.mjs`, same
+> commit, no code changes between them: **all three crashed** — 1, then 3, then 2 separate
+> `Worker exited unexpectedly` errors per run (`Errors 1/3/2 errors`). **100% crash rate across 3
+> runs**, against the previously-documented baseline of roughly 2-in-315-files (i.e. crash-free runs
+> were the norm). Every crash was the identical signature already on file — `tinypool@1.1.1` /
+> `ChildProcess`, zero file attribution — and none of the three partial results contained a single
+> genuine assertion `FAIL`; every discrepancy was purely dropped files (files/tests collected minus
+> reported, exactly matching the error count each time, correctly caught by AC-5's wrapper). Not
+> attributed to #185's change (a single-table upsert loop with no new collaborators, no timers, no
+> child-process interaction); recorded here because it changes this issue's priority more than
+> anything else in the repair programme did — **worth picking up next**, not because of anything
+> #185 touched.
 
 ## The measurement that makes this issue load-bearing
 

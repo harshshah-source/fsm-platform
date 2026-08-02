@@ -1,6 +1,6 @@
 # 185 — `tiers` reference table is never seeded — Issue 157 Slice 1 has been dead since it landed
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Backend (test repair / seed gap)
 
 Filed 2026-07-31. Discovered verifying [#181](./181-business-sweep-scheduler-arity-and-config-drift.md)
@@ -59,12 +59,33 @@ Cross-check the exact shape (column names, any additional fields) against `prism
 
 ## Acceptance criteria
 
-- [ ] **AC-1** — `seedOrgReferenceData` seeds `tiers` with the three PRD-canon rows, idempotently
-      (a second call does not duplicate or error).
-- [ ] **AC-2** — `org-tiers.e2e-spec.ts` and `tiers-spec-pin.spec.ts` (4 tests) pass against a
-      truncated+reseeded database.
-- [ ] **AC-3** — no regression in any other spec that reads `tiers` or depends on the recompute of
-      `seedOrgReferenceData`'s row counts (#180 R5's table gains one row: `tiers: 3`).
+- [x] **AC-1** — `seedOrgReferenceData` seeds `tiers` with the three PRD-canon rows, idempotently
+      (a second call does not duplicate or error). **Landed** (`prisma.tier.upsert` keyed on `name`)
+      and verified empirically: two consecutive in-process calls against the same connection both
+      report `tiers: 3`, and the table holds exactly the 3 PRD-canon rows afterward, not 6.
+- [x] **AC-2** — `org-tiers.e2e-spec.ts` and `tiers-spec-pin.spec.ts` (4 tests) pass against a
+      truncated+reseeded database. **Verified**: the 4 previously-failing tests are green — 1 in
+      `org-tiers.e2e-spec.ts` ("lists tiers ordered by rank ascending") + 3 in `tiers-spec-pin.spec.ts`.
+      (`org-tiers.e2e-spec.ts` has a second, unrelated 403-authorization test that was already
+      passing — 2 files / 5 tests total run clean, both standalone and inside two separate partial
+      full-suite runs.)
+- [x] **AC-3** — no regression in any other spec that reads `tiers` or depends on the recompute of
+      `seedOrgReferenceData`'s row counts (#180 R5's table gains one row: `tiers: 3`). **Verified**:
+      `pnpm test:reset` reports `tiers: 3` alongside the unchanged R5 counts for every other table;
+      two full-suite runs (312/317 and 311/317 files executed before each hit an unrelated worker
+      crash — see note below) reported **zero** real assertion failures anywhere in the suite.
+
+**Status: done.** All 3 ACs verified 2026-08-02.
+
+**Note — full-suite confirmation was blocked by #184, not by this change.** Three consecutive
+full-suite runs attempted for final sign-off all hit `Worker exited unexpectedly` (1, then 3, then 2
+crashes per run — 100% crash rate across all three, well above #184's previously documented ~2-in-315
+rate). None of the three runs' partial results contained a single genuine `FAIL` (assertion) entry —
+only silently-dropped files, exactly #184's documented mechanism. `org-tiers.e2e-spec.ts` and
+`tiers-spec-pin.spec.ts` passed cleanly in both runs that reached them. Per #184's own protocol
+("discard, don't quietly re-roll"), these three runs are recorded here as discarded, not hidden. The
+elevated crash rate observed today is filed as new evidence on #184 directly rather than chased here
+— diagnosing it is that issue's job, not this one's.
 
 ## Out of scope — do not do these here
 

@@ -29,6 +29,15 @@ const SEED_ZONE_MAPPINGS: { raw: string; zone: string }[] = [
   { raw: 'East', zone: 'East' },
 ];
 
+// Canonical tier list and order as data (Issue 157 AC-1, PRD canon CONTEXT.md:315 — Platinum > Gold
+// > Silver, rank 1 = highest priority). Standalone reference table: no FK from any other model,
+// which is what let this fall through — nothing failed loudly when it was never seeded (#185).
+const SEED_TIERS: { name: $Enums.CompanyTier; rank: number }[] = [
+  { name: 'PLATINUM', rank: 1 },
+  { name: 'GOLD', rank: 2 },
+  { name: 'SILVER', rank: 3 },
+];
+
 const SEED_COMPANIES: { name: string; tier: $Enums.CompanyTier; rank: string }[] = [
   { name: 'Acme Logistics', tier: 'PLATINUM', rank: 'A' },
   { name: 'Globex Transport', tier: 'GOLD', rank: 'B' },
@@ -99,6 +108,7 @@ export interface OrgSeedSummary {
   zoneMappings: number;
   plants: number;
   companies: number;
+  tiers: number;
   slaRules: number;
   scoringWeights: number;
   commonKit: number;
@@ -149,6 +159,14 @@ export async function seedOrgReferenceData(prisma: PrismaClient): Promise<OrgSee
   });
   if (!existingPlant) {
     await prisma.plant.create({ data: { name: plantName, zoneId: north.zoneId } });
+  }
+
+  for (const t of SEED_TIERS) {
+    await prisma.tier.upsert({
+      where: { name: t.name },
+      create: { name: t.name, rank: t.rank },
+      update: { rank: t.rank },
+    });
   }
 
   // Company name is not unique either — guard by name.
@@ -244,6 +262,7 @@ export async function seedOrgReferenceData(prisma: PrismaClient): Promise<OrgSee
     zoneMappings: SEED_ZONE_MAPPINGS.length,
     plants: 1,
     companies: SEED_COMPANIES.length,
+    tiers: SEED_TIERS.length,
     slaRules: SEED_SLA_RULES.length,
     scoringWeights: SEED_WEIGHTS.length,
     commonKit: SEED_COMMON_KIT.length,
