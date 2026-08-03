@@ -20,6 +20,31 @@ export function isRole(value: unknown): value is Role {
   return typeof value === 'string' && (ROLES as readonly string[]).includes(value);
 }
 
+/**
+ * The signed-in SE's own identity/coverage/reporting profile — #161's `/api/me` enrichment.
+ * Populated on `SessionView.profile` only when `role === 'SERVICE_ENGINEER'`; every other role gets
+ * no `profile` key at all (no extra joins on the session-hydration path for managers). Scoped to
+ * exactly what `docs/ui/mobile/home-dashboard.png` (header) and `docs/ui/mobile/profile.png` render
+ * — `coverageType`/`dailyCapacity`/shift window/the full covered-plants list do not appear on either
+ * screen and are deliberately not part of this contract.
+ */
+export interface SeProfileView {
+  name: string;
+  phone: string;
+  email: string;
+  zoneName: string;
+  coverageType: 'DEDICATED' | 'MULTI_PLANT' | 'FLOATING';
+  /** The SE's single covered plant. Only ever populated for `DEDICATED` coverage (CONTEXT.md: "A
+   *  Dedicated SE has 1 Plant in coverage") — `null` for MULTI_PLANT/FLOATING, which have no single
+   *  "home" plant in the data model. That is a genuine, undecided product gap, not a bug: those
+   *  coverage types were never given a "home" concept, and the reference image only depicts a
+   *  Dedicated SE. */
+  homePlant: { plantId: string; name: string } | null;
+  /** The SE's Zonal Manager, resolved via `Zone.zonalManagerUserId`. `null` if the zone has no ZM
+   *  assigned. */
+  reportsTo: { name: string; role: Role; phone: string; email: string } | null;
+}
+
 /** What `GET /api/me` returns — the caller's session as rendered by the admin shell. */
 export interface SessionView {
   user_id: string;
@@ -27,6 +52,8 @@ export interface SessionView {
   zone_id: number | null;
   /** Set only when acting in another scope via the backup cascade; otherwise null. */
   acted_as_role: Role | null;
+  /** The caller's own SE profile — present only when `role === 'SERVICE_ENGINEER'`. */
+  profile?: SeProfileView;
 }
 
 /** `POST /api/auth/login` request body. */

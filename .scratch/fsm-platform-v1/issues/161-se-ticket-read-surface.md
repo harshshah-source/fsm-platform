@@ -1,10 +1,9 @@
 # 161 — SE ticket-read surface (mobile M3 data source)
 
-Status: ready-for-agent — **partial: item 2 (day-plan/shared-pool merge, 2026-08-03), item 1 +
-`ticketNo` (ticket detail — SE/recovery reads, 2026-08-03), and item 3 (own submitted forms,
-2026-08-03) are landed.** The `/api/me` enrichment and the day-plan removal/deferral-metadata AC
-from the comments below are **not built**. See the dated comments for scope and why each stopped
-where it did.
+Status: ready-for-agent — **partial: item 2 (day-plan/shared-pool merge), item 1 + `ticketNo`
+(ticket detail — SE/recovery reads), item 3 (own submitted forms), and the `/api/me` enrichment
+(all landed 2026-08-03).** Only the day-plan removal/deferral-metadata AC (PRD:510) remains open.
+See the dated comments for scope and why each stopped where it did.
 Type: AFK · Backend
 
 Filed 2026-07-28 by the mobile-readiness verification
@@ -384,3 +383,61 @@ extraction: 321/325 files, 1364/1371 tests green, `tsc` clean — the only failu
 pre-existing [#187](./187-voucher-controller-e2e-missing-engineer-seed.md) `voucher-controller`
 fixture defect (reproduces identically in isolation on this branch, unrelated to any file touched
 here).
+
+### 2026-08-03 — `/api/me` enrichment landed, scope corrected from the earlier field guess against direct image re-review
+
+Only the day-plan removal/deferral-metadata AC (PRD:510) remains open on this issue.
+
+**The 2026-07-28 "~14 fields" estimate was written without directly re-checking the two images it
+cites.** Read `docs/ui/mobile/home-dashboard.png` and `docs/ui/mobile/profile.png` directly before
+building (per the workflow's UI-reference-image-authority rule, the same rule #172/#88 already used
+to settle this exact screen). Neither image renders `coverageType` (as a labelled field — see below),
+`dailyCapacity`, a shift window, or the *list* of covered plants anywhere; both are fully accounted
+for by: `name`, one `homePlant`/zone identity block, and a 3-level `reportsTo` (ZM name/phone/email).
+The Device Status tile ("Last sync 2 min ago", "Location permission enabled", "Role-based access
+enabled") and the "Online / Network status" badge on both screens are client-side facts (network
+connectivity, OS permission state) — not resolvable from any backend field, and not attempted here,
+same principle as the issue's own precedent of not inventing `readinessHint`/`expectedComponents`
+derivations that don't exist. This narrows the AC, it does not weaken it — every value actually
+rendered on both screens is now served.
+
+**New gap found, not modeled anywhere: a Plant has no `Company` relationship.** The Profile image's
+"Mapped Area → Company: Nuvoco" row has no schema backing — `Plant` (`schema.prisma`) carries no
+`companyId`; only `Vehicle`/`Ticket`/etc. relate to `Company`, never `Plant`. `Plant.name` is very
+likely just formatted `"{Company} - {Plant}"` at the data-entry/seed layer (`"Nuvoco - Mumbai
+Plant"`), which is probably all the mockup's "Company" row actually reflects — not a queryable
+relationship. Left out rather than invented; flagged here since it will recur the moment anyone
+tries to build a real Plant→Company field.
+
+**`homePlant` is genuinely undefined for non-DEDICATED coverage.** CONTEXT.md: "A Dedicated SE has 1
+Plant in coverage; Multi-Plant SE has 3–4 Plants; Floating SE covers 1+ Regions/Districts." The
+reference image depicts a Dedicated SE. For MULTI_PLANT/FLOATING there is no "home" plant concept in
+the domain model at all — `homePlant: null` for those, `coverageType` returned alongside it so the
+client can tell "no home plant, expected" from "no home plant, error."
+
+**Contract.** `SeProfileView` (`packages/shared/src/index.ts`) — `name`, `phone`, `email`,
+`zoneName`, `coverageType`, `homePlant: {plantId,name} | null`, `reportsTo:
+{name,role,phone,email} | null`. Attached as `SessionView.profile?`, present **only** when
+`role === 'SERVICE_ENGINEER'` — every other role gets no `profile` key at all (zero extra joins on
+the session-hydration path every role hits on every app load). `null`/omitted also for an SE with no
+`EngineerMaster` row (a real state in some dev/test fixtures — every production SE has one via
+`engineer-admin.service.ts` — the base session read must never error over an enrichment gap).
+
+**Where it lives.** New `src/me/me-profile.service.ts` (`MeProfileService.getSeProfile`), new
+`src/me/me.module.ts` supplying it (`MeController` itself stays registered directly on `AppModule`,
+matching the `me-tickets.module.ts` convention). `MeController.me()` is now `async`, calling the
+service only when `role === 'SERVICE_ENGINEER'`.
+
+**Test-fixture note.** `auth-fixture-seed.ts`'s `se.north@fsm.test` has a `User` row but **no**
+`EngineerMaster` row — the same gap #187 already root-caused for `voucher-controller`. Confirmed
+`recovery-controller.e2e-spec.ts`/`recovery-decision-controller.e2e-spec.ts` call `GET /api/me` as
+this exact fixture SE; both stayed green because a missing `EngineerMaster` row now correctly omits
+`profile` rather than 500ing.
+
+Tests: `test/me-profile.e2e-spec.ts` (5 cases — full profile for a DEDICATED SE with an assigned ZM,
+`homePlant: null` for MULTI_PLANT, `reportsTo: null` for a ZM-less zone, no `profile` key for a
+non-SE role, no `profile` key for an SE with no `EngineerMaster` row). `test/me.e2e-spec.ts`'s
+existing exact-equality assertion for a ZM's `/me` response was left unmodified and stayed green —
+direct proof the `profile` key is truly absent, not `null`, for non-SE roles. Full backend suite:
+321/326 files, 1364/1376 tests green, `tsc` clean across backend + admin + mobile — only the
+pre-existing #187 voucher failures and one known #184-class worker crash, both unrelated.
