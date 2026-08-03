@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { utcDayStart } from '../common/utc-day';
 import { PrismaService } from '../prisma/prisma.service';
-import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
+import { isTicketReadableBySe } from './se-ticket-access';
 import { buildTechnicalHealth, type TechnicalHealth } from './technical-hints';
 import { formatTicketNo, ticketNoAsNumber } from '../ticketing/ticket-no';
 
@@ -120,7 +119,7 @@ export class MeTicketDetailService {
     });
     if (!ticket) return null;
 
-    if (!(await this.isReadable(ticket, seId, now))) return null;
+    if (!(await isTicketReadableBySe(this.prisma, this.coverage, ticket, seId, now))) return null;
 
     const [activeSoftState, failureCycleHistory, componentRequests, technicalHealth] = await Promise.all([
       this.activeSoftState(ticketId, seId),
@@ -177,39 +176,6 @@ export class MeTicketDetailService {
       },
     });
     return buildTechnicalHealth(snapshot);
-  }
-
-  private async isReadable(
-    ticket: { ticketId: string; assignedSeId: string | null; plantId: bigint; status: string; assignmentState: string; deferredUntil: Date | null },
-    seId: string,
-    now: Date,
-  ): Promise<boolean> {
-    if (ticket.assignedSeId === seId) return true;
-    if (await this.assignedViaSchedule(ticket.ticketId, seId)) return true;
-
-    const notDeferred = ticket.deferredUntil === null || ticket.deferredUntil <= utcDayStart(now);
-    if (ticket.status !== 'OPEN' || ticket.assignmentState !== 'UNASSIGNED' || !notDeferred) return false;
-    return this.coverage.isPlantCovered(seId, ticket.plantId);
-  }
-
-  /** The TROUBLESHOOT day-plan assignment path — same mechanism `MeTicketsQueryService` resolves
-   *  "assigned" with, narrowed to a single ticket rather than fetching the caller's whole batch set. */
-  private async assignedViaSchedule(ticketId: string, seId: string): Promise<boolean> {
-    const schedule = await this.prisma.workSchedule.findFirst({
-      where: { seId, ...liveScheduleFilter() },
-      orderBy: { dispatchedAt: 'desc' },
-    });
-    if (!schedule) return false;
-
-    const row = await this.prisma.batchAssignmentTicket.findFirst({
-      where: {
-        ticketId,
-        removedAt: null,
-        batch: { scheduleId: schedule.scheduleId, status: { in: ['AUTO_ASSIGNED', 'OVERRIDDEN'] } },
-      },
-      select: { id: true },
-    });
-    return row !== null;
   }
 
   /** Sourced the same way `MeTicketsQueryService.getMyTickets` derives it (#161 item 2): the caller's

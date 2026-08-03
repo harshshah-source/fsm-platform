@@ -1,9 +1,10 @@
 # 161 — SE ticket-read surface (mobile M3 data source)
 
-Status: ready-for-agent — **partial: item 2 (day-plan/shared-pool merge, 2026-08-03) and item 1 +
-`ticketNo` (ticket detail — SE/recovery reads, 2026-08-03) are landed.** Item 3 (own submitted
-forms), the `/api/me` enrichment, and the day-plan removal/deferral-metadata AC from the comments
-below are **not built**. See the dated comments for scope and why each stopped where it did.
+Status: ready-for-agent — **partial: item 2 (day-plan/shared-pool merge, 2026-08-03), item 1 +
+`ticketNo` (ticket detail — SE/recovery reads, 2026-08-03), and item 3 (own submitted forms,
+2026-08-03) are landed.** The `/api/me` enrichment and the day-plan removal/deferral-metadata AC
+from the comments below are **not built**. See the dated comments for scope and why each stopped
+where it did.
 Type: AFK · Backend
 
 Filed 2026-07-28 by the mobile-readiness verification
@@ -339,3 +340,47 @@ readability, shared-pool visibility, out-of-coverage 404, unknown-id 404, "corre
 404, non-SE 403, unauthenticated 401); `test/issue-122-dashboard-reads.e2e-spec.ts` gained one case
 for the `TCK-#####` admin search match; `test/me-tickets-controller.e2e-spec.ts` extended to assert
 `ticketNo`/`ticketNoDisplay` on the list row.
+
+### 2026-08-03 — item 3 (own submitted forms, `GET /api/me/tickets/:id/forms`) landed
+
+`/api/me` enrichment and the day-plan removal/deferral metadata AC remain open — not attempted this
+session, per operator direction to build item 3 next.
+
+**Scope rule.** New `MeTicketFormsService` (`src/me-tickets/me-ticket-forms.service.ts`) filters
+`TroubleshootingSubmission` rows to `ticketId` + `seId === caller` — "never another SE's" is
+enforced at the query, not by post-filtering. Access gate is an OR: the caller sees the (filtered,
+possibly empty) list if EITHER they have at least one submission of their own on the ticket
+(ownership — independent of the ticket's *current* coverage/assignment, since a plant/zone
+reassignment, #158, must not erase an SE's own past work from their view) OR the ticket is currently
+readable to them under item 1's rule (covers the "I can see this ticket but haven't submitted
+anything yet" empty-array case). Outside both → `null` → controller 404s, same never-distinguish-
+unknown-from-out-of-scope convention as item 1.
+
+**Refactor, no behavior change.** Item 1's scope predicate (`assignedSeId` direct / day-plan
+schedule / shared-pool-visible-and-covered) was private to `MeTicketDetailService`. Extracted to
+`src/me-tickets/se-ticket-access.ts` (`isTicketReadableBySe` + its `assignedViaSchedule` helper) so
+item 3 reuses the identical rule rather than growing a second copy — the issue's own #172-era note
+("Coverage scoping is unchanged... reuse one scoping helper") applied to this predicate too.
+`MeTicketDetailService` now calls the shared function; its own two private methods were deleted, not
+duplicated. All of item 1's existing tests stayed green through the extraction, unmodified.
+
+**Route.** `GET /me/tickets/:id/forms` on the existing `MeTicketsController`, SE-only. Reuses
+`TicketFormView` (`ticketing/ticket-query.service.ts`) — the same shape the manager read
+(`GET /tickets/:id/forms`) already returns — so no new response type had to be pinned for #57.
+
+**Judgment call — a real submission workflow can't produce two SEs' submissions on one open
+ticket.** `TroubleshootSubmissionService.submit` moves a TROUBLESHOOT ticket `OPEN` →
+`VERIFICATION_PENDING` on the first accepted submission (normal path) or into `WAITING_COMPONENT`
+(component-unavailable path); either way a second SE's `POST .../troubleshoot` on the same ticket
+hits the Business-409 conflict path, not a second row. The "never another SE's" test therefore
+inserts the second submission directly via Prisma rather than through the API, to isolate what this
+*read* is responsible for (query-level filtering) from #16's submission-workflow rule.
+
+Tests: `test/me-ticket-forms-controller.e2e-spec.ts` (8 cases — own submission returned, empty array
+when readable-but-unsubmitted, cross-SE isolation on one ticket, ownership survives a coverage
+revocation that also 404s the ticket detail read, out-of-coverage-with-no-own-submissions 404,
+unknown-ticket-id 404, non-SE 403, unauthenticated 401). Full backend suite re-run after the
+extraction: 321/325 files, 1364/1371 tests green, `tsc` clean — the only failures are the
+pre-existing [#187](./187-voucher-controller-e2e-missing-engineer-seed.md) `voucher-controller`
+fixture defect (reproduces identically in isolation on this branch, unrelated to any file touched
+here).
