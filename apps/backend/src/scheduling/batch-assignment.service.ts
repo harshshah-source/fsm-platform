@@ -5,6 +5,7 @@ import {
   type DayPlanNotifier,
   LoggingDayPlanNotifier,
 } from './day-plan-notifier';
+import { dispatchZoneLockKey } from './dispatch-zone-lock';
 import { UNIQUE_ACTIVE_SCHEDULE_INDEX_STATUS, liveScheduleFilter } from './schedule-status';
 
 export interface DispatchOptions {
@@ -66,7 +67,7 @@ export class BatchAssignmentService {
       // partial-unique indexes are the durable cross-connection backstop if this is ever bypassed. Same
       // txn-scoped idiom as SnapshotRunService/MasterSyncRunService (a non-blocking `try` lock).
       const locked = await tx.$queryRaw<{ locked: boolean }[]>`
-        SELECT pg_try_advisory_xact_lock(hashtext(${'dispatch_zone_' + zoneId.toString()})) AS locked`;
+        SELECT pg_try_advisory_xact_lock(hashtext(${dispatchZoneLockKey(zoneId)})) AS locked`;
       if (!locked[0]?.locked) {
         this.logger.log(`dispatch for zone ${zoneId} skipped — another dispatch holds the lock`);
         return null;

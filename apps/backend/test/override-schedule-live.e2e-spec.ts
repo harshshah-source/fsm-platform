@@ -144,8 +144,10 @@ describe('#153 — an overridden schedule is still live: the SE day plan survive
     await prisma.onModuleDestroy();
   });
 
+  // #147 — the read is date-filtered, so this fixture (dispatched for a past `NOW`) states its clock at
+  // every call site. What is under test here is the *status* widening, not the date bound.
   it('control — before any override the SE sees their dispatched day plan', async () => {
-    const plan = await dayPlan.getDayPlan(se);
+    const plan = await dayPlan.getDayPlan(se, { now: NOW });
     expect(plan.dispatched).toBe(true);
     expect(plan.stops.flatMap((s) => s.tickets)).toHaveLength(2);
   });
@@ -162,7 +164,7 @@ describe('#153 — an overridden schedule is still live: the SE day plan survive
     const sched = await prisma.workSchedule.findUniqueOrThrow({ where: { scheduleId } });
     expect(sched.status).toBe('OVERRIDDEN');
 
-    const plan = await dayPlan.getDayPlan(se);
+    const plan = await dayPlan.getDayPlan(se, { now: NOW });
     expect(plan.dispatched).toBe(true);
     // Pre-#146 this is still BOTH tickets — DEFER_TICKET has no read semantics yet (that is #146
     // slice 1). The assertion here is only that an override does not blank the whole plan.
@@ -172,7 +174,7 @@ describe('#153 — an overridden schedule is still live: the SE day plan survive
   it('PIN — a COMPLETED schedule stays excluded: the widening is exactly one status', async () => {
     await prisma.workSchedule.update({ where: { scheduleId }, data: { status: 'COMPLETED' } });
     try {
-      const plan = await dayPlan.getDayPlan(se);
+      const plan = await dayPlan.getDayPlan(se, { now: NOW });
       expect(plan.dispatched).toBe(false);
       expect(plan.stops).toHaveLength(0);
     } finally {

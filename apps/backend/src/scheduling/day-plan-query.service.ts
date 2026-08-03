@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { utcDayStart } from '../common/utc-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from './schedule-status';
 
@@ -37,11 +38,22 @@ const EMPTY: DayPlanView = { dispatched: false, scheduleId: null, dateFrom: null
 export class DayPlanQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getDayPlan(seId: string): Promise<DayPlanView> {
+  /**
+   * `opts.now` decides which day "today" is — injected only so fixtures can state their own clock;
+   * production always passes nothing and gets the wall clock.
+   */
+  async getDayPlan(seId: string, opts: { now?: Date } = {}): Promise<DayPlanView> {
+    const today = utcDayStart(opts.now ?? new Date());
     const schedule = await this.prisma.workSchedule.findFirst({
       // #153 — a ZM override flips the schedule to OVERRIDDEN but the SE still has to work it; filtering
       // to ACTIVE alone blanked the entire day plan the moment a ZM touched anything.
-      where: { seId, ...liveScheduleFilter() },
+      //
+      // #147 — the date predicate, not the ordering, decides which plan is today's. Without it an SE
+      // with no dispatch today was served yesterday's stops as today's, and #127's APPEND made the
+      // `dispatchedAt` tiebreak actively wrong: appending to a schedule does not refresh the stamp, so
+      // it no longer tracks last-modification and an older day could sort first. Ordering now only
+      // breaks ties among schedules that all genuinely cover today.
+      where: { seId, dateFrom: { lte: today }, dateTo: { gte: today }, ...liveScheduleFilter() },
       orderBy: { dispatchedAt: 'desc' },
     });
     if (!schedule) return EMPTY;

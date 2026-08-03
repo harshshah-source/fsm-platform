@@ -157,8 +157,10 @@ describe('#146 slice 1 — a deferred ticket leaves today\'s reads, its batch-ma
     await prisma.onModuleDestroy();
   });
 
+  // #147 — the read is date-filtered; this fixture is dispatched for a past `NOW`, so it states its
+  // clock. "Today" for this suite is `NOW`'s day, which is what "leaves today's reads" means here.
   const planTickets = async () => {
-    const plan = await dayPlan.getDayPlan(se);
+    const plan = await dayPlan.getDayPlan(se, { now: NOW });
     return plan.stops.flatMap((s) => s.tickets.map((t) => t.ticketId));
   };
 

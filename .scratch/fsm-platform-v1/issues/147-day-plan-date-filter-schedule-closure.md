@@ -70,12 +70,12 @@ be old.
 
 ## Acceptance criteria
 
-- [ ] `getDayPlan` filters `dateFrom <= today <= dateTo`; an SE with no schedule for today receives the explicit empty plan, never yesterday's.
-- [ ] Under APPEND, the correct (today's) schedule is returned **even when `dispatchedAt` is stale** — the date predicate, not the ordering, decides.
-- [ ] Schedules reach a terminal status; the closer **cannot** close a schedule while an APPEND is in flight.
-- [ ] No `work_schedules` row remains `ACTIVE` past its `dateTo` — asserted against a seeded past-dated row.
-- [ ] #127 APPEND and #126 zone-wedge regressions stay green.
-- [ ] Backend suite green.
+- [x] `getDayPlan` filters `dateFrom <= today <= dateTo`; an SE with no schedule for today receives the explicit empty plan, never yesterday's.
+- [x] Under APPEND, the correct (today's) schedule is returned **even when `dispatchedAt` is stale** — the date predicate, not the ordering, decides.
+- [x] Schedules reach a terminal status; the closer **cannot** close a schedule while an APPEND is in flight.
+- [x] No `work_schedules` row remains `ACTIVE` past its `dateTo` — asserted against a seeded past-dated row.
+- [x] #127 APPEND and #126 zone-wedge regressions stay green.
+- [x] Backend suite green.
 
 ## TDD Strategy
 

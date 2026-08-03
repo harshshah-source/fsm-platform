@@ -121,8 +121,10 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
     await prisma.onModuleDestroy();
   });
 
+  // #147 — the read is date-filtered, so a fixture dispatched for a past day has to state its clock.
+  // `NOW` is the same instant the plan was dispatched for; production passes nothing and gets today.
   it('returns the dispatched plan as ordered, plant-clustered stops with device counts', async () => {
-    const view = await dayPlan.getDayPlan(se);
+    const view = await dayPlan.getDayPlan(se, { now: NOW });
     expect(view.dispatched).toBe(true);
     expect(view.stops).toHaveLength(1);
     const stop = view.stops[0];
@@ -135,7 +137,7 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
 
   it('returns the empty-state for an SE with no dispatched schedule', async () => {
     const fresh = await makeSe();
-    const view = await dayPlan.getDayPlan(fresh);
+    const view = await dayPlan.getDayPlan(fresh, { now: NOW });
     expect(view.dispatched).toBe(false);
     expect(view.stops).toEqual([]);
   });
@@ -165,7 +167,7 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
         data: { removedAt: NOW, removedBy: hollowSe },
       });
 
-      const view = await dayPlan.getDayPlan(hollowSe);
+      const view = await dayPlan.getDayPlan(hollowSe, { now: NOW });
       expect(view.dispatched).toBe(true);
       expect(view.stops).toHaveLength(1); // the hollow stop is gone, not rendered as deviceCount: 0
       expect(view.stops[0].plantId).toBe(String(plantLiveId));
