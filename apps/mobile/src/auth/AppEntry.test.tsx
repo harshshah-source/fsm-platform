@@ -39,6 +39,15 @@ describe('AppEntry', () => {
     expect(screen.queryByTestId('email-input')).toBeNull();
   });
 
+  it('renders the SE tab shell when authenticated as SERVICE_ENGINEER', () => {
+    setAuth({ user_id: 'se-1', role: 'SERVICE_ENGINEER', zone_id: 1, acted_as_role: null });
+    render(<AppEntry />);
+
+    expect(screen.getByTestId('screen-home')).toBeTruthy();
+    expect(screen.getByTestId('tab-Tickets')).toBeTruthy();
+    expect(screen.queryByTestId('logout')).toBeNull();
+  });
+
   it('renders neither screen while rehydrating, even with no session yet', () => {
     setAuth(null, true);
     render(<AppEntry />);
