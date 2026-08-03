@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { execFileSync } from 'node:child_process';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { seedAuthFixtureUsers } from '../src/auth/auth-fixture-seed';
 import { PrismaClient } from '../src/generated/prisma/client';
 import { seedOrgReferenceData } from '../src/org/org-seed';
 import { testDatabaseUrl } from './test-db-url';
@@ -10,9 +11,11 @@ import { truncateTestDatabase } from './truncate-test-db';
  * Vitest globalSetup — runs ONCE before any worker. Brings the isolated test database (see
  * `test-db-url.ts`) to the exact baseline the suite is written against: committed migrations applied
  * + truncate-and-reset (#180 R2 — a leaked row from a crashed prior run must not survive into this
- * run) + idempotent org/reference seed. The sibling DB itself (and its PostGIS extension) is a
- * one-time superuser bootstrap documented in `.env.example`; if it is missing, `migrate deploy` fails
- * here with a clear connection error pointing at the bootstrap step.
+ * run) + idempotent org/reference seed + the auth fixture users (#91 S2 — same emails/UUIDs/password
+ * `InMemoryUserStore` used to hardcode, now real `users`/`user_credentials` rows so DB-backed login
+ * resolves them). The sibling DB itself (and its PostGIS extension) is a one-time superuser bootstrap
+ * documented in `.env.example`; if it is missing, `migrate deploy` fails here with a clear connection
+ * error pointing at the bootstrap step.
  */
 export default async function setup(): Promise<void> {
   const url = testDatabaseUrl();
@@ -27,12 +30,16 @@ export default async function setup(): Promise<void> {
   });
 
   // 2) truncate + reset identities (#180 R2), then the idempotent org/reference seed — the same
-  // entrypoint as `npm run seed` (src/seed.ts). Order matters: truncate before seed, see R4.
+  // entrypoint as `npm run seed` (src/seed.ts) — then the auth fixture users (#91 S2, test/dev only —
+  // NOT part of src/seed.ts, so a real-database seed run never mints `*@fsm.test` credentials).
+  // Order matters: truncate before seed; zones (from org-seed) must exist before the fixture users
+  // that reference them by name, see R4.
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
   try {
     await prisma.$connect();
     await truncateTestDatabase(prisma, url);
     await seedOrgReferenceData(prisma);
+    await seedAuthFixtureUsers(prisma);
   } finally {
     await prisma.$disconnect();
   }

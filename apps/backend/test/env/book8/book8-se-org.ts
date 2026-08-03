@@ -15,6 +15,7 @@
  * availability/planner guarded by existence — re-running converges without duplicates.
  */
 import type { PrismaService } from '../../../src/prisma/prisma.service';
+import { ensureCredential } from '../../../src/auth/credential-seed';
 import { PlantEligibleFloatingSeService } from '../../../src/org/plant-eligible-floating-se.service';
 import { ZONE_NAMES, type Book8Dataset } from './book8-dataset';
 
@@ -33,23 +34,35 @@ export interface SeOrgSummary {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Same well-known test password every other spec logs in with — Book users are DB users like any
+// other (#91: "no Book-specific code path"), so they get credentials the same generic way.
+const BOOK_USER_PASSWORD = 'correct-password';
+
 async function ensureUser(
   prisma: PrismaService,
   email: string,
   data: { name: string; role: string; phone: string; zoneId: bigint | null },
 ): Promise<string> {
   const existing = await prisma.user.findFirst({ where: { email } });
-  if (existing) return existing.userId;
-  const u = await prisma.user.create({
-    data: {
-      name: data.name,
-      role: data.role as never,
-      phone: data.phone,
-      email,
-      zoneId: data.zoneId ?? undefined,
-    },
-  });
-  return u.userId;
+  const userId =
+    existing?.userId ??
+    (
+      await prisma.user.create({
+        data: {
+          name: data.name,
+          role: data.role as never,
+          phone: data.phone,
+          email,
+          zoneId: data.zoneId ?? undefined,
+        },
+      })
+    ).userId;
+
+  // #91 S2 — every Book-seeded user gets a credential the same way an org-created user would, so
+  // login has no Book-specific path. Idempotent: a re-run never rotates an existing hash.
+  await ensureCredential(prisma, userId, BOOK_USER_PASSWORD);
+
+  return userId;
 }
 
 export async function seedSeOrg(prisma: PrismaService, ds: Book8Dataset): Promise<SeOrgSummary> {

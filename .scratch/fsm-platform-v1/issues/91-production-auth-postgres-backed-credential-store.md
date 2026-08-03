@@ -1,11 +1,13 @@
 # 91 — Production authentication: Postgres-backed credential store + persistent refresh tokens
 
-Status: needs-triage
+Status: ready-for-human
 Type: HITL
-Progress: not started — filed 2026-06-29 from the authentication architecture audit. This is the
-single implementation authority for swapping the in-memory auth scaffold to the database-backed
-production design the repository already specifies. Requires one schema/architecture decision
-(credential-column placement) before GREEN — see "Open decision (decide before coding)".
+Progress: S1–S4 landed (2026-08-03). Schema (S1), DB-backed login (S2), persistent refresh + device
+binding + logout (S3), and in-memory-store retirement (S4) are all implemented and scoped-test green.
+The credential-column-placement HITL is closed (Slice 1, `user_credentials` table). Remaining:
+central full-suite verification (a shared-DB collision with a parallel slice interrupted the one
+unattended full-suite run this session attempted — see the 2026-08-03 comment) and the optional
+admin httpOnly-cookie fast-follow (still deliberately deferred, not required for this issue's ACs).
 
 > **This issue does not redesign authentication. It implements the design the repository already
 > defines** in [ADR-0025](../../../docs/adr/0025-foundation-skeleton-infra.md),
@@ -456,3 +458,106 @@ existing accounts) · S3 persistent refresh with device binding + one-active rep
 retire `InMemoryUserStore`/`InMemoryRefreshTokenStore`/`DevZoneResolver`, add logout +
 `revokeAllForUser`. The admin httpOnly-cookie leg is **split to a fast-follow** (agent call, permitted
 by this issue's last AC) — #91 was already the largest Wave 1 item before D-2 added device binding.
+
+### 2026-08-03 — S2 + S3 + S4 LANDED: DB-backed login, persistent refresh + device binding, in-memory retirement
+
+**S2 — DB-backed login.** New `PrismaUserStore` (`apps/backend/src/auth/prisma-user-store.ts`) reads
+`users` JOINed with `user_credentials` and satisfies the exact `validateCredentials`/`findById` shape
+`InMemoryUserStore` exposed. Password hashing moved to **async** `crypto.scrypt` (never `scryptSync`)
+in a new shared helper, `apps/backend/src/auth/password-hasher.ts` (`hashPassword`/`verifyPassword`/
+`hashDummyPassword`) — the 2026-07-28 amendment. An unknown email, or a `users` row with no credential
+row yet, still runs `hashDummyPassword` before returning null, so response timing carries no
+email-enumeration signal. `apps/backend/src/auth/credential-seed.ts` (`ensureCredential`) is the ONE
+credential-writing path, idempotent, shared by every seed/harness — org fixtures
+(`auth-fixture-seed.ts`) and the Book harness (`book8-se-org.ts`'s `ensureUser`) both call it, so login
+has no origin-specific branching, satisfying the issue's "any DB user" AC framing directly.
+
+The `*@fsm.test` dev/test fixture users (same emails/UUIDs/password as the retired
+`InMemoryUserStore`) are now real `users` + `user_credentials` rows, seeded by
+`apps/backend/src/auth/auth-fixture-seed.ts` and wired into `test/global-setup.ts` (test/dev only —
+deliberately NOT wired into `src/seed.ts`, so a `pnpm seed` run against a real database can never mint
+`*@fsm.test` credentials there — see judgment call below). `book8-se-org.ts`'s `ensureUser` now also
+calls `ensureCredential` for every Book user it creates/finds, with the same well-known test password
+every other spec uses.
+
+**S3 — persistent refresh + device binding.** New `PrismaRefreshTokenStore`
+(`apps/backend/src/auth/prisma-refresh-token-store.ts`) stores only a SHA-256 hash of the token
+(never plaintext), implements the same single-use `issue`/`consume` rotation contract, and adds:
+- **D-2 one-active-device, replace-on-login** — every `issue()` call revokes whatever was still
+  active for that `userId` first (`revokedReason: 'REPLACED_BY_NEW_DEVICE'`). On login this ends the
+  previous device's session; on a plain refresh it is a no-op, since `consume()` already revoked the
+  one row that was active (the one being rotated) — so "at most one active refresh token per user"
+  holds after every call, not just at login.
+- **`revoke(token, reason)`** — revokes the presented token without rotating it, backing the new
+  `POST /api/auth/logout` route (`auth.controller.ts`, `auth.service.ts#logout`). Idempotent and
+  side-channel-safe: logout always returns 200, whether the token was valid, already revoked, or
+  garbage — it must not become an oracle for token validity.
+- **`revokeAllForUser(userId, reason)`** — the future admin-forced-logout hook the issue's ACs call
+  for; no route calls it yet (no admin UI for this exists, per the issue's own "Not in v1" list).
+
+`AuthService.refresh()` now returns `{userId, tokenId, deviceId}` from `consume()` so the newly
+issued row can carry `rotatedFrom` (rotation lineage) and inherit the consumed token's `deviceId` when
+the caller sends no `X-Device-Id` on the refresh call (see judgment call below).
+
+**S4 — retired the in-memory graph.** Deleted `apps/backend/src/auth/user-store.ts`,
+`refresh-token-store.ts`, `dev-zone-resolver.ts`, and `test/dev-zone-resolver.e2e-spec.ts`. Removed
+the `DEV_AUTH_ZONE` documentation block from `.env.example` (the `test/setup-env.ts` allowlist entry
+and its own regression spec were deliberately left alone — that entry is a no-op deletion of a var
+nobody sets anymore, and removing it would require also editing `setup-env-allowlist.spec.ts`, which
+is explicitly out of this issue's touch-list). `auth.module.ts` now provides only `PrismaUserStore` +
+`PrismaRefreshTokenStore` + `TokenService` + `AuthController`/`AuthService`. `AuthService.login`/
+`refresh`/`issueTokens` stay `async` (the Prisma-backed stores are themselves async), but the
+now-dead `DevZoneResolver` dependency and its `resolveZoneId` await are gone; `zone_id` loads directly
+from `users.zone_id` via `PrismaUserStore`.
+
+**Judgment calls:**
+1. **`X-Device-Id` pragmatic default.** No client (mobile or admin) sends a stable device id yet
+   (tracked on #54, per the issue's own note). `auth.controller.ts#login` reads `X-Device-Id` if
+   present, else generates a `randomUUID()` server-side so the `device_id NOT NULL` constraint is
+   satisfied. This means one-active-device enforcement only meaningfully activates once a client
+   sends a real stable id per install — an accepted, documented limitation of this slice, not a bug.
+   `refresh()` falls back to the *consumed token's own* `deviceId` (not a fresh random one) when the
+   caller sends no header, so a routine token rotation never masquerades as a new-device login.
+2. **Logout route shape.** `POST /api/auth/logout` lives on the same `@Public()` `AuthController` as
+   `login`/`refresh` (added to the route-guard sweep's allowlist in
+   `test/global-guard-validation.e2e-spec.ts`) — the presented refresh token IS the credential, same
+   as `/refresh`, so no `Authorization` bearer token is required. Body is `{ refreshToken }`; response
+   is always `{ success: true }` / 200, deliberately never a distinct status for "unknown token" vs
+   "already revoked" vs "never existed", so logout cannot be used to probe token validity.
+3. **`*@fsm.test` fixture seeding scope.** Wired into `test/global-setup.ts` only, not
+   `src/seed.ts` — seeding well-known dev/test credentials into whatever database `pnpm seed` targets
+   felt like an unacceptable production hazard for a convenience that only the test suite needs.
+4. **No status/DISABLED gating added to login.** `PrismaUserStore` does not check `users.status`;
+   this preserves scope (the issue's AC list does not mention account-disable interacting with login)
+   rather than introducing new behavior. Flagging in case a future issue expects a `DISABLED` account
+   to be rejected at `/auth/login` — today it is not.
+
+**Tests added** (all under `apps/backend/test/`, TDD style — see each file's own doc comment):
+`db-backed-login.e2e-spec.ts` (DB login success/failure, unknown email, no-credential-yet, org-CRUD
+user login once credentialed) · `refresh-persistence.e2e-spec.ts` (restart-survival via a
+brand-new `PrismaService` instance reading the row by hash, one-active-device replace-on-login,
+revoked-token rejection, device-id inheritance on refresh) · `logout.e2e-spec.ts` (revocation,
+tokenless, no-oracle, idempotent) · `book-role-logins.e2e-spec.ts` (all 5 roles, Book email
+convention, no Book-specific code path) · `password-hasher.spec.ts` (unit: hash/verify round-trip,
+wrong-password rejection, salt uniqueness, dummy-hash-is-real-work). Existing
+`login.e2e-spec.ts`/`refresh.e2e-spec.ts`/`per-zone-zm-logins.e2e-spec.ts`/`auth.e2e-spec.ts` were
+left byte-unmodified as the regression baseline (they now exercise the DB-backed path transparently)
+and still pass.
+
+**Scoped test results (green):** `db-backed-login`, `refresh-persistence`, `logout`,
+`book-role-logins`, `password-hasher`, `login`, `refresh`, `auth`, `per-zone-zm-logins`,
+`global-guard-validation`, `org-users`, `me`, `acting-context`, `zone-scope` — all green.
+`tsc --noEmit` on `apps/backend`: clean.
+
+**Full-suite run:** NOT completed this session. This worktree and the parallel #161 (`ticket_no`)
+slice's worktree share one physical Postgres `fsm_test` database with no per-worktree isolation (the
+`fsm` role lacks `CREATEDB`, confirmed directly — same constraint the 2026-07-29 comment already
+hit). One unattended full-suite attempt was started and stopped mid-run at the coordinating session's
+request once a concurrent collision surfaced on the other slice's side (a `truncateTestDatabase`
+deadlock, P2010/40P01); the coordinator is running full-suite verification centrally, one slice at a
+time, to avoid further collisions. Transient symptom observed and confirmed environmental (not an
+auth regression): `login.e2e-spec.ts`/`per-zone-zm-logins.e2e-spec.ts` briefly asserted the wrong
+zone-id when a concurrent session's own truncate+reseed interleaved with this session's — the extra
+zone rows observed (timestamp-named) were never created by this issue's code, and both specs went
+green again once rerun without the interleaving. This is the same "DB-state-bleed" flake class the
+task brief already calls out as pre-existing and out of scope to chase.

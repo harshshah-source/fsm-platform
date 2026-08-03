@@ -6,8 +6,9 @@ import { AppModule } from '../src/app.module';
 
 /**
  * Issue 02, Slice 4 — user accounts as Operations-Head-owned reference data (`/api/org/users`).
- * Additive: this is the RBAC/account registry (no credentials here); the login path stays on the
- * in-memory store for now (decision 2026-06-18). Satisfies AC#4 (accounts manageable for all roles).
+ * Additive: this is the RBAC/account registry only — it does not mint a credential, so a freshly
+ * created account cannot log in until one is issued (see `db-backed-login.e2e-spec.ts`, #91 S2, for
+ * the "org-CRUD user login" AC once a credential exists).
  */
 describe('Issue 02 Slice 4 — /api/org/users (user account management)', () => {
   let app: INestApplication;
