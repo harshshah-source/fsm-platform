@@ -162,3 +162,15 @@ New spec `test/api-versioning.e2e-spec.ts` (4 tests, red-first) pins both halves
 alias and silently 404s the admin app.
 
 Items 1, 2, 4–8 of this issue remain open.
+
+### 2026-08-03 — scope is now load-bearing: OTA deferred (#170 D-10)
+
+The compatibility bar this issue was scoped against assumed a client update path would exist. It
+will not, for the pilot: #170's D-10 decision (2026-08-03) defers OTA. The freeze plan's own verdict
+— ~85% of a hard freeze achievable — now reads differently: **the un-freezable ~15% no longer has a
+routine fix.** A contract mistake a shipped client depends on means manual reinstall across the
+fleet, not an OTA push. The surviving mitigations are exactly this issue's remaining items (1, 2,
+4–8: error-shape normalisation, shared error codes/types, serialization/naming conventions, enum
+vocabularies, the 8 by-omission routes) plus #170's `X-App-Version` floor — the floor can *refuse* a
+stale client, but only this issue's work prevents shipping a wrong shape in the first place.
+**Treat the remaining items as pilot-gating, not P0-in-name-only.**

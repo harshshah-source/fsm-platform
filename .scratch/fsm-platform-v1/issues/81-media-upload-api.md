@@ -1,6 +1,7 @@
 # 81 — Media Upload API (photo references for mobile capture)
 
-Status: ready-for-agent
+Status: ready-for-agent — D-12 settled 2026-08-03 (see Comments): Postgres-backed for the pilot,
+storage fully hidden behind the `photoRef` seam; multipart upload, not presign
 Type: AFK · Backend
 
 ## Business purpose
@@ -102,3 +103,56 @@ Troubleshoot has **4** named slots (`Before`, `After`, `Part`, `Plate`), Voucher
 (`Receipt`, `Photo`, `Bill`), Install has 1 unnamed. The PRD's unstructured "photo refs" wording is
 overridden. A flat `string[]` cannot express any of this, and retrofitting slots onto a shipped flat
 array is a breaking change for every photo screen.
+
+### 2026-08-03 — D-12 SETTLED: Postgres-backed storage for the pilot, behind an opaque seam
+
+**Operator decision, recorded so it does not reopen.**
+
+**Storage.** Photo bytes go in the **existing FSM Postgres** for the pilot, with a **planned move to
+a separate media instance before rollout**. Not object storage for now: #111 (deployment
+packaging) is unbuilt, so no deployment target exists, and picking a storage service ahead of that
+is the wrong order. The team's preference for a separate instance is **accepted as the eventual
+shape — this is sequencing, not disagreement.** The reasoning: the benefit of a separate store
+(backup/restore size, disk headroom) scales with volume we don't have yet, while its cost —
+cross-database orphan handling when a blob write succeeds and its form write fails — lands on day
+one regardless. Single-DB keeps blob + `media_objects` row + (later) form linkage inside one
+transactional boundary for the pilot.
+
+**Mechanism follows from the decision:** the issue body's two alternatives resolve to
+**`POST /api/media/upload` multipart → `{ photoRef }`** (there is nothing to presign against).
+The presign section above is superseded; do not implement both.
+
+**Upload contract — the seam is load-bearing for the whole decision.** The endpoint must fully hide
+the storage backend: the app sends a file, receives an opaque `photoRef`, and learns **nothing**
+about where bytes live (no URLs, no storage keys, no backend hints in the ref format). This opacity
+is what makes the later move — separate instance, or object storage — an infra change with **zero
+mobile impact**. Any leak of storage detail into the contract converts the planned move into a
+client-breaking change, which (per #170's no-OTA decision) means manual reinstall across the fleet.
+
+**Slots — the irreversible part.** Carry the #172 Decision 6 slot semantics from day one:
+troubleshoot 4 named slots (`Before`/`After`/`Part`/`Plate`), vouchers 3 (`Receipt`/`Photo`/`Bill`),
+install 1 unnamed. Today's flat `string[]` cannot express this, and retrofitting after the client
+ships breaks every photo screen on every handset. **Storage location is reversible; the slot-bearing
+contract shape is not.** Get the second one right.
+
+**Client-side compression.** Target a few hundred KB per photo, not multi-MB — this matters *more*
+under this decision, since bytes now traverse the API and land in Postgres. It belongs on **mobile,
+not backend** (PRD:311 already mandates client-side compression for the offline queue). No new
+issue: it rides on the capture work — #54's `PhotoCaptureRow` kit primitive and the #58/#61 form
+ACs. Backend enforces a hard `FILE_TOO_LARGE` cap as the backstop, per the existing AC.
+
+**Verified while recording (2026-08-03):**
+- **Nothing in the repo assumes S3-presign semantics.** Grep across `apps/backend/src`,
+  `apps/mobile/src`, `packages/`, `.env.example`: zero presign/aws-sdk/S3 hits (the only "S3"
+  matches are #91's *slice-3* naming in auth files). The presign assumption lived only in this
+  issue's own body text and the old CLAUDE.md line. **CLAUDE.md's contradiction (recommends S3
+  presign vs "no S3 in the current stack") is resolved by this decision** — the current stack
+  stays S3-free.
+- **Retention/audit for expense-claim photos: nothing is recorded anywhere.** Every retention
+  mention in PRD/CONTEXT/workflow is *client-side* offline-queue cache (PRD:311, :750, :775 —
+  local copies removed after upload, 7–15-day ticket cache). ZM review requires thumbnails +
+  lightbox (PRD:459) and Finance export validation (PRD:134), which implies server-side persistence
+  at least through review — but **no server-side retention period or audit requirement exists in
+  the written record. Open product question, not an assumed "none":** how long must voucher-proof
+  photos be retrievable after PAID, and do they fall under any finance-audit retention rule?
+  Owner: product/finance.

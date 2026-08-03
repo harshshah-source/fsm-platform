@@ -72,3 +72,15 @@ falls back to in-app notifications (Issue 85) + state polling.
 
 - Issue #53 (push on Common-Kit-zero + Component-Blocked cross-link) is a **specific trigger** of this
   pipeline. It remains its own issue, re-scoped as blocked-by #76 + this issue. See INDEX.
+
+## Comments
+
+### 2026-08-03 — upstream decisions settled on #76
+
+D1 (**FCM only for v1** — no APNs until iOS exists in the fleet) and D4 (**one token row per user**,
+matching #91's one-active-device policy; per-device shape rejected) are settled — recorded on #76's
+2026-08-03 comment. The token-table migration and `POST /api/notifications/device-token` are
+unblocked; this issue's client half still waits on #54 and on #76's FCM adapter (account
+provisioning remains HITL). Note the delivery-semantics finding on #76 (operator expects broadcast;
+code + PRD:727 implement a fallback chain) — resolve there before designing the notification-shade
+quick-action payloads.
