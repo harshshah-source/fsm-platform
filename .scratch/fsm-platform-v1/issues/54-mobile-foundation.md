@@ -25,13 +25,15 @@ screens beyond the tab skeletons — those are the M-series (55–61).
 
 ## Acceptance criteria
 
-- [ ] Expo app boots with bottom-tab navigation: Home, Tickets, Stock, Vouchers, Profile (empty tab shells)
-- [ ] Shared component kit primitives exist and render against the mockup styling (DESIGN-SYSTEM §6)
-- [ ] Offline-aware API client exposes a write-queue interface + connectivity state; auth/session reuse from Issue 01
-- [ ] Each tab shell registers its nav entry (no dead labels; role-visible tabs only)
-- [ ] 🔴 **The app generates a stable install id on first launch, persists it in the keychain, and sends it as `X-Device-Id` on every request — including `POST /api/auth/login` and `/refresh`.** See the warning below; this one cannot be added later.
-- [ ] The install id survives app restart and re-login, and is regenerated **only** on reinstall
-- [ ] The client sends `/api/v1/...` as its base path (both `/api/v1` and `/api/` are served — #169 Wave 0 — but v1 is the path to pin)
+- [x] Expo app boots with bottom-tab navigation: Home, Tickets, Stock, Vouchers, Profile (empty tab shells)
+- [x] Shared component kit primitives exist and render against the mockup styling (DESIGN-SYSTEM §6)
+- [x] Offline-aware API client exposes a write-queue interface + connectivity state; auth/session reuse from Issue 01
+- [x] Each tab shell registers its nav entry (no dead labels; role-visible tabs only)
+- [x] 🔴 **The app generates a stable install id on first launch, persists it in the keychain, and sends it as `X-Device-Id` on every request — including `POST /api/auth/login` and `/refresh`.** See the warning below; this one cannot be added later.
+- [x] The install id survives app restart and re-login, and is regenerated **only** on reinstall
+- [x] The client sends `/api/v1/...` as its base path (both `/api/v1` and `/api/` are served — #169 Wave 0 — but v1 is the path to pin)
+- [x] `X-App-Version` sent on every request (2026-08-03 comment, D-10)
+- [ ] 🔴 **Blocking "update required" screen on the server's min-version error code (2026-08-03 comment, D-10) — NOT built. See 2026-08-04 comment: the error-code/response-shape contract does not exist yet and is a HITL item, not mine to invent.**
 
 ## API contract
 
@@ -106,3 +108,29 @@ set is no longer just `X-Device-Id`. **`X-App-Version` on every request and the 
 `update required` screen on the server's min-version error code are also first-build items** — with
 no OTA channel, a client shipped without them cannot be corrected short of manual reinstall.
 Sequencing of this issue is otherwise unchanged. The server-side floor is #170's backend half.
+
+### 2026-08-04 — built, except the update-required screen (HITL)
+
+All ACs above landed except the update-required screen: `getDeviceId()` (keychain, distinct service
+from `tokenStore.ts` so logout can never wipe it), `apiLogin`/`apiRefresh`/`apiMe` send
+`X-Device-Id` + `X-App-Version` on every request incl. login/refresh, base path is `/api/v1`,
+`WriteQueue` + NetInfo-backed `ConnectivitySource` (PENDING while offline, replays on reconnect,
+in-memory — durable persistence is Issue 17), `SeTabShell` (Home/Tickets/Stock/Vouchers/Profile via
+`@react-navigation/bottom-tabs`), `AppEntry` now branches session role (SE → tabs, other role →
+existing debug `SessionScreen`, no session → `LoginScreen`), theme/tokens.ts mirroring
+`apps/admin/src/index.css`'s live `@theme` block, and 6 kit primitives (StatTile, StatusPill,
+TicketCard, IconSelectGrid, ProgressBar, PhotoCaptureRow — the last is the D-12/#172 Decision-6
+named-slot shape, never a flat `string[]`). 66 mobile tests green, `tsc` clean.
+
+**Deliberately not built: the update-required screen's trigger.** #170's backend half (server
+min-version floor + a distinct error code) does not exist — `grep` for `X-App-Version`/
+`MIN_CLIENT_VERSION`/`UPDATE_REQUIRED` across `apps/backend/src` returns zero hits. The exact error
+code and response shape is itself a contract decision the mobile client would pin against
+permanently (no OTA) — **HITL, not mine to invent under AFK authorization** ("any decision that
+changes a contract shape the mobile client will pin against ... not yours to assume"). What's needed
+to close this AC: (1) #170's backend half built (server floor + a chosen distinct error code/shape),
+(2) the client wired to recognize that exact code and render a blocking screen. Until then this AC
+stays unchecked rather than wired against a guessed shape.
+
+Also landed alongside, not itself an AC here: `app.json` real name/bundle-ids (#170 D-10's other
+zero-cost part — separately committed, referenced on #170).
