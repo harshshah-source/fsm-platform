@@ -1,6 +1,23 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import * as Keychain from 'react-native-keychain';
 import type { LoginResponse, SessionView } from '@fsm/shared';
 import { apiLogin, apiMe, apiRefresh } from './client';
+
+jest.mock('react-native-keychain', () => ({
+  setGenericPassword: jest.fn(),
+  getGenericPassword: jest.fn(),
+}));
+
+jest.mock('expo-crypto', () => ({
+  randomUUID: () => 'device-uuid-fixed-for-tests',
+}));
+
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: { expoConfig: { version: '9.9.9' } },
+}));
+
+const keychain = jest.mocked(Keychain);
 
 // The mock is typed by lib.dom's fetch; the global.fetch slot is typed by React Native's fetch
 // (no URL in RequestInfo). They are assignment-incompatible, so cast on assignment only — the
@@ -19,6 +36,7 @@ describe('apiLogin', () => {
   });
 
   it('POSTs the credentials to /auth/login and returns the token pair', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
     const fetchMock = installFetchMock();
     fetchMock.mockResolvedValue({ ok: true, json: async () => tokens } as unknown as Response);
 
@@ -35,7 +53,21 @@ describe('apiLogin', () => {
     });
   });
 
+  it('#54 non-retrofittable: sends X-Device-Id and X-App-Version on login', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => tokens } as unknown as Response);
+
+    await apiLogin({ email: 'zm.north@fsm.test', password: 'correct-password' });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init).toMatchObject({
+      headers: { 'X-Device-Id': 'device-uuid-fixed-for-tests', 'X-App-Version': '9.9.9' },
+    });
+  });
+
   it('throws INVALID_CREDENTIALS when the server rejects the login', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
     installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
 
     await expect(apiLogin({ email: 'x@y.z', password: 'wrong' })).rejects.toThrow('INVALID_CREDENTIALS');
@@ -50,6 +82,7 @@ describe('apiMe', () => {
   });
 
   it('GETs /me with a Bearer token and returns the session view', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
     const fetchMock = installFetchMock();
     fetchMock.mockResolvedValue({ ok: true, json: async () => session } as unknown as Response);
 
@@ -60,11 +93,12 @@ describe('apiMe', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toMatch(/\/me$/);
     expect(init).toMatchObject({
-      headers: { Authorization: 'Bearer header.payload.sig' },
+      headers: { Authorization: 'Bearer header.payload.sig', 'X-Device-Id': 'device-uuid-fixed-for-tests' },
     });
   });
 
   it('throws UNAUTHORIZED when the token is rejected', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
     installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
 
     await expect(apiMe('bad-token')).rejects.toThrow('UNAUTHORIZED');
@@ -79,6 +113,7 @@ describe('apiRefresh', () => {
   });
 
   it('POSTs the refresh token to /auth/refresh and returns the rotated pair', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
     const fetchMock = installFetchMock();
     fetchMock.mockResolvedValue({ ok: true, json: async () => tokens } as unknown as Response);
 
@@ -95,7 +130,21 @@ describe('apiRefresh', () => {
     });
   });
 
+  it('#54 non-retrofittable: sends X-Device-Id and X-App-Version on refresh', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => tokens } as unknown as Response);
+
+    await apiRefresh('old.refresh.value');
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init).toMatchObject({
+      headers: { 'X-Device-Id': 'device-uuid-fixed-for-tests', 'X-App-Version': '9.9.9' },
+    });
+  });
+
   it('throws UNAUTHORIZED when the refresh token is rejected', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
     installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
 
     await expect(apiRefresh('revoked.refresh.value')).rejects.toThrow('UNAUTHORIZED');
