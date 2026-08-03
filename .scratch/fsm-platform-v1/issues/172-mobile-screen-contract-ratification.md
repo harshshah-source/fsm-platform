@@ -111,6 +111,17 @@ the current live schedule. **Deferred to [#175](./175-se-work-history-series.md)
 `employeeCode` column (`ID - ANV1012`), which exists on neither `User` nor `EngineerMaster`.
 → **#161**, **#55**, **#175**.
 
+> **AMENDED 2026-08-03 — the `employeeCode` column is cancelled, not deferred.** Operator decision:
+> the field is **dropped from the Home header entirely** (no column, no substitute identifier). This
+> ratification's "small `employeeCode` column" line is therefore withdrawn — the header ships with
+> name/role/zone and no `ID - …` line. Recorded here because this document is the frozen screen
+> contract a client pins against; a mobile build reading only this file must not add the field.
+> Rationale + the full SE-identifier inventory live on **#161**'s 2026-08-03 comment. AutoPlant was
+> ruled out as a source from schema (no employee/HR entity exists in it), and no existing identifier
+> is both human-readable and identity-shaped, so substitution was rejected rather than unavailable.
+> Re-adding it later is purely additive (nullable column + one `/api/me` field) and breaks no shipped
+> client — so this is a cancellation of scope, not a blocked dependency.
+
 **2. Inventory — image wins, full surface.**
 Overrides PRD Flow 12's explicit *"Read-only — restocking arranged through ZM or Warehouse."*
 Rationale: an SE who can see they are down to 1 SIM card and cannot request one becomes a support

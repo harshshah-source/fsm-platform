@@ -82,3 +82,15 @@ Assigned vs Completed chart**, which is deferred to **#175** — ship Home witho
 Two further ratifications touching this issue: the **Kit Complete/Incomplete badge moves to
 Inventory** (PRD Flow 12 put it on Home; the Home image has no kit badge), and the header's
 `ID - ANV1012` employee code needs a new column (AC added to #161).
+
+> **SUPERSEDED 2026-08-03 — build the Home header WITHOUT the employee code.** The operator settled
+> this: `employeeCode` is **removed from the Home header**, no column, no substitute. Do not render
+> `ID - …` at all — name, role and zone carry the header on their own. Full rationale and the
+> identifier inventory behind it are on **#161**'s 2026-08-03 comment; the short version: AutoPlant
+> has no employee/HR entity to source from (it is a fleet/logistics database), and nothing on `User`
+> or `EngineerMaster` is both human-readable and identity-shaped — the only unique human-readable
+> fields are `phone` and `email`, which are *contact* semantics, and everything else is a UUID.
+> Rendering a UUID (or a phone number) under someone's name is worse than showing no ID, the same
+> mistake as ticket UUIDs before `ticketNo` landed. **Additive if Operations later defines a real
+> employee code:** a nullable column plus one additive `/api/me` field — no shipped client breaks by
+> its absence, so add then, do not design for it now.
