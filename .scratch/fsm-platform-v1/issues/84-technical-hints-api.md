@@ -1,6 +1,6 @@
 # 84 — Technical Hints API (derived telemetry signals)
 
-Status: ready-for-agent
+Status: landed
 Type: AFK · Backend
 
 ## Business purpose
@@ -32,11 +32,11 @@ the backend derivation + read that Issue 20 renders.
 
 ## Acceptance criteria
 
-- [ ] Hints derived from the latest snapshot per the §641 table exactly
-- [ ] Card source = the single highest-severity hint; detail source = all hints
-- [ ] Raw telemetry field set (§662) returned with the snapshot `dataAsOf`
-- [ ] Missing snapshot → `available=false`, empty hints, null raw ("Telemetry unavailable")
-- [ ] Hints never alter ticket state, SLA, assignment, scoring, verification, or closure
+- [x] Hints derived from the latest snapshot per the §641 table exactly
+- [x] Card source = the single highest-severity hint; detail source = all hints
+- [x] Raw telemetry field set (§662) returned with the snapshot `dataAsOf`
+- [x] Missing snapshot → `available=false`, empty hints, null raw ("Telemetry unavailable")
+- [x] Hints never alter ticket state, SLA, assignment, scoring, verification, or closure
 
 ## Validation & error codes
 
@@ -94,3 +94,78 @@ rawDeviceSnapshot` hits only generated Prisma and one comment
 
 **Freeze-relevant:** the hint *vocabulary* is part of the frozen contract — a client that renders
 chips must know the closed set, or receive display-ready strings. Decide which under **#169**.
+
+### 2026-08-03 — landed
+
+Built as **option 1** from this issue's own API spec: extended the existing `GET /api/me/tickets/:id`
+payload (`MeTicketDetailView.technicalHealth`, #161/#07's read) rather than a new
+`GET /api/tickets/:id/technical` route — this reuses that endpoint's already-correct
+`SeCoverageService`-based RBAC scope with no new predicate. Also added `topHint` to the
+`GET /api/me/tickets` list row (`MeTicketRow.topHint`) per AC #2's card-source requirement; both
+surfaces call the same pure derivation so they can never disagree.
+
+**New files:**
+- `apps/backend/src/me-tickets/technical-hints.ts` — the pure §641 derivation
+  (`deriveTechnicalHints`, `pickTopHint`, `buildTechnicalHealth`). No DB/ORM dependency.
+- `apps/backend/test/technical-hints.spec.ts` — 17 unit tests (no DB): one per §641 condition +
+  boundary cases, multi-anomaly/top-hint determinism, `available:false`, `Prisma.Decimal` input.
+
+**Changed files:**
+- `apps/backend/src/me-tickets/me-ticket-detail.service.ts` — `MeTicketDetailView.technicalHealth:
+  TechnicalHealth`, computed via a new private `technicalHealth(deviceId)` (`rawDeviceSnapshot.
+  findFirst` ordered by `gpsDatetime desc`, the existing index).
+- `apps/backend/src/me-tickets/me-tickets-query.service.ts` — `MeTicketRow.topHint: TechnicalHint |
+  null`, computed via a new private `topHintsByDevice(deviceIds)` (deduplicated by device, one
+  `findFirst` per distinct device on the page).
+- `apps/backend/test/me-ticket-detail-controller.e2e-spec.ts` — 3 new e2e tests: missing-snapshot
+  `available:false`, multi-anomaly full-hints + raw-telemetry + `dataAsOf`, and a read-only assertion
+  (ticket/TicketEvent/SoftState rows unchanged by the GET).
+- `apps/backend/test/me-tickets-controller.e2e-spec.ts` — 2 new e2e tests: `topHint` null with no
+  snapshot, `topHint` = the single highest-severity hint with a multi-anomaly snapshot.
+
+**Code vocabulary (frozen per #169's request — do not rename without updating there), severity
+descending:**
+
+| code | severity | label |
+|---|---|---|
+| `NO_MAIN_POWER` | 8 | "No main power — check fuse" |
+| `NOT_ON_NETWORK` | 7 | "Not on network" |
+| `GPS_INVALID` | 6 | "GPS signal invalid" |
+| `NO_GPS_FIX` | 5 | "No GPS fix" |
+| `LOW_VOLTAGE` | 4 | "Low voltage" |
+| `WEAK_GSM` | 3 | "Weak GSM signal" |
+| `IGNITION_OFF` | 2 | "Ignition off" |
+| `VEHICLE_IN_MOTION` | 1 | "Vehicle in motion" |
+
+**Severity-ranking rationale:** conditions meaning the device may be producing NO further usable
+telemetry at all (no power, not on network, GPS unreliable/no-fix) block diagnosis entirely and
+outrank conditions that are just informational context about a device still reporting (ignition,
+motion). Within that top tier, total power loss outranks a comms/GPS problem (unpowered = nothing
+can be reasoned about; briefly off-network/no-fix may self-recover). Low voltage / weak GSM are
+degraded-but-still-working warnings, ranked between the two tiers. All eight conditions are evaluated
+independently (not `else if`) — a snapshot can fire several at once; `deriveTechnicalHints` returns
+them severity-descending so "all hints" and "the top hint" (`pickTopHint`, effectively `hints[0]`)
+can never disagree between the list and detail surfaces.
+
+**Ambiguous-string literal judgment calls** (nothing in the current ingestion path produces these
+fields — see `ingestion/autoplant/mapping.ts:152-161`, all hardcoded `null` today — so these are
+best-effort literals for whenever ingestion is later enriched, or for a fixture that sets the field
+directly):
+- `gpsValidity` — case-insensitive equality to `"invalid"` (PRD's own literal, case-folded).
+- `gpsMode` "no fix" — case-insensitive equality to the literal `"no fix"`.
+- `creg` / `cgreg` "not registered" — case-insensitive equality to the literal `"not registered"`
+  (either field alone is sufficient). Deliberately NOT matching AutoPlant/3GPP's numeric CREG/CGREG
+  codes (e.g. `0`/`3`) — the source column is a free `String?` with no confirmed real value yet, and
+  a numeric-code mapping would be a new threshold this issue's own "no new thresholds" rule forbids.
+- `ignitionStatus` "off" — case-insensitive equality to the literal `"off"` (AutoPlant's
+  `IGNITION_STATUS` column is documented free text, likely `"ON"`/`"OFF"`).
+
+**Scope note:** the earlier 2026-07-28 comment above also mentions a "Device not reporting since 42h"
+staleness chip on 4 screens — that is NOT one of the 8 §641 conditions in this issue's corrected spec
+and was intentionally NOT built here (it would be a new, uncited threshold). If a staleness hint is
+wanted it needs its own PRD citation and is a candidate follow-up, not silently folded into this
+derivation.
+
+**Verification:** `pnpm --filter backend exec tsc --noEmit` clean. Full `pnpm --filter backend test`
+suite run — see the session commit for the final pass/fail counts (`voucher-controller.e2e-spec.ts`
+has the pre-existing, already-filed #187 fixture bug, unrelated to this work).

@@ -3,6 +3,7 @@ import { utcDayStart } from '../common/utc-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
+import { buildTechnicalHealth, type TechnicalHealth } from './technical-hints';
 import { formatTicketNo, ticketNoAsNumber } from '../ticketing/ticket-no';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -73,6 +74,10 @@ export interface MeTicketDetailView {
   componentRequestStatus: string | null;
   waitingComponentSince: string | null;
   readinessHint: 'READY' | 'ON_TRIP' | 'STALE' | 'UNKNOWN';
+  /** #84 — derived Technical Hints + raw telemetry, from the device's latest `RawDeviceSnapshot`.
+   *  Purely advisory (see `technical-hints.ts`); `available:false` when the device has no snapshot
+   *  row at all, distinct from an individual raw field being genuinely null. */
+  technicalHealth: TechnicalHealth;
 }
 
 const MAX_FAILURE_HISTORY_DEPTH = 10;
@@ -117,10 +122,11 @@ export class MeTicketDetailService {
 
     if (!(await this.isReadable(ticket, seId, now))) return null;
 
-    const [activeSoftState, failureCycleHistory, componentRequests] = await Promise.all([
+    const [activeSoftState, failureCycleHistory, componentRequests, technicalHealth] = await Promise.all([
       this.activeSoftState(ticketId, seId),
       this.failureCycleHistory(ticket.failureCycle?.cycleId ?? null),
       this.componentRequests(ticketId),
+      this.technicalHealth(String(ticket.deviceId)),
     ]);
 
     const latestComponentRequest = componentRequests[componentRequests.length - 1] ?? null;
@@ -152,7 +158,25 @@ export class MeTicketDetailService {
       // Not derived — see the class/interface doc. Kept as a literal so the field's absence-of-data
       // state is honest rather than implying a computation that does not exist.
       readinessHint: 'UNKNOWN',
+      technicalHealth,
     };
+  }
+
+  /** #84 — the latest `RawDeviceSnapshot` for the ticket's device, mapped through the pure
+   *  `buildTechnicalHealth` derivation. The existing `[deviceId, gpsDatetime desc]` index supports
+   *  this `findFirst` directly (no new index needed). Read-only — this method and everything it
+   *  calls only ever reads `raw_device_snapshots`. */
+  private async technicalHealth(deviceId: string): Promise<TechnicalHealth> {
+    const snapshot = await this.prisma.rawDeviceSnapshot.findFirst({
+      where: { deviceId },
+      orderBy: { gpsDatetime: 'desc' },
+      select: {
+        gpsDatetime: true, lat: true, lon: true, mainsStatus: true, mainsVoltage: true,
+        gpsValidity: true, gpsMode: true, ignitionStatus: true, speed: true, creg: true, cgreg: true,
+        csq: true, ipAddress: true, portNo: true, simSubscriberName: true, unitNo: true, deviceType: true,
+      },
+    });
+    return buildTechnicalHealth(snapshot);
   }
 
   private async isReadable(

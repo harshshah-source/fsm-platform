@@ -5,6 +5,7 @@ import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
 import { notDeferredOn } from '../ticketing/deferral';
 import { formatTicketNo, ticketNoAsNumber } from '../ticketing/ticket-no';
+import { buildTechnicalHealth, pickTopHint, type TechnicalHint } from './technical-hints';
 
 /** The image's row glyph (V/P/W/✓) — naming vocabulary pinned under #169, semantics fixed by #172
  *  Decision 3. VERIFY/IN_WORK are unambiguous (ticket status / active soft state); PLAN vs VISIT_NOW
@@ -31,6 +32,15 @@ export interface MeTicketRow {
   activeSoftState: string | null;
   createdAt: Date;
   lastStateChangedAt: Date;
+  /** #84 AC #2 — "card source = the single highest-severity hint" from the device's latest
+   *  `RawDeviceSnapshot`, via the same pure derivation (`technical-hints.ts`) the full detail read
+   *  (`MeTicketDetailView.technicalHealth.hints`) uses. `null` when no hint currently fires OR the
+   *  device has no snapshot row at all — the list row has no separate "unavailable" signal, unlike
+   *  the detail payload's `technicalHealth.available`; a client wanting to distinguish those two
+   *  cases reads the detail payload. Also satisfies the `topTechnicalHint` field #161's own
+   *  day-plan-expansion comment names separately — see this issue's landed-comment note so a future
+   *  #161 continuation does not duplicate it. */
+  topHint: TechnicalHint | null;
 }
 
 export interface MeTicketsView {
@@ -106,6 +116,8 @@ export class MeTicketsQueryService {
     });
     const activeByTicket = new Map(activeSoftStates.map((s) => [s.ticketId, s.type]));
 
+    const topHintByDevice = await this.topHintsByDevice(tickets.map((t) => String(t.deviceId)));
+
     const items: MeTicketRow[] = tickets.map((t) => {
       const assigned = assignedTicketIds.has(t.ticketId);
       const activeSoftState = activeByTicket.get(t.ticketId) ?? null;
@@ -128,9 +140,33 @@ export class MeTicketsQueryService {
         activeSoftState,
         createdAt: t.createdAt,
         lastStateChangedAt: t.lastStateChangedAt,
+        topHint: topHintByDevice.get(String(t.deviceId)) ?? null,
       };
     });
 
     return { items, cursor: null };
+  }
+
+  /** #84 — one highest-severity hint per distinct device on this page of tickets, via the same pure
+   *  derivation `MeTicketDetailService` uses for the full detail read. Deduplicated by `deviceId`
+   *  (not by ticket) since two tickets can share a device; read-only, same `[deviceId, gpsDatetime
+   *  desc]` index as the detail read's `findFirst`. */
+  private async topHintsByDevice(deviceIds: string[]): Promise<Map<string, TechnicalHint | null>> {
+    const uniqueIds = [...new Set(deviceIds)];
+    const entries = await Promise.all(
+      uniqueIds.map(async (deviceId): Promise<[string, TechnicalHint | null]> => {
+        const snapshot = await this.prisma.rawDeviceSnapshot.findFirst({
+          where: { deviceId },
+          orderBy: { gpsDatetime: 'desc' },
+          select: {
+            gpsDatetime: true, lat: true, lon: true, mainsStatus: true, mainsVoltage: true,
+            gpsValidity: true, gpsMode: true, ignitionStatus: true, speed: true, creg: true, cgreg: true,
+            csq: true, ipAddress: true, portNo: true, simSubscriberName: true, unitNo: true, deviceType: true,
+          },
+        });
+        return [deviceId, pickTopHint(buildTechnicalHealth(snapshot).hints)];
+      }),
+    );
+    return new Map(entries);
   }
 }

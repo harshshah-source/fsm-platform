@@ -30,6 +30,7 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
   let companyId: bigint;
   let plantId: bigint;
   let se: string;
+  let snapshotRunId: bigint; // #84 — technical-hints fixture rows ride this one run
   const userIds: string[] = [];
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
@@ -69,6 +70,30 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
     return ticket.ticketId;
   };
 
+  /** Same as `makeTicket`, but also returns the `deviceId` so #84 `topHint` tests can attach a
+   *  `RawDeviceSnapshot` fixture to it. */
+  const makeTicketWithDevice = async (): Promise<{ ticketId: string; deviceId: string }> => {
+    const deviceId = String(9_820_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    deviceIds.push(deviceId);
+    await prisma.device.create({ data: { deviceId } });
+    await prisma.deviceState.create({
+      data: {
+        deviceId, isInactive: true, slaBucket: 'CRITICAL', eligibleForUptime: true,
+        hasOpenFailureCycle: true, latestGpsDatetime: new Date(NOW.getTime() - 120 * 60_000),
+        plantId, companyId, computedAt: NOW,
+      },
+    });
+    const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: NOW } });
+    const ticket = await prisma.ticket.create({
+      data: {
+        workType: 'TROUBLESHOOT', status: 'OPEN', failureCycleId: cycle.cycleId, deviceId,
+        plantId, companyId, companyTier: 'GOLD', lastStateChangedAt: NOW,
+      },
+    });
+    ticketIds.push(ticket.ticketId);
+    return { ticketId: ticket.ticketId, deviceId };
+  };
+
   const seToken = () => tokens.signAccessToken({ user_id: se, role: 'SERVICE_ENGINEER', zone_id: Number(zoneId) });
 
   beforeAll(async () => {
@@ -96,9 +121,12 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
     userIds.push(se);
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
     await prisma.seCoverage.create({ data: { seId: se, plantId, coverageType: 'DEDICATED' } });
+    snapshotRunId = (await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: NOW } })).runId;
   });
 
   afterAll(async () => {
+    await prisma.rawDeviceSnapshot.deleteMany({ where: { runId: snapshotRunId } });
+    await prisma.snapshotRun.deleteMany({ where: { runId: snapshotRunId } });
     const schedules = await prisma.workSchedule.findMany({ where: { zoneId }, select: { scheduleId: true } });
     const batches = await prisma.plantBatchAssignment.findMany({
       where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } },
@@ -218,5 +246,41 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
 
   it('rejects an unauthenticated request', async () => {
     await request(app.getHttpServer()).get('/api/me/tickets').expect(401);
+  });
+
+  describe('#84 — topHint (card source = single highest-severity hint)', () => {
+    it('is null when the device has no snapshot', async () => {
+      const { ticketId } = await makeTicketWithDevice();
+
+      const res = await request(app.getHttpServer())
+        .get('/api/me/tickets')
+        .set('Authorization', `Bearer ${seToken()}`)
+        .expect(200);
+
+      const row = (res.body.items as Array<{ ticketId: string; topHint: unknown }>).find((i) => i.ticketId === ticketId);
+      expect(row?.topHint).toBeNull();
+    });
+
+    it('surfaces the single highest-severity hint when the device snapshot has multiple anomalies', async () => {
+      const { ticketId, deviceId } = await makeTicketWithDevice();
+      await prisma.rawDeviceSnapshot.create({
+        data: {
+          runId: snapshotRunId, deviceId, gpsDatetime: NOW,
+          mainsStatus: 0, // NO_MAIN_POWER (8) — highest
+          csq: 5, // WEAK_GSM (3)
+          ignitionStatus: 'OFF', // IGNITION_OFF (2)
+        },
+      });
+
+      const res = await request(app.getHttpServer())
+        .get('/api/me/tickets')
+        .set('Authorization', `Bearer ${seToken()}`)
+        .expect(200);
+
+      const row = (res.body.items as Array<{ ticketId: string; topHint: { code: string } | null }>).find(
+        (i) => i.ticketId === ticketId,
+      );
+      expect(row?.topHint?.code).toBe('NO_MAIN_POWER');
+    });
   });
 });

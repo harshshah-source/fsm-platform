@@ -27,6 +27,7 @@ describe('#161 item 1 — GET /api/me/tickets/:id (e2e)', () => {
   let componentId: bigint;
   let seA: string;
   let seB: string;
+  let snapshotRunId: bigint; // #84 — technical-hints fixture rows ride this one run
   const userIds: string[] = [];
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
@@ -126,6 +127,21 @@ describe('#161 item 1 — GET /api/me/tickets/:id (e2e)', () => {
     return ticket.ticketId;
   };
 
+  /** Same shared-pool ticket shape as `makePoolTicket`, but also returns the `deviceId` so #84 tests
+   *  can attach a `RawDeviceSnapshot` fixture to it. */
+  const makePoolTicketWithDevice = async (): Promise<{ ticketId: string; deviceId: string }> => {
+    const deviceId = await makeDevice();
+    const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: NOW } });
+    const ticket = await prisma.ticket.create({
+      data: {
+        workType: 'TROUBLESHOOT', status: 'OPEN', assignmentState: 'UNASSIGNED', failureCycleId: cycle.cycleId,
+        deviceId, plantId, companyId, companyTier: 'GOLD', lastStateChangedAt: NOW,
+      },
+    });
+    ticketIds.push(ticket.ticketId);
+    return { ticketId: ticket.ticketId, deviceId };
+  };
+
   const tokenFor = (seId: string) => tokens.signAccessToken({ user_id: seId, role: 'SERVICE_ENGINEER', zone_id: Number(zoneId) });
 
   beforeAll(async () => {
@@ -156,9 +172,12 @@ describe('#161 item 1 — GET /api/me/tickets/:id (e2e)', () => {
     seB = uB.userId;
     userIds.push(seB);
     await prisma.engineerMaster.create({ data: { engineerId: seB, coverageType: 'MULTI_PLANT', zoneId, dailyCapacity: 10 } });
+    snapshotRunId = (await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: NOW } })).runId;
   });
 
   afterAll(async () => {
+    await prisma.rawDeviceSnapshot.deleteMany({ where: { runId: snapshotRunId } });
+    await prisma.snapshotRun.deleteMany({ where: { runId: snapshotRunId } });
     const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: scheduleIds } }, select: { batchId: true } });
     await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
     await prisma.plantBatchAssignment.deleteMany({ where: { scheduleId: { in: scheduleIds } } });
@@ -296,5 +315,73 @@ describe('#161 item 1 — GET /api/me/tickets/:id (e2e)', () => {
   it('rejects an unauthenticated request', async () => {
     const ticketId = await makePoolTicket();
     await request(app.getHttpServer()).get(`/api/me/tickets/${ticketId}`).expect(401);
+  });
+
+  describe('#84 — technicalHealth (derived Technical Hints + raw telemetry)', () => {
+    it('missing snapshot → available:false, empty hints, null raw telemetry, null dataAsOf', async () => {
+      const { ticketId } = await makePoolTicketWithDevice();
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/me/tickets/${ticketId}`)
+        .set('Authorization', `Bearer ${tokenFor(seA)}`)
+        .expect(200);
+
+      expect(res.body.technicalHealth).toEqual({ hints: [], rawTelemetry: null, dataAsOf: null, available: false });
+    });
+
+    it('a multi-anomaly snapshot returns ALL firing hints on detail, raw telemetry, and dataAsOf', async () => {
+      const { ticketId, deviceId } = await makePoolTicketWithDevice();
+      const gpsDatetime = new Date(NOW.getTime() - 15 * 60_000);
+      await prisma.rawDeviceSnapshot.create({
+        data: {
+          runId: snapshotRunId, deviceId, gpsDatetime, lat: 19.1, lon: 72.9,
+          mainsStatus: 0, mainsVoltage: 5, ignitionStatus: 'OFF', speed: 12,
+          unitNo: 'UNIT-' + NS, deviceType: 'GPS-X',
+        },
+      });
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/me/tickets/${ticketId}`)
+        .set('Authorization', `Bearer ${tokenFor(seA)}`)
+        .expect(200);
+
+      expect(res.body.technicalHealth.available).toBe(true);
+      expect(res.body.technicalHealth.dataAsOf).toBe(gpsDatetime.toISOString());
+      // Severity-descending: NO_MAIN_POWER (8) > LOW_VOLTAGE (4) > IGNITION_OFF (2) > VEHICLE_IN_MOTION (1).
+      expect(res.body.technicalHealth.hints.map((h: { code: string }) => h.code)).toEqual([
+        'NO_MAIN_POWER', 'LOW_VOLTAGE', 'IGNITION_OFF', 'VEHICLE_IN_MOTION',
+      ]);
+      expect(res.body.technicalHealth.rawTelemetry).toMatchObject({
+        gpsDatetime: gpsDatetime.toISOString(),
+        lat: 19.1, lon: 72.9, mainsStatus: 0, mainsVoltage: 5, ignitionStatus: 'OFF', speed: 12,
+        unitNo: 'UNIT-' + NS, deviceType: 'GPS-X',
+        // Fields the current AutoPlant ingestion path never populates — pass through as-is (null is
+        // a genuine "no data for this field" value, distinct from the whole-row `available:false` case).
+        gpsValidity: null, gpsMode: null, creg: null, cgreg: null, csq: null,
+        ipAddress: null, portNo: null, simSubscriberName: null,
+      });
+    });
+
+    it('computing hints is read-only: ticket/failure-cycle/soft-state rows are unchanged by the read', async () => {
+      const { ticketId, deviceId } = await makePoolTicketWithDevice();
+      await prisma.rawDeviceSnapshot.create({
+        data: { runId: snapshotRunId, deviceId, gpsDatetime: NOW, mainsStatus: 0, speed: 40 },
+      });
+
+      const before = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
+      const eventsBefore = await prisma.ticketEvent.count({ where: { ticketId } });
+      const softStatesBefore = await prisma.softState.count({ where: { ticketId } });
+
+      const res = await request(app.getHttpServer())
+        .get(`/api/me/tickets/${ticketId}`)
+        .set('Authorization', `Bearer ${tokenFor(seA)}`)
+        .expect(200);
+      expect(res.body.technicalHealth.hints.length).toBeGreaterThan(0); // sanity: hints actually fired
+
+      const after = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
+      expect(after).toEqual(before);
+      expect(await prisma.ticketEvent.count({ where: { ticketId } })).toBe(eventsBefore);
+      expect(await prisma.softState.count({ where: { ticketId } })).toBe(softStatesBefore);
+    });
   });
 });
