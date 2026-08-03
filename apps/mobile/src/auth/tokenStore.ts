@@ -10,7 +10,7 @@ export async function setTokens(tokens: LoginResponse): Promise<void> {
   await Keychain.setGenericPassword(ACCOUNT, JSON.stringify(tokens), { service: SERVICE });
 }
 
-async function getTokens(): Promise<LoginResponse | null> {
+export async function getTokens(): Promise<LoginResponse | null> {
   const stored = await Keychain.getGenericPassword({ service: SERVICE });
   if (!stored) {
     return null;

@@ -13,6 +13,7 @@ beforeEach(() => {
   mockLogin.mockResolvedValue(undefined);
   mockUseAuth.mockReturnValue({
     session: null,
+    loading: false,
     login: mockLogin,
     logout: jest.fn<() => Promise<void>>(),
   });

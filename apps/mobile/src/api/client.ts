@@ -25,6 +25,18 @@ export async function apiLogin(body: LoginRequest): Promise<LoginResponse> {
   return (await res.json()) as LoginResponse;
 }
 
+export async function apiRefresh(refreshToken: string): Promise<LoginResponse> {
+  const res = await fetch(`${BASE_URL}/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as LoginResponse;
+}
+
 export async function apiMe(accessToken: string): Promise<SessionView> {
   const res = await fetch(`${BASE_URL}/me`, {
     headers: { Authorization: `Bearer ${accessToken}` },

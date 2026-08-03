@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import * as Keychain from 'react-native-keychain';
 import type { LoginResponse } from '@fsm/shared';
-import { clearTokens, getAccessToken, setTokens } from './tokenStore';
+import { clearTokens, getAccessToken, getTokens, setTokens } from './tokenStore';
 
 jest.mock('react-native-keychain', () => ({
   setGenericPassword: jest.fn(),
@@ -45,6 +45,23 @@ describe('tokenStore', () => {
     keychain.getGenericPassword.mockResolvedValue(false);
 
     await expect(getAccessToken()).resolves.toBeNull();
+  });
+
+  it('getTokens returns the stored access + refresh pair', async () => {
+    keychain.getGenericPassword.mockResolvedValue({
+      service: 'fsm.tokens',
+      username: 'fsm',
+      password: JSON.stringify(tokens),
+      storage: 'keychain',
+    } as unknown as StoredCredentials);
+
+    await expect(getTokens()).resolves.toEqual(tokens);
+  });
+
+  it('getTokens returns null when the keychain is empty', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+
+    await expect(getTokens()).resolves.toBeNull();
   });
 
   it('clearTokens removes the keychain entry', async () => {

@@ -8,9 +8,10 @@ jest.mock('./AuthProvider', () => ({ useAuth: jest.fn() }));
 
 const mockUseAuth = jest.mocked(useAuth);
 
-function setAuth(session: SessionView | null) {
+function setAuth(session: SessionView | null, loading = false) {
   mockUseAuth.mockReturnValue({
     session,
+    loading,
     login: jest.fn<(email: string, password: string) => Promise<void>>(),
     logout: jest.fn<() => Promise<void>>(),
   });
@@ -36,5 +37,14 @@ describe('AppEntry', () => {
     expect(screen.getByTestId('logout')).toBeTruthy();
     expect(screen.getByText('ZONAL_MANAGER')).toBeTruthy();
     expect(screen.queryByTestId('email-input')).toBeNull();
+  });
+
+  it('renders neither screen while rehydrating, even with no session yet', () => {
+    setAuth(null, true);
+    render(<AppEntry />);
+
+    expect(screen.getByTestId('rehydrating')).toBeTruthy();
+    expect(screen.queryByTestId('email-input')).toBeNull();
+    expect(screen.queryByTestId('logout')).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import type { LoginResponse, SessionView } from '@fsm/shared';
-import { apiLogin, apiMe } from './client';
+import { apiLogin, apiMe, apiRefresh } from './client';
 
 // The mock is typed by lib.dom's fetch; the global.fetch slot is typed by React Native's fetch
 // (no URL in RequestInfo). They are assignment-incompatible, so cast on assignment only — the
@@ -68,5 +68,36 @@ describe('apiMe', () => {
     installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
 
     await expect(apiMe('bad-token')).rejects.toThrow('UNAUTHORIZED');
+  });
+});
+
+describe('apiRefresh', () => {
+  const tokens: LoginResponse = { accessToken: 'new.access.sig', refreshToken: 'new.refresh.value' };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('POSTs the refresh token to /auth/refresh and returns the rotated pair', async () => {
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => tokens } as unknown as Response);
+
+    const result = await apiRefresh('old.refresh.value');
+
+    expect(result).toEqual(tokens);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/auth\/refresh$/);
+    expect(init).toMatchObject({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: 'old.refresh.value' }),
+    });
+  });
+
+  it('throws UNAUTHORIZED when the refresh token is rejected', async () => {
+    installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
+
+    await expect(apiRefresh('revoked.refresh.value')).rejects.toThrow('UNAUTHORIZED');
   });
 });

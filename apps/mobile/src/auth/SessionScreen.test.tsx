@@ -12,6 +12,7 @@ const mockLogout = jest.fn<() => Promise<void>>();
 function setSession(session: SessionView | null) {
   mockUseAuth.mockReturnValue({
     session,
+    loading: false,
     login: jest.fn<(e: string, p: string) => Promise<void>>(),
     logout: mockLogout,
   });

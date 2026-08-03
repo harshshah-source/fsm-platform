@@ -1,6 +1,12 @@
 # 186 — Mobile auth shell has no session rehydration or token refresh
 
-Status: ready-for-agent
+Status: ready-for-agent — **partial: found uncommitted in the working tree 2026-08-03 (implementation
+predates this status note; author/session untracked), committed as-is this session.** AC#1
+(rehydration on mount), AC#2 (refresh-and-retry via a shared `resolveSession` helper), and AC#4 (unit
+tests: rehydrate-success, rehydrate-no-token, refresh-success-retries, refresh-failure-logs-out) are
+done and green (29/29 mobile tests, `tsc --noEmit` clean). **AC#3 is not done** — `console.log` debug
+scaffolding remains in `LoginScreen.tsx:14,19` and `client.ts:6,9-10,19` (only `AuthProvider.tsx`'s was
+removed). Small, mechanical remainder; do not re-do AC#1/#2/#4.
 Type: AFK · Mobile
 
 Filed 2026-08-03, found during the mobile-readiness precondition analysis
