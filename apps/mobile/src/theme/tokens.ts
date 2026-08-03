@@ -7,6 +7,8 @@ export const color = {
   brand300: '#f3cbd3',
   brand600: '#b9102b',
   brand700: '#8f0f24',
+  // text/icon on a bold color surface (brand button, StatTile) — DESIGN-SYSTEM §1.1 `--brand-on`.
+  onColor: '#ffffff',
 
   chrome900: '#0a0a0c',
   chrome800: '#131316',
