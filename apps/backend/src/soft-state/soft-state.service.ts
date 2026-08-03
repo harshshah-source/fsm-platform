@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { type OnsiteSource, type SoftStateType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { SeCoverageService } from '../shared-pool/se-coverage.service';
 import { type ActivityStatus, deriveActivityStatus, resolveShiftEnd } from './activity-status';
 
 /**
@@ -72,7 +73,8 @@ export interface SetOnSiteInput {
 export type AdvanceOutcome =
   | { result: 'OK'; softState: SoftStateView }
   | { result: 'IDEMPOTENT'; softState: SoftStateView }
-  | { result: 'INVALID_TRANSITION'; from: SoftStateType | null; to: SoftStateType };
+  | { result: 'INVALID_TRANSITION'; from: SoftStateType | null; to: SoftStateType }
+  | { result: 'NOT_FOUND' };
 
 function toView(row: {
   softStateId: bigint;
@@ -98,7 +100,24 @@ function toView(row: {
 
 @Injectable()
 export class SoftStateService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly coverage: SeCoverageService,
+  ) {}
+
+  /**
+   * #162 row-scoping floor: `runAdvance` used to write a soft state onto ANY ticket id — including one
+   * that doesn't exist, is terminal, or belongs to a plant outside the SE's coverage — because it never
+   * queried `tickets` at all. Checked ahead of the transaction (troubleshoot-submission's pattern) so a
+   * fabricated/out-of-coverage/terminal ticket never reaches the write path. "Terminal" here is simply
+   * "not OPEN": the VIEWED→ON_SITE→TROUBLESHOOT_STARTED chain is a pre-submission signal, meaningless
+   * once the ticket has moved on (RECOVERY has its own on-site tracking via `/recovery/:id/on-site`).
+   */
+  private async assertInScope(ticketId: string, seId: string): Promise<boolean> {
+    const ticket = await this.prisma.ticket.findUnique({ where: { ticketId }, select: { plantId: true, status: true } });
+    if (!ticket || ticket.status !== 'OPEN') return false;
+    return this.coverage.isPlantCovered(seId, ticket.plantId);
+  }
 
   /**
    * Advance the SE's soft state on a ticket to `target`. Valid only as the next step in the chain;
@@ -106,6 +125,7 @@ export class SoftStateService {
    * active state (if any) is resolved as part of the same transaction.
    */
   async advance(input: AdvanceSoftStateInput): Promise<AdvanceOutcome> {
+    if (!(await this.assertInScope(input.ticketId, input.seId))) return { result: 'NOT_FOUND' };
     const now = input.now ?? new Date();
     const viewedTimeoutMs = await this.viewedTimeoutMs();
     return this.prisma.$transaction((tx) => this.runAdvance(tx, input, now, viewedTimeoutMs));
@@ -204,6 +224,7 @@ export class SoftStateService {
    * audited (CONTEXT §Soft State). Creation and the MANUAL audit row commit together.
    */
   async setOnSite(input: SetOnSiteInput): Promise<AdvanceOutcome> {
+    if (!(await this.assertInScope(input.ticketId, input.seId))) return { result: 'NOT_FOUND' };
     const now = input.now ?? new Date();
     const source = await this.resolveOnsiteSource(input.ticketId, input.capturedLocation);
     return this.prisma.$transaction(async (tx) => {

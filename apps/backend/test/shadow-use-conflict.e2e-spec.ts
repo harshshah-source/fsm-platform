@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-submission.service';
 
 /**
@@ -26,11 +27,14 @@ describe('Issue 24 slice 2 — 409 conflict + shadow use + consumption', () => {
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
+  // #162 regression: both winner and loser cover `plantId` — the sanctioned two-SE 409/Shadow-Use race
+  // (workflow:931-935) must keep working now that submit() enforces the coverage floor.
   const seedSe = async (qty: number): Promise<string> => {
     const tag = randomUUID().slice(0, 8);
     const u = await prisma.user.create({ data: { name: 'SE ' + tag, role: 'SERVICE_ENGINEER', phone: 'se-' + tag, email: `se-${tag}@su.test`, zoneId } });
     engineers.push(u.userId);
     await prisma.engineerMaster.create({ data: { engineerId: u.userId, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+    await prisma.seCoverage.create({ data: { seId: u.userId, plantId, coverageType: 'DEDICATED' } });
     await prisma.seVanStock.create({ data: { seId: u.userId, componentId: cable, qty } });
     return u.userId;
   };
@@ -48,7 +52,7 @@ describe('Issue 24 slice 2 — 409 conflict + shadow use + consumption', () => {
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
-    svc = new TroubleshootSubmissionService(prisma);
+    svc = new TroubleshootSubmissionService(prisma, new SeCoverageService(prisma));
     zoneId = (await prisma.zone.create({ data: { name: 'Z-su-' + NS } })).zoneId;
     companyId = (await prisma.company.create({ data: { name: 'Co-su-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-su-' + NS, zoneId } })).plantId;
@@ -65,6 +69,7 @@ describe('Issue 24 slice 2 — 409 conflict + shadow use + consumption', () => {
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
+    await prisma.seCoverage.deleteMany({ where: { seId: { in: engineers } } });
     await prisma.seVanStock.deleteMany({ where: { seId: { in: engineers } } });
     await prisma.componentMaster.deleteMany({ where: { componentId: cable } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: engineers } } });

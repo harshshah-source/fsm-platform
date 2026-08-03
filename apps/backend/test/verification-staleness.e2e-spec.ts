@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-submission.service';
 import { VerificationService } from '../src/verification/verification.service';
 
@@ -92,7 +93,7 @@ describe('#148 — verification does not expire on stale telemetry', () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
     verify = new VerificationService(prisma);
-    submit = new TroubleshootSubmissionService(prisma);
+    submit = new TroubleshootSubmissionService(prisma, new SeCoverageService(prisma));
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-vs-' + NS } })).zoneId;
     companyId = (
@@ -106,9 +107,11 @@ describe('#148 — verification does not expire on stale telemetry', () => {
     });
     se = u.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+    await prisma.seCoverage.create({ data: { seId: se, plantId, coverageType: 'DEDICATED' } });
   });
 
   afterAll(async () => {
+    await prisma.seCoverage.deleteMany({ where: { seId: se } });
     await prisma.verificationRun.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: ticketIds } } });

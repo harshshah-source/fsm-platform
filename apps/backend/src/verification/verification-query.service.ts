@@ -72,6 +72,13 @@ export interface VerificationView {
   badge: VerificationBadge;
 }
 
+/** Caller identity for `forTicket`'s row-scoping (#162 — this read was previously unscoped for every role). */
+export interface VerificationReadScope {
+  role: string;
+  userId: string;
+  zoneId: number | null;
+}
+
 export interface FraudFlagView {
   ticketId: string;
   deviceId: string;
@@ -90,8 +97,20 @@ function badgeFor(pings: number, outcome: VerifyOutcome | null): VerificationBad
 export class VerificationQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Latest verification run for a ticket, with the derived badge; null if none yet. */
-  async forTicket(ticketId: string): Promise<VerificationView | null> {
+  /**
+   * Latest verification run for a ticket, with the derived badge; null if none yet — or if the caller
+   * is out of scope for this ticket, which the controller maps to the same 404 as "no run" (#162: this
+   * route was unscoped for EVERY role, not just SE — `@CurrentUser()` wasn't even injected). SE: own
+   * submission, own RECOVERY assignment, or own batch assignment. ZONAL_MANAGER: own zone (mirrors
+   * `review()` / `escalateFraud`). CSM / OPERATIONS_HEAD: unrestricted, as elsewhere.
+   */
+  async forTicket(ticketId: string, scope: VerificationReadScope): Promise<VerificationView | null> {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { ticketId },
+      select: { assignedSeId: true, plant: { select: { zoneId: true } } },
+    });
+    if (!ticket || !(await this.inScope(ticketId, ticket, scope))) return null;
+
     const run = await this.prisma.verificationRun.findFirst({
       where: { ticketId },
       orderBy: { startedAt: 'desc' },
@@ -106,6 +125,30 @@ export class VerificationQueryService {
       firstPingDistanceMeters: run.firstPingDistanceMeters == null ? null : Number(run.firstPingDistanceMeters),
       badge: badgeFor(run.pingsReceivedCount, run.outcome),
     };
+  }
+
+  private async inScope(
+    ticketId: string,
+    ticket: { assignedSeId: string | null; plant: { zoneId: bigint } },
+    scope: VerificationReadScope,
+  ): Promise<boolean> {
+    if (scope.role === 'SERVICE_ENGINEER') {
+      if (ticket.assignedSeId === scope.userId) return true; // RECOVERY assignment
+      const submission = await this.prisma.troubleshootingSubmission.findFirst({
+        where: { ticketId, seId: scope.userId },
+        select: { submissionId: true },
+      });
+      if (submission) return true; // own troubleshoot submission
+      const batchTicket = await this.prisma.batchAssignmentTicket.findFirst({
+        where: { ticketId, batch: { seId: scope.userId } },
+        select: { id: true },
+      });
+      return !!batchTicket; // TROUBLESHOOT/INSTALL batch assignment
+    }
+    if (scope.role === 'ZONAL_MANAGER') {
+      return scope.zoneId == null || Number(ticket.plant.zoneId) === scope.zoneId;
+    }
+    return true; // CENTRAL_SERVICE_MANAGER / OPERATIONS_HEAD — unrestricted, as elsewhere
   }
 
   /**

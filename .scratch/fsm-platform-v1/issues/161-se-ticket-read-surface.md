@@ -1,6 +1,9 @@
 # 161 — SE ticket-read surface (mobile M3 data source)
 
-Status: ready-for-agent
+Status: ready-for-agent — **partial: item 2 (day-plan/shared-pool merge) landed 2026-08-03,
+uncommitted this session.** Items 1 (ticket detail — SE/recovery reads), 3 (own submitted forms),
+and the `/api/me` enrichment / `ticketNo` / removal-deferral-metadata ACs from the comments below are
+**not built**. See the dated comment for scope and why it stopped there.
 Type: AFK · Backend
 
 Filed 2026-07-28 by the mobile-readiness verification
@@ -201,3 +204,43 @@ Same applies to the Profile screen's **ZM contact block** (name, phone, email): 
 `Zone.zonalManagerUserId` (`schema.prisma:219`) → `users`. All present, none exposed.
 
 No new issue; the other consumer of the same field is **#76** (WhatsApp delivery address).
+
+### 2026-08-03 — item 2 landed (merged `GET /api/me/tickets`); scope deliberately stopped there
+
+Built together with #162's coverage predicate, as both issues require. New `MeTicketsModule`
+(`src/me-tickets/`) — `MeTicketsQueryService` + `MeTicketsController` at `GET /api/me/tickets`,
+SE-only, registered in `AppModule` alongside `SharedPoolController`.
+
+**What it does.** Implements #172 Decision 3's contract exactly:
+`{ items: [{ ticketId, assigned, workState, ...row fields }], cursor: null }`. Merges two existing,
+**untouched** read paths rather than replacing them: the SE's own dispatched day-plan (`WorkSchedule`
+→ `PlantBatchAssignment` → `BatchAssignmentTicket`, `assigned: true`) and the shared-pool set (OPEN /
+UNASSIGNED tickets at covered plants, `assigned: false`) — both scoped through #162's
+`SeCoverageService`. `DayPlanQueryService` (still backs the ZM SE-detail view) and `SharedPoolService`
+(still its own contract) are unchanged; this is a new SE-facing read on top of the same data, not a
+replacement of either service.
+
+`workState` derivation — the two unambiguous cases are exact: `VERIFY` = `status === 'VERIFICATION_PENDING'`;
+`IN_WORK` = an active `ON_SITE`/`TROUBLESHOOT_STARTED` soft state. The `PLAN` vs `VISIT_NOW` split
+(assigned-but-not-started vs. pool) is a reasonable default, **not a ratified decision** — #172 itself
+says naming/semantics for this vocabulary is pinned under **#169**, which this session did not touch.
+Row fields shipped: `workType`, `status`, `plantId`/`plantName`, `companyName`, `companyTier`,
+`slaBucket`, `deviceId`, `vehicleId`, `activeSoftState`, `createdAt`, `lastStateChangedAt` — enough
+for the M2 list card without an N+1 fetch, per AC, but **not** the full widened field list from the
+2026-07-28 comment above (`vehicleNo`, `deviceType`, `transporterName`, `inactivityHours`,
+`topTechnicalHint`, `isCriticalInsertion`, per-stop counts) — those need derivations owned elsewhere
+(recommender hint is hardcoded `UNKNOWN`; transporter fields are #171's gap) or weren't in the task's
+scope for this slice.
+
+**Deliberately not built this session** (left for a follow-up pass on this same issue, not filed as
+new issues per instruction):
+- Item 1 — ticket detail read (`GET /api/tickets/:id` SE access or `GET /api/me/tickets/:id`),
+  including RECOVERY SE-readability (`recovery.controller.ts` is still POST-only).
+- Item 3 — SE-readable own submitted forms (`GET /api/tickets/:id/forms` is still manager-only).
+- `GET /api/me` enrichment (still 4 primitives against the ~14-field ask).
+- `tickets.ticket_no` migration/backfill and its downstream (admin search, notifications).
+- Day-plan removal/deferral "removed for one session" label (PRD:510) — `BatchAssignmentTicket.removedAt`
+  exists but is not surfaced on this row.
+
+Tests: `test/me-tickets-controller.e2e-spec.ts` (5 cases — merge, IN_WORK derivation, out-of-coverage
+exclusion, non-SE 403, unauthenticated 401).

@@ -1,4 +1,4 @@
-import { Body, ConflictException, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, ConflictException, Controller, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -48,6 +48,9 @@ export class SoftStateController {
           })
         : await this.softState.advance({ ticketId, seId: user.user_id, target: body.target });
 
+    if (outcome.result === 'NOT_FOUND') {
+      throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
+    }
     if (outcome.result === 'INVALID_TRANSITION') {
       throw new ConflictException({ code: 'INVALID_SOFT_STATE_TRANSITION', from: outcome.from, to: outcome.to });
     }

@@ -34,6 +34,7 @@ export interface ComponentRequestRow extends ComponentRequestView {
 export type WmOutcome =
   | { result: 'OK'; request: ComponentRequestView }
   | { result: 'NOT_FOUND' }
+  | { result: 'FORBIDDEN' }
   | { result: 'INVALID_STATE'; status: ComponentRequestStatus };
 
 /**
@@ -176,6 +177,10 @@ export class ComponentRequestService {
     const now = opts.now ?? new Date();
     const existing = await this.prisma.componentRequest.findUnique({ where: { requestId } });
     if (!existing) return { result: 'NOT_FOUND' };
+    // #162 — any SE could confirm receipt of ANY request, flipping another SE's SHIPPED→RECEIVED and
+    // resuming a stranger's SLA clock. Checked ahead of the state branch so a non-owning SE never
+    // learns the request's current status.
+    if (existing.seId !== actor.userId) return { result: 'FORBIDDEN' };
     if (existing.status !== 'SHIPPED') return { result: 'INVALID_STATE', status: existing.status };
     const resume = await this.resolveResumeOnReceipt(opts.resumeOnReceipt);
 

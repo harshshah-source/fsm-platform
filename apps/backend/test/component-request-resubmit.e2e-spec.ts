@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ComponentRequestService } from '../src/component-request/component-request.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-submission.service';
 import { type CoverageType, type DeliveryDestination } from '../src/generated/prisma/enums';
 
@@ -98,7 +99,7 @@ describe('Issue 22 slice 5 — ZM-confirmed resubmit: ownership + reopen', () =>
     prisma = new PrismaService();
     await prisma.onModuleInit();
     svc = new ComponentRequestService(prisma);
-    submit = new TroubleshootSubmissionService(prisma);
+    submit = new TroubleshootSubmissionService(prisma, new SeCoverageService(prisma));
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-rs-' + NS } })).zoneId;
     companyId = (
@@ -115,6 +116,13 @@ describe('Issue 22 slice 5 — ZM-confirmed resubmit: ownership + reopen', () =>
       seByCoverage.set(cov, u.userId);
       engineerIds.push(u.userId);
       await prisma.engineerMaster.create({ data: { engineerId: u.userId, coverageType: cov, zoneId, dailyCapacity: 10 } });
+      // `se_coverage` rejects FLOATING rows (se_coverage_not_floating_chk) — a Floating SE's coverage
+      // comes from the `plant_eligible_floating_se` MV instead (see shared-pool-floating.e2e-spec.ts).
+      // Only the DEDICATED SE's fixture below calls submit.submit(), so DEDICATED/MULTI_PLANT coverage
+      // is all this suite needs.
+      if (cov !== 'FLOATING') {
+        await prisma.seCoverage.create({ data: { seId: u.userId, plantId, coverageType: cov } });
+      }
     }
     const zmTag = randomUUID().slice(0, 8);
     const zmUser = await prisma.user.create({
@@ -133,6 +141,7 @@ describe('Issue 22 slice 5 — ZM-confirmed resubmit: ownership + reopen', () =>
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.componentMaster.deleteMany({ where: { componentId } });
+    await prisma.seCoverage.deleteMany({ where: { seId: { in: engineerIds } } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: engineerIds } } });
     await prisma.user.deleteMany({ where: { userId: { in: [...engineerIds, zm] } } });
     await prisma.plant.deleteMany({ where: { plantId } });

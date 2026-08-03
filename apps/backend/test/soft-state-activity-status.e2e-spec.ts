@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { SoftStateService } from '../src/soft-state/soft-state.service';
 
 /**
@@ -54,7 +55,7 @@ describe('Issue 15 slice 7 — activityStatusFor', () => {
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
-    svc = new SoftStateService(prisma);
+    svc = new SoftStateService(prisma, new SeCoverageService(prisma));
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-as-' + NS } })).zoneId;
     companyId = (
@@ -68,9 +69,11 @@ describe('Issue 15 slice 7 — activityStatusFor', () => {
     });
     se = u.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+    await prisma.seCoverage.create({ data: { seId: se, plantId, coverageType: 'DEDICATED' } });
   });
 
   afterAll(async () => {
+    await prisma.seCoverage.deleteMany({ where: { seId: se } });
     await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });

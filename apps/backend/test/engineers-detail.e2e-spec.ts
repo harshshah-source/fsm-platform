@@ -44,9 +44,11 @@ describe('Issue 25 slice 6 — SE detail', () => {
     componentId = (await prisma.componentMaster.create({ data: { name: 'Antenna-ed-' + NS } })).componentId;
     await prisma.seVanStock.create({ data: { seId: se, componentId, qty: 3 } });
 
+    // ON_LEAVE is ZM-only (#162 — an SE can no longer self-grant it); this is fixture setup, not the
+    // scoping test itself, so the actor here is the ZM who would legitimately write it.
     await availability.setAvailability(
       { seId: se, status: 'ON_LEAVE', windowStart: new Date('2026-06-25T00:00:00Z'), windowEnd: new Date('2026-06-26T00:00:00Z'), reason: 'leave' },
-      { userId: se, role: 'SERVICE_ENGINEER', zoneId: Number(zoneA) },
+      { userId: 'zm-ed-' + NS, role: 'ZONAL_MANAGER', zoneId: Number(zoneA) },
     );
   });
 

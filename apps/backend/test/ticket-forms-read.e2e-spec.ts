@@ -76,9 +76,15 @@ describe('Ticket forms read (Issue 70, e2e)', () => {
       create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 },
       update: {},
     });
+    await prisma.seCoverage.upsert({
+      where: { seId_plantId: { seId: SE_ID, plantId } },
+      create: { seId: SE_ID, plantId, coverageType: 'DEDICATED' },
+      update: {},
+    });
   });
 
   afterAll(async () => {
+    await prisma.seCoverage.deleteMany({ where: { seId: SE_ID, plantId } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.componentRequest.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: ticketIds } } });

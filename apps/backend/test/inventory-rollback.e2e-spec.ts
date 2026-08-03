@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-submission.service';
 import { VerificationService } from '../src/verification/verification.service';
 
@@ -49,7 +50,7 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
     prisma = new PrismaService();
     await prisma.onModuleInit();
     verify = new VerificationService(prisma);
-    submit = new TroubleshootSubmissionService(prisma);
+    submit = new TroubleshootSubmissionService(prisma, new SeCoverageService(prisma));
     zoneId = (await prisma.zone.create({ data: { name: 'Z-ir-' + NS } })).zoneId;
     companyId = (await prisma.company.create({ data: { name: 'Co-ir-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-ir-' + NS, zoneId } })).plantId;
@@ -59,10 +60,12 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
     const u = await prisma.user.create({ data: { name: 'SE ' + tag, role: 'SERVICE_ENGINEER', phone: 'ph-' + tag, email: `${tag}@ir.test`, zoneId } });
     se = u.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+    await prisma.seCoverage.create({ data: { seId: se, plantId, coverageType: 'DEDICATED' } });
     await prisma.seVanStock.create({ data: { seId: se, componentId: cable, qty: 10 } });
   });
 
   afterAll(async () => {
+    await prisma.seCoverage.deleteMany({ where: { seId: se } });
     await prisma.inventoryTransaction.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.verificationRun.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });

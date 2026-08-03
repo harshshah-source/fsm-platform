@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { TokenService } from '../src/auth/token.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -19,6 +20,7 @@ const NS = Date.now();
 describe('Issue 25 slice 3 — Set Availability HTTP (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let tokens: TokenService;
   let seZ1: string; // SE in zone 1 (North) — ZM north's own zone
   let seZ2: string; // SE in zone 2 (South) — another zone
   const userIds: string[] = [];
@@ -41,6 +43,7 @@ describe('Issue 25 slice 3 — Set Availability HTTP (e2e)', () => {
     app.setGlobalPrefix('api');
     await app.init();
     prisma = app.get(PrismaService);
+    tokens = app.get(TokenService);
     // The in-memory ZM-north token is scoped to zoneId 1; this suite also exercises a
     // cross-zone (zoneId 2) 403. On a non-pristine DB the org seed creates North/South at
     // higher sequence ids, so we cannot assume zones 1/2 exist. Ensure them by explicit id
@@ -82,6 +85,25 @@ describe('Issue 25 slice 3 — Set Availability HTTP (e2e)', () => {
     const row = await prisma.seAvailability.findFirst({ where: { seId: seZ1 } });
     expect(row?.status).toBe('ON_LEAVE');
     expect(row?.setByRole).toBe('ZONAL_MANAGER');
+  });
+
+  it('#162 — an SE may self-set SOFT_UNAVAILABLE → 201', async () => {
+    const token = tokens.signAccessToken({ user_id: seZ1, role: 'SERVICE_ENGINEER', zone_id: 1 });
+    const res = await request(app.getHttpServer())
+      .post(`/api/engineers/${seZ1}/availability`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'SOFT_UNAVAILABLE', ...window })
+      .expect(201);
+    expect(res.body.result).toBe('OK');
+  });
+
+  it('#162 — an SE self-setting ON_LEAVE (bypassing ZM approval) is forbidden → 403', async () => {
+    const token = tokens.signAccessToken({ user_id: seZ1, role: 'SERVICE_ENGINEER', zone_id: 1 });
+    await request(app.getHttpServer())
+      .post(`/api/engineers/${seZ1}/availability`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'ON_LEAVE', ...window, reason: 'leave' })
+      .expect(403);
   });
 
   it('forbids a ZM from setting an SE in another zone → 403', async () => {

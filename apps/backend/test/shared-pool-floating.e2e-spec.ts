@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { PlantEligibleFloatingSeService } from '../src/org/plant-eligible-floating-se.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { SharedPoolService } from '../src/shared-pool/shared-pool.service';
 
 /**
@@ -67,7 +68,7 @@ describe('Issue 12 slice 4 — Floating-SE territory coverage in the Shared Pool
     prisma = new PrismaService();
     await prisma.onModuleInit();
     mv = new PlantEligibleFloatingSeService(prisma);
-    pool = new SharedPoolService(prisma);
+    pool = new SharedPoolService(prisma, new SeCoverageService(prisma));
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-spf-' + NS } })).zoneId;
     companyId = (

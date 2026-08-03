@@ -52,14 +52,19 @@ export class SeAvailabilityService {
   /**
    * Write an availability window. Authorised only for the SE themselves or a Zonal Manager over their
    * own zone (a CSM acting as ZM is treated as ZM). Operations Head is never a setter (CONTEXT).
+   *
+   * #162 — an SE self-set is narrowed to SOFT_UNAVAILABLE only (PRD:496; workflow:1338/:1360-1363: SE
+   * cannot self-approve ON_LEAVE/OFF_SHIFT/WEEKLY_OFF, those are ZM-only). Managers keep the full
+   * `SETTABLE_STATUSES` set regardless of which status they're writing.
    */
   async setAvailability(input: SetAvailabilityInput, actor: AvailabilityActor): Promise<SetAvailabilityOutcome> {
     const engineer = await this.prisma.engineerMaster.findUnique({ where: { engineerId: input.seId } });
     if (!engineer) return { result: 'NOT_FOUND' };
 
     const effectiveRole = actor.actedAsRole ?? actor.role;
+    const selfSet = actor.role === 'SERVICE_ENGINEER' && actor.userId === input.seId;
     const allowed =
-      (actor.role === 'SERVICE_ENGINEER' && actor.userId === input.seId) ||
+      (selfSet && input.status === 'SOFT_UNAVAILABLE') ||
       (effectiveRole === 'ZONAL_MANAGER' && (actor.zoneId === null || Number(engineer.zoneId) === actor.zoneId)) ||
       effectiveRole === 'CENTRAL_SERVICE_MANAGER';
     if (!allowed) return { result: 'FORBIDDEN' };

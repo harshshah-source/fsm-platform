@@ -3,6 +3,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -29,6 +30,9 @@ interface RejectBody {
 
 function resolve(outcome: WmOutcome) {
   if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'COMPONENT_REQUEST_NOT_FOUND' });
+  // FORBIDDEN is only ever produced by confirmReceipt's ownership check, never by approve/ship/reject —
+  // handled here regardless so this shared resolver stays exhaustive over WmOutcome.
+  if (outcome.result === 'FORBIDDEN') throw new ForbiddenException({ code: 'COMPONENT_REQUEST_FORBIDDEN' });
   if (outcome.result === 'INVALID_STATE') {
     throw new ConflictException({ code: 'COMPONENT_REQUEST_INVALID_STATE', status: outcome.status });
   }

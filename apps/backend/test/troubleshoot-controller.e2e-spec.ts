@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { TokenService } from '../src/auth/token.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -16,10 +17,12 @@ const SE_ID = '22222222-2222-2222-2222-222222222222'; // se.north@fsm.test (in-m
 describe('SE troubleshoot controller (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let tokens: TokenService;
 
   let zoneId: bigint;
   let companyId: bigint;
   let plantId: bigint;
+  let otherSeId: string; // an SE with NO coverage of `plantId` (#162 wrong-SE regression)
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
@@ -50,6 +53,7 @@ describe('SE troubleshoot controller (e2e)', () => {
     app.setGlobalPrefix('api');
     await app.init();
     prisma = app.get(PrismaService);
+    tokens = app.get(TokenService);
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-tc-' + NS } })).zoneId;
     companyId = (
@@ -66,9 +70,25 @@ describe('SE troubleshoot controller (e2e)', () => {
       create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 },
       update: {},
     });
+    await prisma.seCoverage.upsert({
+      where: { seId_plantId: { seId: SE_ID, plantId } },
+      create: { seId: SE_ID, plantId, coverageType: 'DEDICATED' },
+      update: {},
+    });
+
+    // A second, real SE with no coverage of `plantId` at all — the #162 wrong-SE regression case.
+    const otherTag = randomUUID().slice(0, 8);
+    const otherUser = await prisma.user.create({
+      data: { name: 'SE Other', role: 'SERVICE_ENGINEER', phone: 'ph-tc-other-' + otherTag, email: `se-tc-other-${otherTag}@x.test`, zoneId },
+    });
+    otherSeId = otherUser.userId;
+    await prisma.engineerMaster.create({ data: { engineerId: otherSeId, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
   });
 
   afterAll(async () => {
+    await prisma.engineerMaster.deleteMany({ where: { engineerId: otherSeId } });
+    await prisma.user.deleteMany({ where: { userId: otherSeId } });
+    await prisma.seCoverage.deleteMany({ where: { seId: SE_ID, plantId } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: ticketIds } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
@@ -125,6 +145,18 @@ describe('SE troubleshoot controller (e2e)', () => {
       .expect(201);
     expect(second.body.duplicate).toBe(true);
     expect(second.body.submission.submissionId).toBe(first.body.submission.submissionId);
+  });
+
+  it('#162 — rejects a submission from a correctly-authenticated SE outside the ticket coverage (404, no submission row)', async () => {
+    const ticketId = await makeTicket();
+    const token = tokens.signAccessToken({ user_id: otherSeId, role: 'SERVICE_ENGINEER', zone_id: Number(zoneId) });
+    await request(app.getHttpServer())
+      .post(`/api/tickets/${ticketId}/troubleshoot`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ clientSubmissionId: randomUUID(), rootCauseCategory: 'UNKNOWN' })
+      .expect(404);
+    const rows = await prisma.troubleshootingSubmission.findMany({ where: { ticketId } });
+    expect(rows.length).toBe(0);
   });
 
   it('forbids a non-SE role', async () => {

@@ -1,4 +1,4 @@
-import { ConflictException, Controller, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
+import { ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -44,6 +44,7 @@ export class ComponentRequestController {
   async confirmReceipt(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string) {
     const outcome = await this.requests.confirmReceipt(id, { userId: user.user_id, role: user.role });
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'COMPONENT_REQUEST_NOT_FOUND' });
+    if (outcome.result === 'FORBIDDEN') throw new ForbiddenException({ code: 'COMPONENT_REQUEST_FORBIDDEN' });
     if (outcome.result === 'INVALID_STATE') {
       throw new ConflictException({ code: 'COMPONENT_REQUEST_INVALID_STATE', status: outcome.status });
     }

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { type PresenceSource, type RootCauseCategory, type SubmissionType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { SeCoverageService } from '../shared-pool/se-coverage.service';
 
 /** A component the SE physically consumed on this visit (Issue 24 inventory ledger). */
 export interface ConsumedComponent {
@@ -98,7 +99,10 @@ function toView(row: {
 
 @Injectable()
 export class TroubleshootSubmissionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly coverage: SeCoverageService,
+  ) {}
 
   async submit(input: SubmitTroubleshootInput): Promise<SubmitOutcome> {
     const now = input.now ?? new Date();
@@ -111,6 +115,12 @@ export class TroubleshootSubmissionService {
 
     const ticket = await this.prisma.ticket.findUnique({ where: { ticketId: input.ticketId } });
     if (!ticket || ticket.workType !== 'TROUBLESHOOT' || !ticket.failureCycleId) {
+      return { result: 'NOT_FOUND' };
+    }
+    // #162 coverage floor: assignment is not required (the Business-409/Shadow-Use model sanctions
+    // covered-plant races), but the ticket's plant must be in the SE's coverage. Checked ahead of the
+    // status branch so an out-of-coverage SE never learns a closed ticket's winner/conflict details.
+    if (!(await this.coverage.isPlantCovered(input.seId, ticket.plantId))) {
       return { result: 'NOT_FOUND' };
     }
     if (ticket.status !== 'OPEN') return this.handleConflict(ticket.status, input);

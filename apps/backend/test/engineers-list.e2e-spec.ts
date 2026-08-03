@@ -58,10 +58,11 @@ describe('Issue 25 slice 5 — SE Management list', () => {
     seBusy = await makeSe(zoneA, 'Busy SE ' + NS);
     seB = await makeSe(zoneB, 'Other Zone SE ' + NS);
 
-    // seLeave: active ON_LEAVE window over NOW.
+    // seLeave: active ON_LEAVE window over NOW. ON_LEAVE is ZM-only (#162 — an SE can no longer
+    // self-grant it); this is fixture setup, not the scoping test itself, so the actor is the ZM.
     await availability.setAvailability(
       { seId: seLeave, status: 'ON_LEAVE', windowStart: new Date('2026-06-25T00:00:00Z'), windowEnd: new Date('2026-06-26T00:00:00Z') },
-      { userId: seLeave, role: 'SERVICE_ENGINEER', zoneId: Number(zoneA) },
+      { userId: 'zm-el-' + NS, role: 'ZONAL_MANAGER', zoneId: Number(zoneA) },
     );
 
     // seBusy: an active TROUBLESHOOT_STARTED soft state on a ticket → derived BUSY.

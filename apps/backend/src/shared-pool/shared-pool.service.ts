@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { utcDayStart } from '../common/utc-day';
 import { notDeferredOn } from '../ticketing/deferral';
+import { SeCoverageService } from './se-coverage.service';
 
 export interface SharedPoolTicket {
   ticketId: string;
@@ -24,7 +24,10 @@ export interface SharedPoolTicket {
  */
 @Injectable()
 export class SharedPoolService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly coverage: SeCoverageService,
+  ) {}
 
   /**
    * `now` is injectable so the deferral gate below is testable against a fixed timeline and so a
@@ -32,7 +35,7 @@ export class SharedPoolService {
    * cross-zone sweeps already use. Defaults to the wall clock for the controller.
    */
   async getSharedPool(seId: string, now: Date = new Date()): Promise<SharedPoolTicket[]> {
-    const plantIds = await this.coveredPlantIds(seId);
+    const plantIds = await this.coverage.coveredPlantIds(seId);
     if (plantIds.length === 0) return [];
 
     const tickets = await this.prisma.ticket.findMany({
@@ -60,17 +63,5 @@ export class SharedPoolService {
       slaBucket: t.device.state?.slaBucket ?? null,
       deviceId: String(t.deviceId),
     }));
-  }
-
-  /** Union of se_coverage (Dedicated/Multi-Plant) and the Floating-territory MV. */
-  private async coveredPlantIds(seId: string): Promise<bigint[]> {
-    const coverage = await this.prisma.seCoverage.findMany({ where: { seId }, select: { plantId: true } });
-    const floating = await this.prisma.$queryRaw<{ plant_id: bigint }[]>(
-      Prisma.sql`SELECT plant_id FROM plant_eligible_floating_se WHERE se_id = ${seId}::uuid`,
-    );
-    const ids = new Set<bigint>();
-    for (const c of coverage) ids.add(c.plantId);
-    for (const f of floating) ids.add(f.plant_id);
-    return [...ids];
   }
 }

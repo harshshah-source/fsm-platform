@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { TokenService } from '../src/auth/token.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-submission.service';
 import { VerificationService } from '../src/verification/verification.service';
@@ -23,6 +24,7 @@ const SE_ID = '22222222-2222-2222-2222-222222222222';
 describe('verification controller (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let tokens: TokenService;
   let verify: VerificationService;
   let submit: TroubleshootSubmissionService;
 
@@ -30,6 +32,7 @@ describe('verification controller (e2e)', () => {
   let companyId: bigint;
   let plantId: bigint;
   let snapshotRunId: bigint;
+  let otherSeId: string; // no submission/assignment on any ticket here (#162 wrong-SE regression)
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
 
@@ -58,6 +61,7 @@ describe('verification controller (e2e)', () => {
     app.setGlobalPrefix('api');
     await app.init();
     prisma = app.get(PrismaService);
+    tokens = app.get(TokenService);
     verify = app.get(VerificationService);
     submit = app.get(TroubleshootSubmissionService);
 
@@ -67,9 +71,24 @@ describe('verification controller (e2e)', () => {
     snapshotRunId = (await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: T0 } })).runId;
     await prisma.user.upsert({ where: { userId: SE_ID }, create: { userId: SE_ID, name: 'SE North', role: 'SERVICE_ENGINEER', phone: 'ph-vc-' + NS, email: `se-vc-${NS}@x.test`, zoneId }, update: {} });
     await prisma.engineerMaster.upsert({ where: { engineerId: SE_ID }, create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 }, update: {} });
+    await prisma.seCoverage.upsert({
+      where: { seId_plantId: { seId: SE_ID, plantId } },
+      create: { seId: SE_ID, plantId, coverageType: 'DEDICATED' },
+      update: {},
+    });
+
+    const otherTag = randomUUID().slice(0, 8);
+    const otherUser = await prisma.user.create({
+      data: { name: 'SE Other', role: 'SERVICE_ENGINEER', phone: 'ph-vc-other-' + otherTag, email: `se-vc-other-${otherTag}@x.test`, zoneId },
+    });
+    otherSeId = otherUser.userId;
+    await prisma.engineerMaster.create({ data: { engineerId: otherSeId, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
   });
 
   afterAll(async () => {
+    await prisma.engineerMaster.deleteMany({ where: { engineerId: otherSeId } });
+    await prisma.user.deleteMany({ where: { userId: otherSeId } });
+    await prisma.seCoverage.deleteMany({ where: { seId: SE_ID, plantId } });
     await prisma.verificationRun.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.rawDeviceSnapshot.deleteMany({ where: { deviceId: { in: deviceIds } } });
@@ -118,6 +137,33 @@ describe('verification controller (e2e)', () => {
       .expect(200);
     expect(res.body.badge).toBe('CLOSED');
     expect(res.body.outcome).toBe('CLOSED');
+  });
+
+  it('#162 — a correctly-authenticated SE with no relationship to the ticket gets 404, not the run', async () => {
+    const { ticketId, deviceId } = await makeTicket();
+    await submitForm(ticketId);
+    await addPing(deviceId, at(5), NEAR);
+    await verify.runVerification(at(30), { ticketIds: [ticketId] });
+
+    const token = tokens.signAccessToken({ user_id: otherSeId, role: 'SERVICE_ENGINEER', zone_id: Number(zoneId) });
+    await request(app.getHttpServer())
+      .get(`/api/tickets/${ticketId}/verification`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
+  });
+
+  it('#162 — a ZM outside the ticket zone gets 404 (mirrors the review/escalate zone clamp)', async () => {
+    const { ticketId, deviceId } = await makeTicket();
+    await submitForm(ticketId);
+    await addPing(deviceId, at(5), NEAR);
+    await verify.runVerification(at(30), { ticketIds: [ticketId] });
+
+    // zm.north (in-memory seed) is pinned to zone_id 1; this suite's zone is a freshly created one.
+    const token = await login('zm.north@fsm.test');
+    await request(app.getHttpServer())
+      .get(`/api/tickets/${ticketId}/verification`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
   });
 
   it('ZM fraud-flags lists a far Phase-1 ping with its distance delta', async () => {

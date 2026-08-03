@@ -69,9 +69,15 @@ describe('verification review controller (e2e)', () => {
     snapshotRunId = (await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: T0 } })).runId;
     await prisma.user.upsert({ where: { userId: SE_ID }, create: { userId: SE_ID, name: 'SE North', role: 'SERVICE_ENGINEER', phone: 'ph-vrev-' + NS, email: `se-vrev-${NS}@x.test`, zoneId }, update: {} });
     await prisma.engineerMaster.upsert({ where: { engineerId: SE_ID }, create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 }, update: {} });
+    await prisma.seCoverage.upsert({
+      where: { seId_plantId: { seId: SE_ID, plantId } },
+      create: { seId: SE_ID, plantId, coverageType: 'DEDICATED' },
+      update: {},
+    });
   });
 
   afterAll(async () => {
+    await prisma.seCoverage.deleteMany({ where: { seId: SE_ID, plantId } });
     await prisma.verificationRun.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.rawDeviceSnapshot.deleteMany({ where: { deviceId: { in: deviceIds } } });

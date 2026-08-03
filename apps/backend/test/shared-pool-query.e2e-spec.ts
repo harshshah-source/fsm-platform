@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { SharedPoolService } from '../src/shared-pool/shared-pool.service';
 
 /**
@@ -67,7 +68,7 @@ describe('Issue 12 slice 3 — SharedPoolService.getSharedPool (coverage scoping
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
-    pool = new SharedPoolService(prisma);
+    pool = new SharedPoolService(prisma, new SeCoverageService(prisma));
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-sp-' + NS } })).zoneId;
     companyId = (

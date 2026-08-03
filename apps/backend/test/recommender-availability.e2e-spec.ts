@@ -121,6 +121,8 @@ describe('Issue 25 slice 4 — Recommender excludes unavailable SEs', () => {
   });
 
   it('excludes the SE while an ON_LEAVE window is active → ticket UNASSIGNABLE', async () => {
+    // ON_LEAVE is ZM-only (#162 — an SE can no longer self-grant it); this is fixture setup for the
+    // Recommender exclusion behaviour, not the scoping test itself, so the actor is the ZM.
     const out = await availability.setAvailability(
       {
         seId: dedicated,
@@ -129,7 +131,7 @@ describe('Issue 25 slice 4 — Recommender excludes unavailable SEs', () => {
         windowEnd: new Date('2026-06-22T00:00:00Z'),
         reason: 'leave',
       },
-      { userId: dedicated, role: 'SERVICE_ENGINEER', zoneId: Number(zoneId) },
+      { userId: 'zm-ra-' + NS, role: 'ZONAL_MANAGER', zoneId: Number(zoneId) },
     );
     expect(out.result).toBe('OK');
 

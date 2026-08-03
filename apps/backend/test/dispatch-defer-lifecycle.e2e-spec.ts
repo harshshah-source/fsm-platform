@@ -6,6 +6,7 @@ import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { LoggingDayPlanNotifier } from '../src/scheduling/day-plan-notifier';
 import { OverrideService } from '../src/scheduling/override.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { SharedPoolService } from '../src/shared-pool/shared-pool.service';
 
 /**
@@ -64,7 +65,7 @@ describe('#146 slice 3 — a deferred ticket is re-dispatched ON its deferred da
     rec = new RecommenderService(prisma, new CandidateSelectionService(prisma));
     dispatch = new BatchAssignmentService(prisma);
     override = new OverrideService(prisma, new AuditService(prisma), new LoggingDayPlanNotifier());
-    pool = new SharedPoolService(prisma);
+    pool = new SharedPoolService(prisma, new SeCoverageService(prisma));
 
     for (const [component, weight] of [
       ['company_priority_rank', 0.4],

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { SharedPoolModule } from '../shared-pool/shared-pool.module';
 import { PrismaSoftStateConflictPort } from './soft-state-conflict.adapter';
 import { SoftStateService } from './soft-state.service';
 
@@ -11,7 +12,7 @@ import { SoftStateService } from './soft-state.service';
  * `SharedPoolController` / `SchedulesController`).
  */
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, SharedPoolModule],
   providers: [SoftStateService, PrismaSoftStateConflictPort],
   exports: [SoftStateService, PrismaSoftStateConflictPort],
 })

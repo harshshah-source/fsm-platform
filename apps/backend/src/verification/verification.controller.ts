@@ -102,8 +102,8 @@ export class VerificationController {
 
   @Get('tickets/:id/verification')
   @Roles('SERVICE_ENGINEER', ...MANAGER_ROLES)
-  async forTicket(@Param('id') ticketId: string): Promise<VerificationView> {
-    const view = await this.query.forTicket(ticketId);
+  async forTicket(@CurrentUser() user: AccessTokenClaims, @Param('id') ticketId: string): Promise<VerificationView> {
+    const view = await this.query.forTicket(ticketId, { role: user.role, userId: user.user_id, zoneId: user.zone_id });
     if (!view) throw new NotFoundException({ code: 'NO_VERIFICATION_RUN' });
     return view;
   }

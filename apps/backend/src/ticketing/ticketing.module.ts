@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { SharedPoolModule } from '../shared-pool/shared-pool.module';
 import { AutoRecoveryService } from './auto-recovery.service';
 import {
   CUSTOMER_CONFIRMATION_NOTIFIER,
@@ -26,7 +27,7 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
  * Shared Pool surfaces are layered on by later issues.
  */
 @Module({
-  imports: [PrismaModule, AuditModule],
+  imports: [PrismaModule, AuditModule, SharedPoolModule],
   providers: [
     TicketCreationService,
     TicketQueryService,

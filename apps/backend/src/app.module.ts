@@ -33,6 +33,8 @@ import { RoleBackupController } from './roles/role-backup.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsController } from './notifications/notifications.controller';
 import { MeController } from './me/me.controller';
+import { MeTicketsModule } from './me-tickets/me-tickets.module';
+import { MeTicketsController } from './me-tickets/me-tickets.controller';
 import { OrgModule } from './org/org.module';
 import { PlannerModule } from './planner/planner.module';
 import { SePlannerController } from './planner/se-planner.controller';
@@ -102,6 +104,7 @@ import { ZonesController } from './zones/zones.controller';
     IntradayModule,
     CrossZoneModule,
     SharedPoolModule,
+    MeTicketsModule,
     PlannerModule,
     DashboardModule,
     ReportsModule,
@@ -149,6 +152,7 @@ import { ZonesController } from './zones/zones.controller';
     DispatchRunsController,
     IntradayUpdatesController,
     SharedPoolController,
+    MeTicketsController,
     SePlannerController,
     DashboardController,
     OperatingModeController,

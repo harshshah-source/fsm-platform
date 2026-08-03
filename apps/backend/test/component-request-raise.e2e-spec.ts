@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-submission.service';
 
 /**
@@ -49,7 +50,7 @@ describe('Issue 22 slice 2 — component-unavailable submit raises a request + p
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
-    svc = new TroubleshootSubmissionService(prisma);
+    svc = new TroubleshootSubmissionService(prisma, new SeCoverageService(prisma));
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-crr-' + NS } })).zoneId;
     companyId = (
@@ -64,9 +65,11 @@ describe('Issue 22 slice 2 — component-unavailable submit raises a request + p
     });
     se = u.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+    await prisma.seCoverage.create({ data: { seId: se, plantId, coverageType: 'DEDICATED' } });
   });
 
   afterAll(async () => {
+    await prisma.seCoverage.deleteMany({ where: { seId: se } });
     await prisma.componentRequest.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
