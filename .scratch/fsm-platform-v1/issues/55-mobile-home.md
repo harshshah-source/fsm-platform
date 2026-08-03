@@ -72,6 +72,43 @@ Day Plan / Next Visit / Plant Workload (Issue 11 `/api/schedules/me`), Common-Ki
 
 ## Comments
 
+### 2026-08-04 — the KPI-tile derivation (STARTED/COMPLETED/VERIFIED/FAILED) is not specified anywhere
+
+Picked up next after #54 (now built — see #54's 2026-08-04 comment; M-series unblocked). Read this
+issue's own contract section plus `me-tickets-query.service.ts` and the `TicketStatus` enum before
+writing any Home code, to check the "surfaces already-built backend" claim against source.
+
+**`/api/schedules/me` cannot produce the 4 home-dashboard KPI tiles.** Its documented shape
+(`DayPlanView { dispatched, stops:[{ ..., tickets:[{ticketId, sortOrder}] }] }`) carries no status —
+just ticket ids in stop order. The 07-28 comment says the tiles "derive from #161's per-ticket status
+and per-stop counts", i.e. `GET /api/me/tickets` (`MeTicketRow`), which does carry status —
+but not the tile categories directly:
+
+- `MeTicketRow.workState` is `'VISIT_NOW' | 'PLAN' | 'IN_WORK' | 'VERIFY'` — the **Tickets tab's**
+  vocabulary (#172 Decision 3, the V/P/W/✓ row glyphs), not Home's.
+- `MeTicketRow.status` is the raw `TicketStatus` enum (`OPEN, SUBMITTED, VERIFICATION_PENDING,
+  CLOSED, CLOSED_AUTO_RECOVERY, FAILED_VERIFICATION, ESCALATED, CLOSED_NON_OPERATIONAL, REQUESTED,
+  SCHEDULED, ON_SITE, FITTED, ACTIVATED, FAILED_ACTIVATION, COLLECTED, ...` — spans TROUBLESHOOT/
+  RECOVERY/INSTALL). None of `STARTED`/`COMPLETED`/`VERIFIED`/`FAILED` is a literal value in either
+  vocabulary, and the mapping is genuinely ambiguous, not just unwritten:
+  - **STARTED** — `workState === 'IN_WORK'`? Or a raw status like `ON_SITE`/`SCHEDULED`? Different
+    ticket types don't share one "started" status.
+  - **COMPLETED** — `CLOSED` only, or `CLOSED` + `CLOSED_AUTO_RECOVERY` + `FITTED`/`ACTIVATED`
+    (install-side completion)? `CLOSED_NON_OPERATIONAL` is a closure that almost certainly should
+    NOT count as "completed" work — but nothing says so.
+  - **VERIFIED** — does this mean *currently in* `VERIFICATION_PENDING` (a mid-flight state, reads
+    oddly as a completed-sounding tile) or *successfully passed* verification (i.e. a subset of
+    CLOSED, double-counting against COMPLETED)?
+  - **FAILED** — `FAILED_VERIFICATION` alone, or also `FAILED_ACTIVATION`/`ESCALATED`?
+
+Getting this wrong ships a field engineer a KPI strip that silently miscounts their own day's work —
+not a cosmetic bug. **Not built pending this decision** (Strategic HITL: business-rule gap, per
+CLAUDE.md's workflow policy — the PRD doesn't resolve it either: §503/§617 describe Day Plan and
+Van-Stock flows, not this tile taxonomy). Recorded rather than guessed. Whoever answers this should
+also confirm whether the count is bounded to *today's* day-plan (dispatched-schedule scope) or the
+SE's full open workload (shared-pool included) — the mockup's card sits directly under the header
+with no visible date scope, so that's a second open question riding on the same answer.
+
 ### 2026-07-28 — #172 decision 1: build Home from the image, without the chart
 
 Ratified: `docs/ui/mobile/home-dashboard.png` is authority over the PRD's "ordered Day Plan list".
