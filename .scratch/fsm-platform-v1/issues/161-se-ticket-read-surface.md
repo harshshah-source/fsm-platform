@@ -1,9 +1,9 @@
 # 161 — SE ticket-read surface (mobile M3 data source)
 
-Status: ready-for-agent — **partial: item 2 (day-plan/shared-pool merge), item 1 + `ticketNo`
-(ticket detail — SE/recovery reads), item 3 (own submitted forms), and the `/api/me` enrichment
-(all landed 2026-08-03).** Only the day-plan removal/deferral-metadata AC (PRD:510) remains open.
-See the dated comments for scope and why each stopped where it did.
+Status: **✅ DONE (2026-08-03)** — all items landed: item 2 (day-plan/shared-pool merge), item 1 +
+`ticketNo` (ticket detail — SE/recovery reads), item 3 (own submitted forms), `/api/me` enrichment,
+and the day-plan removal/deferral-metadata AC (PRD:510). See the dated comments for scope and
+judgment calls on each slice.
 Type: AFK · Backend
 
 Filed 2026-07-28 by the mobile-readiness verification
@@ -441,3 +441,50 @@ existing exact-equality assertion for a ZM's `/me` response was left unmodified 
 direct proof the `profile` key is truly absent, not `null`, for non-SE roles. Full backend suite:
 321/326 files, 1364/1376 tests green, `tsc` clean across backend + admin + mobile — only the
 pre-existing #187 voucher failures and one known #184-class worker crash, both unrelated.
+
+### 2026-08-03 — day-plan removal/deferral metadata (PRD:510) landed — issue DONE
+
+The last open piece. PRD:510 (Flow 1 step 4): "ZM manual same-day update arrives → push
+notification; updated Ticket is highlighted (new addition at top of affected plant group; removed
+Ticket shows 'removed' label for one session)." The push half already existed (`OverrideService`
+calls `notifier.dayPlanOverridden` on every action) — only the read side was missing: a ticket
+removed from the SE's batch today either silently vanished (a same-day `DEFER_TICKET` to a future
+date drops out of both the assigned branch — removed from the batch — and the shared-pool branch —
+`deferredUntil` is in the future) or reappeared with zero signal anything had changed (a plain
+`REMOVE_TICKET` with no defer just flips back to a normal `assigned:false` pool row).
+
+**Design.** `MeTicketsQueryService.getMyTickets` now also fetches `BatchAssignmentTicket` rows under
+the caller's own live schedule with `removedAt` on or after today's UTC day start (any override
+action — REMOVE_TICKET/DEFER_TICKET/REASSIGN/SPLIT_BATCH all write `removedAt`, so this is one
+predicate covering all four, not four separate ones), and ORs their ticket ids into the existing
+ticket query so a same-day-removed ticket is never dropped even when it fails both the assigned and
+pool branches. Two new `MeTicketRow` fields: `removedFromPlanAt: string | null` (the ISO removal
+timestamp — the presence signal) and `deferredToDate: string | null` (set only for a `DEFER_TICKET`
+removal, `null` otherwise, including for non-removed rows). Bounded to today by design — "for one
+session" — so a removal from a prior day does not resurface once the plan has moved on; the client
+renders the label and may forget it locally after showing it once, there is no server-side
+"already shown" state to key a session on (there is no session concept server-side to key it on).
+
+**Judgment call — scope, not status.** The window query filters on `batch: { scheduleId: ... }`
+without a batch-status filter, deliberately: `REMOVE_TICKET`/`DEFER_TICKET` always flip the batch to
+`OVERRIDDEN` as part of the same transaction (`flagOverridden`), so filtering by status would be
+redundant, not protective — the removal predicate is `removedAt` itself, same reasoning `override.
+service.ts`'s own comments already give for why `removedAt: null` is the universal "is this ticket
+still on the batch" filter every other reader spreads.
+
+**Not attempted — out of this issue's stated scope.** The "new addition... highlighted" half of the
+same PRD line is not built: an added ticket already appears as an ordinary new row today (no
+backend gap — the client can diff its own previous fetch to detect "new", same as how "for one
+session" already implies client-side state). #161's own AC list names only the removal/deferral
+metadata, not addition-highlighting, so this was not read as in scope.
+
+Tests: `test/me-tickets-removal-metadata.e2e-spec.ts` (4 cases, driven through the real
+`POST /api/batches/:id/override` endpoint as Operations Head rather than mocking the override —
+plain `REMOVE_TICKET` un-assigns the row and reappears via the pool with `removedFromPlanAt` set;
+`DEFER_TICKET` keeps the ticket visible with `deferredToDate` set where it would otherwise vanish
+entirely; a normal never-removed row carries both fields `null`; a removal from outside today's
+window does not resurrect the ticket). Full backend suite: 323/327 files, 1373/1380 tests green,
+`tsc` clean — only the pre-existing #187 voucher failures.
+
+**All of #161's stated scope is now built.** Every item (1–3), `/api/me` enrichment, and this
+removal-metadata AC are landed; nothing deferred to a follow-up issue.

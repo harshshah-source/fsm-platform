@@ -32,6 +32,18 @@ export interface MeTicketRow {
   activeSoftState: string | null;
   createdAt: Date;
   lastStateChangedAt: Date;
+  /** PRD:510 — "removed Ticket shows 'removed' label for one session". Non-null (ISO timestamp) only
+   *  when this ticket was removed from the caller's *current* day-plan batch earlier **today**
+   *  (`BatchAssignmentTicket.removedAt`, any override action — REMOVE_TICKET/DEFER_TICKET/REASSIGN/
+   *  SPLIT_BATCH — scoped to the caller's live `WorkSchedule`). Without this the row would either
+   *  silently vanish (a same-day defer to a future date drops out of both the assigned and pool
+   *  branches) or reappear with no signal that anything changed (a plain removal that returns to the
+   *  pool). The client renders the label and may forget it locally after showing it once — there is
+   *  no server-side "already shown this session" state to key on. `null` for a normal row. */
+  removedFromPlanAt: string | null;
+  /** Set alongside `removedFromPlanAt` only for a DEFER_TICKET removal — the date the ticket returns
+   *  to the pool. `null` for every other case, including a non-removed row. */
+  deferredToDate: string | null;
   /** #84 AC #2 — "card source = the single highest-severity hint" from the device's latest
    *  `RawDeviceSnapshot`, via the same pure derivation (`technical-hints.ts`) the full detail read
    *  (`MeTicketDetailView.technicalHealth.hints`) uses. `null` when no hint currently fires OR the
@@ -90,6 +102,21 @@ export class MeTicketsQueryService {
       for (const b of batches) for (const t of b.tickets) assignedTicketIds.add(t.ticketId);
     }
 
+    // PRD:510 — a ticket removed from the caller's own batch earlier TODAY (any override action)
+    // stays on the read with `removedFromPlanAt` set, rather than silently disappearing (a same-day
+    // defer to a future date would otherwise drop out of both branches below entirely). Scoped to the
+    // schedule's own batches, not batch status, since REMOVE_TICKET/DEFER_TICKET already flip the
+    // batch to OVERRIDDEN. Bounded to today so this never resurrects a stale removal from a prior day
+    // once the plan has moved on — matching "for one session".
+    const removedTodayByTicket = new Map<string, { removedAt: Date; deferredToDate: Date | null }>();
+    if (schedule) {
+      const removedRows = await this.prisma.batchAssignmentTicket.findMany({
+        where: { batch: { scheduleId: schedule.scheduleId }, removedAt: { gte: utcDayStart(now) } },
+        select: { ticketId: true, removedAt: true, deferredToDate: true },
+      });
+      for (const r of removedRows) removedTodayByTicket.set(r.ticketId, { removedAt: r.removedAt!, deferredToDate: r.deferredToDate });
+    }
+
     const tickets = await this.prisma.ticket.findMany({
       where: {
         OR: [
@@ -100,6 +127,7 @@ export class MeTicketsQueryService {
             assignmentState: 'UNASSIGNED',
             ...notDeferredOn(utcDayStart(now)),
           },
+          { ticketId: { in: [...removedTodayByTicket.keys()] } },
         ],
       },
       orderBy: [{ plantId: 'asc' }, { createdAt: 'asc' }],
@@ -122,6 +150,7 @@ export class MeTicketsQueryService {
       const assigned = assignedTicketIds.has(t.ticketId);
       const activeSoftState = activeByTicket.get(t.ticketId) ?? null;
       const inWork = activeSoftState === 'ON_SITE' || activeSoftState === 'TROUBLESHOOT_STARTED';
+      const removedToday = removedTodayByTicket.get(t.ticketId) ?? null;
       return {
         ticketId: t.ticketId,
         ticketNo: ticketNoAsNumber(t.ticketNo),
@@ -140,6 +169,8 @@ export class MeTicketsQueryService {
         activeSoftState,
         createdAt: t.createdAt,
         lastStateChangedAt: t.lastStateChangedAt,
+        removedFromPlanAt: removedToday ? removedToday.removedAt.toISOString() : null,
+        deferredToDate: removedToday?.deferredToDate ? removedToday.deferredToDate.toISOString().slice(0, 10) : null,
         topHint: topHintByDevice.get(String(t.deviceId)) ?? null,
       };
     });
