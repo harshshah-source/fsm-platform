@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
 import { notDeferredOn } from '../ticketing/deferral';
+import { formatTicketNo, ticketNoAsNumber } from '../ticketing/ticket-no';
 
 /** The image's row glyph (V/P/W/✓) — naming vocabulary pinned under #169, semantics fixed by #172
  *  Decision 3. VERIFY/IN_WORK are unambiguous (ticket status / active soft state); PLAN vs VISIT_NOW
@@ -12,6 +13,10 @@ export type MeTicketWorkState = 'VISIT_NOW' | 'PLAN' | 'IN_WORK' | 'VERIFY';
 
 export interface MeTicketRow {
   ticketId: string;
+  /** #161 D-4 — the `TCK-#####` display label's raw number (see `ticket-no.ts`). */
+  ticketNo: number;
+  /** Pre-formatted `TCK-#####` (zero-padded to 5) so the client never re-derives the padding rule. */
+  ticketNoDisplay: string;
   assigned: boolean;
   workState: MeTicketWorkState;
   workType: string;
@@ -107,6 +112,8 @@ export class MeTicketsQueryService {
       const inWork = activeSoftState === 'ON_SITE' || activeSoftState === 'TROUBLESHOOT_STARTED';
       return {
         ticketId: t.ticketId,
+        ticketNo: ticketNoAsNumber(t.ticketNo),
+        ticketNoDisplay: formatTicketNo(t.ticketNo),
         assigned,
         workState: workStateFor(t.status, assigned, inWork),
         workType: t.workType,

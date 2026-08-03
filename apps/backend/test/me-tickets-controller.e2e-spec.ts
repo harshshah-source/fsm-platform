@@ -146,7 +146,14 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
       .set('Authorization', `Bearer ${seToken()}`)
       .expect(200);
 
-    const items = res.body.items as Array<{ ticketId: string; assigned: boolean; workState: string; plantName: string }>;
+    const items = res.body.items as Array<{
+      ticketId: string;
+      ticketNo: number;
+      ticketNoDisplay: string;
+      assigned: boolean;
+      workState: string;
+      plantName: string;
+    }>;
     const byId = new Map(items.map((i) => [i.ticketId, i]));
 
     expect(byId.get(toAssign)?.assigned).toBe(true);
@@ -154,6 +161,9 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
     expect(byId.get(poolTicket)?.assigned).toBe(false);
     expect(byId.get(poolTicket)?.workState).toBe('VISIT_NOW');
     expect(byId.get(toAssign)?.plantName).toBe('P-mt-' + NS);
+    // #161 D-4 — the display label rides alongside the raw number so the client never re-derives padding.
+    expect(typeof byId.get(toAssign)?.ticketNo).toBe('number');
+    expect(byId.get(toAssign)?.ticketNoDisplay).toBe(`TCK-${String(byId.get(toAssign)?.ticketNo).padStart(5, '0')}`);
     expect(res.body.cursor).toBeNull();
   });
 

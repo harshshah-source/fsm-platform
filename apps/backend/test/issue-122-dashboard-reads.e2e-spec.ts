@@ -182,6 +182,32 @@ describe('Issue 122 — enriched reads', () => {
     expect(miss.body).toHaveLength(0);
   });
 
+  it('#161 D-4 — universal q matches a quoted ticket number (TCK-#####)', async () => {
+    const token = await login('ops.head@fsm.test');
+    const stored = await prisma.ticket.findUniqueOrThrow({ where: { ticketId }, select: { ticketNo: true } });
+    const display = `TCK-${String(stored.ticketNo).padStart(5, '0')}`;
+
+    const byTicketNo = await request(app.getHttpServer())
+      .get(`/api/tickets?q=${display}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(byTicketNo.body.map((t: { ticketId: string }) => t.ticketId)).toEqual([ticketId]);
+
+    // Case-insensitive, dash-optional, per the search's own regex.
+    const lowerNoDash = await request(app.getHttpServer())
+      .get(`/api/tickets?q=tck${stored.ticketNo}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(lowerNoDash.body.map((t: { ticketId: string }) => t.ticketId)).toEqual([ticketId]);
+
+    // A ticket number belonging to nothing else in this fixture set misses cleanly.
+    const miss = await request(app.getHttpServer())
+      .get('/api/tickets?q=TCK-99999999')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(miss.body).toHaveLength(0);
+  });
+
   it('marks the ticket overridden when its batch is OVERRIDDEN', async () => {
     await prisma.plantBatchAssignment.update({ where: { batchId }, data: { status: 'OVERRIDDEN' } });
     const token = await login('ops.head@fsm.test');

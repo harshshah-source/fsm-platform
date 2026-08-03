@@ -2093,6 +2093,11 @@ enum VehicleUnavailStatus {
 /// creation. The `work_type='TROUBLESHOOT' ⇒ failure_cycle_id IS NOT NULL` CHECK is raw SQL.
 model Ticket {
   ticketId                 String                 @id @default(uuid()) @map("ticket_id") @db.Uuid
+  // Human-readable display label (Issue 161 D-4) — `TCK-` + this number, zero-padded to 5 for
+  // display. Global monotonic sequence, backfilled in `created_at` order so numbers are
+  // chronologically comparable. `ticketId` (above) stays canonical identity and the API route
+  // param; this is a label only — never used as a foreign key or a lookup key.
+  ticketNo                 BigInt                 @default(autoincrement()) @unique @map("ticket_no")
   workType                 WorkType               @map("work_type")
   status                   TicketStatus
   failureCycleId           String?                @unique @map("failure_cycle_id") @db.Uuid

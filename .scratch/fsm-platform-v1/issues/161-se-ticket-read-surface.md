@@ -1,9 +1,9 @@
 # 161 — SE ticket-read surface (mobile M3 data source)
 
-Status: ready-for-agent — **partial: item 2 (day-plan/shared-pool merge) landed 2026-08-03,
-uncommitted this session.** Items 1 (ticket detail — SE/recovery reads), 3 (own submitted forms),
-and the `/api/me` enrichment / `ticketNo` / removal-deferral-metadata ACs from the comments below are
-**not built**. See the dated comment for scope and why it stopped there.
+Status: ready-for-agent — **partial: item 2 (day-plan/shared-pool merge, 2026-08-03) and item 1 +
+`ticketNo` (ticket detail — SE/recovery reads, 2026-08-03) are landed.** Item 3 (own submitted
+forms), the `/api/me` enrichment, and the day-plan removal/deferral-metadata AC from the comments
+below are **not built**. See the dated comments for scope and why each stopped where it did.
 Type: AFK · Backend
 
 Filed 2026-07-28 by the mobile-readiness verification
@@ -244,3 +244,98 @@ new issues per instruction):
 
 Tests: `test/me-tickets-controller.e2e-spec.ts` (5 cases — merge, IN_WORK derivation, out-of-coverage
 exclusion, non-SE 403, unauthenticated 401).
+
+### 2026-08-03 — item 1 (ticket detail) + ticketNo landed
+
+Both remaining pieces this session was scoped to (`ticketNo` end-to-end, and item 1's ticket-detail
+read) are built, tested, and committed. Item 3 (own submitted forms), `/api/me` enrichment, and the
+day-plan removal/deferral metadata AC are still open — deliberately out of scope for this pass, not
+attempted.
+
+**`ticketNo` (D-4).** `Ticket.ticketNo BigInt @default(autoincrement()) @unique @map("ticket_no")`,
+migration `20260803120000_ticket_no`. Additive: column added nullable with no default, backfilled by
+a single `ROW_NUMBER() OVER (ORDER BY created_at ASC, ticket_id ASC)` update (not the default
+`nextval()` path, which would have numbered by physical heap order instead of creation order), then
+the sequence is created and seeded above the backfilled max and the column is set `NOT NULL` +
+unique-indexed — all in the one transaction a Postgres migration file already runs in, so the
+"half-backfilled table with a live sequence" failure mode the issue calls out cannot occur; no
+batching/resume logic was needed at the ~24k-row scale this local DB backfilled at (verified
+monotonic against `created_at` post-backfill). Display format exactly as specified: `TCK-` +
+zero-padded-to-5. **Both** the raw integer and the pre-formatted string are returned (the issue's own
+recommendation) — `ticketNo: number` (JSON number; ticket volumes are far inside
+`MAX_SAFE_INTEGER`, unlike the UUID-adjacent bigint ids elsewhere in these payloads that get
+stringified) and `ticketNoDisplay: string`. Helper: `src/ticketing/ticket-no.ts`. Wired into: the
+`GET /api/me/tickets` row (`MeTicketRow`), the new `GET /api/me/tickets/:id` detail payload, and
+`GET /tickets`'s `@Query('q')` search (`ticket-query.service.ts` — a `TCK-?(\d+)` match, case-
+insensitive, dash-optional, added as its own `OR` leg so a bare numeric `q` keeps its existing
+plant/company-id meaning). Audit-trail route and exports untouched, per the issue's own "no change
+needed" calls. Notification/WhatsApp payload decision explicitly **not** made here — still #76's to
+make when it builds adapters.
+
+**Item 1 — `GET /api/me/tickets/:id`.** New `MeTicketDetailService` (`src/me-tickets/
+me-ticket-detail.service.ts`), wired onto the existing `MeTicketsController` (`GET /me/tickets/:id`,
+SE-only). One endpoint covers TROUBLESHOOT, RECOVERY and INSTALL uniformly — this is what closes the
+literal `RecoveryController`-is-POST-only gap the issue names, without adding a parallel GET there;
+`install.controller.ts`'s own `GET /install/:ticketId` is untouched and still serves its existing
+`INSTALL_READER_ROLES` callers (WM included).
+
+Scope rule, reusing #162's `SeCoverageService` (no second coverage predicate): readable if EITHER
+assigned to the caller (`Ticket.assignedSeId === seId` — the column RECOVERY/INSTALL dispatch writes
+directly — OR the caller's live `WorkSchedule → PlantBatchAssignment → BatchAssignmentTicket` names
+it, the same mechanism `MeTicketsQueryService` already resolves "assigned" with) OR shared-pool-
+visible (`OPEN` + `UNASSIGNED` + not currently deferred, at a covered plant). Outside both → `null` →
+controller 404s; out-of-coverage and unknown-ticket-id are never distinguished from each other or
+from "assigned to someone else" in the response.
+
+**Response contract** (`MeTicketDetailView`, `src/me-tickets/me-ticket-detail.service.ts`) — the
+shape #54/#57 pin against:
+
+| Field | Type | Notes |
+|---|---|---|
+| `ticketId` | `string` (UUID) | canonical identity, unchanged |
+| `ticketNo` | `number` | raw `TCK-` number |
+| `ticketNoDisplay` | `string` | pre-formatted `TCK-#####` |
+| `deviceId` | `string` | |
+| `vehicleNo` | `string \| null` | null when the ticket has no linked vehicle |
+| `plantName` | `string` | |
+| `companyName` | `string` | |
+| `companyTier` | `string` | **stamped at ticket creation** — diverges from #157's zone-scoped *effective* tier override by decided design (Q-B); this is not a bug and must not be "fixed" by joining the live override in |
+| `transporterName` | `string \| null` | name only — transporter **phone/number** is a column that does not exist yet (#171's gap); left out rather than invented |
+| `slaBucket` | `string \| null` | from `device_states`, null if never computed |
+| `workType` | `string` | `TROUBLESHOOT \| RECOVERY \| INSTALL` |
+| `status` | `string` | ticket status enum |
+| `activeSoftState` | `string \| null` | the caller's own unresolved `SoftState` on this ticket (per-(SE,ticket); a shared-pool ticket the SE hasn't engaged reads `null` even if some other SE has an active state on it) |
+| `createdAt` | `string` (ISO) | |
+| `lastStateChangedAt` | `string` (ISO) | |
+| `failureCycleHistory` | array, bounded to 10 | walks `FailureCycle.previousFailureCycleId` from the ticket's own cycle backward — `[]` for RECOVERY/INSTALL (no failure cycle). Each entry: `{cycleId, openedAt, closedAt, repeatFailure}` |
+| `expectedComponents` | array | **judgment call** — this is the ticket's actual `ComponentRequest` history (what was requested + its approve/ship/receive status), reusing the model as-is. It is *not* a catalog-driven "expected components for this device" list — that derivation genuinely does not exist yet (`hard-filters.ts`'s `expectedComponentsAvailable` is still hardcoded `true`; no `expected_components` table exists — Issue 21/22, out of scope here). Each entry: `{requestId, componentId, componentName, status, requestedAt}` |
+| `componentRequestStatus` | `string \| null` | latest `ComponentRequest.status`, null if none raised |
+| `waitingComponentSince` | `string (ISO) \| null` | the SLA-pause badge anchor — set only while the failure cycle is `WAITING_COMPONENT` |
+| `readinessHint` | `'READY' \| 'ON_TRIP' \| 'STALE' \| 'UNKNOWN'` | **judgment call** — literal `'UNKNOWN'` today, always. There is no per-ticket vehicle-readiness value persisted anywhere to read: the Recommender computes `vehicleReadiness` in-memory per dispatch run (`recommender.service.ts`, hardcoded `'UNKNOWN'`) and never stores it. The field is genuinely present (satisfying "has no read anywhere"), but fixing the hardcode is the separate systemic gap the issue explicitly defers — not attempted here |
+
+Explicitly excluded, per the issue's own #172-ratified comment: Technical Hints, raw telemetry
+(owned by #84).
+
+Payload size: the richest fixture in the e2e suite (repeat-failure chain + component request) is
+well under the ≤5KB budget — asserted directly in the test.
+
+**Judgment calls made this session:**
+- `expectedComponents` reused `ComponentRequest` (real data) rather than returning an empty
+  placeholder for a nonexistent "expected kit" concept — see the contract table above.
+- `readinessHint` is a literal constant, not a live computation — see the contract table above.
+- Both `ticketNo` and `ticketNoDisplay` are returned (the issue's own "recommended" option), on both
+  the list row and the detail payload, for consistency.
+- One unified `GET /api/me/tickets/:id` covers all three work types rather than adding a parallel GET
+  to `RecoveryController`; `install.controller.ts`'s existing `GET /install/:ticketId` was left as-is
+  rather than merged away, since manager/WM callers already depend on its exact shape.
+- Migration backfill used a single set-based `UPDATE ... FROM (ROW_NUMBER() OVER ...)` inside the one
+  transaction Postgres migrations already run in, rather than hand-rolled batching — correct and
+  fast at the real ~21k-row / this DB's ~24k-row scale; documented in the migration file itself as a
+  deliberate choice, not an oversight.
+
+Tests: `test/me-ticket-detail-controller.e2e-spec.ts` (8 cases — full-payload happy path incl.
+repeat-failure history + component-request/SLA-pause badge + payload-size assertion, RECOVERY
+readability, shared-pool visibility, out-of-coverage 404, unknown-id 404, "correct role wrong SE"
+404, non-SE 403, unauthenticated 401); `test/issue-122-dashboard-reads.e2e-spec.ts` gained one case
+for the `TCK-#####` admin search match; `test/me-tickets-controller.e2e-spec.ts` extended to assert
+`ticketNo`/`ticketNoDisplay` on the list row.

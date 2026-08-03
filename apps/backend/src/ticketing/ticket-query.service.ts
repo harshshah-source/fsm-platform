@@ -282,8 +282,16 @@ export class TicketQueryService {
       const idMatch = /^\d+$/.test(q)
         ? Prisma.sql` OR t.plant_id = ${BigInt(q)} OR t.company_id = ${BigInt(q)}`
         : Prisma.empty;
+      // #161 D-4 downstream: a support call quotes the display label (`TCK-10306`), not the UUID —
+      // match it against `ticket_no`. Kept separate from `idMatch` above (bare numeric `q` keeps its
+      // existing plant/company-id meaning) so a plain "10306" is not accidentally reinterpreted; the
+      // `TCK-` prefix is what disambiguates a ticket-number search. Dash optional for robustness.
+      const ticketNoMatch = /^TCK-?(\d+)$/i.exec(q);
+      const ticketNoMatchCond = ticketNoMatch
+        ? Prisma.sql` OR t.ticket_no = ${BigInt(ticketNoMatch[1])}`
+        : Prisma.empty;
       conds.push(Prisma.sql`AND (t.device_id ILIKE ${like} OR v.vehicle_no ILIKE ${like}
-        OR p.name ILIKE ${like} OR c.name ILIKE ${like}${idMatch})`);
+        OR p.name ILIKE ${like} OR c.name ILIKE ${like}${idMatch}${ticketNoMatchCond})`);
     }
     const where = conds.length ? Prisma.join(conds, ' ') : Prisma.empty;
 
