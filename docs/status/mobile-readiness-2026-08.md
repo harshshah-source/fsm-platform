@@ -1,17 +1,22 @@
-# Mobile Readiness — Backend & `@fsm/shared` Preconditions (2026-08-03)
+# Mobile Readiness — Backend & `@fsm/shared` Preconditions (2026-08-03, revised)
 
 > **Scope:** what must change in the backend and `packages/shared` before SE mobile development can
 > *safely* continue past the existing auth shell. Not the mobile app build itself.
-> **Method:** four-phase read, in order — source-only current state, then PRD requirements mapped
-> onto that state, then reconciliation against the written record, then a concrete day-one
+> **Method:** four-phase read, in order — source-only current state (via 6 independent, doc-blind
+> subagent passes covering every controller/guard/DTO/e2e-spec, the full Prisma schema, `@fsm/shared`,
+> and an absence-search for upload/push/rate-limit/search/refresh-token infra), then PRD requirements
+> mapped onto that state, then reconciliation against the written record, then a concrete day-one
 > walkthrough. Every claim is labelled **OBSERVED** (read from source, cited `file:line`) or
-> **INFERRED** (a conclusion drawn from OBSERVED facts, or a number carried from a document whose
-> claims were independently re-verified in Phase 3). Nothing here is presented as observation unless
-> it was read directly from source in this pass.
-> **Why this order:** the written record for this repo has been independently found wrong three
-> times in 48 hours before this report was written (a constructor-arity claim, a missing
-> config-shape defect, and a suite-non-determinism cause). Phase 1–2 were built with zero doc access
-> so the written record in Phase 3 could be *checked against* an independent reading, not assumed.
+> **INFERRED**.
+> **Why this order, and why this revision exists:** the written record for this repo has been
+> independently found wrong three times in 48 hours (a constructor-arity claim, a missing
+> config-shape defect, a misdiagnosed suite-non-determinism cause). A prior pass of *this exact
+> report*, also dated 2026-08-03, was written earlier today — and reality moved again before this
+> revision started: commit `54b23de` closed **#162** (SE row-level authorization floor) and commit
+> `980a212` landed most of **#186** (mobile session persistence) *after* that draft's Phase 1 was
+> written. This revision re-derived Phase 1 from source independently (blind to that draft and to
+> `.scratch/`), then checked it against both the older doc set and the prior draft. Where they
+> disagree, the newer commit wins — see Phase 3.
 
 ---
 
@@ -20,412 +25,504 @@
 ### 1.1 API surface & guard chain
 
 **Guard chain (OBSERVED).** Three guards run globally via `APP_GUARD`
-(`apps/backend/src/app.module.ts:179-190`), in order:
+(`apps/backend/src/app.module.ts:186-188`), in order:
 
-1. **`AuthGuard`** (`common/guards/auth.guard.ts:24-56`) — requires a valid Bearer token unless
-   `@Public()`; attaches `{user_id, role, zone_id}` from JWT claims.
-2. **`RoleGuard`** (`common/guards/role.guard.ts:16-37`) — enforces `@Roles(...)`. A route with no
-   `@Roles` decorator is reachable by **any authenticated role** (e.g. `GET /me`).
-3. **`ZoneScopeGuard`** (`common/guards/zone-scope.guard.ts:22-42`) — **only fires for
-   `role === 'ZONAL_MANAGER'`**; a no-op for every other role, SERVICE_ENGINEER included.
+1. **`AuthGuard`** (`common/guards/auth.guard.ts:31-55`) — requires a valid Bearer token unless
+   `@Public()`; verifies via `TokenService`, attaches `{user_id, role, zone_id}` to `request.user`.
+2. **`RoleGuard`** (`common/guards/role.guard.ts:20-36`) — enforces `@Roles(...)` from
+   `reflector.getAllAndOverride`. **A route with no `@Roles()` decorator at all is reachable by any
+   authenticated role** (`role.guard.ts:25-27`, exact: `if (!required || required.length === 0) {
+   return true; }`) — default-allow, not deny-by-default. Confirmed live instances:
+   `org/geography.controller.ts` (`GET /org/geo/states|regions|districts`) and `GET /zones/:zoneId`
+   carry no `@Roles()` anywhere in either file — any authenticated SE token can call them today.
+   Tracked (not new): `.scratch/fsm-platform-v1/issues/169-se-api-contract-freeze.md` scopes
+   "decide the 8 by-omission routes" as part of the contract-freeze work.
+3. **`ZoneScopeGuard`** (`common/guards/zone-scope.guard.ts:23-41`) — first line is
+   `if (!user || user.role !== 'ZONAL_MANAGER') { return true; }` — **a complete no-op for every
+   role except ZONAL_MANAGER, SERVICE_ENGINEER included.** It never filters query results; it only
+   403s a ZM targeting a `:zoneId`/`zone_id` outside their own zone.
 
-**There is no cross-cutting per-SE row-scoping guard or interceptor.** Ownership/coverage checks
-are implemented ad hoc, per service method — a pattern that is correct in some places and absent in
-others by construction, not by design:
+**There is no cross-cutting per-SE row-scoping guard or interceptor.** All SE ownership/coverage
+enforcement is service-layer, per call site.
 
-**Correctly row-scoped (OBSERVED):** `ticketing/recovery.service.ts:107,314` (`isAssignedSe`),
-`ticketing/install-lifecycle.service.ts:266,296`, `ticketing/vehicle-unavailability.service.ts:68`,
-`intraday/intraday-insertion.service.ts` accept/decline (`NOT_OFFERED` on a mismatched offer),
-`vouchers/vouchers.service.ts:288` (`resubmit`).
+**Closed as of commit `54b23de` (2026-08-03) — OBSERVED, re-verified independently in this pass:**
+issue **#162** ("SE row-level authorization floor") landed all 5 sites via a shared
+`SeCoverageService.coveredPlantIds`/`isPlantCovered` predicate:
 
-**Not row-scoped at all (OBSERVED — any authenticated SE can act on/read a ticket that is not
-theirs):**
-- `POST /tickets/:id/troubleshoot` — `troubleshoot-submission.service.ts:112-114` checks only that
-  the ticket exists; never checks assignment/coverage. Controller: `ticketing/troubleshoot.controller.ts:71-96`.
-- `POST /tickets/:id/soft-state` — `soft-state.service.ts` `runAdvance`/`setOnSite` never query
-  `tickets` for an owner check at all (zero matches on grep).
-- `POST /component-requests/:id/confirm-receipt` — `component-request.service.ts:171-200` checks
-  status only, not `existing.seId` against the caller.
-- `GET /tickets/:id/verification` — `verification.controller.ts:103-109` calls
-  `this.query.forTicket(ticketId)` with **no scope argument at all** — unscoped for every role, not
-  SE-specific (confirmed by direct read of `verification-query.service.ts`).
+- `isAssignedSe(ticket, actor)` pattern (`actor.role === 'SERVICE_ENGINEER' && ticket.assignedSeId
+  === actor.userId`) gates install on-site/fitted (`install-lifecycle.service.ts:295-297`) and
+  recovery on-site/collected/unable-to-collect (`recovery.service.ts:313-315`).
+- **Troubleshoot submission** (`troubleshoot-submission.service.ts:123`) now requires
+  `SeCoverageService.isPlantCovered(seId, ticket.plantId)` before accepting a write — **by design,
+  this is plant-coverage, not per-ticket assignment**: any SE covering the plant may submit, and a
+  genuine two-SE race on the same ticket resolves via the documented Business-409/Shadow-Use path
+  (`shadow-use-conflict.e2e-spec.ts`), not a scoping bug.
+- **Soft-state** (`soft-state.service.ts`) gained an `assertInScope` check ahead of the transaction —
+  previously had *no* ticket query at all.
+- **Component-request confirm-receipt** (`component-request.service.ts:183`) now requires
+  `existing.seId === actor.userId`.
+- **Verification read** (`GET /tickets/:id/verification`, `verification-query.service.ts:130-146`)
+  now takes a scope argument — SE limited to own troubleshoot submission / own RECOVERY
+  `assignedSeId` / own batch assignment; previously unscoped for **every** role, ZM included, not
+  SE-specific (per the issue's own 2026-07-28 correction, re-confirmed here).
+- **Availability self-grant** (`se-availability.service.ts:62`) narrowed: an SE may now self-set only
+  `SOFT_UNAVAILABLE`, not `ON_LEAVE`/`OFF_SHIFT`/`WEEKLY_OFF` (previously any SE could silently
+  bypass ZM leave approval by calling `POST /engineers/:seId/availability` on themselves).
 
-**Test coverage of the gap (OBSERVED):** `test/soft-state-controller.e2e-spec.ts:124-132` and
-`test/troubleshoot-controller.e2e-spec.ts:128-137` each test "wrong role → 403" but neither has a
-"right role, wrong SE" case. The gap is real and currently invisible to CI.
+Vehicle-unavailability file report (`vehicle-unavailability.service.ts:67-68`,
+`actor.userId === input.seId`) and voucher resubmit (`vouchers.service.ts:288`,
+`voucher.seId !== actor.userId`) were **already** correctly scoped before #162 and are unchanged.
 
-**SE has no general ticket list/detail read (OBSERVED).** `GET /tickets` and `GET /tickets/:id`
-(`ticketing/tickets.controller.ts:39,71`) are `ZONAL_MANAGER, CENTRAL_SERVICE_MANAGER,
-OPERATIONS_HEAD` only. The controller's own docstring says this is deliberate — SEs read work
-through Day Plan / Shared Pool. Those two views:
+**SE has no general ticket list/detail read beyond a card view (OBSERVED — this is the single
+largest remaining blocker).** `GET /tickets` and `GET /tickets/:id`
+(`ticketing/tickets.controller.ts`, `@Roles('ZONAL_MANAGER','CENTRAL_SERVICE_MANAGER',
+'OPERATIONS_HEAD')`) exclude SERVICE_ENGINEER entirely. The SE-facing merged read,
+`GET /api/me/tickets` (`me-tickets-query.service.ts:61-96`, shipped 2026-08-03 as #161 "item 2"),
+returns only a card-shaped row (`MeTicketRow`, lines 13-29: ticketId, assigned, workState, workType,
+status, plantId/Name, companyName/Tier, slaBucket, deviceId, vehicleId, activeSoftState, two
+timestamps). **The code's own comment says explicitly** (lines 49-52): *"a fuller per-ticket detail
+read is #161's own item 1 and is not built here."* No Technical Hints, no raw telemetry, no
+Transporter contact, no Failure Cycle history, no expected components, no lifecycle — anywhere in
+the SE-reachable API surface, for TROUBLESHOOT-type tickets. `GET /install/:ticketId` is the sole
+exception — a real per-ticket detail read, but INSTALL-work-type only
+(`install-lifecycle.service.ts:266`, correctly scoped). RECOVERY has no SE-readable detail route at
+all (`recovery.controller.ts` is POST-only).
 
-- `GET /schedules/me` → `DayPlanQueryService.getDayPlan` (`scheduling/day-plan-query.service.ts:40`)
-  returns `DayPlanView { dispatched, scheduleId, dateFrom, dateTo, stops: [{batchId, stopSequence,
-  plantId, plantName, deviceCount, tickets: [{ticketId, sortOrder}]}] }` — **each ticket is bare
-  `{ticketId, sortOrder}`, nothing else** (`day-plan-query.service.ts:5-25`).
-- `GET /me/shared-pool` → `SharedPoolService.getSharedPool` (`shared-pool/shared-pool.service.ts:34-63`)
-  returns `{ticketId, workType, plantId, plantName, companyTier, slaBucket, deviceId}` per ticket —
-  richer, and correctly coverage-scoped server-side (`coveredPlantIds`, union of `se_coverage` +
-  the `plant_eligible_floating_se` materialized view) — but still nothing like transporter contact,
-  technical hints, telemetry, failure-cycle history, or expected components.
+**Other SE-reachable read gaps (OBSERVED, tracked by #163 "SE self-artifact reads"):** `GET
+/vouchers` is manager-only — an SE can `POST /vouchers` and `POST /vouchers/:id/resubmit` but never
+list their own past vouchers or see review status. `GET /leave-requests` is manager-only — an SE can
+submit but never see status. `GET /devices` is manager-only (`devices.controller.ts:31`,
+`READ_ROLES` excludes SE) — device master data an SE's tickets reference is unreachable directly.
 
-Since `GET /tickets/:id` is manager-only, **there is no way for an SE-facing client to hydrate a
-bare Day Plan ticket ID into anything renderable.** This is the single largest concrete blocker
-found in this pass.
+**Ticket search exists, not for SE (OBSERVED, tracked by #83).** `GET /tickets` accepts `@Query('q')`
+— a real ILIKE match across `device_id`/`vehicle_no`/plant name/company name plus exact id
+(`ticket-query.service.ts:278-287`) — wired only to the manager-only controller. `GET
+/api/me/tickets` takes zero query parameters. The QR Scanner PRD flow has no SE-reachable backend
+counterpart today.
 
-**Other SE-reachable read gaps (OBSERVED):** `GET /vouchers` is `REVIEW_ROLES`-only
-(`vouchers.controller.ts:100-101`) — an SE can `POST /vouchers` (create) and `POST
-/vouchers/:id/resubmit` but never list their own past vouchers or see review status. `GET
-/leave-requests` is `MANAGER_ROLES`-only (`leave-request.controller.ts:66-67`) — an SE can submit a
-leave request but never see its status. Both are one-way streets: write access without read-back.
+**DTO validation is inert for nearly the whole SE write surface (OBSERVED, tracked by #174).** Every
+DTO across the ticketing/scheduling/org surfaces sampled (troubleshoot, install, recovery, voucher,
+component-request, vehicle-unavailability, leave-request, availability, intraday-insertion,
+schedules, planner — 21+ routes) is a plain TS `interface`/inline object type, not a `class`. Nest's
+global `ValidationPipe({whitelist, forbidNonWhitelisted, transform})` (`app.module.ts`) silently
+no-ops on non-class metatypes. The only real `class-validator` DTOs in the entire backend are in
+`cross-zone/cross-zone.dtos.ts` — a manager-only surface. Malformed SE input (e.g. a non-numeric
+`componentUnavailableItem`) surfaces as a generic 500, not a 400.
 
-**QR/vehicle search (OBSERVED).** A "universal search" by device ID / vehicle number / plant /
-company exists (`ticketing/ticket-query.service.ts:110,278`) but is wired only into the
-manager-only `GET /tickets` controller. No SE-reachable endpoint exposes it. The QR Scanner PRD
-feature (Flow 13) has zero backend counterpart today.
+**HTTP e2e coverage gaps (OBSERVED, not previously catalogued at this granularity).** Every SE-facing
+write route found in this pass (install/recovery/troubleshoot/voucher/component-request/vehicle-
+unavailability/soft-state/leave-request lifecycle) has a passing HTTP-level e2e spec. The gaps are
+on the **admin** side: `ZoneMappingAdminController`'s 5 routes and `POST/PATCH/DELETE` on
+`engineers.controller.ts` (6 routes) have zero HTTP-level e2e coverage (service-level tests only, or
+none) — tangential to mobile readiness, noted for completeness, not filed as a new issue since it
+doesn't gate mobile.
+
+**Test-signal caveat found incidentally (OBSERVED, already filed as #187 2026-08-02, independently
+reproduced by #162's closure work):** `voucher-controller.e2e-spec.ts` fails 3/5 deterministically —
+a missing `EngineerMaster` seed fixture, not a route defect — reproduced on the base commit via
+`git stash` isolation. The voucher write **routes** are real and correctly scoped; the **test file**
+asserting them is currently red. Don't read "voucher writes are e2e-tested" as "currently green."
 
 ### 1.2 Data model (Prisma schema, `apps/backend/prisma/schema.prisma`, 2432 lines)
 
-**Row-scoping capability — partial, join-dependent (OBSERVED).** Every SE-facing operational model
-carries a direct `seId`/`engineerId` FK (`WorkSchedule:603`, `PlantBatchAssignment:633`,
-`SePlanner:686`, `TroubleshootingSubmission:907`, `ExpenseVoucher/Item:978/1006`,
-`ComponentRequest`, `InventoryTransaction`, `SeAvailability`, `LeaveRequest`) — trivial to scope
-`WHERE se_id = :callerId`. **`Ticket` itself has no general assignee column** — `assignedSeId`
-(`schema.prisma:2120`) exists only for the RECOVERY work-type. For TROUBLESHOOT/INSTALL, resolving
-"which tickets is this SE assigned today" requires a join:
-`Ticket ← BatchAssignmentTicket(:666) ← PlantBatchAssignment.seId(:637)`.
+**Row-scoping capability — real, with two read-side gaps and five missing indexes (OBSERVED).**
+Every field-work model except two carries a direct `seId`/`assignedSeId`/`offeredSeId` column:
+`Ticket.assignedSeId` (RECOVERY only, `:2120`, indexed), `TroubleshootingSubmission.seId` (`:913`),
+`ExpenseVoucher.seId` (`:980`), `ComponentRequest.seId` (`:1173`), `ComponentBlockedQueue.seId`
+(`:1150`), `InventoryTransaction.seId` (`:1205`), `SeAvailability.seId` (`:1234`),
+`LeaveRequest.seId` (`:1255`), `VehicleUnavailabilityReport.seId` (`:2050`), `WorkSchedule.seId`
+(`:605`), `PlantBatchAssignment.seId` (`:637`), `IntradayInsertion.offeredSeId` (`:495`).
 
-**No org/tenant column anywhere (OBSERVED, grep confirmed zero hits).** Isolation is zone-based
-only (`User.zoneId`, `Plant.zoneId`) — this is one fleet-management org with internal zones, not a
-multi-tenant system.
+- **`VerificationRun` (`:1048-1072`) has no SE/engineer column at all** — scoping (done in #162) must
+  join through `submissionId → TroubleshootingSubmission.seId` or the ticket's `assignedSeId`/batch
+  assignment.
+- **`NonOperationalMarking` (`:2393-2432`) has only a generic, role-polymorphic `requestedBy`/
+  `requestedByRole` pair**, not an SE-specific ownership column — not currently exercised as an SE
+  read/write path, so latent, not live.
+- **Five columns have no supporting index** (a per-SE query on any of these would force a sequential
+  scan as the table grows): `ComponentRequest.seId` (only `[status,createdAt]` and
+  `[ticketId,createdAt DESC]` exist); **`ComponentBlockedQueue` has zero `@@index`/`@@unique`
+  declarations at all** — not even on `ticketId`; `VehicleUnavailabilityReport.seId`;
+  `IntradayInsertion.offeredSeId`; and (lower relevance, manager-facing)
+  `CrossZoneEscalation.assignedSeId` / `DispatchDecisionTrace.seId`. None of these are load-bearing
+  yet because no SE-scoped read against them exists in the API today — they become load-bearing the
+  moment #173 (SE inventory & component-request surface) ships a `WHERE se_id = :caller` query
+  against `ComponentRequest` or `ComponentBlockedQueue`. **New issue #188 filed for this** (see
+  below) — not covered by #161/#162/#173 as filed.
 
-**Mobile-specific model gaps (OBSERVED):**
-- **No attendance/check-in model** — zero matches for `attendance|check.?in|check.?out`.
-- **No push/device-token storage table.** `NotificationChannel.PUSH` exists as an enum value
-  (`:1442`) but nothing stores an FCM/APNs token per device; schema comment at `:1487-1488` calls
-  the external send "a deferred seam."
-- **No continuous location/ping table for an engineer's own phone.** The only GPS capture is
-  single-shot: `TroubleshootingSubmission.seGpsLat/Lon` + `onsiteCaptureGps`
-  (`Unsupported("geometry(Point,4326)")`, `:914-917`) — one row per form submission, not a track.
-  `Device`/`DeviceState` models are the fleet GPS hardware being serviced, not the SE's handset.
-- **No photo/attachment upload endpoint anywhere.** `photoRef`/`photo_refs` fields
-  (`Ticket.fittedPhotoRef:2144`, `TroubleshootingSubmission.photoRefs:927`,
-  `ExpenseVoucherItem.photoRef:1013`) are bare `String`/`String[]` columns. Confirmed at the
-  controller layer (`install.controller.ts:52-56`) that `photoRef` is accepted as a plain string in
-  JSON. Zero `Multer`/`FileInterceptor`/`@UploadedFile` hits anywhere in `apps/backend/src`. Combined
-  with no S3 in the stack (per `CLAUDE.md`), **there is currently no server-side place to put an
-  actual image file.**
+**`User`/`EngineerMaster` → zone (OBSERVED):** `User.zoneId` (`:137`, indexed) and
+`EngineerMaster.zoneId` (`:225`, non-nullable, indexed) give every SE exactly one home zone;
+plant-level assignment is `SeCoverage` (`seId`+`plantId`, `:265-278`) and floating territory is
+`EngineerTerritoryCoverage` (`:384-398`). `Role` enum (`:18-26`) confirms the exact string
+`SERVICE_ENGINEER`.
+
+**Auth persistence (OBSERVED — confirmed still true, matches #91 exactly).** `RefreshToken`
+(`schema.prisma:191-209` — tokenHash, deviceId, expiresAt, revokedAt, rotatedFrom, lastSeenAt) exists
+and is schema-ready for real session persistence, but `auth.module.ts`/`auth.service.ts` still inject
+`InMemoryRefreshTokenStore` (`refresh-token-store.ts` — a process-local `Map`, explicitly commented
+"TEMPORARY... does not survive restart and is not shared across instances"). A backend restart or a
+second instance logs out every active session, mobile included.
+
+**Re-confirmed directly, follow-up (OBSERVED):** `auth.module.ts:11-18` provides `InMemoryUserStore`,
+`InMemoryRefreshTokenStore`, and `DevZoneResolver` as the live production providers today.
+`auth.service.ts:9-16` injects all three by constructor; `login()` (`:18-24`) calls
+`InMemoryUserStore.validateCredentials`; `refresh()` (`:26-36`) calls
+`InMemoryRefreshTokenStore.consume` (single-use rotation, `refresh-token-store.ts:30-37`); `issueTokens`
+(`:38-49`) calls `DevZoneResolver.resolveZoneId` and `InMemoryRefreshTokenStore.issue`. None of this
+reads Postgres. **Schema Slice 1 has already landed** (commit `dd9846b`, 2026-07-29, per #91's own
+2026-07-29 comment): `UserCredential` (`schema.prisma:162-175` — `userId` PK/FK, `passwordHash`,
+`passwordSalt`, `passwordAlgo`, `passwordParams`) and `RefreshToken` (`:191-209`, as above, plus
+`deviceId` NOT NULL per the ratified D-2 one-active-device policy) both exist, migrated, and indexed.
+**#91's own issue file already scopes the remaining work as three slices** (comment
+`91-....md:454-458`), which this pass confirms are still accurate and not yet started:
+- **S2 — DB-backed login.** A `PrismaUserStore` implementing the same `validateCredentials` contract
+  `InMemoryUserStore` exposes today, reading `users` + `UserCredential`; async `crypto.scrypt` (not
+  `scryptSync`, per #91's own 2026-07-28 amendment — `user-store.ts:78`'s sync call stalls the event
+  loop under login burst); credential seeding for the existing `*@fsm.test` and Book users so current
+  tests/demos survive the cutover.
+- **S3 — persistent refresh with device binding.** A `PrismaRefreshTokenStore` implementing the same
+  `issue`/`consume` contract, writing/reading `RefreshToken` (hash-only — SHA-256 the opaque token
+  before storing), enforcing one-active-device (new login revokes the previous `RefreshToken` row for
+  that `userId`), plus the `revokeAllForUser`/logout path #91's 2026-07-28 comment adds as a new AC
+  (there is currently no logout endpoint at all — `auth.controller.ts:16-26` exposes only `login` and
+  `refresh`).
+- **S4 — retire the in-memory graph.** Remove `InMemoryUserStore`, `InMemoryRefreshTokenStore`, and
+  `DevZoneResolver` (`dev-zone-resolver.ts`, plus its provider line in `auth.module.ts:17` and its
+  injection/call in `auth.service.ts:15,41` — redundant once `zone_id` loads from `users.zone_id`
+  directly) from the production provider graph; add `POST /api/auth/logout`.
+
+**What changes in `auth.module.ts`/`auth.service.ts` specifically, S2→S4:** the `providers` array
+swaps `InMemoryUserStore`→`PrismaUserStore` and `InMemoryRefreshTokenStore`→`PrismaRefreshTokenStore`
+(S2/S3, DI swap only — same constructor shape); `AuthService`'s constructor swaps its two store types
+accordingly (S2/S3); `DevZoneResolver` and its one call site in `issueTokens` are deleted, and
+`issueTokens`/`login`/`refresh` may revert from `Promise<...>` back to sync return types where the
+dev-zone `await` was the only async point (S4) — though `PrismaUserStore`/`PrismaRefreshTokenStore`
+calls are themselves async, so the methods stay `async` regardless. `auth.controller.ts`,
+`token.service.ts`, and all three guards are untouched in every slice — the JWT shape and API contract
+are explicitly frozen (#91's own byte-compatibility AC). **This confirms the user's framing is
+accurate:** because Slice 1's schema is already done, S2-S4 is a DI-swap-plus-seeding exercise on two
+files, not a design or schema task — smaller than the issue file's overall "L" sizing implies once
+Slice 1 is priced out separately.
+
+**No file/photo upload mechanism anywhere (OBSERVED, tracked by #81).** Zero grep hits for
+`FileInterceptor|multer|multipart|@UploadedFile` in `apps/backend/src`. Every `photoRef`/`photoRefs`
+column (`Ticket.fittedPhotoRef`, `TroubleshootingSubmission.photoRefs`,
+`ExpenseVoucherItem.photoRef`) is a bare `String`/`String[]` accepted as opaque client-supplied text
+(`install.controller.ts:55`, `troubleshoot.controller.ts:42`, `vouchers.service.ts:153`) — there is
+nowhere to actually upload binary image content today.
+
+**No offline bulk-sync endpoint (OBSERVED, tracked by #82).** The only "bulk" surfaces are
+manager/admin actions over existing rows (`vouchers markPaid`, `schedules/bulk-unassign`) or a
+manager CSV-text bulk-**create** for installs — nothing accepts a client-generated batch of
+SE-originated offline events.
+
+**No rate limiting anywhere (OBSERVED, tracked by #110).** Zero hits for
+`ThrottlerModule|@Throttle|rate-limit|express-rate-limit`; no such dependency in `package.json`.
+`/auth/login` scrypt is an unthrottled CPU-DoS vector.
+
+**Push/WhatsApp delivery is a real, deliberately-honest stub, not a bug (OBSERVED — corrects an
+initial mischaracterization during this pass).** `NotificationChannelGateway`
+(`notification-channel.gateway.ts:24-26`) is implemented only by `LoggingChannelGateway`
+(`:35-41`) — logs and returns `'UNAVAILABLE'` for every channel; no FCM/APNs/WhatsApp/SMS/SMTP
+adapter exists (`package.json` has no `firebase-admin`/`node-apn`/etc.). Only `IN_APP` delivery is
+real (a DB row). **For the `SE_ACCEPTANCE` chain specifically**, `notification.service.ts:158-161`
+unconditionally records the WhatsApp delivery row as `status: 'SENT'` regardless of the gateway's
+actual `'UNAVAILABLE'` return. This *looks* like a correctness bug in isolation, but
+**PRD:305 explicitly specifies this exact behavior** — *"WhatsApp Confirmation displayed as 'sent'
+(not 'attempted') — it is a first-class delivery channel for SE Acceptance events"* — and
+`SYSTEM-STATE-2026-07.md:769` confirms it is "honored in data (`first_class=true`)" as a known,
+intentional placeholder ahead of a real adapter. **The open question is a product one** (see
+UNRESOLVED below), not an engineering defect: is it acceptable for the UI to claim "sent" before any
+adapter exists at all, or should the fallback display differ until #76 lands a real channel?
 
 ### 1.3 `packages/shared` (`@fsm/shared`)
 
-**OBSERVED.** The entire package is one 77-line file (`packages/shared/src/index.ts`): `ROLES` +
-`Role`, `isRole()`, `SessionView`, `LoginRequest`/`LoginResponse`, `SlaBucket`, `SLA_BANDS`. All
-three apps (`backend`, `admin`, `mobile`) already depend on it via `workspace:*` and all three
-actually import it — mobile is already correctly wired, that part is not a gap. But **the package's
-domain contract stops at auth/session/SLA-bucket.** Every ticket/job/install/recovery/troubleshoot
-DTO (`TicketView`, `TicketDetailView`, etc.) is defined locally inside
-`apps/backend/src/ticketing/*.service.ts` and re-exported nowhere. A mobile screen touching any of
-those domains has zero compile-time contract with the backend today — it would need either new
-`@fsm/shared` types or hand-duplicated local types with no drift protection (the same risk already
-visible in the `Role`/`SlaBucket` enums, which are hand-copied between `@fsm/shared` and the Prisma
-schema's Postgres enums, kept in sync only by convention/comment, not by tooling).
+**OBSERVED.** One 77-line file: `ROLES`/`Role`, `isRole()`, `SessionView`, `LoginRequest`/
+`LoginResponse`, `SlaBucket`, `SLA_BANDS`. All three apps depend on it via `workspace:*` and actually
+import real symbols from it (backend: 5 files; admin: 5 files; mobile: all 3 API/auth files) — it is
+wired, not dead. **Partial duplication exists alongside it, tracked by #169:** `Role` and `SlaBucket`
+are also defined in Prisma-generated `apps/backend/src/generated/prisma/enums.ts`, and several
+backend files (`roles/role-backup.controller.ts:17`, `notification.service.ts:2`,
+`devices.controller.ts:17`) import the generated version instead of `@fsm/shared` — values match
+today (no drift), but two parallel definitions exist. Admin independently re-declares its own
+`SlaBucket` type (`apps/admin/src/lib/slaBucket.ts:6-17`) rather than importing shared's, though it
+does derive its display bands from shared's `SLA_BANDS`. No ticket/job/install/recovery/troubleshoot
+domain type exists in `@fsm/shared` at all — every such DTO is defined locally inside
+`apps/backend/src/ticketing/*.service.ts` with zero compile-time contract for a mobile consumer.
 
 ### 1.4 `apps/mobile` — current state
 
-**OBSERVED.** Two screens exist, full stop: `LoginScreen` (`src/auth/LoginScreen.tsx`) and
-`SessionScreen` (`src/auth/SessionScreen.tsx`, a role/zone display + logout button — **no
-field-service functionality of any kind**). `app/_layout.tsx` + `app/index.tsx` +
-`src/auth/AppEntry.tsx` route declaratively between them on `session ? SessionScreen : LoginScreen`.
-`@react-navigation/*` packages are installed but unused — template scaffolding, not evidence of
-built navigation.
+**OBSERVED — materially more built than "auth shell, nothing else" implied a few hours ago.** Six
+non-test files: `AppEntry.tsx`, `LoginScreen.tsx`, `SessionScreen.tsx`, `AuthProvider.tsx`,
+`tokenStore.ts`, `api/client.ts`. Still zero field-service screens — this part is unchanged.
 
-**Auth flow works for what it does, and nothing else:** `apiLogin` → `POST /auth/login`, `apiMe` →
-`GET /me` (`src/api/client.ts:8-36`) — contract verified field-for-field against the backend's
-`LoginRequest/LoginResponse`/`SessionView` types, both sourced from `@fsm/shared`. This match is
-**unverified by any automated test** — no integration/e2e test in `apps/mobile` hits a real backend;
-it was confirmed here by manual cross-reading of source on both sides.
+**Session persistence — mostly landed as of commit `980a212` (2026-08-03), corrects the prior
+draft's "no rehydration, no refresh" finding:**
+- `tokenStore.ts` stores the full token pair in `react-native-keychain` (`SERVICE='fsm.tokens'`).
+- `AuthProvider.tsx:40-60` **does** rehydrate on mount: reads the keychain, calls `resolveSession()`
+  (lines 19-34), which tries `apiMe(accessToken)` first and on `UNAUTHORIZED` falls back to
+  `apiRefresh(refreshToken)` → persists the new pair → retries `apiMe` with the new access token.
+  `AppEntry.tsx` gates on a `loading` state so a returning user with a valid token never flashes
+  `LoginScreen`.
+- Matches issue **#186**'s own status line exactly: AC#1 (rehydration), AC#2 (refresh-and-retry),
+  and AC#4 (unit tests) are done; **AC#3 is not** — `console.log` debug scaffolding remains in
+  `LoginScreen.tsx:14,19` and `client.ts:6,9-10,19` (independently re-confirmed by direct read in
+  this pass: `client.ts:6` `console.log('[API] BASE_URL =', BASE_URL)`, `:9-10,19` request/error
+  logs; `LoginScreen.tsx:14,19` button-press/error logs). Small, mechanical remainder — no new
+  finding here, #186 already tracks it precisely.
 
-**Two concrete defects in already-shipped code (OBSERVED, not previously filed — see New Issues
-below):**
-- **No session rehydration on relaunch.** `AuthProvider.tsx:15` holds `session` in `useState`,
-  initialized `null`. `tokenStore.ts:21-24`'s `getAccessToken()` exists and is unit-tested but is
-  never called outside test files. Every app restart forces re-login even with a valid keychain
-  token.
-- **No token refresh wired.** Backend `POST /auth/refresh` exists (`auth.controller.ts:22`,
-  `@Public`) and `LoginResponse.refreshToken` is stored, but no client code calls it (grep:
-  zero non-test hits). `apiMe` on 401 just throws `UNAUTHORIZED`; nothing catches it to retry.
-
-**Dependency signals confirm "auth shell only" is accurate, not conservative (OBSERVED,
-`package.json`):** no `expo-location`/maps, no `expo-notifications`, no `expo-image-picker`/`expo-camera`
-(capture — `expo-image` is display-only), no `expo-sqlite`/WatermelonDB/AsyncStorage, no
-`@react-native-community/netinfo`, no React Query/axios/zustand/redux. Location, push, photo
-capture, and offline storage all have **zero scaffolding**, not partial scaffolding.
+**Dependency signals (OBSERVED, `package.json`):** no `expo-location`/maps, no `expo-notifications`,
+no `expo-image-picker`/`expo-camera` (capture — `expo-image` is display-only), no
+`expo-sqlite`/WatermelonDB/AsyncStorage, no `@react-native-community/netinfo`, no React
+Query/axios/zustand/redux. Location, push, photo capture, and offline storage all have zero
+scaffolding.
 
 ---
 
 ## Phase 2 — What Mobile Needs (PRD requirements → Phase 1 reality)
 
-Source: `docs/PRD-fsm-admin-dashboard.md` (SE Mobile App sections — user stories §217-285, Screen
-Inventory §479-499, App Flows §501-663, Architecture §307-317). Read for requirements only.
+Source: `docs/PRD-fsm-admin-dashboard.md` — SE Mobile App user stories (§217-285), Screen Inventory
+(§479-499), App Flows (§501-663), Architecture (§307-317). Read for requirements only.
 
-| PRD Screen / Flow | Backend endpoint needed | Phase 1 reality |
+| PRD Screen | Backend endpoint | Phase 1 reality |
 |---|---|---|
-| Home / Day Plan | `GET /schedules/me` | Exists, self-scoped — but returns `{ticketId, sortOrder}` only; **unbuildable as a card list without #161** |
-| Ticket Detail (device, vehicle, transporter, SLA, Failure Cycle history, Technical Hints, telemetry) | `GET /tickets/:id` (SE-scoped) | **Does not exist for SE** — manager-only. **Hard blocker.** |
-| Troubleshooting Form (root cause, photos, GPS) | `POST /tickets/:id/troubleshoot` | Exists, reachable — **not row-scoped** (any SE, any ticket) — and photo_refs has no upload target (§1.2) |
-| Vehicle Unavailability | `POST /vehicle-unavailability` | Exists, row-scoped correctly. No SE-reachable GET to render "expected back on [date]" state after submit. |
-| Install Form (device/SIM serial, photo) | `POST /install/:ticketId/fitted` | Exists, row-scoped correctly. Photo optional but has no upload target. |
-| Recovery Collection Form | `POST /recovery/:id/collected` | Exists, row-scoped correctly. |
-| Intra-day Insertion Accept/Decline | `POST /intraday-insertions/:id/accept\|decline` | Exists, row-scoped correctly (`NOT_OFFERED`) — but the **10-minute Acceptance Timeout is push-notification-dependent**, and no push infra exists at all (§1.2, §1.4) |
-| Verification Result | `GET /tickets/:id/verification` | Exists, SE-reachable — **but unscoped for every role**, a read-side leak, not just an SE gap |
-| 409 Conflict Screen | dedup/Shadow-Use contract on submit | Not independently re-verified this pass; existing issue coverage (#164) — flagged, not re-derived |
+| Home / Day Plan | `GET /api/me/tickets` | Exists, self-scoped, card-shaped — buildable for a list view |
+| Shared Pool | `GET /api/me/tickets` (merged) / `GET /me/shared-pool` | Exists, correctly coverage-scoped |
+| **Ticket Detail** (device, vehicle, transporter, SLA, Failure Cycle, Technical Hints, telemetry) | none for SE | **Does not exist.** Hard blocker — #161 item 1 |
+| Tickets List — human-readable ID | n/a (schema gap) | **`ticketNo` does not exist yet** (OBSERVED — `grep 'ticketNo\|ticket_no' schema.prisma` → zero hits). Already fully scoped, not missing an issue: #161's own 2026-07-28 comment (`161-....md:140-193`) specifies a global `ticketNo BigInt @default(autoincrement()) @unique` alongside the UUID PK, `TCK-`+5-digit-zero-padded display format (matches the 7 reference-image numbers cited, `TCK-10252`…`TCK-10306`), backfill in `created_at` order for the existing 21,438 rows, and lists every downstream consumer (#161/#165 payloads, admin ticket search `q`, WhatsApp notification payload, audit-trail route param, ticket drawer deep links). This is an unimplemented AC *inside* #161, not a separate gap — filing a new issue would duplicate it. Relevant because the Tickets List (via `GET /api/me/tickets`) is the one SE screen buildable today, and every reference image shows `TCK-#####`; shipping against raw UUIDs first is guaranteed rework. |
+| Troubleshooting Form | `POST /tickets/:id/troubleshoot` | Exists, now coverage-scoped (#162); photo has no upload target |
+| Vehicle Unavailability | `POST /vehicle-unavailability` | Exists, row-scoped correctly |
+| Install Form | `POST /install/:ticketId/fitted` | Exists, row-scoped correctly; photo optional, no upload target |
+| Recovery Collection Form | `POST /recovery/:id/collected` | Exists, row-scoped correctly; no SE detail GET for recovery |
+| Intra-day Insertion Accept/Decline | `POST /intraday-insertions/:id/accept\|decline` | Exists, row-scoped; 10-min timeout depends on push (absent); routes have no HTTP success-path e2e test (404-only coverage) |
+| Verification Result | `GET /tickets/:id/verification` | Exists, now scoped to own submission/assignment (#162) |
+| 409 Conflict Screen | Shadow-Use contract on submit | Exists, sanctioned race path confirmed |
 | Van Stock | `GET /me/van-stock` | Exists, self-scoped |
-| Expense Voucher Create | `POST /vouchers` | Exists — **mandatory photo proof has no upload target** |
-| My Vouchers (status list) | `GET /vouchers` (SE-scoped) | **Does not exist for SE** — `REVIEW_ROLES` only |
+| Expense Voucher Create | `POST /vouchers` | Exists; mandatory photo proof has no upload target |
+| My Vouchers | `GET /vouchers` (SE-scoped) | **Does not exist for SE** — #163 |
 | Leave Request | `POST /leave-requests` | Exists, row-scoped correctly |
-| Leave status ("PENDING badge") | `GET /leave-requests` (SE-scoped) | **Does not exist for SE** — `MANAGER_ROLES` only |
-| Availability (SOFT_UNAVAILABLE) | `POST /engineers/:seId/availability` | Exists — but **an SE can currently self-grant `ON_LEAVE`/`OFF_SHIFT`/`WEEKLY_OFF`**, not just `SOFT_UNAVAILABLE` as the PRD specifies (§Phase 3 below) |
-| Shared Pool | `GET /me/shared-pool` | Exists, correctly coverage-scoped, reasonably rich card data |
-| QR Scanner | search-by-vehicle/device (SE-scoped) | **Search logic exists in the service layer but has no SE-reachable route at all** |
-| Notifications (in-app list) | `GET /notifications` | Exists (`notifications.controller.ts:16`), no `@Roles` restriction — reachable |
-| Technical Hints | derived from raw telemetry, shown on Ticket Card + Detail | Depends entirely on the missing Ticket Detail endpoint (§ above) — no independent source found |
+| Leave status | `GET /leave-requests` (SE-scoped) | **Does not exist for SE** — #163 |
+| Availability | `POST /engineers/:seId/availability` | Exists, now correctly narrowed to SOFT_UNAVAILABLE-only self-grant (#162) |
+| QR Scanner | search-by-vehicle/device (SE-scoped) | Search logic exists (`ticket-query.service.ts:278`), no SE-reachable route — #83 |
+| Notifications | `GET /notifications` | Exists, no `@Roles` restriction, reachable |
+| Technical Hints | derived telemetry | Depends entirely on the missing Ticket Detail endpoint — #84 |
 
-**Architecture requirements (PRD §307-317, requirements-level, read alongside the screens):**
-offline-first (WatermelonDB/SQLite) for form submission, expense drafts, and soft-state updates;
-FCM/APNs push required for five distinct triggers including the 10-minute intra-day timeout; GPS
-auto-capture at submission plus geofence-triggered ON_SITE; `client_submission_id` dedup;
-`react-native-keychain` for token storage (already in use). **None of the offline, push, or GPS
-requirements have any client-side scaffolding today** (§1.4).
+**Architecture requirements (PRD §307-317):** WatermelonDB/SQLite offline queue, FCM/APNs push for 5+
+triggers, GPS auto-capture, `client_submission_id` dedup, `react-native-keychain` (already correctly
+in use). None of offline/push/GPS have client-side scaffolding.
 
 ---
 
 ## Phase 3 — Reconciliation With the Written Record
 
-Read only after Phases 1-2 were complete: `docs/SYSTEM-STATE-2026-07.md`,
-`audit/2026-07-31-implementation-audit.md`, `audit/02-open-questions.md` §6.32,
-`docs/status/mobile-backend-freeze-plan-2026-07-28.md`, `.scratch/fsm-platform-v1/INDEX.md`, and the
-issue files it references.
+Read after Phases 1-2: `docs/SYSTEM-STATE-2026-07.md`, `audit/2026-07-31-implementation-audit.md`,
+`audit/02-open-questions.md` (item 32 of §6, "Everything marked UNKNOWN" — there is no literal
+"§6.32" heading; it is list item 32 under section 6), `docs/status/mobile-backend-freeze-plan-
+2026-07-28.md`, `docs/status/mobile-backend-independent-assessment-2026-07-28.md`,
+`docs/status/backend-mobile-readiness-2026-07-22.md`, `docs/status/backend-mobile-readiness-plan-
+2026-07-28.md`, `docs/status/se-screen-data-needs-2026-07-28.md`, the prior same-day draft of this
+file, `.scratch/fsm-platform-v1/INDEX.md`, and issues #161, #162, #163, #169, #174, #186, #187, #188.
 
 ### Contradiction list
 
-| # | Written-record claim | Verdict | Why |
-|---|---|---|---|
-| 1 | `SYSTEM-STATE-2026-07.md:154-156,856-857` — no global `APP_GUARD`/`ValidationPipe` (#99 open) | **CONTRADICTS** (stale) | `app.module.ts:179-190` has both; `#99` shows **done 2026-07-13** in INDEX.md:27. Doc body text was never edited in place after the fix landed — the exact drift class the doc's own convention exists to prevent. |
-| 2 | Mobile is auth-shell-only, nothing else built (`SYSTEM-STATE:77-79`, `2026-07-31-implementation-audit.md` multiple) | **AGREES** | Independently reproduced: 2 screens, zero field-service functionality, zero relevant dependencies. |
-| 3 | No general SE ticket-read endpoint; Day Plan returns bare ticket IDs (`2026-07-31-implementation-audit.md:29,270`; issue #161) | **AGREES** | Reproduced at the same file:line citations independently. |
-| 4 | SE row-level authorization floor missing on 4 sites (issue #162) | **AGREES**, with #162's own correction adopted: the verification-read gap is role-generic (unscoped for every role, including ZM), not SE-specific — confirmed by direct read of `verification-query.service.ts`. |
-| 5 | SE self-artifact reads are one-way (issue #163) | **AGREES** on the 2 sites independently checked (vouchers, leave-requests); the other 5 in #163 were not independently re-verified but follow the identical pattern. |
-| 6 | No media/photo upload endpoint anywhere (`SYSTEM-STATE:773-774`; issue #81) | **AGREES** | Independently reproduced — bare string columns, zero upload-handler grep hits. |
-| 7 | Push notifications are a spine with no external adapter (issue #76/#89) | **AGREES** | `NotificationChannel.PUSH` enum exists; no device-token table; "deferred seam" comment confirmed independently. |
-| 8 | `@fsm/shared` is auth/session-only (issue #169) | **AGREES** | Independently counted the same export set. |
-| 9 | No QR/vehicle-search endpoint for SE (issue #83) | **AGREES** | Search logic exists (`ticket-query.service.ts:110,278`) but wired only to the manager-only controller — independently reached the same conclusion. |
-| 10 | Issue #176 (KPI transparency) filed `Status: DONE` | **SCOPE NO LONGER MATCHES REALITY** (as of 07-31; not re-checked as of today) | The 07-31 audit found the feature exists only in an uncommitted working tree — a "done" status line that a fresh clone would not reproduce. Not mobile-relevant directly, but a live example of why status lines need `git log`/`git status` verification, not just a read of the issue file. |
-| 11 | Open Questions §6.32 — mobile absence explains several dashboard metrics with no live producer | **AGREES**, and correctly scoped as a human question ("confirm this is the expected pre-launch state"), not an engineering defect — left open here, not answered. |
+| # | Claim | Source | Verdict | Why |
+|---|---|---|---|---|
+| 1 | No global `APP_GUARD` / `ValidationPipe` (#99 open) | `SYSTEM-STATE-2026-07.md:154-156` | **STALE** | `app.module.ts:186-193` has both; #99 shows done 2026-07-13 in INDEX.md. Doc body was never edited in place after the fix — the exact drift pattern the doc's own convention exists to prevent. |
+| 2 | "Any authenticated SE can currently write against every open troubleshoot ticket in every zone" (#162 open) | `audit/2026-07-31-implementation-audit.md:272`, §13 R3 | **STALE as of `54b23de` (2026-08-03)** | Independently re-verified in this pass: all 5 sites now coverage/ownership-scoped. The audit was accurate *when written* (2026-07-31); #162 landed 3 days later. |
+| 3 | Mobile auth shell has no session rehydration or refresh | Prior same-day draft of this file, Phase 1.4 | **STALE as of `980a212` (2026-08-03)** | Independently re-verified: `AuthProvider.tsx:40-60` now rehydrates + refreshes. The prior draft was accurate when its Phase 1 was written; the commit landed afterward. Only the `console.log` remainder (#186 AC#3) still holds. |
+| 4 | SE ticket-read surface entirely unbuilt, Day Plan returns bare `{ticketId, sortOrder}` | `2026-07-31-implementation-audit.md:29,270`; prior draft | **PARTIALLY STALE** | `GET /api/me/tickets` (card-shaped, not bare ids) shipped 2026-08-03 per #161 "item 2". The *conclusion* — no per-ticket detail read exists — is still fully accurate; only the day-plan-list half improved. |
+| 5 | WhatsApp "shown as sent" for SE Acceptance is a correctness bug | (this pass's own first-draft internal read, corrected before publishing) | **NOT A BUG** | PRD:305 + `SYSTEM-STATE-2026-07.md:769` both confirm this is deliberate, documented behavior pending a real adapter (#76). Recorded here as a caution against over-flagging PRD-sanctioned stub behavior as a defect. |
+| 6 | Mobile is "auth shell only, nothing else" | `SYSTEM-STATE-2026-07.md:77-79`, `2026-07-31-implementation-audit.md` | **AGREES on scope, STALE on functional depth** | Still true that zero field-service screens exist; false that the auth shell itself is non-functional — it now persists and refreshes sessions correctly. |
+| 7 | Issue #176 (KPI transparency) filed done | `2026-07-31-implementation-audit.md:32,156` | Not re-verified this pass (out of mobile scope) — flagged again per the prior draft, unresolved. |
+| 8 | Open Questions item 32 — mobile absence explains several dashboard metrics with no live producer | `audit/02-open-questions.md:449-454` | **AGREES**, correctly scoped as a human question, not an engineering defect. |
 
-### Per-existing-issue verdict (the ones this analysis would otherwise duplicate)
+### Per-existing-issue verdict
 
 | Issue | Verdict |
 |---|---|
-| **#161** SE ticket-read surface | STILL OPEN AS FILED — matches Phase 1/2 exactly. Reference, don't re-file. |
-| **#162** SE row-level authorization floor | STILL OPEN AS FILED — matches all 4 original sites exactly, **and already contains a 5th site** (SE self-grant leave via `POST /engineers/:seId/availability`, added 2026-07-28) that this analysis also found independently in Phase 2. Already captured; no new issue needed. |
-| **#163** SE self-artifact reads | STILL OPEN AS FILED — matches the 2 independently-checked sites; widened to 7 by the issue's own 2026-07-28 addendum. |
-| **#164** SE mutation retry contract | STILL OPEN AS FILED (not independently re-verified this pass). |
-| **#165** SE poll-endpoint bounding | STILL OPEN AS FILED — the bare-array, unbounded-list shape is independently visible in `SharedPoolTicket[]`/`DayPlanView`, corroborating its claim. |
-| **#166** Capture-time authority | STILL OPEN, `ready-for-human` — correctly scoped as a product decision. |
-| **#169** SE API contract freeze | STILL OPEN, partially landed (`/api/v1` dual-serve done per its own comment). |
-| **#170** Mobile release/upgrade mechanism | STILL OPEN, `ready-for-human`. |
-| **#171** Transporter contact data | STILL OPEN, `ready-for-human` (migration). |
-| **#172** Mobile screen-contract ratification | **ALREADY RESOLVED** — `Status: DONE`, ratified 2026-07-28, all 12 items closed. Its resolutions (e.g. merged `GET /api/me/tickets` replacing the day-plan/pool split as the SE ticket-read contract boundary) are binding for any future #161 build — noted here so a future session doesn't re-litigate it. |
-| **#173** SE inventory & component-request surface | STILL OPEN AS FILED — contingent scope resolved in its favor by #172. |
-| **#174** SE request validation DTOs | STILL OPEN AS FILED. |
-| **#175** SE work-history series | STILL OPEN, explicitly non-blocking. |
-| **#176** KPI transparency | Filed DONE but not committed as of 07-31 (see contradiction #10) — not mobile-relevant, flagged for confidence calibration only. |
-| **#178** Closure never clears assignment | STILL OPEN — not a mobile blocker directly, but relevant background for Phase 4: if mobile starts writing ticket closures on top of this bug, SE capacity accounting will visibly degrade shortly after launch. |
+| **#161** SE ticket-read surface | Partial — item 2 (merged list) DONE 2026-08-03; items 1 (detail), 3 (own forms), `/api/me` enrichment, `ticketNo` still open exactly as filed. This remains the top blocker. |
+| **#162** SE row-level authorization floor | **DONE 2026-08-03** — closes the audit's R3 finding. No further action; reference only. |
+| **#163** SE self-artifact reads | Still open as filed — matches Phase 1 (vouchers, leave-requests) exactly. |
+| **#169** SE API contract freeze | Still open; already scopes the by-omission-route decision (geography/zones) this pass independently re-found. |
+| **#174** SE request validation DTOs | Still open as filed; independently reproduced across a wider route sample this pass. |
+| **#186** Mobile auth shell session persistence | Partial — AC#1/#2/#4 done 2026-08-03 (`980a212`); AC#3 (console.log cleanup) open, independently reconfirmed at the same file:lines. |
+| **#187** voucher-controller e2e fixture bug | Still open, test-only; independently reproduced as a side effect of verifying #162's closure (3/5 tests fail on a missing `EngineerMaster` seed, not a route defect). |
+| **#188** (new, this pass) — missing indexes on SE-ownership columns | Not previously filed; see below. |
 
-**Bottom line:** the written record's most recent layer (`2026-07-31-implementation-audit.md` +
-issues #161-#178, filed 2026-07-28) is **highly accurate** and independently corroborates nearly
-every Phase 1/2 finding, in several cases with more precision than this pass achieved on its own
-(#162's 5th site, #163's 7-site widening). The only concrete staleness found is
-`SYSTEM-STATE-2026-07.md`'s never-updated guard-chain paragraph and the #176 status-line/git-status
-mismatch — neither changes the mobile-readiness picture. Nearly everything this analysis would
-otherwise recommend filing is already filed, open, and current.
+**Bottom line:** the written record — including a same-day draft of this exact file — was accurate
+*at the moment each artifact was written*, and this codebase is moving fast enough (two security-
+relevant landings within the same calendar day) that a status document's shelf life is measured in
+hours, not days. Nearly everything this pass would otherwise recommend filing is already filed,
+open, and correctly scoped; the one gap that had no owner (index coverage on SE-ownership columns
+ahead of #173) is filed below as #188.
 
 ---
 
 ## Phase 4 — The Day-One Walkthrough
 
-*A mobile client, built straightforwardly on today's exposed endpoints (per the PRD), ships
-tomorrow. What breaks first, concretely, citing routes and guards from Phase 1.*
+*A mobile client, built straightforwardly on today's exposed endpoints, ships tomorrow. What breaks
+first, concretely, citing routes and guards from Phase 1 — updated to reflect #162/#186 now landed.*
 
-1. **The first screen is unbuildable.** SE opens the app, Day Plan loads (`GET /schedules/me`) and
-   returns a list of bare ticket IDs (`day-plan-query.service.ts:5-25`). To render anything — plant
-   name, SLA bucket, device — the client must call `GET /tickets/:id`, which 403s for
-   SERVICE_ENGINEER (`tickets.controller.ts:39,71`). Shared Pool is somewhat better (has plant/SLA/
-   device fields) but Ticket Detail — the screen an SE actually taps into to do work — has the same
-   wall. **This is not a rough edge; it is the literal first tap after login failing.**
+1. **The first real screen is unbuildable.** SE opens the app, Day Plan loads
+   (`GET /api/me/tickets`) and returns a real card list — plant, SLA bucket, device, work state. SE
+   taps a card. There is no `GET /api/me/tickets/:id` and `GET /tickets/:id` 403s for
+   SERVICE_ENGINEER (`tickets.controller.ts`). **This is still the literal first tap after Day Plan
+   rendering successfully, failing.** Install tickets are the one exception (`GET /install/:ticketId`
+   works); Troubleshoot and Recovery tickets — the majority of PRD-described field work — have
+   nowhere to go.
 
-2. **A stale cached ticket ID silently corrupts another SE's work.** PRD Flow 1/3b: a ZM can
-   manually add/remove/reorder tickets on an SE's Day Plan mid-shift, "no SE Acceptance required,"
-   with a push notification firing to inform the SE. But push has zero infrastructure (§1.2, §1.4) —
-   no device-token table, no adapter, and the mobile client has no push handler. So: SE B has ticket
-   X cached from an earlier sync; the ZM reassigns X to SE C; SE B, never informed, is still en
-   route and taps **Submit Form**. `troubleshoot-submission.service.ts:112-114` checks only that the
-   ticket exists — never that it still belongs to SE B — so the write succeeds. SE C's real work is
-   now clobbered or duplicated, with no error surfaced to anyone. This is a direct consequence of
-   the row-scoping gap (Phase 1.1) compounding the push gap (Phase 1.2/1.4) — neither alone would
-   cause silent corruption; together they do.
+2. **The two most severe day-one risks from a few hours ago are now closed.** As of `54b23de`: a
+   stale-cached ticket no longer lets an out-of-coverage SE silently overwrite another SE's
+   troubleshoot submission (coverage-checked); `GET /tickets/:id/verification` no longer leaks every
+   historically-seen ticket's fraud/verification detail indefinitely (scoped to own submission/
+   assignment); an SE can no longer self-grant `ON_LEAVE`/`OFF_SHIFT`/`WEEKLY_OFF` and silently
+   bypass ZM approval (narrowed to `SOFT_UNAVAILABLE`). All three were live, unauthenticated-scope
+   holes as of the 2026-07-31 audit and are gone as of today's commit.
 
-3. **Verification data leaks permanently, not just today.** `GET /tickets/:id/verification` never
-   re-checks current assignment (Phase 1.1, item 4). Any ticket ID an SE has ever seen — through
-   their own historical Day Plan, Shared Pool, or a ticket they were reassigned away from — remains
-   permanently queryable for fraud-flag and verification detail, with no time-based revocation. No
-   ID-guessing is required; the SE only needs to have once been near the ticket.
+3. **Intra-day CRITICAL insertions will still mis-route confusingly, but not silently-and-wrongly.**
+   The 10-minute Acceptance Timeout (PRD §393) depends on push, which has zero infrastructure
+   (§1.2/1.4) — an SE only learns of an offer by polling or opening the app, so timeouts/reroutes
+   will read as "routed to another SE while you were offline" for offers never actually delivered.
+   The accept/decline routes themselves are coverage-correct (`NOT_OFFERED` on mismatch) but have
+   **no HTTP-level success-path e2e test** (only 404 cases are covered) — an unverified, not
+   necessarily broken, write path.
 
-4. **An SE can quietly skip the Leave Request approval flow entirely.** `POST
-   /engineers/:seId/availability` currently authorizes an SE to self-set `ON_LEAVE`/`OFF_SHIFT`/
-   `WEEKLY_OFF` (issue #162's 5th site) when the PRD (§496) and the workflow doc both specify SE gets
-   only `SOFT_UNAVAILABLE`. A mobile client built to the PRD's Leave Request screen would coexist
-   with this bug rather than trigger it directly — but a client built slightly off-PRD, or a bug in
-   the availability screen, silently bypasses ZM approval with no audit trail of an approval that
-   never happened.
+4. **Expense Voucher and Troubleshooting Form photo requirements cannot be met at all.** No upload
+   endpoint exists anywhere (§1.2). PRD requires at least one photo before an Expense Voucher can
+   submit (§601) — a submit button that can never succeed without further backend work, independent
+   of anything else in this report.
 
-5. **Expense Voucher and Troubleshooting Form photo requirements cannot be met at all.** No upload
-   endpoint exists anywhere in the backend (Phase 1.2). The PRD requires **at least one photo before
-   an Expense Voucher can submit** (§601) — this is not a degraded experience, it is a submit button
-   that can never succeed without further backend work.
+5. **My Vouchers and Leave-status screens have nothing to render.** `GET /vouchers` and
+   `GET /leave-requests` remain manager-only (§1.1, #163). An SE who submits either has no way to see
+   what happened short of asking their ZM.
 
-6. **Intra-day CRITICAL insertions will silently mis-route.** The Acceptance Timeout is a hard
-   10 minutes with reroute-after-3-retries (PRD §393, Decision §16) — these are the highest-severity
-   tickets in the system. Without push (Phase 1.2/1.4), an SE only learns of an offer by polling or
-   opening the app. The system will behave exactly as designed — timing out and rerouting — but the
-   SE will experience it as confusing, unexplained churn ("routed to another SE while you were
-   offline") for offers they were never actually notified of.
+6. **QR Scanner and offline queueing remain entirely unbuildable/unscaffolded respectively.** Neither
+   corrupts data on day one; both are advertised PRD features with zero path to existing without
+   further work (#83, #82 + client-side WatermelonDB build).
 
-7. **My Vouchers and Leave status screens have nothing to render.** `GET /vouchers` and `GET
-   /leave-requests` are manager-only (Phase 1.1). An SE who submits either has no way to see what
-   happened to it short of asking their ZM.
+7. **Session loss is now a much smaller risk than it was this morning.** With `980a212` landed, an
+   app restart mid-shift rehydrates from the keychain and silently refreshes an expired access token
+   — the field-availability risk flagged a few hours ago (forced re-login on every restart, unusable
+   without signal) is closed. The only remaining defect is cosmetic (`console.log` scaffolding still
+   present, #186 AC#3) — no functional impact.
 
-8. **QR Scanner and offline queueing are not "slower to build" — they are entirely unbuildable
-   server-side (QR) or entirely unscaffolded client-side (offline).** Neither is a day-one
-   functional break in the sense above (nothing gets corrupted), but both are advertised PRD
-   features with zero path to existing today without further work first.
+8. **A test-signal trap, not a runtime one:** anyone checking "are voucher writes safe to build
+   against" by running `voucher-controller.e2e-spec.ts` will see 3/5 red today (#187, a fixture bug)
+   and could wrongly conclude the voucher write path itself is broken. It isn't — `POST /vouchers`
+   and `/resubmit` are real, scoped, and independently confirmed correct by direct code read in this
+   pass; only the test fixture is missing a seed row.
 
-9. **Session loss is a field-availability risk, not a data risk.** No rehydration, no refresh
-   (Phase 1.4) — an SE who loses the app mid-shift (OS eviction, crash, dead battery/restart) is
-   logged out and, if offline at that moment, cannot work until they regain connectivity to
-   re-authenticate. This does not corrupt data but does make the app unusable exactly when field
-   conditions are worst.
-
-**What does *not* break:** login/session (`/auth/login`, `/me`) is contract-correct and needs no
-changes; the correctly-scoped write paths (recovery, install, vehicle-unavailability, intraday
-accept/decline, voucher resubmit) are safe to build against today; Shared Pool's coverage-scoping is
-correctly enforced server-side.
+**What does not break:** login/session/`/me` is contract-correct; the now-scoped write paths
+(troubleshoot, soft-state, confirm-receipt, verification-read, availability, plus the
+previously-correct recovery/install/VU/voucher-resubmit paths) are safe to build against today;
+Shared Pool and the merged `/me/tickets` list are correctly coverage-scoped and reasonably rich for a
+list view.
 
 ---
 
 ## Ordered Sequence
 
-This section is the deliverable. Grouped by dependency, not by issue number. Cross-checked against
-`docs/status/mobile-backend-freeze-plan-2026-07-28.md`'s own W0-W4 waves (Phase 3 found that plan
-still accurate as of 07-31) — where this ordering agrees with that plan, it's noted; the reasoning
-below is derived from this pass's own Phase 1/2/4 findings, not copied from the plan.
+**Backend runway estimate — INFERRED, carried from `docs/status/mobile-backend-freeze-plan-2026-07-28.md`,
+not derived in this pass.** That plan's own table (`freeze-plan:408`) gives **59-87 engineer-days
+(3-4 calendar months at its assumed staffing, or 6-8 weeks at the team size the plan itself sizes for)**
+for the "Compatibility" bar it recommends over a full contract freeze (`freeze-plan:422`, decision D-1).
+This pass did not re-derive that figure from source — it is restated here, labeled, because the prior
+version of this report cited it inline next to OBSERVED findings without distinguishing the two. The
+one adjustment this pass can make with OBSERVED confidence: #162 (a whole wave of that estimate) is now
+done, so the true remaining figure is smaller than 59-87 days, but by how much has not been re-costed
+here — treat 59-87 as a stale upper bound, not a current re-estimate.
 
-**Blocks mobile (must land before any further mobile screen is built on top of the auth shell):**
+Cross-checked against `docs/status/mobile-backend-freeze-plan-2026-07-28.md`'s W0-W4 waves and
+`.scratch/fsm-platform-v1/INDEX.md`'s own mobile-readiness block — largely still accurate; the one
+material change this pass makes to that ordering is moving #162 from "blocks mobile, land first" to
+**done**, which unblocks starting #161's remaining items immediately rather than sequencing behind it.
 
-1. **#162 — SE row-level authorization floor.** Every other backend gap is a missing feature; this
-   one is an active security hole against 14,000+ live tickets (per the issue's own 07-28 measurement)
-   that gets *wider*, not narrower, the more mobile client code gets written against today's
-   endpoints. Land first because every subsequent slice (#161, #163) reuses its coverage predicate —
-   building #161 first would mean redoing its scoping logic twice.
-2. **#161 — SE ticket-read surface.** Nothing past Day Plan can render without it (Phase 4, item 1).
-   Build alongside #162 (they share the coverage-predicate helper per #162's own note); this is also
-   where the #172-ratified `GET /api/me/tickets` contract decision (merged day-plan/pool boundary)
-   gets implemented, so revisit that ratification when scoping the slice.
-3. **#186 (new, this pass) — mobile auth shell session persistence.** Small and independent of the
-   backend blocks, but every future mobile screen builds on `AuthProvider`; landing it now is a
-   single fix instead of an N-screen retrofit later (Phase 1.4).
-4. **#91 — Postgres-backed credential store**, ahead of any real SE credential rollout — the
-   in-memory `InMemoryUserStore` (`auth.module.ts`/`auth.service.ts`) does not survive a restart, and
-   #162's fix must land no later than #91's rollout per #162's own filed constraint (currently one
-   synthetic SE credential exists; #91 mints ~75 real ones).
+**Blocks mobile (must land before any further field screen is built on the auth shell):**
 
-**Should precede mobile (not a hard block, but building without these means later rework or a
-worse field experience):**
+1. **#161 (items 1 & 3) — SE ticket detail read + own submitted forms.** The single concrete blocker
+   left in this category (Phase 4, item 1). Troubleshoot and Recovery ticket detail, specifically —
+   Install's read already exists as the pattern to mirror.
+2. **#91 — Postgres-backed credential store**, ahead of any real SE credential rollout — in-memory
+   `InMemoryUserStore`/`InMemoryRefreshTokenStore` does not survive a restart despite the
+   `RefreshToken` table already existing in schema (§1.2). One synthetic SE credential exists today;
+   #91 mints ~75 real ones. **Re-confirmed directly against source this pass** (§1.2) — the claim is
+   accurate: `auth.module.ts`/`auth.service.ts` still inject the in-memory stores today. Schema
+   Slice 1 already landed (`dd9846b`); remaining work is S2 (DB-backed login) → S3 (persistent refresh
+   + device binding + logout) → S4 (retire in-memory providers), a DI swap on two files plus credential
+   seeding, not a design task — see §1.2 for the full slice breakdown and exactly what changes in
+   `auth.module.ts`/`auth.service.ts`.
+3. ~~#162 — SE row-level authorization floor~~ — **done, no longer a blocker.**
+4. ~~#186 (console.log remainder)~~ — **cosmetic only, does not block further mobile work**; land
+   opportunistically, not as a gate.
 
-5. **#163 — SE self-artifact reads** (my vouchers, my leave, my pending intraday offer) — the "My
-   Vouchers" and Leave-status screens are unbuildable without it (Phase 2 table).
-6. **#169 + #174 — SE API contract freeze + request-validation DTOs.** Not urgent for a first
-   screen, but every endpoint mobile starts consuming before this lands is a contract that can still
-   change underneath a shipped client. This is the "freeze before build" bet the existing plan
-   already made; Phase 3 found no reason to disagree with it.
-7. **#81 — Media Upload API.** Blocks Expense Voucher and Troubleshooting Form photo requirements
-   completely (Phase 4, item 5) — not a nice-to-have, a hard submit-blocker for two PRD flows.
-8. **#76 + #89 — Notification spine adapters + mobile push client wiring.** Blocks the 10-minute
-   intra-day Acceptance flow from behaving sanely (Phase 4, item 6) and every other push trigger the
-   PRD specifies (§312).
-9. **#83 — Ticket Search API**, for QR Scanner — server-side search logic already exists
-   (`ticket-query.service.ts:110`), this is exposing it to SE, not building it from scratch.
-10. **#84 — Technical Hints API** — depends on #161 existing first (Ticket Detail is the render
-    target).
+**Should precede mobile (not a hard block, but building without these means rework or a worse field
+experience):**
 
-**Parallel (independent of the above, can proceed alongside):**
+5. **#163 — SE self-artifact reads** (my vouchers, my leave, my pending intraday offer).
+6. **#169 + #174 — SE API contract freeze + request-validation DTOs**, including the by-omission
+   route decision (geography/zones) this pass independently reconfirmed.
+7. **#81 — Media Upload API** — hard submit-blocker for Expense Voucher and Troubleshooting Form.
+8. **#76 + #89 — Notification adapters + mobile push wiring** — needed for the 10-minute intra-day
+   flow and every other push trigger PRD §312 specifies; also resolves the WhatsApp-"sent" product
+   question (Phase 1.2) once a real adapter exists to make the claim true.
+9. **#83 — Ticket Search API** for QR Scanner — server-side search logic already exists, this is
+   exposing it to SE.
+10. **#84 — Technical Hints API** — depends on #161 item 1 existing first as its render target.
+11. **#188 (new, this pass) — index the five unindexed SE-ownership columns** before #173 ships any
+    SE-scoped query against `ComponentRequest`/`ComponentBlockedQueue`/
+    `VehicleUnavailabilityReport`/`IntradayInsertion` — cheap now (small tables), a real migration
+    later.
 
-- **#164/#165 — mutation retry contract + poll-endpoint bounding/delta.** Client-data-layer
-  concerns; useful before mobile writes real traffic at volume, not before the first screen exists.
-- **#171 — transporter contact data** (schema has no phone column) — needed for the tap-to-call
-  requirement on 3 screens, independent of the read-surface work.
-- **#110 — auth rate limiting** on `/auth/login`/`/auth/refresh`, ahead of real device volume.
-- **#82 — Offline Batch Sync API** — backend counterpart can be built in parallel with the read-surface
-  work; the *client-side* WatermelonDB/SQLite queue (Phase 1.4, zero scaffolding) is mobile-app work,
-  out of this report's scope, but its absence should inform sequencing of when mobile screens go live
-  in the field vs. in a connected-only pilot.
+**Parallel (independent, can proceed alongside):**
 
-**Can follow (genuinely deferrable without blocking safe mobile start):**
+- **#164/#165 — mutation retry contract + poll-endpoint bounding/delta.**
+- **#171 — transporter contact data** (schema has no phone column).
+- **#110 — auth rate limiting**, ahead of real device volume.
+- **#82 — Offline Batch Sync API** (backend half); client-side WatermelonDB/SQLite queue is mobile-
+  app work, out of this report's scope.
 
-- **#166 — capture-time authority** (HITL D5, a product decision, not urgent for a first pilot).
-- **#170 — mobile release/upgrade mechanism** (OTA) — matters at scale, not for a first build.
-- **#167 — request-scoped observability** — matters before a field pilot generates real incident
-  volume, not before code exists to observe.
-- **#175 — SE work-history series** — explicitly deferred by #172's own ratification.
-- **#111 — deployment packaging/runbook** — an operations concern, decoupled from client build order.
+**Can follow (genuinely deferrable):**
+
+- **#166 — capture-time authority** (HITL D5).
+- **#170 — mobile release/upgrade mechanism** (OTA).
+- **#167 — request-scoped observability.**
+- **#175 — SE work-history series** (explicitly deferred by #172's own ratification).
+- **#111 — deployment packaging/runbook.**
 
 ---
 
 ## UNRESOLVED — Human Must Decide
 
-- **Push provider choice (FCM vs. a unified provider) and the offline-confirm UX for the 10-minute
-  Acceptance Timeout when push is unavailable** — product/infra decision, not resolvable from
-  source. Owner: **product + backend lead** (this is Gate-0 decision D1/D2 in the freeze plan;
-  Phase 3 found no reason it has since been settled).
+- **Push provider choice and offline-confirm UX for the 10-minute Acceptance Timeout when push is
+  unavailable** — Gate-0 decision D1/D2 in the freeze plan, still open. Owner: **product + backend
+  lead**.
+- **Whether the WhatsApp-"sent" display (PRD:305) is acceptable to ship before #76's real adapter
+  exists**, i.e. is a UI claim of "sent" with zero actual delivery tolerable pre-launch, or should the
+  fallback state differ until a real channel lands. Not previously posed as an explicit question in
+  the written record found this pass. Owner: **product**.
 - **Contract-freeze bar: full immutability vs. compatibility (versioning + additive-only + OTA)** —
-  the freeze plan's own honest verdict (as re-verified in Phase 3, still current) is ~85% of a hard
-  freeze is achievable; the remaining categories (field-level completeness, client-discovered error
-  cases, offline sync semantics, real-device performance) cannot be frozen ahead of a real client.
-  Owner: **engineering lead**, informed by how much schedule risk the org will accept from
-  mid-build contract changes.
-- **Media storage decision** (S3 vs. an alternative — CLAUDE.md states no S3 in the current stack) —
-  a genuine infrastructure/cost decision blocking #81. Owner: **backend lead + infra**.
-- **Whether a first mobile pilot ships connected-only** (accepting the offline-queue gap, Phase 1.4)
-  **or waits for the full WatermelonDB/SQLite build** — this changes how urgently #82's backend half
-  needs to land and whether field SEs can be trusted to always have signal. Owner: **product**, this
-  is an operational-risk call about the actual field conditions in the pilot zone(s).
-- **Open Questions §6.32** — whether the current absence of dashboard producer metrics (Activity
-  Status, root-cause distribution, etc., caused by zero mobile writers) is the expected pre-launch
-  state or a gap someone assumed was already covered. Owner: **product/operations**, this is a
-  question about expectations, not a defect.
-- **#176's actual commit status** — was the KPI-transparency work ever committed after 07-31? Not
-  re-verified in this pass (out of mobile-readiness scope); flagged so the next session checks
-  `git log` before trusting the issue file's `DONE` line. Owner: **whoever picks up #176 next**.
+  freeze plan's own verdict (~85% of a hard freeze achievable) still stands. Owner: **engineering
+  lead**.
+- **Media storage decision** (S3 vs. alternative — CLAUDE.md states no S3 in the current stack),
+  blocking #81. Owner: **backend lead + infra**.
+- **Whether a first mobile pilot ships connected-only** or waits for the full offline queue build.
+  Owner: **product**.
+- **Open Questions item 32** — whether the current absence of several dashboard producer metrics
+  (caused by zero mobile writers) is the expected pre-launch state. Owner: **product/operations**.
+- **#176's actual commit status** — flagged again, not re-verified this pass (out of mobile scope).
+  Owner: whoever next picks up #176.
 
 ---
 
-## New Issues Filed This Pass
+## New Issue Filed This Pass
 
-- **[#186 — Mobile auth shell has no session rehydration or token refresh](../../.scratch/fsm-platform-v1/issues/186-mobile-auth-shell-no-session-persistence.md).**
-  Not covered by #91 (backend credential store), #109 (admin session lifecycle — a different app),
-  or any SE-mobile-backend issue #161-#178 — those own the server side; this is a client-side defect
-  in already-shipped `apps/mobile/src/auth/` code (Phase 1.4). Checked against the full issue list
-  before filing; no duplicate found.
+- **[#188 — Missing indexes on SE-ownership columns ahead of SE-scoped reads](../../.scratch/fsm-platform-v1/issues/188-se-ownership-column-indexes.md).**
+  `ComponentRequest.seId`, `ComponentBlockedQueue.seId` (which has *no* indexes at all),
+  `VehicleUnavailabilityReport.seId`, and `IntradayInsertion.offeredSeId` have no supporting index.
+  Latent today (no SE-scoped query hits them yet); becomes load-bearing the moment #173 ships an
+  SE-scoped component-request/component-blocked read. Not covered by #161, #162, or #173 as filed —
+  checked against the full issue list before filing.
 
-Everything else this analysis found was already filed, current, and accurately scoped — see the
-Phase 3 per-issue verdict table. No other new issues were filed.
+Everything else this pass found was already filed, current, and (with the two staleness corrections
+in Phase 3) accurately scoped. #186's session-persistence work is far enough along that its status
+line should be read as "small remainder," not "not started," by the next session that touches it.

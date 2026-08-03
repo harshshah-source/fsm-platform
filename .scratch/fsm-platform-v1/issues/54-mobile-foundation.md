@@ -96,3 +96,13 @@ screens beyond the tab skeletons — those are the M-series (55–61).
 ## Blocked by
 
 - #01
+
+## Comments
+
+### 2026-08-03 — #170 D-10 (no OTA for pilot) grows the first-build AC set
+
+OTA is deferred for the pilot (#170, 2026-08-03). Consequence for this issue: the non-retrofittable
+set is no longer just `X-Device-Id`. **`X-App-Version` on every request and the blocking
+`update required` screen on the server's min-version error code are also first-build items** — with
+no OTA channel, a client shipped without them cannot be corrected short of manual reinstall.
+Sequencing of this issue is otherwise unchanged. The server-side floor is #170's backend half.
