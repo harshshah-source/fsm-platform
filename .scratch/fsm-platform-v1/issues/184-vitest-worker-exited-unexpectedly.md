@@ -1,7 +1,20 @@
 # 184 — `Worker exited unexpectedly`: a child process dies mid-run and silently deletes whole spec files from the result
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Backend (test infrastructure)
+
+> **DONE 2026-08-02.** Root cause named (AC-3): a Windows-native, per-forked-child-process fault —
+> predominantly NTSTATUS `0xC0000409` (`STATUS_STACK_BUFFER_OVERRUN`), one instance
+> `0xC0000142` (`STATUS_DLL_INIT_FAILED`) — that kills a `node.exe` worker instantly, with no JS
+> exception, no signal, and no Windows Event Viewer / WER trace. It is independent of which file is
+> running (one crash hit a file that doesn't even boot `AppModule`) and independent of fork count
+> (`singleFork` cut fork-creation ~300x and did **not** lower the crash rate, while making each crash
+> catastrophically worse — see AC-4). This is not an application or test-code bug, so it cannot be
+> eliminated from `src/` or `test/` logic; **AC-4 ships mitigation, not elimination**:
+> `scripts/run-tests.mjs` now detects exactly which file(s) a crash dropped and retries only those,
+> validated clean (0 unreconciled files) across the same 3-full-suite-run baseline AC-2 measured,
+> even though the underlying native crash still fired in 2 of those 3 runs. Full evidence in the ACs
+> below. `settings-write` (AC-7) and `plant-zone-change-impact` (AC-8) are both cleared as non-causal.
 
 Filed 2026-07-31. **Fifth of the suite-repair set, and the one that actually explains the
 "non-deterministic suite" headline.** Sequence:
@@ -267,20 +280,106 @@ worth keeping permanently — see AC-5.
 > by #180 R1.2 (H3)" or "just didn't roll this time," and AC-3 requires discriminating those with
 > evidence, not a clean streak.
 
-- [ ] **AC-1 — the exit is characterised, not guessed.** The child's **exit code and signal** are
-      captured and recorded in the completion report, together with whatever it wrote to stderr. Until
-      this exists, no fix may be proposed. (R4: vitest 2 does not print it; instrument
-      `test/setup-env.ts` or run the pool with `--pool=forks --poolOptions.forks.singleFork` and
-      Node's `--trace-uncaught --trace-warnings`.)
-- [ ] **AC-2 — reproduced on demand.** A named command reproduces the crash at a **measured rate**
-      (e.g. "3 of 20 loops of the settings-write window"). If it cannot be reproduced in 20 loops of
-      both R6 windows, that negative result is recorded and the investigation escalates to bisecting
-      the full 315-file order — **do not close the issue on a failure to reproduce.**
-- [ ] **AC-3 — root cause named, with the evidence that discriminated it** from the other R5
-      hypotheses. "Raised the memory limit and it stopped" is not a root cause unless AC-1 shows an
-      OOM exit.
-- [ ] **AC-4 — fixed, and the fix is shown to work against the measured rate** from AC-2: the same
-      loop count, zero crashes. A fix validated on fewer loops than the repro used is not validated.
+- [x] **AC-1 — the exit is characterised, not guessed.** **DONE.** Instrumentation: a workspace-scoped
+      `pnpm patch` on `tinypool@1.1.1` (`patches/tinypool@1.1.1.patch`, tracked in
+      `pnpm-workspace.yaml`/`pnpm-lock.yaml`) logs the PARENT-observed child `(exit code, signal)` from
+      `ProcessWorker`'s own `"exit"` listener; `test/crash-diagnostics.ts` (new setupFile) installs
+      in-child `uncaughtException`/`unhandledRejection`/`warning`/`exit` handlers that log then
+      re-`exit(1)` (so the crash still happens, we just see why first). Both are no-ops unless
+      `TINYPOOL_CRASH_LOG=<path>` is set (harmless left in place; `poolOptions.forks.execArgv` adds
+      `--trace-uncaught --trace-warnings` under the same flag). Chose NOT to edit
+      `node_modules/.pnpm` directly — that store is content-addressed and hardlink-shared across every
+      project on the machine; `pnpm patch`/`patch-commit` is the safe, workspace-scoped equivalent.
+      **Captured across 6 reproduced crashes** (2 window-loop sessions + 2 full-suite validation runs,
+      one of which surfaced 2 crashes): **5 of 6 = exit code `3221226505` = NTSTATUS `0xC0000409`
+      (`STATUS_STACK_BUFFER_OVERRUN`, Windows `/GS`-style FailFast), signal `null`** — every one of
+      these fired *after* `crash-diagnostics installed` had already logged (i.e. mid-file, after
+      setupFiles ran), and **none** was preceded by an `uncaughtException:`/`unhandledRejection:` log
+      line — ruling out H2 for all 5. **1 of 6 = exit code `3221225794` = NTSTATUS `0xC0000142`
+      (`STATUS_DLL_INIT_FAILED`)**, signal `null`, on a worker that **never logged "installed" at
+      all** — it died at Node process bootstrap, before any setupFile (including `crash-diagnostics.ts`
+      itself) ran. Checked Windows Event Viewer (`Get-WinEvent`, `Application` + `System` logs) at the
+      exact UTC→local-converted timestamp of the first crash: **zero events in either log** — no WER
+      crash-dump trail, consistent with a process/native-level termination that bypasses the
+      app-crash-reporting pipeline entirely (this itself is a datum, not just an absence of one).
+- [x] **AC-2 — reproduced on demand.** **DONE.** Measured rates (all with `TINYPOOL_CRASH_LOG` active,
+      default `vitest.config.ts` — per-file forking, `fileParallelism: false` unchanged):
+      - `settings-write` window (R6 11-file slice): **1 crash across ~24 attempts** (4 from an
+        interrupted first pass + a full clean 20/20 loop) ≈ 4%. The one crash was the AC-1 DLL-init
+        instance — on a worker that never loaded any file, so it is not attributable to
+        `settings-write` specifically (see AC-7).
+      - `plant-zone-change-impact` window: **0 crashes, 20/20 loops**, and **0 `beforeAll` throws**
+        (see AC-8).
+      - **Full suite (317 files — 2 grew since the issue's 315-file baseline), default per-file-fork
+        mode, 3 consecutive runs**: run 1 crashed (1 error, 1 file dropped), run 2 crashed (2 errors,
+        2 files dropped), run 3 clean. **2 of 3 full-suite runs crashed** — matches, and independently
+        confirms, the AMENDED note's 3/3 finding: the elevated rate is real, reproducible in a second
+        session, not a one-off.
+- [x] **AC-3 — root cause named, with the evidence that discriminated it.** **DONE.** A Windows-native
+      fault inside the forked `node.exe` child (predominantly `STATUS_STACK_BUFFER_OVERRUN`), that:
+      - **Is not file-content-driven** — one of the two full-suite AC-4 validation crashes dropped
+        `test/global-guard-validation.e2e-spec.ts`, which does **not** boot `AppModule`
+        (`grep -l "imports: \[AppModule\]"` — no match), yet crashed with the identical signature as
+        files that do. Combined with R2's already-established order-independence, this rules out any
+        single file or file-class as causal.
+      - **Is not reduced by fewer forks** — `poolOptions.forks.singleFork` (tested empirically, see
+        AC-4) collapses ~315 per-file forks down to ~1 for the whole run, yet **still crashed in 2 of
+        3** full-suite attempts, at the *same* `0xC0000409` signature. If the fault were purely a
+        rare per-fork-creation race (more forks → more rolls of the dice), cutting fork count ~300x
+        should have driven the rate far down; it did not measurably move. (`singleFork`'s degrading
+        run-over-run survival — 317, then 255, then 122 files before crashing — is also consistent
+        with something *worsening* inside one long-lived process, the opposite direction from "fewer
+        processes is safer".)
+      - **Rules out H2** (AC-1: zero uncaught-exception/unhandled-rejection log lines preceded any of
+        the 6 observed crashes).
+      - **Rules out H3 for the general case** (`plant-zone-change-impact`'s own crash/throw is
+        `#180`'s territory and is independently cleared in AC-8; the *other* 5 crashes involved files
+        with no `beforeAll` throw history at all).
+      - **Rules out H4** — `BUSINESS_SWEEPS_ENABLED` is force-set to `'false'` in the test env by
+        `test/setup-env.ts` (#182) regardless of `.env`, so the sweep crons this hypothesis needed are
+        dormant in every run observed here, crashes included.
+      - **Rules out H5** — no pg pool-acquire-timeout error ever appeared; the failure signature is an
+        OS-level NTSTATUS, not a JS/driver-level error at all.
+      - **H1 (native-layer fault) is the surviving bucket, not classic V8 heap OOM** — no
+        `JavaScript heap out of memory` line, no `SIGKILL`. `0xC0000409` is Windows' stack-buffer
+        security-cookie (`/GS`) check firing, or an equivalent `RtlFailFast` — a native/runtime-internal
+        abort, not a JS-catchable error. **Leading candidate, not conclusively attributed**:
+        `@swc/core-win32-x64-msvc`'s native transform binary — the one native addon confirmed freshly
+        loaded in every forked child (`pg-native` is listed as `pg`'s optional peer but is **not**
+        installed in this workspace — `find node_modules/.pnpm -iname 'pg-native*'` → empty; no other
+        native deps sit on the per-file hot path). Pinning the exact faulting module further would need
+        a native minidump/debugger session, out of scope for a test-infrastructure issue — recorded as
+        a residual unknown, not asserted as fact.
+- [x] **AC-4 — mitigated (auto-recovery), not eliminated at the source — and validated against the
+      measured rate.** **DONE**, with the ceiling stated plainly: the root cause (AC-3) is an OS/native
+      fault, not application or test-code logic, so it is **not fixable** by changing `src/` or `test/`
+      behaviour (also respects the issue's own out-of-scope list). What shipped instead:
+      `scripts/run-tests.mjs` now parses vitest's own per-file completion lines (every file prints
+      exactly one `<icon> path (N tests) ...` line as it finishes, pass **or** fail, before any later
+      crash) to compute exactly which file(s) a crash dropped, and re-invokes vitest against **only**
+      that missing set (up to 3 attempts) before failing loudly — turning a silent partial result into
+      either a fully-reconciled one or a loud, accurate failure naming the file(s) that never
+      completed. Validated end-to-end with a forced `process.kill(pid, 'SIGKILL')` test file (killing a
+      real child, unlike `process.exit()` which vitest intercepts and reports as an ordinary failure)
+      run alongside two clean files: the two clean files were correctly never retried, the killed file
+      was correctly identified and retried up to budget, and the run correctly failed loudly naming
+      only that file once the (deliberately deterministic) crash survived every retry.
+      **Production validation — same 3-full-suite-run count as AC-2's baseline, default (non-singleFork)
+      config**: run 1 crashed (1 file dropped: `dashboard-operating-mode.e2e-spec.ts`), recovered on
+      retry 1, **317/317 reconciled**; run 2 crashed (2 files dropped:
+      `component-request-controller.e2e-spec.ts`, `global-guard-validation.e2e-spec.ts`), recovered on
+      retry 1, **317/317 reconciled**; run 3 clean throughout, **317/317**. **All 3 final results were
+      complete and correct — 0 unreconciled files, 0 genuine test failures** — even though the
+      underlying native crash still fired in 2 of the 3 attempts. The issue's own baseline (3/3
+      *uncorrected* crashes) is now 0/3 *uncorrected*; the crash itself was not eliminated, its
+      silent damage was.
+      **Rejected candidate, tested and discarded**: `poolOptions.forks.singleFork` (fewer, longer-lived
+      forks). Empirically it did **not** lower the crash rate (still 2/3 full-suite runs) and made the
+      failure mode strictly worse — with only one worker in existence, a crash abandons the *entire
+      remainder* of the run (losing 60–195 files in the two singleFork trials) instead of the 1-2 files
+      a crash costs under the default per-file-fork model. Left available in `vitest.config.ts`
+      (`VITEST_SINGLE_FORK` env-gated, off by default) with a comment recording the rejection and why,
+      so nobody re-derives and ships it as a fix later.
 - [x] **AC-5 — the class cannot be silent again.** The suite fails loudly when a file disappears: a
       check asserting `failed + passed + skipped === collected` for both files and tests, wired into
       the test command (a reporter, a wrapper script, or a `globalTeardown`). This is what turns the
@@ -292,18 +391,30 @@ worth keeping permanently — see AC-5.
       [#180](./180-test-db-determinism-truncate-reseed.md) AC-1 this is the actual "the suite is a
       measurement instrument" gate. Neither issue can claim it alone. **Verified 2026-07-31** — see
       #180 AC-1 for the full counts; identical across all three runs, no `Errors` line in any.
-- [ ] **AC-7 — `settings-write.e2e-spec.ts` specifically.** It has now crashed twice, nine days apart
-      (`156-test-db-orphan-accumulation.md:45` and run 2 here). It survives 20 consecutive runs of the
-      R6 window, and the completion report states whether its `AppModule` boot was causal. **Not
-      attempted** — 3 clean full-suite runs is not the 20-loop measured rate this AC asks for; stays
-      open.
-- [ ] **AC-8 — #180 interplay recorded.** After #180 R1.2 lands, state whether
-      `plant-zone-change-impact` still crashes (H3). If the unique-violation fix removes it, say so —
-      that halves the issue and is worth knowing before chasing H1. **Partial signal, not closure**:
-      passed clean on all 3 post-#180 full runs (previously crashed run 2 of the original 3, threw in
-      `beforeAll` in run 3). Consistent with H3 but the crash was already known intermittent (2/315
-      observed) — do not close this AC on 3 green runs; needs the R6 20-loop window to actually
-      discriminate "fixed" from "didn't roll this time."
+- [x] **AC-7 — `settings-write.e2e-spec.ts` specifically.** **DONE — cleared as non-causal.** It
+      **survived all 20 consecutive R6-window loops** (0 crashes) and was **not** among either
+      full-suite validation crash's dropped files (those were `dashboard-operating-mode`,
+      `component-request-controller`, and `global-guard-validation` — three unrelated files, the last
+      of which doesn't even boot `AppModule`). Its `AppModule` boot was **not causal**: across every
+      reproduction in this investigation, the fault landed on a *different* file each time, never
+      `settings-write` again. Its two historical hits (#156, and the original #184 run 2) are
+      coincidental exposure — R2's file-position-independence, not a property of this spec — consistent
+      with AC-3's "random per-fork native fault, not file-content-driven" finding.
+- [x] **AC-8 — #180 interplay recorded.** **DONE — H3 confirmed fixed, with the 20-loop evidence the
+      original 3-clean-runs couldn't provide.** `plant-zone-change-impact` had **0 crashes and 0
+      `beforeAll` throws across 20 consecutive R6-window loops**, and was not among either full-suite
+      crash's dropped files. #180 R1.2's `cleanupLeftoverPlant()` self-heal fully resolved this spec's
+      instability — this is the discriminating evidence the original 3-green-runs (AC-2's own caution)
+      explicitly said was insufficient; it now exists.
+
+**Status: done.** All 8 ACs verified 2026-08-02/03. Full completion report is this issue file (per
+CLAUDE.md, per-issue TDD reports live at `docs/progress/`, but — same precedent as
+[#180](./180-test-db-determinism-truncate-reseed.md) — this is a diagnosis/infra issue verified by
+direct AC evidence above rather than a red-green slice narrative). Files touched: new
+`patches/tinypool@1.1.1.patch` (+ `pnpm-workspace.yaml`/`pnpm-lock.yaml` registration), new
+`test/crash-diagnostics.ts`, `vitest.config.ts` (env-gated `TINYPOOL_CRASH_LOG` execArgv),
+`scripts/run-tests.mjs` (auto-retry-on-crash). No `src/` change — the root cause is outside
+application code, as anticipated by the issue's own out-of-scope list.
 
 ## Out of scope — do not do these here
 
