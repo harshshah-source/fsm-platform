@@ -99,6 +99,7 @@ describe('#99 global guard + validation + body limits (e2e)', () => {
       'GET /api/health/ready',
       'POST /api/auth/login',
       'POST /api/auth/refresh',
+      'POST /api/auth/logout', // #91 S3 — the presented refresh token IS the credential, like /refresh
       'GET /api/non-op/confirm', // customer tokenised-email link (Issue 35 AC#6) — token IS the credential
     ]);
     interface RouteLayer {
