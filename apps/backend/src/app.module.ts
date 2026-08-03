@@ -25,9 +25,12 @@ import { ShadowUseController } from './inventory/shadow-use.controller';
 import { ComponentRequestModule } from './component-request/component-request.module';
 import { WarehouseRequestsController } from './component-request/warehouse.controller';
 import { ComponentRequestController } from './component-request/component-request.controller';
+import { MeComponentRequestsController } from './component-request/me-component-requests.controller';
 import { EngineersModule } from './engineers/engineers.module';
 import { EngineersController } from './engineers/engineers.controller';
 import { LeaveRequestController } from './engineers/leave-request.controller';
+import { MeLeaveRequestsController } from './engineers/me-leave-requests.controller';
+import { MeAvailabilityController } from './engineers/me-availability.controller';
 import { RoleBackupModule } from './roles/role-backup.module';
 import { RoleBackupController } from './roles/role-backup.controller';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -75,6 +78,7 @@ import { TicketingModule } from './ticketing/ticketing.module';
 import { TicketsController } from './ticketing/tickets.controller';
 import { TroubleshootController } from './ticketing/troubleshoot.controller';
 import { VehicleUnavailabilityController } from './ticketing/vehicle-unavailability.controller';
+import { MeVehicleUnavailabilityController } from './ticketing/me-vehicle-unavailability.controller';
 import {
   NonOperationalController,
   NonOperationalPublicController,
@@ -87,6 +91,7 @@ import { VouchersModule } from './vouchers/vouchers.module';
 import { ExportsModule } from './exports/exports.module';
 import { PlantDeactivationModule } from './plant-deactivation/plant-deactivation.module';
 import { VouchersController } from './vouchers/vouchers.controller';
+import { MeVouchersController } from './vouchers/me-vouchers.controller';
 import { ZonesController } from './zones/zones.controller';
 
 @Module({
@@ -145,6 +150,7 @@ import { ZonesController } from './zones/zones.controller';
     DevicesController,
     TroubleshootController,
     VehicleUnavailabilityController,
+    MeVehicleUnavailabilityController,
     NonOperationalController,
     NonOperationalPublicController,
     RecoveryController,
@@ -167,12 +173,16 @@ import { ZonesController } from './zones/zones.controller';
     ShadowUseController,
     WarehouseRequestsController,
     ComponentRequestController,
+    MeComponentRequestsController,
     EngineersController,
     LeaveRequestController,
+    MeLeaveRequestsController,
+    MeAvailabilityController,
     RoleBackupController,
     NotificationsController,
     AuditTrailController,
     VouchersController,
+    MeVouchersController,
   ],
   providers: [
     AuthGuard,

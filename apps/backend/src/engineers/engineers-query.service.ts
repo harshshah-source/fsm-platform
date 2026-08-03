@@ -5,7 +5,9 @@ import { type CommonKitMissing, InventoryService, type VanStockItem } from '../i
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { type ActivityStatus, deriveActivityStatus, resolveShiftEnd } from '../soft-state/activity-status';
-import { SeAvailabilityService } from './se-availability.service';
+import { type AvailabilityRow, SeAvailabilityService } from './se-availability.service';
+
+export type { AvailabilityRow };
 
 export interface EngineerScope {
   role: string;
@@ -27,14 +29,6 @@ export interface EngineerListRow {
   missingKit: CommonKitMissing[];
   dailyCapacity: number;
   isActive: boolean;
-}
-
-export interface AvailabilityRow {
-  status: string;
-  windowStart: string;
-  windowEnd: string | null;
-  reason: string | null;
-  setByRole: string | null;
 }
 
 /** One ticket inside an SE's day-plan stop, with its full operating context (Issue 122 drill-down). */
@@ -154,11 +148,7 @@ export class EngineersQueryService {
     const kit = await this.inventory.commonKitStatus(seId);
     const dayPlan = await this.currentDayPlan(seId);
     const { schedule, stops } = await this.currentAssignments(seId);
-    const rows = await this.prisma.seAvailability.findMany({
-      where: { seId },
-      orderBy: { windowStart: 'desc' },
-      take: 10,
-    });
+    const availabilityRows = await this.availability.listWindows(seId);
 
     return {
       seId,
@@ -181,13 +171,7 @@ export class EngineersQueryService {
       stops,
       vanStock,
       kit,
-      availabilityRows: rows.map((r) => ({
-        status: r.status,
-        windowStart: r.windowStart.toISOString(),
-        windowEnd: r.windowEnd ? r.windowEnd.toISOString() : null,
-        reason: r.reason,
-        setByRole: r.setByRole,
-      })),
+      availabilityRows,
     };
   }
 

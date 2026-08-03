@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../generated/prisma/client';
 import { type LeaveRequestType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { SeAvailabilityService } from './se-availability.service';
@@ -135,7 +136,27 @@ export class LeaveRequestService {
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-    return rows.map((r) => ({
+    return rows.map((r) => this.toRow(r));
+  }
+
+  /** #163 item 2 — `GET /api/me/leave-requests`. Same row shape as {@link listForZone} (including
+   *  `decisionReason` — already on the model, previously exposed only behind the manager role), keyed
+   *  on the caller's own `seId` instead of zone. Every status, not just PENDING, so the SE can see a
+   *  past rejection's reason. */
+  async listForSe(seId: string, limit = 200): Promise<LeaveRequestRow[]> {
+    const rows = await this.prisma.leaveRequest.findMany({
+      where: { seId },
+      include: { engineer: { include: { user: { select: { name: true } } } } },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    return rows.map((r) => this.toRow(r));
+  }
+
+  private toRow(
+    r: Prisma.LeaveRequestGetPayload<{ include: { engineer: { include: { user: { select: { name: true } } } } } }>,
+  ): LeaveRequestRow {
+    return {
       id: String(r.id),
       seId: r.seId,
       seName: r.engineer.user.name,
@@ -146,7 +167,7 @@ export class LeaveRequestService {
       reason: r.reason,
       decisionReason: r.decisionReason,
       createdAt: r.createdAt.toISOString(),
-    }));
+    };
   }
 
   /** Submit authorization: the SE themselves, or a manager over the SE's zone. */

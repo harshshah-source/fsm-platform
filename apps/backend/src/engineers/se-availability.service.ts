@@ -25,6 +25,16 @@ export interface AvailabilityActor {
 
 export type SetAvailabilityOutcome = { result: 'OK'; id: string } | { result: 'FORBIDDEN' } | { result: 'NOT_FOUND' };
 
+/** One `SeAvailability` window, as rendered on `EngineerDetail.availabilityRows` (manager) and
+ *  `GET /api/me/availability` (#163 item 7, SE-own). */
+export interface AvailabilityRow {
+  status: string;
+  windowStart: string;
+  windowEnd: string | null;
+  reason: string | null;
+  setByRole: string | null;
+}
+
 @Injectable()
 export class SeAvailabilityService {
   constructor(private readonly prisma: PrismaService) {}
@@ -36,6 +46,25 @@ export class SeAvailabilityService {
       orderBy: { windowStart: 'desc' },
     });
     return row?.status ?? 'AVAILABLE';
+  }
+
+  /** #163 item 7 — `GET /api/me/availability`. The caller's own windows (status/start/end/reason/
+   *  setByRole) — #87's AC ("current availability state + active window shown") is unbuildable today
+   *  because only the manager `GET /engineers/:seId` read exposes `availabilityRows`. Same shape,
+   *  same 10-row bound, keyed on `seId` instead of manager zone-scope. */
+  async listWindows(seId: string, limit = 10): Promise<AvailabilityRow[]> {
+    const rows = await this.prisma.seAvailability.findMany({
+      where: { seId },
+      orderBy: { windowStart: 'desc' },
+      take: limit,
+    });
+    return rows.map((r) => ({
+      status: r.status,
+      windowStart: r.windowStart.toISOString(),
+      windowEnd: r.windowEnd ? r.windowEnd.toISOString() : null,
+      reason: r.reason,
+      setByRole: r.setByRole,
+    }));
   }
 
   /** Current status for a set of SEs in one query (for the Recommender / SE list). */

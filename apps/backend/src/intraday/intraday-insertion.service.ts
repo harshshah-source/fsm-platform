@@ -342,7 +342,26 @@ export class IntradayInsertionService {
       orderBy: { createdAt: 'desc' },
       include: { ticket: { select: { companyId: true, companyTier: true } } },
     });
-    return rows.map((r) => ({
+    return rows.map((r) => this.toRow(r));
+  }
+
+  /** #163 item 3 — `GET /api/me/intraday-insertions`. The caller's own currently-live offer(s) —
+   *  `PENDING_ACCEPTANCE` and `offeredSeId === seId` — so a restarted app can recover the offer screen
+   *  (deadline included) purely from a re-read instead of scraping notifications. Empty when nothing
+   *  is currently offered; never a 403 for "no offer" (that is not a permissions question). */
+  async getMyPendingOffers(seId: string): Promise<IntradayInsertionRow[]> {
+    const rows = await this.prisma.intradayInsertion.findMany({
+      where: { offeredSeId: seId, status: 'PENDING_ACCEPTANCE' },
+      orderBy: { offeredAt: 'desc' },
+      include: { ticket: { select: { companyId: true, companyTier: true } } },
+    });
+    return rows.map((r) => this.toRow(r));
+  }
+
+  private toRow(
+    r: Prisma.IntradayInsertionGetPayload<{ include: { ticket: { select: { companyId: true; companyTier: true } } } }>,
+  ): IntradayInsertionRow {
+    return {
       insertionId: String(r.insertionId),
       ticketId: r.ticketId,
       zoneId: String(r.zoneId),
@@ -359,7 +378,7 @@ export class IntradayInsertionService {
       retryChain: (r.retryChain as unknown as RetryAttempt[]) ?? [],
       whatsappSent: r.whatsappSentAt !== null,
       createdAt: r.createdAt.toISOString(),
-    }));
+    };
   }
 
   // ---- internals ---------------------------------------------------------

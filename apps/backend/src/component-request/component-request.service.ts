@@ -118,6 +118,14 @@ export class ComponentRequestService {
     return this.buildRows(where, now);
   }
 
+  /** #163 item 5 — `GET /api/me/component-requests`. The caller's own requests, any status, newest
+   *  first — the SE `confirm-receipt`s a request today with no way to read it first. Same row shape
+   *  as the manager oversight read; nothing withheld (unlike vehicle-unavailability's SLA-seconds
+   *  fields, there is no manager-only data on this row). */
+  async bySe(seId: string, now: Date = new Date()): Promise<ComponentRequestRow[]> {
+    return this.buildRows({ seId }, now);
+  }
+
   private async buildRows(where: Prisma.ComponentRequestWhereInput, now: Date): Promise<ComponentRequestRow[]> {
     const rows = await this.prisma.componentRequest.findMany({
       where,

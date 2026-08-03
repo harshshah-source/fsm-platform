@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../generated/prisma/client';
 import { type VehicleUnavailReason } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -48,6 +49,10 @@ export interface VehicleUnavailRow {
   secondarySlaSeconds: number;
   createdAt: string;
 }
+
+/** The SE-readable row (#163 item 6) — identical to {@link VehicleUnavailRow} minus
+ *  `secondarySlaSeconds`, which is manager-only by design (PRD §299). */
+export type MeVehicleUnavailRow = Omit<VehicleUnavailRow, 'secondarySlaSeconds'>;
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'];
 
@@ -104,38 +109,64 @@ export class VehicleUnavailabilityService {
 
   /** ZM-scoped open reports with both SLA clocks. A ZONAL_MANAGER sees only their own zone. */
   async listForZone(scope: VuScope, now: Date = new Date()): Promise<VehicleUnavailRow[]> {
-    const reports = await this.prisma.vehicleUnavailabilityReport.findMany({
-      where: {
+    const reports = await this.findReports(
+      {
         status: 'OPEN',
         ...(scope.role === 'ZONAL_MANAGER' && scope.zoneId != null
           ? { ticket: { plant: { zoneId: BigInt(scope.zoneId) } } }
           : {}),
       },
+    );
+    return reports.map((r) => this.toRow(r, now));
+  }
+
+  /** #163 item 6 — `GET /api/me/vehicle-unavailability`. The caller's own reports, every status (not
+   *  just OPEN, so a resolved report's outcome stays visible) — filing today returns only
+   *  `{result, id}`, so the "expected back on [date]" state has no read at all. `secondarySlaSeconds`
+   *  (the true, never-pausing elapsed clock) is withheld by design: manager-only per PRD §299, not an
+   *  oversight — {@link MeVehicleUnavailRow} has no field for it. */
+  async bySe(seId: string, now: Date = new Date()): Promise<MeVehicleUnavailRow[]> {
+    const reports = await this.findReports({ seId });
+    return reports.map((r) => {
+      const { secondarySlaSeconds: _secondarySlaSeconds, ...row } = this.toRow(r, now);
+      return row;
+    });
+  }
+
+  private async findReports(where: Prisma.VehicleUnavailabilityReportWhereInput) {
+    return this.prisma.vehicleUnavailabilityReport.findMany({
+      where,
       include: { ticket: { include: { plant: { select: { name: true } }, failureCycle: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    return reports.map((r) => {
-      const cycle = r.ticket.failureCycle;
-      const secondary = cycle ? Math.floor((now.getTime() - cycle.openedAt.getTime()) / 1000) : 0;
-      const currentPause = cycle?.slaPaused && cycle.slaPausedAt ? Math.floor((now.getTime() - cycle.slaPausedAt.getTime()) / 1000) : 0;
-      const primary = cycle ? Math.max(0, secondary - Number(cycle.slaAccumulatedPauseSeconds) - currentPause) : 0;
-      return {
-        id: String(r.id),
-        ticketId: r.ticketId,
-        seId: r.seId,
-        plantName: r.ticket.plant.name,
-        reasonCode: r.reasonCode,
-        transporterContacted: r.transporterContacted,
-        expectedFrom: r.expectedFrom.toISOString(),
-        expectedTo: r.expectedTo ? r.expectedTo.toISOString() : null,
-        notes: r.notes,
-        status: r.status,
-        slaPaused: cycle?.slaPaused ?? false,
-        primarySlaSeconds: primary,
-        secondarySlaSeconds: secondary,
-        createdAt: r.createdAt.toISOString(),
-      };
-    });
+  }
+
+  private toRow(
+    r: Prisma.VehicleUnavailabilityReportGetPayload<{
+      include: { ticket: { include: { plant: { select: { name: true } }; failureCycle: true } } };
+    }>,
+    now: Date,
+  ): VehicleUnavailRow {
+    const cycle = r.ticket.failureCycle;
+    const secondary = cycle ? Math.floor((now.getTime() - cycle.openedAt.getTime()) / 1000) : 0;
+    const currentPause = cycle?.slaPaused && cycle.slaPausedAt ? Math.floor((now.getTime() - cycle.slaPausedAt.getTime()) / 1000) : 0;
+    const primary = cycle ? Math.max(0, secondary - Number(cycle.slaAccumulatedPauseSeconds) - currentPause) : 0;
+    return {
+      id: String(r.id),
+      ticketId: r.ticketId,
+      seId: r.seId,
+      plantName: r.ticket.plant.name,
+      reasonCode: r.reasonCode,
+      transporterContacted: r.transporterContacted,
+      expectedFrom: r.expectedFrom.toISOString(),
+      expectedTo: r.expectedTo ? r.expectedTo.toISOString() : null,
+      notes: r.notes,
+      status: r.status,
+      slaPaused: cycle?.slaPaused ?? false,
+      primarySlaSeconds: primary,
+      secondarySlaSeconds: secondary,
+      createdAt: r.createdAt.toISOString(),
+    };
   }
 
   /** ZM edits/confirms the expected-availability date. */

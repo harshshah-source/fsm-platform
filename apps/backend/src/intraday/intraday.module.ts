@@ -8,6 +8,7 @@ import { RecommenderModule } from '../recommender/recommender.module';
 import { SchedulingModule } from '../scheduling/scheduling.module';
 import { IntradayInsertionController } from './intraday-insertion.controller';
 import { IntradayInsertionService } from './intraday-insertion.service';
+import { MeIntradayInsertionsController } from './me-intraday-insertions.controller';
 
 /**
  * System-triggered intra-day CRITICAL insertion + SE Acceptance (Issues 29/30). The offer/accept/decline
@@ -18,7 +19,7 @@ import { IntradayInsertionService } from './intraday-insertion.service';
 @Module({
   imports: [PrismaModule, AuthModule, AuditModule, RecommenderModule, SchedulingModule, NotificationsModule],
   providers: [IntradayInsertionService, SeAvailabilityService],
-  controllers: [IntradayInsertionController],
+  controllers: [IntradayInsertionController, MeIntradayInsertionsController],
   exports: [IntradayInsertionService],
 })
 export class IntradayModule {}
