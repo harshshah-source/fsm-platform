@@ -68,6 +68,78 @@ export interface LoginResponse {
   refreshToken: string;
 }
 
+/** `GET /api/me/tickets` (#161 item 2, per #172 Decision 3) row shape — the merged SE day-plan +
+ *  shared-pool read. The image's row glyph (V/P/W/✓) — naming vocabulary pinned under #169, semantics
+ *  fixed by #172 Decision 3. VERIFY/IN_WORK are unambiguous (ticket status / active soft state); PLAN
+ *  vs VISIT_NOW splits assigned-but-not-started day-plan work from open shared-pool work. */
+export type MeTicketWorkState = 'VISIT_NOW' | 'PLAN' | 'IN_WORK' | 'VERIFY';
+
+export interface MeTicketRow {
+  ticketId: string;
+  /** #161 D-4 — the `TCK-#####` display label's raw number (see `ticket-no.ts`). */
+  ticketNo: number;
+  /** Pre-formatted `TCK-#####` (zero-padded to 5) so the client never re-derives the padding rule. */
+  ticketNoDisplay: string;
+  assigned: boolean;
+  workState: MeTicketWorkState;
+  workType: string;
+  status: string;
+  plantId: string;
+  plantName: string;
+  companyName: string;
+  companyTier: string;
+  slaBucket: string | null;
+  deviceId: string;
+  vehicleId: string | null;
+  activeSoftState: string | null;
+  /** Serialized as ISO strings on the wire (backend assigns real `Date` objects; Express's JSON
+   *  serializer stringifies them). Typed `Date` here to match the backend's own construction site —
+   *  a client reading these two fields must parse them, same as any other JSON date. */
+  createdAt: Date;
+  lastStateChangedAt: Date;
+  /** PRD:510 — "removed Ticket shows 'removed' label for one session". Non-null (ISO timestamp) only
+   *  when this ticket was removed from the caller's *current* day-plan batch earlier **today**
+   *  (`BatchAssignmentTicket.removedAt`, any override action — REMOVE_TICKET/DEFER_TICKET/REASSIGN/
+   *  SPLIT_BATCH — scoped to the caller's live `WorkSchedule`). Without this the row would either
+   *  silently vanish (a same-day defer to a future date drops out of both the assigned and pool
+   *  branches) or reappear with no signal that anything changed (a plain removal that returns to the
+   *  pool). The client renders the label and may forget it locally after showing it once — there is
+   *  no server-side "already shown this session" state to key on. `null` for a normal row. */
+  removedFromPlanAt: string | null;
+  /** Set alongside `removedFromPlanAt` only for a DEFER_TICKET removal — the date the ticket returns
+   *  to the pool. `null` for every other case, including a non-removed row. */
+  deferredToDate: string | null;
+  /** #84 AC #2 — "card source = the single highest-severity hint" from the device's latest
+   *  `RawDeviceSnapshot`. `null` when no hint currently fires OR the device has no snapshot row at
+   *  all — the list row has no separate "unavailable" signal, unlike the detail payload's
+   *  `technicalHealth.available`. */
+  topHint: TechnicalHint | null;
+}
+
+/** #84 — Technical Hints (derived telemetry signals), PRD §641 Flow 14. Frozen vocabulary (#169 owns
+ *  freezing this contract further; do not rename without updating there) — eight `code`s, one per
+ *  §641 condition. Mirrors `apps/backend/src/me-tickets/technical-hints.ts`'s `TechnicalHint`. */
+export type TechnicalHintCode =
+  | 'NO_MAIN_POWER'
+  | 'NOT_ON_NETWORK'
+  | 'GPS_INVALID'
+  | 'NO_GPS_FIX'
+  | 'LOW_VOLTAGE'
+  | 'WEAK_GSM'
+  | 'IGNITION_OFF'
+  | 'VEHICLE_IN_MOTION';
+
+export interface TechnicalHint {
+  code: TechnicalHintCode;
+  severity: number;
+  label: string;
+}
+
+export interface MeTicketsView {
+  items: MeTicketRow[];
+  cursor: null;
+}
+
 /**
  * SLA bucket enum (CONTEXT "SLA Bucket" / LLD §9). A device's inactivity-age band, severity ascending
  * WARNING → LONG_PENDING. Deliberately omits ACTIVE — the 0–4h band is the *absence* of a bucket

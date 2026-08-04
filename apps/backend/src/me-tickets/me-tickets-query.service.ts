@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { MeTicketRow, MeTicketWorkState, MeTicketsView } from '@fsm/shared';
 import { utcDayStart } from '../common/utc-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
@@ -7,58 +8,7 @@ import { notDeferredOn } from '../ticketing/deferral';
 import { formatTicketNo, ticketNoAsNumber } from '../ticketing/ticket-no';
 import { buildTechnicalHealth, pickTopHint, type TechnicalHint } from './technical-hints';
 
-/** The image's row glyph (V/P/W/✓) — naming vocabulary pinned under #169, semantics fixed by #172
- *  Decision 3. VERIFY/IN_WORK are unambiguous (ticket status / active soft state); PLAN vs VISIT_NOW
- *  splits assigned-but-not-started day-plan work from open shared-pool work. */
-export type MeTicketWorkState = 'VISIT_NOW' | 'PLAN' | 'IN_WORK' | 'VERIFY';
-
-export interface MeTicketRow {
-  ticketId: string;
-  /** #161 D-4 — the `TCK-#####` display label's raw number (see `ticket-no.ts`). */
-  ticketNo: number;
-  /** Pre-formatted `TCK-#####` (zero-padded to 5) so the client never re-derives the padding rule. */
-  ticketNoDisplay: string;
-  assigned: boolean;
-  workState: MeTicketWorkState;
-  workType: string;
-  status: string;
-  plantId: string;
-  plantName: string;
-  companyName: string;
-  companyTier: string;
-  slaBucket: string | null;
-  deviceId: string;
-  vehicleId: string | null;
-  activeSoftState: string | null;
-  createdAt: Date;
-  lastStateChangedAt: Date;
-  /** PRD:510 — "removed Ticket shows 'removed' label for one session". Non-null (ISO timestamp) only
-   *  when this ticket was removed from the caller's *current* day-plan batch earlier **today**
-   *  (`BatchAssignmentTicket.removedAt`, any override action — REMOVE_TICKET/DEFER_TICKET/REASSIGN/
-   *  SPLIT_BATCH — scoped to the caller's live `WorkSchedule`). Without this the row would either
-   *  silently vanish (a same-day defer to a future date drops out of both the assigned and pool
-   *  branches) or reappear with no signal that anything changed (a plain removal that returns to the
-   *  pool). The client renders the label and may forget it locally after showing it once — there is
-   *  no server-side "already shown this session" state to key on. `null` for a normal row. */
-  removedFromPlanAt: string | null;
-  /** Set alongside `removedFromPlanAt` only for a DEFER_TICKET removal — the date the ticket returns
-   *  to the pool. `null` for every other case, including a non-removed row. */
-  deferredToDate: string | null;
-  /** #84 AC #2 — "card source = the single highest-severity hint" from the device's latest
-   *  `RawDeviceSnapshot`, via the same pure derivation (`technical-hints.ts`) the full detail read
-   *  (`MeTicketDetailView.technicalHealth.hints`) uses. `null` when no hint currently fires OR the
-   *  device has no snapshot row at all — the list row has no separate "unavailable" signal, unlike
-   *  the detail payload's `technicalHealth.available`; a client wanting to distinguish those two
-   *  cases reads the detail payload. Also satisfies the `topTechnicalHint` field #161's own
-   *  day-plan-expansion comment names separately — see this issue's landed-comment note so a future
-   *  #161 continuation does not duplicate it. */
-  topHint: TechnicalHint | null;
-}
-
-export interface MeTicketsView {
-  items: MeTicketRow[];
-  cursor: null;
-}
+export type { MeTicketRow, MeTicketWorkState, MeTicketsView } from '@fsm/shared';
 
 function workStateFor(status: string, assigned: boolean, inWork: boolean): MeTicketWorkState {
   if (status === 'VERIFICATION_PENDING') return 'VERIFY';
