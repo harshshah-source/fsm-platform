@@ -78,6 +78,9 @@ export class MeTicketsQueryService {
             ...notDeferredOn(utcDayStart(now)),
           },
           { ticketId: { in: [...removedTodayByTicket.keys()] } },
+          // #68 — RECOVERY (and INSTALL) dispatch sets `assignedSeId` directly with no
+          // `PlantBatchAssignment` row, so the batch-derived branch above never sees them.
+          { assignedSeId: seId },
         ],
       },
       orderBy: [{ plantId: 'asc' }, { createdAt: 'asc' }],
@@ -98,7 +101,7 @@ export class MeTicketsQueryService {
     const topHintByDevice = await this.topHintsByDevice(tickets.map((t) => String(t.deviceId)));
 
     const items: MeTicketRow[] = tickets.map((t) => {
-      const assigned = assignedTicketIds.has(t.ticketId);
+      const assigned = assignedTicketIds.has(t.ticketId) || t.assignedSeId === seId;
       const activeSoftState = activeByTicket.get(t.ticketId) ?? null;
       const inWork = activeSoftState === 'ON_SITE' || activeSoftState === 'TROUBLESHOOT_STARTED';
       const removedToday = removedTodayByTicket.get(t.ticketId) ?? null;

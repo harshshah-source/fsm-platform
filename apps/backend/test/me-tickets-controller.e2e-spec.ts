@@ -270,6 +270,36 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
     expect(byId.get(ticketId)?.vehicleNo).toBeNull();
   });
 
+  it('#68 — includes a RECOVERY ticket assigned directly via assignedSeId (no batch row)', async () => {
+    const deviceId = String(9_870_000_000 + (NS % 100_000));
+    deviceIds.push(deviceId);
+    await prisma.device.create({ data: { deviceId } });
+    const ticket = await prisma.ticket.create({
+      data: {
+        workType: 'RECOVERY',
+        status: 'SCHEDULED',
+        assignedSeId: se,
+        deviceId,
+        plantId,
+        companyId,
+        companyTier: 'GOLD',
+        lastStateChangedAt: NOW,
+      },
+    });
+    ticketIds.push(ticket.ticketId);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/me/tickets')
+      .set('Authorization', `Bearer ${seToken()}`)
+      .expect(200);
+
+    const row = (res.body.items as Array<{ ticketId: string; assigned: boolean; workType: string }>).find(
+      (i) => i.ticketId === ticket.ticketId,
+    );
+    expect(row?.assigned).toBe(true);
+    expect(row?.workType).toBe('RECOVERY');
+  });
+
   it('forbids a non-SE role', async () => {
     const token = await login('zm.north@fsm.test');
     await request(app.getHttpServer()).get('/api/me/tickets').set('Authorization', `Bearer ${token}`).expect(403);
