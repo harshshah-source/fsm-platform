@@ -21,11 +21,14 @@ import type {
   MeTicketDetailView,
   MeTicketsView,
   MeVouchersView,
+  MyAvailabilityView,
   MyIntradayOffersView,
   MyLeaveRequestsView,
   NotificationList,
   RecoveryActionResponse,
   SessionView,
+  SetAvailabilityRequest,
+  SetAvailabilityResponse,
   SetSoftStateRequest,
   SetSoftStateResponse,
   SoftStateConflictBody,
@@ -496,4 +499,34 @@ export async function apiSubmitLeaveRequest(
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as SubmitLeaveRequestResponse;
+}
+
+export async function apiGetMyAvailability(accessToken: string): Promise<MyAvailabilityView> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/me/availability`, { headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as MyAvailabilityView;
+}
+
+/** `{code}` on every non-2xx status — `400` (`INVALID_AVAILABILITY_STATUS`/`INVALID_WINDOW_START`/
+ *  `INVALID_WINDOW_END`/`WINDOW_END_REQUIRED`), `403` (`AVAILABILITY_FORBIDDEN`), `404`
+ *  (`SE_NOT_FOUND`) — surfaced uniformly. */
+export async function apiSetAvailability(
+  accessToken: string,
+  seId: string,
+  body: SetAvailabilityRequest,
+): Promise<SetAvailabilityResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/engineers/${seId}/availability`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
+  return (await res.json()) as SetAvailabilityResponse;
 }

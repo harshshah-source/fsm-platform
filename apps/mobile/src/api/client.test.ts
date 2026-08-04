@@ -20,6 +20,7 @@ import {
   apiDeclineIntradayInsertion,
   apiGetDayPlan,
   apiGetMyComponentRequests,
+  apiGetMyAvailability,
   apiGetMyIntradayOffers,
   apiGetMyLeaveRequests,
   apiGetMyTickets,
@@ -38,6 +39,7 @@ import {
   apiRecoveryOnSite,
   apiRecoveryUnableToCollect,
   apiRefresh,
+  apiSetAvailability,
   apiSetSoftState,
   apiSubmitLeaveRequest,
   apiSubmitTroubleshoot,
@@ -968,5 +970,65 @@ describe('#86 — leave request endpoints', () => {
     await expect(
       apiSubmitLeaveRequest('token', { seId: 'se-1', type: 'ON_LEAVE', windowStart: '2026-08-10', windowEnd: '2026-08-12' }),
     ).rejects.toThrow('INVALID_LEAVE_TYPE');
+  });
+});
+
+describe('#87 — availability endpoints', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('apiGetMyAvailability GETs /me/availability with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const view = { items: [], cursor: null };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetMyAvailability('token');
+
+    expect(result).toEqual(view);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/me\/availability$/);
+  });
+
+  it('apiSetAvailability POSTs the request body to /engineers/:seId/availability', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = { result: 'OK', id: 'av-1' };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+    const body = { status: 'SOFT_UNAVAILABLE' as const, windowStart: '2026-08-10T00:00:00Z', windowEnd: '2026-08-12T00:00:00Z' };
+
+    const result = await apiSetAvailability('token', 'se-1', body);
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/engineers\/se-1\/availability$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify(body) });
+  });
+
+  it('apiSetAvailability throws WINDOW_END_REQUIRED verbatim on a 400', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'WINDOW_END_REQUIRED' }),
+    } as unknown as Response);
+
+    await expect(
+      apiSetAvailability('token', 'se-1', { status: 'SOFT_UNAVAILABLE', windowStart: '2026-08-10T00:00:00Z', windowEnd: '' }),
+    ).rejects.toThrow('WINDOW_END_REQUIRED');
+  });
+
+  it('apiSetAvailability throws AVAILABILITY_FORBIDDEN verbatim on a 403 (clearing a manager-set window)', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ code: 'AVAILABILITY_FORBIDDEN' }),
+    } as unknown as Response);
+
+    await expect(
+      apiSetAvailability('token', 'se-1', { status: 'AVAILABLE', windowStart: '2026-08-10T00:00:00Z', windowEnd: '2026-08-12T00:00:00Z' }),
+    ).rejects.toThrow('AVAILABILITY_FORBIDDEN');
   });
 });

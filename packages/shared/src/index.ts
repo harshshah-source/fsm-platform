@@ -920,3 +920,43 @@ export interface SubmitLeaveRequestResponse {
   result: 'OK';
   id: string;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #87 — SE mobile Availability / SOFT_UNAVAILABLE (Issue 25's
+// `POST /api/engineers/:seId/availability` + #163's SE-scoped `GET /api/me/availability`).
+// `AVAILABLE` is settable only to clear the caller's own currently-active `SOFT_UNAVAILABLE`
+// window early (#87/#162) — the mobile client only ever sends these two status values, never
+// ON_LEAVE/OFF_SHIFT/WEEKLY_OFF (server-enforced ZM-only, would 403).
+// ---------------------------------------------------------------------------------------------
+
+export type SeSettableAvailabilityStatus = 'SOFT_UNAVAILABLE' | 'AVAILABLE';
+
+/** Mirrors `AvailabilityRow` (`se-availability.service.ts`) — already JSON-safe server-side. */
+export interface AvailabilityRow {
+  status: string;
+  windowStart: string;
+  windowEnd: string | null;
+  reason: string | null;
+  setByRole: string | null;
+}
+
+/** `GET /api/me/availability` — the caller's own windows, most recent `windowStart` first (not
+ *  filtered to "currently active" — the client derives that from `windowStart`/`windowEnd`). */
+export interface MyAvailabilityView {
+  items: AvailabilityRow[];
+  cursor: null;
+}
+
+/** `POST /api/engineers/:seId/availability` body. `windowEnd` is mandatory for a self-set request
+ *  (`WINDOW_END_REQUIRED` otherwise) — only a manager may leave it open-ended. */
+export interface SetAvailabilityRequest {
+  status: SeSettableAvailabilityStatus;
+  windowStart: string;
+  windowEnd: string;
+  reason?: string | null;
+}
+
+export interface SetAvailabilityResponse {
+  result: 'OK';
+  id: string;
+}
