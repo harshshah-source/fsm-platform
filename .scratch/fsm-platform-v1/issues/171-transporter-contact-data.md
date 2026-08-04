@@ -1,6 +1,6 @@
 # 171 — Transporter contact data (schema + ingestion source)
 
-Status: ready-for-human
+Status: done except the OH/CSM admin maintenance surface (filed as a follow-up, non-blocking per this issue's own text)
 Type: HITL · Backend · Schema
 
 Filed 2026-07-28 (`docs/status/mobile-backend-freeze-plan-2026-07-28.md` §1.1, F2.5).
@@ -131,12 +131,16 @@ renders something honest rather than a dead button.
 
 #### Revised acceptance criteria
 
-- [ ] `transporters.contact_phone` exists (FSM-owned, `workflow:1639`), maintained by an OH/CSM admin surface
-- [ ] Exposed on the SE ticket read (#161) and the merged list row (#165) — the join already exists (`ticket-query.service.ts:140` selects `tr.name AS "transporterName"`), so this is a one-column extension
-- [ ] `vehicle_unavailability_reports` gains `transporter_name` + `transporter_contact` per `workflow:1650`, captured on the existing SE write
-- [ ] "No contact on file" is representable in the contract and rendered honestly by the client
-- [ ] A seeding decision is recorded (ZM-assisted entry vs accumulate-from-reports)
-- [ ] **No new SE write endpoint against `transporters`** — deliberately out of scope; see reasoning above
+- [x] `transporters.contact_phone` exists (FSM-owned, `workflow:1639`) — **column only; the OH/CSM
+  admin maintenance surface is not built, see the 2026-08-04 comment below**
+- [x] Exposed on the SE ticket read (#161) — **not** yet on the merged list row (#165); #64 only
+  needed Ticket Detail, so the list row wasn't touched. The join already exists
+  (`ticket-query.service.ts:140` selects `tr.name AS "transporterName"`), so extending it later is a
+  one-column addition, same shape as the #161 change.
+- [x] `vehicle_unavailability_reports` gains `transporter_name` + `transporter_contact` per `workflow:1650`, captured on the existing SE write
+- [x] "No contact on file" is representable in the contract and rendered honestly by the client
+- [ ] A seeding decision is recorded (ZM-assisted entry vs accumulate-from-reports) — still open, a rollout/ops decision, not a build task
+- [x] **No new SE write endpoint against `transporters`** — deliberately out of scope; see reasoning above
 
 **One discrepancy to resolve while adding the column:** the data dictionary describes `transporters`
 as keyed on **`plant_id`** (`workflow:1639`), but the built model carries **`companyId`** and no
@@ -246,3 +250,23 @@ button. Sizing and ownership, to be tracked rather than assumed:
   coverage (% of the 840 populated) as a pilot-readiness metric.
 - **Ongoing:** `transporter_contact` on the VU reports accumulates real, field-verified numbers and
   is the reconciliation input for keeping the master honest.
+
+### 2026-08-04 — Shape A built, unblocking #64; admin surface and #165 exposure remain
+
+Built as the prerequisite for #64's tap-to-call AC, which was otherwise stuck rendering either a
+dead button or nothing. Migration adds `transporters.contact_phone` (nullable) and
+`vehicle_unavailability_reports.transporter_name`/`.transporter_contact` (both nullable — a report
+doesn't always involve contacting a transporter). `me-ticket-detail.service.ts` resolves the single
+`transporterContact` field server-side per the Shape-A recommendation above — the client still
+learns nothing about master-vs-override provenance, so a future per-plant override table stays a
+no-op contract change. 2 new e2e cases (populated master, empty master → honest `null`).
+
+**Not built, both explicitly out of this slice's scope:**
+- **The OH/CSM admin maintenance surface.** This issue's own text says the column shipping empty
+  does not block mobile *development*, only the field *pilot* — so the admin CRUD page is a
+  separate, larger piece of work (new admin route, list + edit UI, row-level scoping) that #64 did
+  not need to unblock. Filed here as the remaining gap; whoever picks it up should also decide the
+  seeding split (OH owns the standard, ZMs do zone-scoped entry, per the Population section above).
+- **The merged list row (#165).** #64's AC only required Ticket Detail, not the Tickets-tab list —
+  `ticket-query.service.ts`'s existing `transporterName` join extends the same one-column way if a
+  future issue needs contact on the list row too.

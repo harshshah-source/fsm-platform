@@ -1,6 +1,6 @@
 # 64 — SE mobile Vehicle Unavailability file screen + Transporter tap-to-call + readiness hints
 
-Status: ready-for-agent
+Status: done except the readiness-hint AC (deferred to #65, per this issue's own split)
 Type: AFK · Mobile
 
 ## What to build
@@ -24,9 +24,9 @@ never shows a pause indicator and raw readiness never pauses the SLA.
 
 ## Acceptance criteria
 
-- [ ] SE Ticket Detail shows Transporter name + contact with tap-to-call
-- [ ] SE files a Vehicle Unavailability Report (all fields) → `POST /api/vehicle-unavailability`
-- [ ] SE never sees the Secondary SLA Clock (manager-only)
+- [x] SE Ticket Detail shows Transporter name + contact with tap-to-call
+- [x] SE files a Vehicle Unavailability Report (all fields) → `POST /api/vehicle-unavailability`
+- [x] SE never sees the Secondary SLA Clock (manager-only)
 - [ ] *(deferred until #65)* Readiness colour hints render as warnings on Ticket Detail; only ON_TRIP blocks; no pause indicator
 
 ## API contract (authority: backend on `main`)
@@ -80,3 +80,29 @@ never shows a pause indicator and raw readiness never pauses the SLA.
 - #28
 - #54
 - (readiness-hint AC) #65
+
+## Comments
+
+### 2026-08-04 — DONE except the readiness-hint AC; unblocked #171 first (tap-to-call needed a real number)
+
+The tap-to-call AC needed a real contact number, which didn't exist anywhere (`transporters` had no
+phone column — see #171, filed 2026-07-28, decisions already settled but its status label was stale
+`ready-for-human`). Built #171's minimal buildable slice first: `Transporter.contactPhone` (FSM-owned,
+nullable, empty on day one per the issue's own bootstrapping section), resolved server-side into
+`transporterContact` on `GET /api/me/tickets/:id`; `vehicle_unavailability_reports` gained
+`transporterName`/`transporterContact` for the SE's own per-report capture. #171's OH/CSM admin
+maintenance surface is NOT built — out of this issue's scope, and #171's own text says the column
+shipping empty does not block mobile development (only the field pilot).
+
+`VehicleUnavailabilityFormScreen`: reason (`TilePicker`, 5 values), transporter-contacted toggle,
+transporter name/number used (prefilled from the master contact, SE-editable — the report's own
+fields are field evidence, not required to match the master), expected-back via 4 quick relative
+presets (2h / 4h / tomorrow AM / tomorrow PM) rather than a native date/time picker — no reference
+mockup specifies that field's input UX, and installing a native picker for one required field wasn't
+worth the added native-module/test-mocking surface. Files with `seId` = the caller's own id (the
+server already 403s a mismatched `seId` — `vehicle-unavailability.service.ts`'s existing
+`actor.userId === input.seId` check, unchanged). No Secondary SLA Clock field exists on this screen
+at all — not a hidden/conditional render, simply never built into the SE-facing form.
+
+**Not built:** `expectedTo` (optional field, skipped for scope); the readiness-hint AC, explicitly
+deferred to #65 per this issue's own split. 197 mobile tests green, `tsc`/`eslint` clean both apps.
