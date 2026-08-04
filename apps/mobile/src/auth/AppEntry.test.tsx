@@ -1,10 +1,16 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { render, screen } from '@testing-library/react-native';
+import { render, screen, waitFor } from '@testing-library/react-native';
 import type { SessionView } from '@fsm/shared';
 import { AppEntry } from './AppEntry';
 import { useAuth } from './AuthProvider';
 
 jest.mock('./AuthProvider', () => ({ useAuth: jest.fn() }));
+// The SE tab shell's default Home tab (#55) reads connectivity on mount — offline-with-no-cache
+// short-circuits before touching the client, which is all this suite needs (see HomeScreen's own
+// test file for live-data behavior).
+jest.mock('../api/connectivity', () => ({
+  getConnectivityState: jest.fn<() => Promise<'online' | 'offline'>>().mockResolvedValue('offline'),
+}));
 
 const mockUseAuth = jest.mocked(useAuth);
 
@@ -39,13 +45,14 @@ describe('AppEntry', () => {
     expect(screen.queryByTestId('email-input')).toBeNull();
   });
 
-  it('renders the SE tab shell when authenticated as SERVICE_ENGINEER', () => {
+  it('renders the SE tab shell when authenticated as SERVICE_ENGINEER', async () => {
     setAuth({ user_id: 'se-1', role: 'SERVICE_ENGINEER', zone_id: 1, acted_as_role: null });
     render(<AppEntry />);
 
     expect(screen.getByTestId('screen-home')).toBeTruthy();
     expect(screen.getByTestId('tab-Tickets')).toBeTruthy();
     expect(screen.queryByTestId('logout')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('home-offline-badge')).toBeTruthy());
   });
 
   it('renders neither screen while rehydrating, even with no session yet', () => {
