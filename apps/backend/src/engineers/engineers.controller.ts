@@ -63,9 +63,11 @@ function reqNum(raw: number | string | undefined, field: string): number {
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 
-/** The statuses a manager/SE may actively set (CONTEXT §SE Availability). AVAILABLE is the implicit
- *  default outside any window; OFFLINE is a derived activity signal, never a set value. */
-const SETTABLE_STATUSES: readonly SeAvailabilityStatus[] = ['ON_LEAVE', 'OFF_SHIFT', 'WEEKLY_OFF', 'SOFT_UNAVAILABLE'];
+/** The statuses a manager/SE may actively set (CONTEXT §SE Availability). AVAILABLE is settable too
+ *  (#87/#162) — its only legal use is an SE clearing their own active SOFT_UNAVAILABLE window early
+ *  (enforced in `SeAvailabilityService.setAvailability`, not here); OFFLINE is a derived activity
+ *  signal, never a set value. */
+const SETTABLE_STATUSES: readonly SeAvailabilityStatus[] = ['AVAILABLE', 'ON_LEAVE', 'OFF_SHIFT', 'WEEKLY_OFF', 'SOFT_UNAVAILABLE'];
 
 interface SetAvailabilityBody {
   status: SeAvailabilityStatus;
@@ -216,6 +218,12 @@ export class EngineersController {
     const windowEnd = body.windowEnd != null ? new Date(body.windowEnd) : null;
     if (windowEnd && Number.isNaN(windowEnd.getTime())) {
       throw new BadRequestException({ code: 'INVALID_WINDOW_END' });
+    }
+    // #87 (operator-settled 2026-07-28) — an SE-set window is always bounded, so the server's
+    // auto-revert-at-to_ts story (PRD:615) actually applies; managers keep open-ended windows
+    // (e.g. indefinite ON_LEAVE) for every status, self-set included.
+    if (user.role === 'SERVICE_ENGINEER' && user.user_id === seId && windowEnd === null) {
+      throw new BadRequestException({ code: 'WINDOW_END_REQUIRED' });
     }
 
     const outcome = await this.availability.setAvailability(

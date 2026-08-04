@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { TokenService } from '../src/auth/token.service';
+import { SeAvailabilityService } from '../src/engineers/se-availability.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -21,6 +22,7 @@ describe('Issue 25 slice 3 — Set Availability HTTP (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let tokens: TokenService;
+  let availability: SeAvailabilityService;
   let seZ1: string; // SE in zone 1 (North) — ZM north's own zone
   let seZ2: string; // SE in zone 2 (South) — another zone
   const userIds: string[] = [];
@@ -44,6 +46,7 @@ describe('Issue 25 slice 3 — Set Availability HTTP (e2e)', () => {
     await app.init();
     prisma = app.get(PrismaService);
     tokens = app.get(TokenService);
+    availability = app.get(SeAvailabilityService);
     // The in-memory ZM-north token is scoped to zoneId 1; this suite also exercises a
     // cross-zone (zoneId 2) 403. On a non-pristine DB the org seed creates North/South at
     // higher sequence ids, so we cannot assume zones 1/2 exist. Ensure them by explicit id
@@ -104,6 +107,80 @@ describe('Issue 25 slice 3 — Set Availability HTTP (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ status: 'ON_LEAVE', ...window, reason: 'leave' })
       .expect(403);
+  });
+
+  it('#87/#162 — an SE may clear their own active SOFT_UNAVAILABLE by self-setting AVAILABLE → 201', async () => {
+    const se = await makeSe(1n);
+    const token = tokens.signAccessToken({ user_id: se, role: 'SERVICE_ENGINEER', zone_id: 1 });
+    const active = { windowStart: new Date(Date.now() - 60_000).toISOString(), windowEnd: new Date(Date.now() + 3_600_000).toISOString() };
+    await request(app.getHttpServer())
+      .post(`/api/engineers/${se}/availability`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'SOFT_UNAVAILABLE', ...active })
+      .expect(201);
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/engineers/${se}/availability`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'AVAILABLE', windowStart: new Date().toISOString(), windowEnd: active.windowEnd })
+      .expect(201);
+    expect(res.body.result).toBe('OK');
+
+    const status = await availability.currentStatus(se);
+    expect(status).toBe('AVAILABLE');
+  });
+
+  it('#87/#162 — an SE self-setting AVAILABLE while not currently SOFT_UNAVAILABLE is forbidden → 403', async () => {
+    const se = await makeSe(1n);
+    const token = tokens.signAccessToken({ user_id: se, role: 'SERVICE_ENGINEER', zone_id: 1 });
+
+    await request(app.getHttpServer())
+      .post(`/api/engineers/${se}/availability`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'AVAILABLE', windowStart: new Date().toISOString(), windowEnd: new Date(Date.now() + 3_600_000).toISOString() })
+      .expect(403);
+  });
+
+  it('#87/#162 — an SE cannot clear a manager-set ON_LEAVE window by self-setting AVAILABLE → 403', async () => {
+    const se = await makeSe(1n);
+    const zmToken = await login('zm.north@fsm.test');
+    const active = { windowStart: new Date(Date.now() - 60_000).toISOString(), windowEnd: new Date(Date.now() + 3_600_000).toISOString() };
+    await request(app.getHttpServer())
+      .post(`/api/engineers/${se}/availability`)
+      .set('Authorization', `Bearer ${zmToken}`)
+      .send({ status: 'ON_LEAVE', ...active, reason: 'leave' })
+      .expect(201);
+
+    const seToken = tokens.signAccessToken({ user_id: se, role: 'SERVICE_ENGINEER', zone_id: 1 });
+    await request(app.getHttpServer())
+      .post(`/api/engineers/${se}/availability`)
+      .set('Authorization', `Bearer ${seToken}`)
+      .send({ status: 'AVAILABLE', windowStart: new Date().toISOString(), windowEnd: active.windowEnd })
+      .expect(403);
+
+    const status = await availability.currentStatus(se);
+    expect(status).toBe('ON_LEAVE');
+  });
+
+  it('#87 — an SE-set window without windowEnd is rejected → 400', async () => {
+    const se = await makeSe(1n);
+    const token = tokens.signAccessToken({ user_id: se, role: 'SERVICE_ENGINEER', zone_id: 1 });
+    const res = await request(app.getHttpServer())
+      .post(`/api/engineers/${se}/availability`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'SOFT_UNAVAILABLE', windowStart: new Date().toISOString() })
+      .expect(400);
+    expect(res.body.code).toBe('WINDOW_END_REQUIRED');
+  });
+
+  it('#87 — a manager-set window without windowEnd is accepted (indefinite leave) → 201', async () => {
+    const se = await makeSe(1n);
+    const token = await login('zm.north@fsm.test');
+    await request(app.getHttpServer())
+      .post(`/api/engineers/${se}/availability`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ status: 'ON_LEAVE', windowStart: new Date().toISOString() })
+      .expect(201);
   });
 
   it('forbids a ZM from setting an SE in another zone → 403', async () => {

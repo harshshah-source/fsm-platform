@@ -85,6 +85,13 @@ export class SeAvailabilityService {
    * #162 — an SE self-set is narrowed to SOFT_UNAVAILABLE only (PRD:496; workflow:1338/:1360-1363: SE
    * cannot self-approve ON_LEAVE/OFF_SHIFT/WEEKLY_OFF, those are ZM-only). Managers keep the full
    * `SETTABLE_STATUSES` set regardless of which status they're writing.
+   *
+   * #87/#162 (coupled, operator-settled 2026-07-28) — an SE may also self-set `AVAILABLE`, but only
+   * to clear their own currently-active `SOFT_UNAVAILABLE` window early (an open-ended
+   * `SOFT_UNAVAILABLE` is otherwise unrecoverable via this API by any role). Checked against
+   * whatever status is active *right now*, regardless of who set it — the narrowing this pairs with
+   * is specifically about ON_LEAVE/OFF_SHIFT/WEEKLY_OFF (ZM-only decisions), not about who last
+   * touched a SOFT_UNAVAILABLE row, which an SE already has full self-service authority over.
    */
   async setAvailability(input: SetAvailabilityInput, actor: AvailabilityActor): Promise<SetAvailabilityOutcome> {
     const engineer = await this.prisma.engineerMaster.findUnique({ where: { engineerId: input.seId } });
@@ -92,8 +99,10 @@ export class SeAvailabilityService {
 
     const effectiveRole = actor.actedAsRole ?? actor.role;
     const selfSet = actor.role === 'SERVICE_ENGINEER' && actor.userId === input.seId;
+    const selfClearAllowed = selfSet && input.status === 'AVAILABLE' && (await this.currentStatus(input.seId)) === 'SOFT_UNAVAILABLE';
     const allowed =
       (selfSet && input.status === 'SOFT_UNAVAILABLE') ||
+      selfClearAllowed ||
       (effectiveRole === 'ZONAL_MANAGER' && (actor.zoneId === null || Number(engineer.zoneId) === actor.zoneId)) ||
       effectiveRole === 'CENTRAL_SERVICE_MANAGER';
     if (!allowed) return { result: 'FORBIDDEN' };
