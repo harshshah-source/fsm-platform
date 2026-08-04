@@ -1,8 +1,11 @@
 # 76 — Notification spine adoption + external channel adapters
 
-Status: ready-for-agent for spine adoption + token registration (D1/D4 settled 2026-08-03) + the
-per-channel delivery-status fix · ready-for-human remainder: FCM/WhatsApp account provisioning,
-PRD:305 correction sign-off, and the broadcast-vs-fallback product call (see 2026-08-03 comment)
+Status: partially done (2026-08-04) — token registration endpoint, the SE_ACCEPTANCE delivery-status
+fix, and day-plan/recovery/install notifier adoption are built. Remaining AFK-buildable scope
+(customer-confirmation, component-request, repeat-escalation, voucher-notifier adoption) has no
+existing seam/precedent and needs its own scoping, not blind adoption — see 2026-08-04 comment.
+ready-for-human remainder unchanged: FCM/WhatsApp account provisioning, PRD:305 correction
+sign-off, and the broadcast-vs-fallback product call (see 2026-08-03 comment)
 Type: HITL (external accounts) + AFK (spine adoption, token endpoint, status fix)
 
 ## Context
@@ -33,11 +36,16 @@ audit-trail viewer — over a single external-delivery seam (`NotificationChanne
 
 ## Acceptance criteria
 
-- [ ] Every existing per-feature notifier routes through `NotificationService` (in-app always fires)
-- [ ] FCM/APNs push adapter delivers, incl. Accept/Decline quick-action payloads
-- [ ] Device push-token registration endpoint (`POST /api/notifications/device-token`) registers/clears an SE's token (consumed by #89)
-- [ ] WhatsApp / SMS / SMTP adapters deliver; fallback chain resolves on real SENT/FAILED
-- [ ] All listed per-role notifiable events produce a notification
+- [~] Every existing per-feature notifier routes through `NotificationService` (in-app always fires)
+      — day-plan, recovery, install done (2026-08-04); customer-confirmation, component-request,
+      repeat-escalation, voucher-notifier remain — see 2026-08-04 comment for why each is deferred
+- [ ] FCM/APNs push adapter delivers, incl. Accept/Decline quick-action payloads — HITL, blocked on
+      external account provisioning
+- [x] Device push-token registration endpoint (`POST /api/notifications/device-token`) registers/clears an SE's token (consumed by #89) — done 2026-08-04
+- [ ] WhatsApp / SMS / SMTP adapters deliver; fallback chain resolves on real SENT/FAILED — HITL,
+      blocked on external account provisioning
+- [ ] All listed per-role notifiable events produce a notification — depends on the remaining
+      adoption + adapters above
 
 ## Blocked by
 
@@ -183,3 +191,50 @@ a **stress bar / future projection**, not the fleet size. Every other sizing in 
 argument for push-over-polling still holds directionally at 75, but capacity planning must not
 inherit 1,000 as a present-day fact. Corrected here so it stops propagating; the 07-22 doc itself is
 a frozen assessment and is not edited.
+
+---
+
+### 2026-08-04 — AFK slice built: token endpoint, delivery-status fix, three notifier adoptions
+
+Picked up as an AFK-buildable slice after the mobile queue (#68/#71/#77/#85/#86/#87) was exhausted
+and #89 (push) proved genuinely blocked on FCM account provisioning — user sign-off given via
+explicit choice among AFK-continuation options, scoped narrowly to what has either a single
+unambiguous recipient or an already-precedented recipient-resolution pattern. **Built:**
+
+1. **`POST /api/notifications/device-token`** — SE-bound, `DeviceToken` model (one row per user per
+   D4), registers on call and clears on logout (`AuthService.logout` → `DeviceTokenService.clear`).
+   Satisfies the endpoint AC in full; the mobile client that calls it is still #89's job (blocked).
+2. **SE_ACCEPTANCE WhatsApp delivery-status fix** — `notification.service.ts` no longer records a
+   false `SENT` when the gateway returns non-SENT for the first-class WhatsApp channel; now records
+   `ATTEMPTED` truthfully, matching how the GENERAL chain already behaved. This is the defect fix
+   this issue's own 2026-08-03 comment flagged (PRD:305 correction still awaits product sign-off;
+   this only fixes the audit-record honesty, not the display-layer question).
+3. **Three notifier adoptions** — `day-plan-notifier`, `recovery-notifier`, `install-notifier` now
+   route through `NotificationService.notify` (`SpineDayPlanNotifier`/`SpineRecoveryNotifier`/
+   `SpineInstallNotifier`, swapped in as the DI default in `scheduling.module.ts`/
+   `ticketing.module.ts`). Day-plan and install events have exactly one recipient (the assigned SE).
+   Recovery's `unableToCollect` resolves the ZM via ticket → plant → zone (the same lookup shape
+   `IntradayInsertionService.escalateToZm` already uses). All three no-op when `seId`/zone-ZM is
+   null, matching the Logging stubs' own behavior. Proven by `notifier-adoption-wiring.e2e-spec.ts`
+   (boots the real `AppModule`, asserts each DI token resolves to its Spine class), plus mapping-
+   logic tests per notifier. Full regression sweep (100+ tests) green.
+
+**Deliberately NOT adopted this slice — evidence-based, not skipped for time:**
+
+- **`recovery-notifier`'s `escalatedToOh`** — no "notify Operations Head" recipient-resolution
+  precedent exists anywhere in the codebase; broadcast-to-all-OH vs. a single designated OH is a
+  product decision, not something to invent here. Stays on its Logging stub's own logging-only
+  implementation (kept, not deleted, so behavior doesn't silently regress to nothing once
+  `SpineRecoveryNotifier` replaces it as the DI default).
+- **`customer-confirmation-notifier`** — the customer is an external party with no internal `User`
+  row, so it structurally cannot route through `NotificationService.notify`'s `{userId, role}`
+  recipient model. Adopting it would require a different API shape, out of this slice.
+- **Component-request notifications and `repeat-escalation`** — neither has an existing
+  `Logging*Notifier` seam to adopt; wiring either in would mean inventing a new trigger point, which
+  is a different task from "adoption" as this issue's AC#1 describes it.
+- **Voucher-notifier** — not named in this issue's own AC#1 list at all.
+
+**What still blocks the rest of this issue, unchanged:** FCM/APNs push adapter, WhatsApp/SMS/SMTP
+adapters (all HITL — external account + template-approval provisioning), the PRD:305 delivery-
+display correction (awaits product sign-off), and the broadcast-vs-fallback product conflict (2026-
+08-03 comment, owner: product). None of those were touched this slice.
