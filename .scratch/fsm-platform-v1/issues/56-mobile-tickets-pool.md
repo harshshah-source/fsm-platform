@@ -16,9 +16,12 @@ mockup. List rows open Ticket Detail (M3).
 
 ## Acceptance criteria
 
-- [ ] Assigned Day-Plan list rendered from `/api/schedules/me`, ordered/badged per mockup
-- [ ] Shared Pool list rendered from `/api/me/shared-pool`, visually separate from Assigned
-- [ ] Row tap opens Ticket Detail (M3)
+- [x] ~~Assigned Day-Plan list rendered from `/api/schedules/me`, ordered/badged per mockup~~ —
+      superseded by the 2026-07-28 ratification below: one merged list from `GET /api/me/tickets`.
+- [x] ~~Shared Pool list rendered from `/api/me/shared-pool`, visually separate from Assigned~~ —
+      superseded; no assigned/pool visual split, grouped by urgency instead (Visit Now / Other).
+- [ ] Row tap opens Ticket Detail (M3) — **blocked, not built.** #57 (Ticket Detail) does not exist
+      as a screen yet; `TicketCard`'s `onPress` is left unset rather than wired to nothing.
 
 ## API contract (authority: backend on `main`)
 
@@ -62,6 +65,20 @@ mockup. List rows open Ticket Detail (M3).
 - #54, #07, #11, #12
 
 ## Comments
+
+### 2026-08-04 — built except row-tap navigation (blocked on #57) and Plant-wise grouping (deferred)
+
+`TicketsScreen` renders the merged `GET /api/me/tickets` list (`vehicleNo` added to the row — see
+`packages/shared` — the mockup's registration-number display had no source before this), grouped
+Visit Now / Other Tickets by `workState`, each with its own empty state; filter chips (All/Visit
+Now/Plan/In Work/Verify) narrow the list; offline shows a banner and falls back to in-memory state
+(durable cross-restart persistence is Issue 17, same scope line as #54's `WriteQueue`). 8 new tests,
+83 mobile tests green overall, `tsc`/`eslint` clean.
+
+**Not built:** row tap → Ticket Detail — #57 doesn't exist as a screen, so `onPress` is left unset.
+**Deferred, not blocking:** the Plant-wise/Priority toggle — Priority (this issue's Visit Now/Other
+split) ships as the only grouping mode; Plant-wise is presentation-only polish over already-real
+data, not a data or contract gap, and left for a follow-up pass.
 
 ### 2026-07-28 — #172 decision 3: one merged list
 
