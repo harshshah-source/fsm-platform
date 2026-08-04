@@ -1,6 +1,6 @@
 # 66 — SE mobile Day Plan: highlight ZM-added Tickets + one-session "removed" label
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Mobile
 
 ## What to build
@@ -34,9 +34,9 @@ The SE has **no server "added/removed since" signal**: `GET /api/schedules/me` r
 
 ## Acceptance criteria
 
-- [ ] A ZM-added Ticket highlights at the top of its plant group in the SE Day Plan (client set-diff vs cached plan)
-- [ ] A ZM-removed Ticket shows a one-session "removed" label (from the client cache), then clears on next cold start
-- [ ] SE receives the "plan updated by [ZM]" push (delivery seam → Issue 03)
+- [x] A ZM-added Ticket highlights (client set-diff vs cached plan) — **relocated**: a "Newly Added" badge on the Tickets-list row, sorted to the top of its urgency section, not "top of its plant group" (see 2026-08-04 comment — that structure no longer exists)
+- [x] A ZM-removed Ticket shows a one-session "removed" label (from the client cache), then clears on next cold start
+- [x] SE receives the "plan updated by [ZM]" push — delivery seam is Issue 03's existing spine; nothing new needed from this issue
 
 ## API contract (authority: backend on `main`)
 
@@ -75,3 +75,27 @@ The SE has **no server "added/removed since" signal**: `GET /api/schedules/me` r
 
 - #31
 - #54
+
+## Comments
+
+### 2026-08-04 — cue location relocated to the Tickets list, per operator decision; DONE
+
+This issue's "highlight at top of its plant group" assumes a per-ticket, plant-grouped Day Plan
+view. That structure doesn't exist in the ratified mobile screens: **Home** (#55, #172 Decision 1)
+shows Plant Workload as aggregate ratio cards ("3/5 done"), not individual ticket rows; **Tickets**
+(#56, #172 Decision 3) merged the day-plan/pool split into one list grouped by *urgency* (Visit Now /
+Other), not by plant. #66 is conspicuously absent from #172's own ratification-propagation list
+(which explicitly touched #55, #56, #58, #60, #61, ...) — it predates that restructuring and was
+never reconciled against it. Flagged to the operator rather than guessing at a UI-location decision;
+answer: **land the cue on the Tickets list as a badge per row**, no new plant-grouped structure.
+
+Built exactly as decided: `TicketCard` gained an optional `badge` prop (`Newly Added` / `Removed`).
+`dayPlanCues.ts` implements the already-adopted Option A contract (client-side set-diff, in-memory,
+resets on cold start = "one session") — diffed against `/me/tickets`' `assigned:true` set (which
+`TicketsScreen` already fetches) rather than opening a separate `/schedules/me` fetch/cache just for
+this, since the two ticketId sets track the same underlying fact for this purpose. Added tickets sort
+to the top of their urgency section; removed tickets are reconstructed from the cached full
+`MeTicketRow` (not just an id) and placed in their correct section since `workState` travels with the
+cached row. The push delivery AC needed nothing new — Issue 03's spine already carries it.
+
+207 mobile tests green, `tsc`/`eslint` clean both apps.
