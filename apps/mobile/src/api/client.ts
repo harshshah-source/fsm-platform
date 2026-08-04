@@ -1,7 +1,10 @@
 import Constants from 'expo-constants';
 import type {
+  ConfirmReceiptConflictBody,
+  ConfirmReceiptResponse,
   LoginRequest,
   LoginResponse,
+  MeComponentRequestsView,
   MeTicketDetailView,
   MeTicketsView,
   SessionView,
@@ -11,9 +14,20 @@ import type {
   TroubleshootConflictBody,
   TroubleshootSubmitRequest,
   TroubleshootSubmitResponse,
+  VanStockView,
   VerificationView,
 } from '@fsm/shared';
 import { getDeviceId } from '../device/deviceId';
+
+export class ConfirmReceiptConflictError extends Error {
+  readonly status: ConfirmReceiptConflictBody['status'];
+
+  constructor(body: ConfirmReceiptConflictBody) {
+    super('COMPONENT_REQUEST_INVALID_STATE');
+    this.name = 'ConfirmReceiptConflictError';
+    this.status = body.status;
+  }
+}
 
 export class SoftStateConflictError extends Error {
   readonly from: SoftStateConflictBody['from'];
@@ -178,4 +192,43 @@ export async function apiSetSoftState(
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as SetSoftStateResponse;
+}
+
+export async function apiGetVanStock(accessToken: string): Promise<VanStockView> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/me/van-stock`, { headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as VanStockView;
+}
+
+export async function apiGetMyComponentRequests(accessToken: string): Promise<MeComponentRequestsView> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/me/component-requests`, { headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as MeComponentRequestsView;
+}
+
+export async function apiConfirmReceipt(accessToken: string, requestId: string): Promise<ConfirmReceiptResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/component-requests/${requestId}/confirm-receipt`, {
+    method: 'POST',
+    headers,
+  });
+  if (res.status === 404) {
+    throw new Error('COMPONENT_REQUEST_NOT_FOUND');
+  }
+  if (res.status === 403) {
+    throw new Error('COMPONENT_REQUEST_FORBIDDEN');
+  }
+  if (res.status === 409) {
+    throw new ConfirmReceiptConflictError((await res.json()) as ConfirmReceiptConflictBody);
+  }
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as ConfirmReceiptResponse;
 }

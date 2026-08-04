@@ -2,21 +2,27 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import * as Keychain from 'react-native-keychain';
 import type {
   LoginResponse,
+  MeComponentRequestsView,
   MeTicketDetailView,
   MeTicketsView,
   SessionView,
   TroubleshootSubmitRequest,
+  VanStockView,
   VerificationView,
 } from '@fsm/shared';
 import {
+  apiConfirmReceipt,
+  apiGetMyComponentRequests,
   apiGetMyTickets,
   apiGetTicketDetail,
   apiGetTicketVerification,
+  apiGetVanStock,
   apiLogin,
   apiMe,
   apiRefresh,
   apiSetSoftState,
   apiSubmitTroubleshoot,
+  ConfirmReceiptConflictError,
   SoftStateConflictError,
   TroubleshootConflictError,
 } from './client';
@@ -373,5 +379,86 @@ describe('apiSubmitTroubleshoot', () => {
       winnerSeId: 'se-2',
       shadowUseRecorded: true,
     });
+  });
+});
+
+describe('apiGetVanStock', () => {
+  const view: VanStockView = { stock: [], commonKit: { complete: true, missing: [] } };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('GETs /me/van-stock with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetVanStock('token');
+
+    expect(result).toEqual(view);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/me\/van-stock$/);
+  });
+});
+
+describe('apiGetMyComponentRequests', () => {
+  const view: MeComponentRequestsView = { items: [], cursor: null };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('GETs /me/component-requests with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetMyComponentRequests('token');
+
+    expect(result).toEqual(view);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/me\/component-requests$/);
+  });
+});
+
+describe('apiConfirmReceipt', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('POSTs to /component-requests/:id/confirm-receipt', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = { request: { requestId: 'r-1', status: 'RECEIVED' } };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+
+    const result = await apiConfirmReceipt('token', 'r-1');
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/component-requests\/r-1\/confirm-receipt$/);
+    expect(init).toMatchObject({ method: 'POST' });
+  });
+
+  it('throws ConfirmReceiptConflictError carrying the real status on a 409', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ code: 'COMPONENT_REQUEST_INVALID_STATE', status: 'REQUESTED' }),
+    } as unknown as Response);
+
+    const promise = apiConfirmReceipt('token', 'r-1');
+
+    await expect(promise).rejects.toBeInstanceOf(ConfirmReceiptConflictError);
+    await expect(promise.catch((e: ConfirmReceiptConflictError) => e)).resolves.toMatchObject({ status: 'REQUESTED' });
+  });
+
+  it('throws COMPONENT_REQUEST_NOT_FOUND on a 404', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) } as unknown as Response);
+
+    await expect(apiConfirmReceipt('token', 'r-1')).rejects.toThrow('COMPONENT_REQUEST_NOT_FOUND');
   });
 });
