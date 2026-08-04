@@ -1,6 +1,6 @@
 # 71 — SE mobile Install screens (on-site / Install Form / activation result)
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Mobile
 Origin: Issue 34 parity follow-up (2026-06-26).
 
@@ -24,10 +24,10 @@ as the #68 Recovery mobile follow-up — never silently deferred.
 
 ## Acceptance criteria
 
-- [ ] On-site action posts to `/install/:id/on-site` from the Day Plan
-- [ ] Install Form captures GPS + SIM serial (mandatory) + optional photo, posts to `/install/:id/fitted`, renders serial-validation errors
-- [ ] Activation result surfaces verified-CLOSED and FAILED_ACTIVATION outcomes
-- [ ] No backend change — consumes the Issue 34 endpoints as-is
+- [x] On-site action posts to `/install/:id/on-site` from the Day Plan
+- [x] Install Form captures GPS + SIM serial (mandatory) + optional photo, posts to `/install/:id/fitted`, renders serial-validation errors
+- [x] Activation result surfaces verified-CLOSED and FAILED_ACTIVATION outcomes
+- [x] No backend change — consumes the Issue 34 endpoints as-is
 
 ## API contract (authority: backend on `main`, `@Roles('SERVICE_ENGINEER')`)
 
@@ -113,3 +113,49 @@ falls through to `INVALID_SERIAL` (`:128`). This issue lists both without the ma
 the SE has no next-step guidance (PRD:565 does not say what they should do either).
 
 Photo leg still blocked on **#81** (no upload endpoint), now with slot semantics per #172 decision 6.
+
+### 2026-08-04 — done: one contract correction found, rest built as spec'd
+
+#81 landed earlier this session so the photo leg is unblocked; re-verified the rest of this comment
+against current source before building:
+
+1. **Contract correction: `GET /api/install/:id` is not SE-callable.** This issue's own text says
+   "surface CLOSED / FAILED_ACTIVATION by polling `GET /api/install/:id`" — but
+   `INSTALL_READER_ROLES` (`install.controller.ts:40-44`) is `WAREHOUSE_MANAGER` /
+   `ZONAL_MANAGER` / `CENTRAL_SERVICE_MANAGER` / `OPERATIONS_HEAD` only; an SE calling that route
+   gets 403. Used `GET /api/me/tickets/:id` (`MeTicketDetailView.status`, #161) instead — it reads
+   the same `Ticket.status` column every lifecycle transition writes to, and the SE is already
+   authorized to read it (assigned via `assignedSeId`, same as #68's RECOVERY). No new endpoint,
+   no `GET /api/install/:id` call anywhere in the mobile client.
+2. **GPS serial hint confirmed available.** `MeTicketDetailView.deviceId` (already read for the
+   Ticket Detail chrome) is shown as the expected-serial hint on the Install Form, same pattern as
+   #68's Collection Form.
+3. **Error codes confirmed accurate as written** — `SERIAL_REQUIRED` (blank SIM) /
+   `INVALID_SERIAL` (GPS mismatch) match `install-lifecycle.service.ts:123-124` exactly; no
+   correction needed here (unlike #68's stale codes).
+4. **Activation-window fields (`activationDeadline`/`verificationBlockedByStaleTelemetry`) and the
+   `vehicleNo`/`plantName`/`installSimId`/etc. gaps on `InstallView` were NOT built.** This issue's
+   own AC#4 is explicit — "No backend change — consumes the Issue 34 endpoints as-is" — and none of
+   those fields are needed for the three core ACs: `TicketDetailScreen` already carries
+   `plantName`/`vehicleNo`/`transporterName` generically via `MeTicketDetailView` (no `InstallView`
+   fields needed for chrome), and the ACTIVATED state renders a plain "awaiting first ping" message
+   with a manual "Check Status" refresh rather than a computed countdown/overdue state — honest
+   about what the client doesn't know, not a guess at the server's deadline math. The (d) failure-
+   discriminator gap (can't tell "no ping ever" from "window expired on stale telemetry") is
+   unchanged; `FAILED_ACTIVATION` renders one generic message for both, same posture.
+5. **Design choice: manual "Check Status" refresh, not a background timer poll.** The issue itself
+   notes "no push dependency on the core path" — a timer-based `setInterval` poll would be the more
+   complete UX but this codebase has zero existing polling precedent and the added test complexity
+   (fake timers) wasn't worth it for a screen state the SE can just re-open or tap refresh on; not a
+   business-rule call, a proportionality one.
+
+**Built:** `TicketDetailScreen` renders an `install-card` for `workType === 'INSTALL'` — the auto-VIEWED
+soft-state effect's guard was generalized from `workType === 'RECOVERY'` to `workType !== 'TROUBLESHOOT'`
+(the backend's own `soft-state.service.ts` comment already documents the chain as TROUBLESHOOT-only:
+"RECOVERY has its own on-site tracking via `/recovery/:id/on-site`" — INSTALL now has the same via
+`/install/:id/on-site`). Mark On-Site (`SCHEDULED`); `InstallFormScreen` (GPS + SIM serial mandatory,
+optional single `INSTALL_PHOTO` slot via the existing `PhotoCaptureRow`/`apiUploadMedia`, server-
+authoritative validation) — `fitted` takes the ticket straight to `ACTIVATED` server-side, so there is
+no separate FITTED UI state; ACTIVATED/CLOSED/FAILED_ACTIVATION terminal states render inline on the
+same card. New `@fsm/shared` types + `apps/mobile/src/api/client.ts` functions
+(`apiInstallOnSite`/`apiInstallFitted`).

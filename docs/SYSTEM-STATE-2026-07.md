@@ -801,9 +801,9 @@ INDEX.md header.)
 
 1. **The SE mobile app** (PRD §SE-Mobile screens :479-663; workflow §11–§14): substantially built as
    of 2026-08-04 — foundation/shell, Home, Tickets, Ticket Detail + soft-states, Troubleshoot form,
-   Verification, Stock/Vouchers, Vehicle Unavailability, same-day plan cues, Recovery screens (#54–#61,
-   #63/#64/#66/#68, #81) are done. `.scratch/fsm-platform-v1/INDEX.md`'s Session log is the live
-   status source — do not re-derive from this line. Still unbuilt: Install screens (#71), intra-day
+   Verification, Stock/Vouchers, Vehicle Unavailability, same-day plan cues, Recovery screens, Install
+   screens (#54–#61, #63/#64/#66/#68/#71, #81) are done. `.scratch/fsm-platform-v1/INDEX.md`'s Session
+   log is the live status source — do not re-derive from this line. Still unbuilt: intra-day
    accept/decline (#77), Notifications (#85), Leave request (#86), Availability (#87), Push (#89).
 2. **Offline-first queue + batched sync** (PRD :309-310 WatermelonDB/SQLite; workflow §14):
    nothing client- or server-side; server API is #82, client #17.
