@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import type { VerificationBadge, VerificationView } from '@fsm/shared';
+import type { VerificationBadge, VerificationCheck, VerificationView } from '@fsm/shared';
 import { Prisma } from '../generated/prisma/client';
 import { type VerifyOutcome, type VerifyPhase } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { PHASE1_MIN_PINGS } from './verification-criteria';
 
-export type { VerificationBadge, VerificationView } from '@fsm/shared';
+export type { VerificationBadge, VerificationCheck, VerificationView } from '@fsm/shared';
 
 /** 24 h escalation window for a PARTIAL_RECOVERY ticket — the countdown anchor on the review page. */
 const PARTIAL_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -83,6 +84,23 @@ function badgeFor(pings: number, outcome: VerifyOutcome | null): VerificationBad
   return null;
 }
 
+/**
+ * #59 / #172 Decision 4 — the mobile "VERIFICATION CHECKS" list. Only the 3 checks with a real
+ * source in `verification-criteria.ts` ship (2026-08-04 operator decision) — "Device mapping
+ * verified" and "Historical mapping checked" from the reference image have no defined signal and
+ * are omitted, not guessed. A check is `FAIL` only once the run has concluded (`outcome` set) and
+ * it never passed; otherwise `PENDING` — never claim a failure the run hasn't actually reached yet.
+ */
+function buildChecks(run: { pingsReceivedCount: number; phase: VerifyPhase; outcome: VerifyOutcome | null }): VerificationCheck[] {
+  const concluded = run.outcome !== null;
+  const state = (passed: boolean): VerificationCheck['state'] => (passed ? 'PASS' : concluded ? 'FAIL' : 'PENDING');
+  return [
+    { key: 'live_gps', label: 'Live GPS received', state: state(run.pingsReceivedCount >= 1) },
+    { key: 'multiple_pings', label: 'Multiple pings detected', state: state(run.pingsReceivedCount >= PHASE1_MIN_PINGS) },
+    { key: 'stability_window', label: 'Stability window', state: state(run.phase === 'PHASE_2_PASS') },
+  ];
+}
+
 @Injectable()
 export class VerificationQueryService {
   constructor(private readonly prisma: PrismaService) {}
@@ -106,14 +124,19 @@ export class VerificationQueryService {
       orderBy: { startedAt: 'desc' },
     });
     if (!run) return null;
+    const badge = badgeFor(run.pingsReceivedCount, run.outcome);
     return {
       ticketId,
+      deviceId: String(run.deviceId),
       phase: run.phase,
       pingsReceivedCount: run.pingsReceivedCount,
       outcome: run.outcome,
       fraudFlag: run.fraudFlag,
       firstPingDistanceMeters: run.firstPingDistanceMeters == null ? null : Number(run.firstPingDistanceMeters),
-      badge: badgeFor(run.pingsReceivedCount, run.outcome),
+      badge,
+      checks: buildChecks(run),
+      startedAt: run.startedAt.toISOString(),
+      partialDeadline: badge === 'PARTIAL_RECOVERY' ? new Date(run.startedAt.getTime() + PARTIAL_WINDOW_MS).toISOString() : null,
     };
   }
 

@@ -276,14 +276,33 @@ export type VerificationBadge = VerifyOutcome | 'PARTIAL_RECOVERY' | null;
 
 /** `GET /api/tickets/:id/verification` — 404 (`NO_VERIFICATION_RUN`) until a run exists, i.e. only
  *  meaningful once the ticket is `VERIFICATION_PENDING`. Don't call this for a ready-state ticket. */
+/** One row in `VerificationView.checks` (#59 / #172 Decision 4's generic-checks shape — the
+ *  algorithm stays free to change without a field break). #59 (2026-08-04): only the 3 checks with
+ *  a real source in `verification-criteria.ts` ship — "Device mapping verified" and "Historical
+ *  mapping checked" (from the reference image) have no defined signal yet and are deliberately
+ *  omitted rather than guessed. */
+export interface VerificationCheck {
+  key: 'live_gps' | 'multiple_pings' | 'stability_window';
+  label: string;
+  state: 'PASS' | 'FAIL' | 'PENDING';
+}
+
 export interface VerificationView {
   ticketId: string;
+  /** The device this verification run is anchored to — the Device Guard card ("GPS909 only —
+   *  backup device cannot close this ticket"). */
+  deviceId: string;
   phase: VerifyPhase;
   pingsReceivedCount: number;
   outcome: VerifyOutcome | null;
   fraudFlag: boolean;
   firstPingDistanceMeters: number | null;
   badge: VerificationBadge;
+  checks: VerificationCheck[];
+  startedAt: string;
+  /** `startedAt` + 24h only while `badge === 'PARTIAL_RECOVERY'`; `null` otherwise (#172 Decision 4
+   *  — the SE route previously omitted this entirely, see #59's own 2026-07-28 comment). */
+  partialDeadline: string | null;
 }
 
 /** The VIEWED -> ON_SITE -> TROUBLESHOOT_STARTED chain (Issue 15 / CONTEXT §334-353). */

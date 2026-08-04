@@ -124,6 +124,28 @@ describe('verification controller (e2e)', () => {
     expect(res.body.outcome).toBeNull();
   });
 
+  it('#59 — PARTIAL_RECOVERY carries deviceId, startedAt, a 24h partialDeadline, and PENDING checks', async () => {
+    const { ticketId, deviceId } = await makeTicket();
+    await submitForm(ticketId);
+    await addPing(deviceId, at(5), NEAR);
+    await verify.runVerification(at(30), { ticketIds: [ticketId] });
+
+    const token = await login('se.north@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get(`/api/tickets/${ticketId}/verification`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.deviceId).toBe(deviceId);
+    expect(res.body.startedAt).toEqual(expect.any(String));
+    expect(new Date(res.body.partialDeadline).getTime() - new Date(res.body.startedAt).getTime()).toBe(24 * 60 * 60 * 1000);
+    expect(res.body.checks).toEqual([
+      { key: 'live_gps', label: 'Live GPS received', state: 'PASS' },
+      { key: 'multiple_pings', label: 'Multiple pings detected', state: 'PENDING' },
+      { key: 'stability_window', label: 'Stability window', state: 'PENDING' },
+    ]);
+  });
+
   it('SE sees the CLOSED outcome once verification passes', async () => {
     const { ticketId, deviceId } = await makeTicket();
     await submitForm(ticketId);
@@ -137,6 +159,26 @@ describe('verification controller (e2e)', () => {
       .expect(200);
     expect(res.body.badge).toBe('CLOSED');
     expect(res.body.outcome).toBe('CLOSED');
+  });
+
+  it('#59 — CLOSED carries a null partialDeadline and all 3 checks PASS', async () => {
+    const { ticketId, deviceId } = await makeTicket();
+    await submitForm(ticketId);
+    for (const m of [1, 20, 45, 65]) await addPing(deviceId, at(m), NEAR);
+    await verify.runVerification(at(70), { ticketIds: [ticketId] });
+
+    const token = await login('se.north@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get(`/api/tickets/${ticketId}/verification`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.partialDeadline).toBeNull();
+    expect(res.body.checks).toEqual([
+      { key: 'live_gps', label: 'Live GPS received', state: 'PASS' },
+      { key: 'multiple_pings', label: 'Multiple pings detected', state: 'PASS' },
+      { key: 'stability_window', label: 'Stability window', state: 'PASS' },
+    ]);
   });
 
   it('#162 — a correctly-authenticated SE with no relationship to the ticket gets 404, not the run', async () => {
