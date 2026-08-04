@@ -7,6 +7,7 @@ import { StatusPill } from '../../components/kit/StatusPill';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { formatSlaBucketLabel, slaBucketToStatus } from '../ticketDisplay';
 import { TroubleshootFormScreen } from '../troubleshoot/TroubleshootFormScreen';
+import { VerificationScreen } from '../verification/VerificationScreen';
 import { captureLocation } from './captureLocation';
 import { formatInactiveDuration } from './ticketDetailDisplay';
 
@@ -45,6 +46,7 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
   const [conflict, setConflict] = useState<{ from: string | null; to: string } | null>(null);
   const [settingOnSite, setSettingOnSite] = useState(false);
   const [showTroubleshootForm, setShowTroubleshootForm] = useState(false);
+  const [showVerification, setShowVerification] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -137,6 +139,17 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
     );
   }
 
+  if (showVerification && state.status === 'verification-pending') {
+    return (
+      <VerificationScreen
+        ticketId={ticketId}
+        ticketNoDisplay={state.detail.ticketNoDisplay}
+        ticketStatus={state.detail.status}
+        onBack={() => setShowVerification(false)}
+      />
+    );
+  }
+
   if (state.status === 'loading') {
     return <View testID="ticket-detail-loading" style={styles.container} />;
   }
@@ -203,6 +216,13 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
           <Text style={styles.cardSubtitle}>GPS recovery check running.</Text>
           <Text style={styles.badgeText}>{state.verification.badge ?? 'PENDING'}</Text>
           <Text style={styles.metaText}>{state.verification.pingsReceivedCount} ping(s) received</Text>
+          <Pressable
+            testID="view-verification-button"
+            onPress={() => setShowVerification(true)}
+            style={styles.startButton}
+          >
+            <Text style={styles.startButtonLabel}>View Verification</Text>
+          </Pressable>
         </View>
       ) : (
         <View testID="ready-card" style={styles.card}>

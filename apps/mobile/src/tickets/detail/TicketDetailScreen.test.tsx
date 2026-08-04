@@ -29,6 +29,16 @@ jest.mock('../troubleshoot/TroubleshootFormScreen', () => {
     ),
   };
 });
+jest.mock('../verification/VerificationScreen', () => {
+  const { Text } = jest.requireActual('react-native') as typeof import('react-native');
+  return {
+    VerificationScreen: ({ onBack }: { onBack: () => void }) => (
+      <Text testID="mock-verification-screen" onPress={onBack}>
+        Verification
+      </Text>
+    ),
+  };
+});
 
 const mockGetDetail = jest.mocked(apiGetTicketDetail);
 const mockGetVerification = jest.mocked(apiGetTicketVerification);
@@ -87,12 +97,16 @@ describe('TicketDetailScreen', () => {
     mockGetDetail.mockResolvedValue(detail({ status: 'VERIFICATION_PENDING' }));
     const verification: VerificationView = {
       ticketId: 't-1',
+      deviceId: 'GPS502',
       phase: 'PHASE_1_PASS',
       pingsReceivedCount: 2,
       outcome: null,
       fraudFlag: false,
       firstPingDistanceMeters: 120,
       badge: 'PARTIAL_RECOVERY',
+      checks: [],
+      startedAt: '2026-05-11T16:00:00Z',
+      partialDeadline: '2026-05-12T16:00:00Z',
     };
     mockGetVerification.mockResolvedValue(verification);
     mockSetSoftState.mockResolvedValue({ result: 'OK', softState: {} as never });
@@ -102,6 +116,36 @@ describe('TicketDetailScreen', () => {
     await waitFor(() => expect(screen.getByTestId('verification-pending-card')).toBeTruthy());
     expect(mockGetVerification).toHaveBeenCalledWith('token', 't-1');
     expect(screen.getByText('PARTIAL_RECOVERY')).toBeTruthy();
+  });
+
+  it('opens VerificationScreen on View Verification, and returns to the detail view on back', async () => {
+    mockGetAccessToken.mockResolvedValue('token');
+    mockGetDetail.mockResolvedValue(detail({ status: 'VERIFICATION_PENDING' }));
+    mockGetVerification.mockResolvedValue({
+      ticketId: 't-1',
+      deviceId: 'GPS502',
+      phase: 'PHASE_1_PASS',
+      pingsReceivedCount: 2,
+      outcome: null,
+      fraudFlag: false,
+      firstPingDistanceMeters: 120,
+      badge: 'PARTIAL_RECOVERY',
+      checks: [],
+      startedAt: '2026-05-11T16:00:00Z',
+      partialDeadline: '2026-05-12T16:00:00Z',
+    });
+
+    render(<TicketDetailScreen ticketId="t-1" />);
+    await waitFor(() => expect(screen.getByTestId('view-verification-button')).toBeTruthy());
+
+    fireEvent.press(screen.getByTestId('view-verification-button'));
+
+    expect(screen.getByTestId('mock-verification-screen')).toBeTruthy();
+    expect(screen.queryByTestId('screen-ticket-detail')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('mock-verification-screen'));
+
+    expect(screen.getByTestId('screen-ticket-detail')).toBeTruthy();
   });
 
   it('renders a not-found state on TICKET_NOT_FOUND', async () => {
