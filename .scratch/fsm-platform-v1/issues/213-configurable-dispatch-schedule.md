@@ -1,6 +1,7 @@
 # 213 — Operator-configurable dispatch schedule + a real guard against overlapping runs
 
-Status: ready-for-agent
+Status: done — **2026-08-04**, all twelve ACs met across four slices (settings-backed schedule with live
+re-registration · one shared per-zone in-flight guard · optional ledger reason · admin surfaces).
 Type: AFK · Backend + Admin
 Parent: [#197](./197-mobile-pilot-readiness-remediation-epic.md) · Filed 2026-08-04
 Origin: operator ruling on [#198](./198-decision-day-boundary-and-dispatch-clock.md) Q2 — the answer
@@ -94,33 +95,47 @@ it does.
 
 ## Acceptance criteria
 
-- [ ] The daily dispatch time lives in `system_settings` as the **source of truth**, defaulting to
+- [x] The daily dispatch time lives in `system_settings` as the **source of truth**, defaulting to
       `05:00` `Asia/Kolkata`; `BUSINESS_SWEEP_DISPATCH_CRON` is consulted **only** when no setting row
       exists (bootstrap default) and is not a parallel source thereafter
-- [ ] An Operations Head can change it from the admin settings page; other roles cannot
-- [ ] **A change takes effect without a restart** — the job is **re-registered on write**. A test
+      → `dispatch_cron` key; `DispatchScheduleService.resolveCron` seeds create-only
+- [x] An Operations Head can change it from the admin settings page; other roles cannot
+      → Settings › **Dispatch Schedule** tab; `PUT /api/schedules/dispatch-schedule` is OH-only
+      (CSM/ZM/SE → 403, unauth → 401, asserted)
+- [x] **A change takes effect without a restart** — the job is **re-registered on write**. A test
       proves the next fire uses the new time with no process restart; reading the value at boot only,
       or read-per-tick in place of rescheduling, does not satisfy this
-- [ ] **An invalid cron expression is rejected at write time with a clear error and the previous
+      → the live job's next fire moves 23:30 → 00:30 UTC inside one process, same registry
+- [x] **An invalid cron expression is rejected at write time with a clear error and the previous
       schedule is left intact and still firing** — never accepted-then-silently-dead
-- [ ] Every schedule change is logged with the actor, the previous value and the new value
-- [ ] **One shared per-zone in-flight guard** sits where both the scheduled path and the manual
+      → validate → persist → re-register, in that order; six bad inputs asserted to leave both the row
+      and the live next-fire untouched
+- [x] Every schedule change is logged with the actor, the previous value and the new value
+      → `DISPATCH_SCHEDULE_UPDATED` audit row, `{previous, next, timeZone}`
+- [x] **One shared per-zone in-flight guard** sits where both the scheduled path and the manual
       trigger must pass through it — the scheduler's private `inFlight` field is **removed**, not
       supplemented by a second check
-- [ ] A manual `POST /schedules/dispatch-run` for a zone with a run in flight returns a conflict whose
+      → the guard is inside `runForActiveZones`; the private field is gone
+- [x] A manual `POST /schedules/dispatch-run` for a zone with a run in flight returns a conflict whose
       **body names the start time and the actor** ("dispatch already running for this zone, started
       HH:MM by X") — not a queued run, not a silent no-op, not a bare 409 with an empty body
-- [ ] The reverse holds: a cron tick for a zone with a manual run in flight does not start a second run
-- [ ] Admin **disables the Run-dispatch button and surfaces that message** while a run is in flight —
+      → `409 DISPATCH_ALREADY_RUNNING` with `message` + structured `inFlight[]`; the time renders in IST
+- [x] The reverse holds: a cron tick for a zone with a manual run in flight does not start a second run
+- [x] Admin **disables the Run-dispatch button and surfaces that message** while a run is in flight —
       the conflict is not something a user discovers by pressing twice
-- [ ] A reason supplied on a manual run is **persisted on the `dispatch_runs` ledger row** and visible
+      → polled every 10s (the run it guards against is usually the cron, which starts unprompted)
+- [x] A reason supplied on a manual run is **persisted on the `dispatch_runs` ledger row** and visible
       in the run detail; omitting it is still valid
-- [ ] The configured time appears in [#124](./124-effective-config-snapshot.md)'s run-start config
+      → migration `20260804150000_dispatch_run_reason`; blank is stored as null, not `''`
+- [x] The configured time appears in [#124](./124-effective-config-snapshot.md)'s run-start config
       snapshot, so a run records the schedule it was generated under
-- [ ] **Regression test for the concurrent case specifically** (operator-requested): a scheduled run
+      → `configSnapshot.scheduler.dispatchCron` now reads the setting, not the environment variable
+- [x] **Regression test for the concurrent case specifically** (operator-requested): a scheduled run
       is in flight, the manual trigger fires, and the test asserts **exactly one run executed** *and*
       that the caller received the conflict response. **Cheap** — the dispatch-scheduler suite exists
       and `#183` established the frozen-clock fixture pattern
+      → `dispatch-in-flight-guard.e2e-spec.ts`, timing driven by blocking the recommender rather than
+      simulated
 
 ## Verification
 
@@ -146,3 +161,65 @@ pilot when tuning it is most valuable.
 
 S-M. The settings plumbing is the bulk; the concurrency guard is small once the two entry paths share
 one gate.
+
+---
+
+## 2026-08-04 — implementation notes
+
+Built in four slices, each red→green: settings-backed schedule → shared guard → ledger reason → admin.
+
+### Rescheduling without adding a `cron` dependency — and why that is the better answer anyway
+
+`SchedulerRegistry.addCronJob`/`CronJob.setTime` need a `CronTime`, but `cron` is a *transitive*
+dependency of `@nestjs/schedule` (v4 does not re-export it) and is not resolvable from `apps/backend`.
+The obvious move is to declare it directly. `dispatch-cron.ts` instead takes the constructor off a live
+job (`job.cronTime.constructor`), for a reason that outlives the packaging detail:
+
+> **the parser that validates an operator's expression is byte-for-byte the parser that will run it.**
+
+A separately-resolved `cron` could drift and accept an expression the scheduler then rejects — which is
+precisely the accepted-then-silently-dead schedule AC-4 exists to prevent. It also avoided touching
+`pnpm-lock.yaml`, which currently carries another session's uncommitted state. The reach-through lives in
+one documented function and is pinned by the e2e; a library swap fails loudly at the first write.
+
+### The `@Cron` decorator still exists, and has to
+
+`@Cron` evaluates its expression once at class-decoration time, long before a database is reachable, so
+the stored schedule cannot be read there. The decorator now carries `DEFAULT_DISPATCH_CRON` purely to
+*register* the job under a stable name and timezone; `DispatchScheduleService.onApplicationBootstrap`
+re-points that same job at the configured expression, and every write does the same.
+`onApplicationBootstrap`, not `onModuleInit` — `@nestjs/schedule` mounts decorator-declared jobs in its
+own bootstrap hook, so at module-init time the job does not exist yet.
+
+### A hole that had to be closed with it: the generic settings endpoint
+
+`PUT /api/settings/:key` is OH-only but writes *any* key. Left open it bypasses both guarantees at once:
+an unparseable value would be stored and the job would never be re-registered, so the schedule would
+read as changed while dispatch kept firing at the old hour. `SettingsService.set` now refuses keys with
+a specialised writer (`SPECIALISED_SETTING_WRITERS`) and the response names the endpoint that owns it.
+
+### The guard's scope, honestly stated
+
+It is a per-zone **in-process** map on `DispatchRunService`. That is what gives an operator a clear
+answer when they press the button twice. It is *not* a distributed lock: the cross-process guarantee
+remains the per-zone advisory locks + idempotency (#100), which degrade an overlap to benign skips. A
+second backend instance would not double-assign; it would simply not be refused as informatively. Worth
+knowing before this is scaled horizontally.
+
+### Return type change, and why not an exception
+
+`runForActiveZones` now returns `{result:'RAN', summary} | {result:'CONFLICT', inFlight}`. A refusal is a
+first-class answer here, not an exceptional one, and the union forces every caller to acknowledge it —
+which is what stops a future entry point quietly regaining the old bypass. Six existing call sites were
+narrowed through a shared `expectRan` test helper rather than being loosened.
+
+### Explicitly not done
+
+- **Other sweep crons stay env-configured.** It did not fall out for free: each has its own scheduler,
+  registered job name and default, so the settings key, the bootstrap seed, the validation route and the
+  re-registration hook would all need repeating per job. #213 scoped itself to the dispatch run.
+- **No range restriction on the expression.** `* * * * *` is a valid every-minute schedule and is
+  accepted. Narrowing what is *sensible* (as opposed to what will fire) is a product question this issue
+  does not rule on, and silently refusing a valid expression would be its own surprise.
+- **The dev database still needs `pnpm prisma migrate deploy`** for the new `dispatch_runs.reason`
+  column; the test DB applies migrations automatically in `global-setup.ts`.
