@@ -604,11 +604,17 @@ POSTs) drive identical code paths with no cron.
 ### 3j. Auth / session / RBAC
 
 **Backend**: HS256 JWT `{user_id, role, zone_id}`, 15-min access (`token.service.ts:19`), 30-day
-single-use rotating refresh with reuse detection (`refresh-token-store.ts:15-32`) — but both stores
-are **in-memory** (`user-store.ts`), so every restart drops all sessions and users; DB-seeded users
-cannot log in (#91). The dev seed now carries **one ZM per operational zone** — `zm.north`/`zm.south`/
-`zm.east`/`zm.west` (zones 1–4) — plus the OH/CSM/WM/SE accounts (#133, 2026-07-20); the guard chain
-clamps each ZM to their `zone_id`. ~~`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret~~ **closed by #98
+single-use rotating refresh with reuse detection. Both stores are now **Postgres-backed** (#91 S1–S4,
+2026-08-03): `auth.module.ts` provides `PrismaUserStore` + `PrismaRefreshTokenStore`, credentials live
+in `user_credentials` (scrypt), sessions survive a restart, and `src/auth/user-store.ts`
+(`InMemoryUserStore`) has been **deleted**. The four per-zone ZM accounts — `zm.north`/`zm.south`/
+`zm.east`/`zm.west` (zones 1–4) — plus OH/CSM/WM/SE (#133, 2026-07-20) now live in
+`src/auth/auth-fixture-seed.ts`; the guard chain clamps each ZM to their `zone_id`.
+**Correction (2026-08-04):** this paragraph previously said the dev *seed* carries those accounts. It
+does not — `seedAuthFixtureUsers` is called only from `test/global-setup.ts`, i.e. against `fsm_test`.
+**No committed path seeds a credential on a dev database**, so a clean clone can start the backend and
+still have every login 401 (`user_credentials` was measured empty on the dev DB, 0 rows). Owned by
+**#194**; #91 S4's in-memory retirement removed the implicit dev-login provision without a replacement. ~~`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret~~ **closed by #98
 (done 2026-07-12, 4 slices `25a46d4`…`55183e6`): fail-fast boot config (no JWT fallback), public
 liveness/readiness probes, graceful shutdown + fatal bootstrap guard, global exception filter with
 error correlation ids (pino swap deliberately not adopted — Nest Logger retained).**
@@ -793,8 +799,12 @@ INDEX.md header.)
 
 ### 4.4 Business rules in PRD/workflow that the code does NOT implement
 
-1. **The SE mobile app in its entirety** (PRD §SE-Mobile screens :479-663; workflow §11–§14):
-   only the auth shell exists (§1.1). Owners: #54–#61, #63–#68, #71, #77, #85–#89.
+1. **The SE mobile app** (PRD §SE-Mobile screens :479-663; workflow §11–§14): substantially built as
+   of 2026-08-04 — foundation/shell, Home, Tickets, Ticket Detail + soft-states, Troubleshoot form,
+   Verification, Stock/Vouchers, Vehicle Unavailability, same-day plan cues, Recovery screens (#54–#61,
+   #63/#64/#66/#68, #81) are done. `.scratch/fsm-platform-v1/INDEX.md`'s Session log is the live
+   status source — do not re-derive from this line. Still unbuilt: Install screens (#71), intra-day
+   accept/decline (#77), Notifications (#85), Leave request (#86), Availability (#87), Push (#89).
 2. **Offline-first queue + batched sync** (PRD :309-310 WatermelonDB/SQLite; workflow §14):
    nothing client- or server-side; server API is #82, client #17.
 3. **QR scanner + Technical Hints** (PRD §SE-QR/§Hints; workflow §21/§22): no code; needs #83

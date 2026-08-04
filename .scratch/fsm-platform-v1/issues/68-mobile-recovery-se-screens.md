@@ -1,6 +1,6 @@
 # 68 — SE mobile Recovery screens (on-site / Collection Form / Unable to Collect)
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Mobile
 Origin: Issue 36 parity follow-up (2026-06-25).
 
@@ -8,7 +8,10 @@ Origin: Issue 36 parity follow-up (2026-06-25).
 
 The SE-facing mobile surfaces for the Recovery Ticket field workflow (Issue 36). The backend lifecycle
 + endpoints are built and green (`/api/recovery/:id/{on-site,collected,unable-to-collect}`); these are
-the mobile screens that drive them. RECOVERY appears in the Day Plan as a first-class work type.
+the mobile screens that drive them. RECOVERY appears in the SE's merged Tickets list / Ticket Detail
+(not a literal separate "Day Plan" — see 2026-08-04 comment: `/api/schedules/me` never carried it,
+and `GET /api/me/tickets` needed a fix to surface it too, since dispatch sets `assignedSeId` directly
+with no batch row).
 
 - **Recovery in the Day Plan / Ticket Detail** — RECOVERY work-type card with the lifecycle status.
 - **Mark On-Site** action (SCHEDULED → ON_SITE).
@@ -23,9 +26,9 @@ the mobile screens that drive them. RECOVERY appears in the Day Plan as a first-
 
 ## Acceptance criteria
 
-- [ ] RECOVERY tickets render in the SE Day Plan / Ticket Detail with lifecycle status
-- [ ] Mark On-Site, Collection Form (serial + condition), and Unable to Collect drive the #36 endpoints
-- [ ] Collection Form requires a non-empty serial + condition notes; the **server** is authoritative on serial match
+- [x] RECOVERY tickets render in the SE Day Plan / Ticket Detail with lifecycle status
+- [x] Mark On-Site, Collection Form (serial + condition), and Unable to Collect drive the #36 endpoints
+- [x] Collection Form requires a non-empty serial + condition notes; the **server** is authoritative on serial match
 
 ## API contract (authority: backend on `main`, all `@Roles('SERVICE_ENGINEER')`)
 
@@ -101,3 +104,42 @@ Full spec: `docs/status/se-screen-data-needs-2026-07-28.md` §1. Three things th
 Also (b) on `RecoveryView` itself (`recovery.service.ts:26-36`): `unableToCollectAt`
 (`schema.prisma:2056`) and `closureReason` (`:2058`) exist but are not in the view — so a ticket
 sitting at `ON_SITE` with an unable-to-collect already filed is indistinguishable from a fresh one.
+
+### 2026-08-04 — done: premise verified real, fixed; screens built
+
+Re-verified all three flagged items against current source before building (per the standing AFK
+directive's "verify contract against source" step):
+
+1. **Premise confirmed real, not stale.** Traced `MeTicketsQueryService.getMyTickets`
+   (`me-tickets-query.service.ts:38-90`): its `assignedTicketIds` set is built only from
+   `PlantBatchAssignment` rows (the TROUBLESHOOT day-plan path); the OPEN+UNASSIGNED pool branch
+   requires `status: 'OPEN'`. `scheduleRecovery` (`recovery.service.ts:94-99`) sets `assignedSeId`
+   and moves `status` to `SCHEDULED` — so a scheduled RECOVERY ticket matched neither branch and
+   never appeared in `GET /api/me/tickets` at all. Confirmed by a red e2e test before any fix.
+   **User decision (asked via AskUserQuestion, not silently guessed):** extend `getMyTickets` with a
+   third OR branch (`assignedSeId: seId`, folded into the `assigned` flag too) rather than build a
+   parallel RECOVERY-only read or file this as a separate blocking issue. Closes the literal
+   "Day Plan" framing via the Tickets tab / `TicketDetailScreen` `MeTicketDetailView` already
+   renders, per the working theory — no new read path needed once the merged list itself was fixed.
+2. **Confirmed stale, closed already.** `MeTicketDetailView.deviceId` (`me-ticket-detail.service.ts`)
+   does give the SE the expected serial — `CollectionFormScreen` shows it as a hint above the serial
+   input.
+3. **Confirmed stale, corrected.** Built against the real codes:
+   `INVALID_DEVICE_SERIAL` / `CONDITION_NOTES_REQUIRED` / `INVALID_REASON`
+   (`recovery.controller.ts:146-149`), not the issue's original `INVALID_SERIAL` text.
+
+**Built:** `TicketDetailScreen` renders a `recovery-card` for `workType === 'RECOVERY'` (replacing the
+TROUBLESHOOT soft-state ready-card — the VIEWED/ON_SITE chain requires `status === 'OPEN'`, which a
+scheduled RECOVERY ticket never is, so the auto-VIEWED effect is skipped for RECOVERY too) showing the
+lifecycle status; Mark On-Site (`SCHEDULED` only); `CollectionFormScreen` (serial + condition notes,
+server-authoritative, client only gates the submit button) and `UnableToCollectScreen` (reason picker
+→ explicit "routed to the Zone Manager" confirmation, since the ticket's own `status` stays `ON_SITE`
+after filing — satisfies the nav AC without a status-based signal). New `@fsm/shared` types +
+`apps/mobile/src/api/client.ts` functions for all three `/api/recovery/:id/*` actions.
+
+**Not built — item (b) above, filed as its own follow-up:** [#196](../issues/196-recovery-unable-to-collect-not-surfaced-on-reread.md)
+— `unableToCollectAt`/`closureReason` still aren't in `MeTicketDetailView`/`RecoveryView`-derived
+reads, so an SE re-opening an `ON_SITE` ticket that already has a filed unable-to-collect sees the
+same Collection Form / Unable to Collect buttons as a fresh ticket. Not one of the three numbered
+"must absorb" items and not required by this issue's ACs; low-medium priority polish, not a
+parity-gate violation (#68's core ACs are all met).
