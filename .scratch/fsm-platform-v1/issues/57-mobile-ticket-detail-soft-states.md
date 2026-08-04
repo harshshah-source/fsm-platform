@@ -29,10 +29,25 @@ Issue 18 verification status.
 
 ## API contract (authority: backend on `main`)
 
-- `GET /api/tickets/:id` → `TicketDetailView { ticketId, workType, status, failureCycleId, deviceId,
+> **2026-08-04 — the first bullet is stale, verified against source before writing any #57 code.**
+> `GET /api/tickets/:id` is `@Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')`
+> (`ticketing/tickets.controller.ts:70-71`) — an SE gets **403**, not `TicketDetailView`. This issue
+> predates #161 item 1, which built exactly the SE-facing replacement:
+> `GET /api/me/tickets/:id` → `MeTicketDetailView` (`me-tickets/me-ticket-detail.service.ts`),
+> `@Roles('SERVICE_ENGINEER')`, scoped to the caller (assigned OR shared-pool-visible in a covered
+> plant, undifferentiated 404 otherwise). **Use that endpoint, not the one below.** The other two
+> bullets were checked too and are correct as written — `GET /tickets/:id/verification` is
+> `@Roles('SERVICE_ENGINEER', ...MANAGER_ROLES)` and `POST /tickets/:id/soft-state` is
+> `@Roles('SERVICE_ENGINEER')` — both genuinely SE-accessible, no correction needed. This is a
+> one-line fix, not a HITL gap like #55's — recorded so the next session doesn't build against a
+> 403.
+
+- ~~`GET /api/tickets/:id` → `TicketDetailView { ticketId, workType, status, failureCycleId, deviceId,
   vehicleId, plantId, companyId, companyTier, assignmentState, slaBucket, repeatFailure,
   failureCycleState, componentRequestStatus, waitingComponentSince, createdAt, lastStateChangedAt }` +
-  lifecycle events (`ticketing/ticket-query.service.ts`).
+  lifecycle events (`ticketing/ticket-query.service.ts`).~~ **Wrong for mobile — see note above.**
+  Use `GET /api/me/tickets/:id` → `MeTicketDetailView` instead (read the real shape from
+  `me-tickets/me-ticket-detail.service.ts` before building; it was not re-derived here).
 - `GET /api/tickets/:id/verification` → outcome/phase/pings/partialDeadline (`verification/verification-query.service.ts`).
 - `POST /api/tickets/:id/soft-state` — body `{ target: 'VIEWED'|'ON_SITE'|'TROUBLESHOOT_STARTED',
   location?: { lat:number, lng:number } }`; response `{ result, softState:{ softStateId, ticketId, seId,
