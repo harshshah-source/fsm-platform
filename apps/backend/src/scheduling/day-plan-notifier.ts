@@ -1,4 +1,5 @@
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { NotificationService } from '../notifications/notification.service';
 
 /** Emitted when an SE's Day Plan is dispatched (AC#4 "Day Plan is live"). */
 export interface DayPlanDispatchedEvent {
@@ -42,5 +43,37 @@ export class LoggingDayPlanNotifier implements DayPlanNotifier {
     this.logger.log(
       `Day Plan updated (${event.action}) — se=${event.seId} schedule=${event.scheduleId} batch=${event.batchId}`,
     );
+  }
+}
+
+/**
+ * #76 — adoption. Both events have exactly one recipient (the SE themselves), so no extra
+ * recipient-resolution lookup is needed. No `entityType`/`entityId` is set — a dispatched/updated
+ * Day Plan isn't a single ticket entity to tap-route into (#85's Notifications screen only routes
+ * `entityType === 'ticket'`; anything else just marks read, which is the correct behavior here too
+ * since Home *is* the Day Plan).
+ */
+@Injectable()
+export class SpineDayPlanNotifier implements DayPlanNotifier {
+  constructor(private readonly notifications: NotificationService) {}
+
+  async dayPlanDispatched(event: DayPlanDispatchedEvent): Promise<void> {
+    await this.notifications.notify({
+      recipients: [{ userId: event.seId, role: 'SERVICE_ENGINEER' }],
+      type: 'DAY_PLAN_DISPATCHED',
+      title: 'Your Day Plan is live',
+      body: 'Your Day Plan is live. Tap to start.',
+      metadata: { scheduleId: String(event.scheduleId), zoneId: String(event.zoneId), stops: event.stops, tickets: event.tickets },
+    });
+  }
+
+  async dayPlanOverridden(event: DayPlanOverriddenEvent): Promise<void> {
+    await this.notifications.notify({
+      recipients: [{ userId: event.seId, role: 'SERVICE_ENGINEER' }],
+      type: 'DAY_PLAN_OVERRIDDEN',
+      title: 'Day Plan updated',
+      body: `Your Day Plan was updated (${event.action}).`,
+      metadata: { scheduleId: String(event.scheduleId), batchId: String(event.batchId), action: event.action },
+    });
   }
 }

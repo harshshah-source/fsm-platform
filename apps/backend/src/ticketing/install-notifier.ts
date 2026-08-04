@@ -1,4 +1,5 @@
-import { Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { NotificationService } from '../notifications/notification.service';
 
 /** Emitted when an Install Ticket's first valid post-fitment ping arrives — Ticket CLOSED, SE notified. */
 export interface InstallVerifiedEvent {
@@ -36,5 +37,37 @@ export class LoggingInstallNotifier implements InstallNotifier {
   }
   failedActivation(event: InstallFailedActivationEvent): void {
     this.logger.log(`Install FAILED_ACTIVATION — no ping in window — ticket=${event.ticketId} device=${event.deviceId} se=${event.seId ?? '—'}`);
+  }
+}
+
+/** #76 — adoption. Both events have exactly one recipient — the assigned SE; a no-op (matching the
+ *  Logging stub's own `'—'` "no SE" case) when `seId` is null. Messages mirror the #71 mobile
+ *  Install card's own terminal-outcome copy for consistency. */
+@Injectable()
+export class SpineInstallNotifier implements InstallNotifier {
+  constructor(private readonly notifications: NotificationService) {}
+
+  async installVerified(event: InstallVerifiedEvent): Promise<void> {
+    if (!event.seId) return;
+    await this.notifications.notify({
+      recipients: [{ userId: event.seId, role: 'SERVICE_ENGINEER' }],
+      type: 'INSTALL_VERIFIED',
+      title: 'Installation verified',
+      body: 'Installation verified — ticket closed.',
+      entityType: 'ticket',
+      entityId: event.ticketId,
+    });
+  }
+
+  async failedActivation(event: InstallFailedActivationEvent): Promise<void> {
+    if (!event.seId) return;
+    await this.notifications.notify({
+      recipients: [{ userId: event.seId, role: 'SERVICE_ENGINEER' }],
+      type: 'INSTALL_FAILED_ACTIVATION',
+      title: 'Installation activation failed',
+      body: 'No GPS ping received — activation failed.',
+      entityType: 'ticket',
+      entityId: event.ticketId,
+    });
   }
 }

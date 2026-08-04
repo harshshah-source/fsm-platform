@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RecommenderModule } from '../recommender/recommender.module';
 import { BatchAssignmentService } from './batch-assignment.service';
 import { BulkUnassignService } from './bulk-unassign.service';
-import { DAY_PLAN_NOTIFIER, LoggingDayPlanNotifier } from './day-plan-notifier';
+import { DAY_PLAN_NOTIFIER, SpineDayPlanNotifier } from './day-plan-notifier';
 import { DayPlanQueryService } from './day-plan-query.service';
 import { DispatchRunService } from './dispatch-run.service';
 import { DispatchSchedulerService } from './dispatch-scheduler.service';
@@ -49,7 +49,8 @@ import { ZmScheduleQueryService } from './zm-schedule-query.service';
       useFactory: (prisma: PrismaService) => new ScheduleClosureScheduler(prisma),
       inject: [PrismaService],
     },
-    { provide: DAY_PLAN_NOTIFIER, useClass: LoggingDayPlanNotifier },
+    // #76 adoption — SpineDayPlanNotifier routes through the real notification spine.
+    { provide: DAY_PLAN_NOTIFIER, useClass: SpineDayPlanNotifier },
     // Issue 15 AC#7 — the real soft_states-backed conflict source replaces the 13a no-conflict seam.
     { provide: SOFT_STATE_CONFLICT, useClass: PrismaSoftStateConflictPort },
   ],
