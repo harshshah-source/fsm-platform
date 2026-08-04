@@ -20,10 +20,13 @@ export interface TicketCardProps {
   /** #171 (transporter phone) is unbuilt — omit both to render without a dead action row. */
   onCall?: () => void;
   onWhatsApp?: () => void;
+  /** #66 — the client-side same-day-update cue ("New" for a ZM-added ticket, "Removed" for a
+   *  one-session removed label). Absent for every ordinary row. */
+  badge?: { label: string; status: SemanticStatus };
 }
 
 /** docs/ui/mobile/tickets-priority-view.png row. */
-export function TicketCard({ ticket, onPress, onCall, onWhatsApp }: TicketCardProps) {
+export function TicketCard({ ticket, onPress, onCall, onWhatsApp, badge }: TicketCardProps) {
   const showContactRow = Boolean(onCall || onWhatsApp);
   return (
     <Pressable onPress={onPress} style={styles.card}>
@@ -31,6 +34,11 @@ export function TicketCard({ ticket, onPress, onCall, onWhatsApp }: TicketCardPr
         <Text style={styles.vehicleNo}>{ticket.vehicleNo}</Text>
         <Text style={styles.transporter}>{ticket.transporterName}</Text>
       </View>
+      {badge ? (
+        <View style={styles.pillRow}>
+          <StatusPill label={badge.label} status={badge.status} />
+        </View>
+      ) : null}
       <Text style={styles.plantName}>{ticket.plantName}</Text>
       <View style={styles.pillRow}>
         <StatusPill label={ticket.priorityLabel} status={ticket.priorityStatus} />

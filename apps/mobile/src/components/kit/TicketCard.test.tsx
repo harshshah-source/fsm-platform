@@ -43,4 +43,12 @@ describe('TicketCard', () => {
     expect(screen.queryByText('Call')).toBeNull();
     expect(screen.queryByText('WhatsApp')).toBeNull();
   });
+
+  it('#66 — renders the same-day-update badge when given, omits it otherwise', () => {
+    const { rerender } = render(<TicketCard ticket={ticket} badge={{ label: 'Newly Added', status: 'info' }} />);
+    expect(screen.getByText('Newly Added')).toBeTruthy();
+
+    rerender(<TicketCard ticket={ticket} />);
+    expect(screen.queryByText('Newly Added')).toBeNull();
+  });
 });

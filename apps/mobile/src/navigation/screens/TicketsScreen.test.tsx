@@ -5,6 +5,7 @@ import { TicketsScreen } from './TicketsScreen';
 import { apiGetMyTickets } from '../../api/client';
 import { getAccessToken } from '../../auth/tokenStore';
 import { getConnectivityState } from '../../api/connectivity';
+import { __resetPlanCuesForTests } from '../../tickets/dayPlanCues';
 
 jest.mock('../../api/client', () => ({ apiGetMyTickets: jest.fn() }));
 jest.mock('../../auth/tokenStore', () => ({ getAccessToken: jest.fn() }));
@@ -59,6 +60,7 @@ function row(overrides: Partial<MeTicketRow>): MeTicketRow {
 describe('TicketsScreen', () => {
   afterEach(() => {
     jest.clearAllMocks();
+    __resetPlanCuesForTests();
   });
 
   it('groups VISIT_NOW rows under Visit Now and everything else under Other Tickets', async () => {
@@ -200,6 +202,71 @@ describe('TicketsScreen', () => {
 
       expect(screen.getByTestId('screen-tickets')).toBeTruthy();
       expect(screen.getByText('V-TAP')).toBeTruthy();
+    });
+  });
+
+  describe('#66 — same-day update cues (client-side set-diff vs the cached prior fetch)', () => {
+    it('no cache on first load → no Newly Added / Removed badges', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetConnectivityState.mockResolvedValue('online');
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [row({ ticketId: 'a', assigned: true, vehicleNo: 'V-A' })],
+        cursor: null,
+      });
+
+      render(<TicketsScreen />);
+
+      await waitFor(() => expect(screen.getByText('V-A')).toBeTruthy());
+      expect(screen.queryByText('Newly Added')).toBeNull();
+      expect(screen.queryByText('Removed')).toBeNull();
+    });
+
+    it('a ticket added since the cached fetch shows a Newly Added badge, sorted to the top', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetConnectivityState.mockResolvedValue('online');
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' })],
+        cursor: null,
+      });
+      const first = render(<TicketsScreen />);
+      await waitFor(() => expect(first.getByText('V-A')).toBeTruthy());
+      first.unmount();
+
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [
+          row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' }),
+          row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B' }),
+        ],
+        cursor: null,
+      });
+      render(<TicketsScreen />);
+
+      await waitFor(() => expect(screen.getByText('V-B')).toBeTruthy());
+      expect(screen.getByText('Newly Added')).toBeTruthy();
+    });
+
+    it('a ticket removed since the cached fetch shows a one-session Removed label, reconstructed from the cached row', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetConnectivityState.mockResolvedValue('online');
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [
+          row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' }),
+          row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B' }),
+        ],
+        cursor: null,
+      });
+      const first = render(<TicketsScreen />);
+      await waitFor(() => expect(first.getByText('V-B')).toBeTruthy());
+      first.unmount();
+
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' })],
+        cursor: null,
+      });
+      render(<TicketsScreen />);
+
+      await waitFor(() => expect(screen.getByText('V-B')).toBeTruthy());
+      expect(screen.getByText('Removed')).toBeTruthy();
     });
   });
 });

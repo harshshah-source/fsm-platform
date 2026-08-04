@@ -6,13 +6,17 @@ import { getConnectivityState } from '../../api/connectivity';
 import { getAccessToken } from '../../auth/tokenStore';
 import { TicketCard } from '../../components/kit/TicketCard';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
+import { computePlanCues, type PlanCues } from '../../tickets/dayPlanCues';
 import { formatSlaBucketLabel, slaBucketToStatus, workStateLabel } from '../../tickets/ticketDisplay';
 import { TicketDetailScreen } from '../../tickets/detail/TicketDetailScreen';
+
+const NO_CUES: PlanCues = { addedIds: new Set(), removedRows: [] };
 
 interface TicketsState {
   status: 'loading' | 'ready' | 'offline-no-cache';
   items: MeTicketRow[];
   offline: boolean;
+  cues: PlanCues;
 }
 
 type TicketFilter = 'ALL' | MeTicketWorkState;
@@ -45,7 +49,7 @@ function toCardData(row: MeTicketRow) {
  *  split. "Visit Now" = workState VISIT_NOW; "Other Tickets" = PLAN/IN_WORK/VERIFY. Row tap opens
  *  Ticket Detail (M3/#57) via local state, not a stack navigator — none wraps this tab yet. */
 export function TicketsScreen() {
-  const [state, setState] = useState<TicketsState>({ status: 'loading', items: [], offline: false });
+  const [state, setState] = useState<TicketsState>({ status: 'loading', items: [], offline: false, cues: NO_CUES });
   const [filter, setFilter] = useState<TicketFilter>('ALL');
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
 
@@ -61,7 +65,10 @@ export function TicketsScreen() {
         const token = await getAccessToken();
         if (!token) throw new Error('UNAUTHORIZED');
         const view = await apiGetMyTickets(token);
-        if (!cancelled) setState({ status: 'ready', items: view.items, offline: false });
+        // #66 — computePlanCues has side effects (it advances the module's diff cache), so it must
+        // run exactly once per successful fetch, never inside render.
+        const cues = computePlanCues(view.items);
+        if (!cancelled) setState({ status: 'ready', items: view.items, offline: false, cues });
       } catch {
         if (!cancelled) setState((s) => ({ ...s, status: s.items.length ? 'ready' : 'offline-no-cache', offline: true }));
       }
@@ -76,8 +83,15 @@ export function TicketsScreen() {
   }
 
   const visibleItems = filter === 'ALL' ? state.items : state.items.filter((i) => i.workState === filter);
-  const visitNow = visibleItems.filter((i) => i.workState === 'VISIT_NOW');
-  const other = visibleItems.filter((i) => i.workState !== 'VISIT_NOW');
+  const visibleRemoved = filter === 'ALL' ? state.cues.removedRows : state.cues.removedRows.filter((i) => i.workState === filter);
+  const orderBySection = (workStateMatch: (w: MeTicketWorkState) => boolean) => {
+    const live = visibleItems.filter((i) => workStateMatch(i.workState));
+    const added = live.filter((i) => state.cues.addedIds.has(i.ticketId));
+    const rest = live.filter((i) => !state.cues.addedIds.has(i.ticketId));
+    return { removed: visibleRemoved.filter((i) => workStateMatch(i.workState)), ordered: [...added, ...rest] };
+  };
+  const visitNowSection = orderBySection((w) => w === 'VISIT_NOW');
+  const otherSection = orderBySection((w) => w !== 'VISIT_NOW');
 
   return (
     <View testID="screen-tickets" style={styles.container}>
@@ -112,27 +126,47 @@ export function TicketsScreen() {
           <View testID="tickets-visit-now-section" style={styles.section}>
             <Text style={styles.sectionTitle}>Visit Now</Text>
             <Text style={styles.sectionSubtitle}>Most urgent tickets across all plants</Text>
-            {visitNow.length === 0 ? (
+            {visitNowSection.removed.length === 0 && visitNowSection.ordered.length === 0 ? (
               <Text testID="tickets-visit-now-empty" style={styles.emptyText}>
                 Nothing urgent right now.
               </Text>
             ) : (
-              visitNow.map((row) => (
-                <TicketCard key={row.ticketId} ticket={toCardData(row)} onPress={() => setSelectedTicketId(row.ticketId)} />
-              ))
+              <>
+                {visitNowSection.removed.map((row) => (
+                  <TicketCard key={`removed-${row.ticketId}`} ticket={toCardData(row)} badge={{ label: 'Removed', status: 'critical' }} />
+                ))}
+                {visitNowSection.ordered.map((row) => (
+                  <TicketCard
+                    key={row.ticketId}
+                    ticket={toCardData(row)}
+                    onPress={() => setSelectedTicketId(row.ticketId)}
+                    badge={state.cues.addedIds.has(row.ticketId) ? { label: 'Newly Added', status: 'info' } : undefined}
+                  />
+                ))}
+              </>
             )}
           </View>
           <View testID="tickets-other-section" style={styles.section}>
             <Text style={styles.sectionTitle}>Other Tickets</Text>
             <Text style={styles.sectionSubtitle}>Planned, in-work, and verification tickets</Text>
-            {other.length === 0 ? (
+            {otherSection.removed.length === 0 && otherSection.ordered.length === 0 ? (
               <Text testID="tickets-other-empty" style={styles.emptyText}>
                 No other tickets on your list.
               </Text>
             ) : (
-              other.map((row) => (
-                <TicketCard key={row.ticketId} ticket={toCardData(row)} onPress={() => setSelectedTicketId(row.ticketId)} />
-              ))
+              <>
+                {otherSection.removed.map((row) => (
+                  <TicketCard key={`removed-${row.ticketId}`} ticket={toCardData(row)} badge={{ label: 'Removed', status: 'critical' }} />
+                ))}
+                {otherSection.ordered.map((row) => (
+                  <TicketCard
+                    key={row.ticketId}
+                    ticket={toCardData(row)}
+                    onPress={() => setSelectedTicketId(row.ticketId)}
+                    badge={state.cues.addedIds.has(row.ticketId) ? { label: 'Newly Added', status: 'info' } : undefined}
+                  />
+                ))}
+              </>
             )}
           </View>
         </ScrollView>
