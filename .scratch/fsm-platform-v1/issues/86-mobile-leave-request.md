@@ -1,6 +1,6 @@
 # 86 — M8b: SE Leave Request (mobile)
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Mobile
 
 ## What to build
@@ -16,9 +16,9 @@ the admin side (Issue 26).
 
 ## Acceptance criteria
 
-- [ ] Leave form (type + window) submits to `/api/leave-requests`
-- [ ] PENDING state shown after submit
-- [ ] Approve/reject outcome surfaced (reject shows reason; SE can resubmit)
+- [x] Leave form (type + window) submits to `/api/leave-requests`
+- [x] PENDING state shown after submit
+- [x] Approve/reject outcome surfaced (reject shows reason; SE can resubmit)
 
 ## API contract (authority: backend on `main`)
 
@@ -93,3 +93,36 @@ plus a self-scope filter** — owned by **#163**.
   does check `canActFor` (`service:63`). Pin that the client always sends self.
 - Nothing in doc or code covers **cancel/withdraw**, or overlapping requests (no uniqueness
   constraint on `LeaveRequest`, `schema.prisma:1185-1206`).
+
+### 2026-08-04 — done: #163 already closed the premise blocker (same pattern as #77/#85)
+
+Re-verified this comment against current source before building — same "SE cannot read their own
+X" shape as #77 (intraday) and #85 (notifications), and once again already resolved:
+
+1. **Premise blocker resolved by #163 item 2** (done 2026-08-03) — `GET /api/me/leave-requests`
+   (`me-leave-requests.controller.ts`, `SERVICE_ENGINEER`-gated, `listForSe`) returns every status
+   (not just PENDING) with `decisionReason` already on the row. Consumed as-is, no backend change.
+2. **`decidedAt`/`decidedBy`/`decidedByRole` still absent from `LeaveRequestRow`** — confirmed still
+   true, and still not built here: no AC asks for a decision timestamp/actor, only the reason (which
+   #163 already exposes). Not a blocker for this issue.
+3. **Submit response still only `{result, id}`** — also not fixed, and not needed: the mobile screen
+   re-fetches the list after a successful submit (`LeaveRequestScreen`'s `onSubmitted` → `load()`),
+   the same pattern every other create-then-list screen in this codebase uses (Vouchers, Recovery,
+   Install). The PENDING badge renders from that re-fetch, no second endpoint required.
+4. **Error codes confirmed accurate as written** — `SE_REQUIRED`/`INVALID_LEAVE_TYPE`/
+   `INVALID_WINDOW`/`WINDOW_ORDER`, all 400, matched `leave-request.controller.ts` exactly; no
+   correction needed (unlike #68/#71's stale codes).
+5. **Cancel/withdraw and overlapping-window validation** — still not built, still out of scope: no
+   AC references either, and the backend has no cancel endpoint or uniqueness constraint to drive it.
+6. **Notification-on-decision (#76)** — unrelated to this mobile screen; the SE sees the outcome by
+   re-opening the list, no push dependency on the core ACs.
+
+**Entry point:** no PRD mockup specifies where Leave Request lives. `ProfileScreen` was the #54
+empty stub with no owning issue — gave it its first real content (a "Leave Requests" link, local-swap
+navigation, same pattern as every other screen transition in this codebase). Availability (#87) is a
+natural sibling entry there later.
+
+**Date input:** plain `YYYY-MM-DD` text fields, not a native date picker — no such library exists in
+this project's dependencies and no mockup specifies that input's UX, same call #64's Vehicle
+Unavailability form made for its own date field. Server is authoritative on parse (`INVALID_WINDOW`)
+and ordering (`WINDOW_ORDER`); the client only pre-checks non-empty.
