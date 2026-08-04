@@ -499,3 +499,32 @@ export interface ConfirmReceiptConflictBody {
   code: 'COMPONENT_REQUEST_INVALID_STATE';
   status: ComponentRequestStatus;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #55 — GET /api/schedules/me (Day Plan). Mirrors scheduling/day-plan-query.service.ts.
+// ---------------------------------------------------------------------------------------------
+
+export interface DayPlanStopTicket {
+  ticketId: string;
+  sortOrder: number;
+}
+
+export interface DayPlanStop {
+  batchId: string;
+  stopSequence: number;
+  plantId: string;
+  plantName: string;
+  deviceCount: number;
+  tickets: DayPlanStopTicket[];
+}
+
+/** `dispatched: false` (pre-dispatch, no live schedule) renders the mobile Home "your plan is
+ *  being prepared" empty state — `stops` is always `[]` in that case, never a stale prior day's
+ *  plan (#147's date-filter fix). */
+export interface DayPlanView {
+  dispatched: boolean;
+  scheduleId: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
+  stops: DayPlanStop[];
+}

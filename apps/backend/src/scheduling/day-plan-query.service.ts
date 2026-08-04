@@ -1,29 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import type { DayPlanStop, DayPlanStopTicket, DayPlanView } from '@fsm/shared';
 import { utcDayStart } from '../common/utc-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from './schedule-status';
 
-export interface DayPlanStopTicket {
-  ticketId: string;
-  sortOrder: number;
-}
-
-export interface DayPlanStop {
-  batchId: string;
-  stopSequence: number;
-  plantId: string;
-  plantName: string;
-  deviceCount: number;
-  tickets: DayPlanStopTicket[];
-}
-
-export interface DayPlanView {
-  dispatched: boolean;
-  scheduleId: string | null;
-  dateFrom: string | null;
-  dateTo: string | null;
-  stops: DayPlanStop[];
-}
+export type { DayPlanStop, DayPlanStopTicket, DayPlanView } from '@fsm/shared';
 
 const EMPTY: DayPlanView = { dispatched: false, scheduleId: null, dateFrom: null, dateTo: null, stops: [] };
 
