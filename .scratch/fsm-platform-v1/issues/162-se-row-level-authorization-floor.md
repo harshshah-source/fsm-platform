@@ -6,6 +6,12 @@ extracted from `SharedPoolService` and reused by troubleshoot-submit, soft-state
 tickets read (no second copy — AC met). See the dated comment below for per-site detail, tests, and
 the one deviation found (verification-read scope is narrower than plain coverage — "own", not
 "any covered plant" — matching the issue's own 2026-07-28 correction).
+
+> **2026-08-04 correction (from #87):** this closure's own comment says the fifth site's narrowing
+> and #87's `AVAILABLE`-unlock must ship "never separately" — but only the narrowing landed here;
+> `SETTABLE_STATUSES` still excluded `AVAILABLE` entirely after this "done" date. #87 finished the
+> pairing (`se-availability.service.ts`, commit `1c536a4`). This issue's own AC list is otherwise
+> unaffected — the unlock was never one of *its* stated ACs, only a coupling note in its comments.
 Type: AFK · Backend · **Security**
 
 Filed 2026-07-28 (`docs/status/backend-mobile-readiness-plan-2026-07-28.md` §A-§8, §B N2-N4).

@@ -1,6 +1,6 @@
 # 87 — M8c: SE Availability — SOFT_UNAVAILABLE flag (mobile)
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Mobile
 
 ## What to build
@@ -16,9 +16,14 @@ scoring; at `to_ts` availability auto-reverts to AVAILABLE (server-side).
 
 ## Acceptance criteria
 
-- [ ] SE sets SOFT_UNAVAILABLE with a from/to window → `POST /api/engineers/:seId/availability`
-- [ ] Current availability state + active window shown
-- [ ] Auto-revert at `to_ts` is server-owned (the screen just reflects it; no client timer)
+- [x] SE sets SOFT_UNAVAILABLE with a from/to window → `POST /api/engineers/:seId/availability`
+- [x] Current availability state + active window shown
+- [x] Auto-revert at `to_ts` is server-owned (the screen just reflects it; no client timer)
+- [x] (operator-settled 2026-07-28) An SE cannot set a status other than `SOFT_UNAVAILABLE`
+- [x] (operator-settled 2026-07-28) An SE can clear their own active `SOFT_UNAVAILABLE`
+- [x] (operator-settled 2026-07-28) An SE cannot clear a manager-set window
+- [x] (operator-settled 2026-07-28) An SE-set window without `windowEnd` is rejected
+- [x] (operator-settled 2026-07-28) A manager-set window without `windowEnd` is accepted
 
 ## API contract (authority: backend on `main`)
 
@@ -127,3 +132,47 @@ thing to an answer and it is what the auto-revert behaviour is written against.
 Both are service-layer. ACs to add: an SE cannot set a status other than `SOFT_UNAVAILABLE`; an SE
 can clear their own active `SOFT_UNAVAILABLE`; an SE cannot clear a manager-set window; an SE-set
 window without `windowEnd` is rejected; a manager-set window without `windowEnd` is accepted.
+
+### 2026-08-04 — done: finished the coupled backend pairing #162's closure left half-shipped, then built the screen
+
+#162 closed 2026-08-03, but re-verifying against current source before touching the mobile screen
+found its own coupling note ("never separately") had, in fact, been split: the **narrowing** half
+(SE self-set restricted to `SOFT_UNAVAILABLE`) landed; the **unlock** half (adding `AVAILABLE` to
+`SETTABLE_STATUSES` so an SE can clear it) had not — `SETTABLE_STATUSES` still excluded `AVAILABLE`
+entirely, so an open-ended `SOFT_UNAVAILABLE` remained unrecoverable via the API by any role, exactly
+the severity note in this issue's own 07-28 comment. Finished it first, as its own commit, before
+building the screen on top:
+
+- `SETTABLE_STATUSES` gains `AVAILABLE`.
+- `SeAvailabilityService.setAvailability`: an SE may self-set `AVAILABLE` only when their status
+  *right now* (regardless of who set it) is `SOFT_UNAVAILABLE` — new e2e proves both the happy path
+  and that clearing a manager-set `ON_LEAVE` window is still 403.
+- `windowEnd` is now mandatory for any self-set write (`WINDOW_END_REQUIRED`), matching the settled
+  "SE-set window without `windowEnd` is rejected" AC; managers keep open-ended windows for every
+  status including on an SE's behalf.
+- All 5 operator-settled ACs above are now proven by e2e in `engineers-availability-controller.e2e-spec.ts`
+  (17/17 green) + 20/20 across the related availability/recommender/engineers-detail/list suites,
+  `tsc --noEmit` clean.
+
+**#161/#163 read-side confirmed already closed, consumed as-is:** `GET /api/me/availability` (#163
+item 7, done 2026-08-03) already exposed every window with `setByRole`, closing the "current
+availability state + active window shown" AC — no backend change needed for the read.
+
+**Mobile build, one design decision worth recording:** the "Clear" action forwards the *currently
+active window's own* `windowEnd` as the new `AVAILABLE` row's `windowEnd`, rather than an arbitrary
+future date. Reasoning: since a self-set window's `windowEnd` is now mandatory (can't leave the clear
+open-ended), and `currentStatus` picks the *latest-`windowStart`* active row, a clear-row whose own
+end fell *before* the original `SOFT_UNAVAILABLE` window's end would let the original win again the
+moment the clear-row's shorter window elapsed — an "un-clear" bug. Forwarding the original's own end
+(never shorter) closes that off by construction, without needing a policy decision on "how far in the
+future" a clear should reach.
+
+`AvailabilityScreen` derives "currently active" client-side the same way
+`SeAvailabilityService.currentStatus` does server-side (latest `windowStart` row whose window
+contains now) — `listWindows`/`GET /api/me/availability` returns every row, not just the active one.
+Manager-set statuses (`ON_LEAVE`/`OFF_SHIFT`/`WEEKLY_OFF`) render read-only, no Clear action offered
+(the server would 403 anyway). No client timer anywhere — auto-revert is entirely server-owned, the
+screen just reflects whatever the next `GET /api/me/availability` read returns.
+
+Entry point: same as #86 — `ProfileScreen` (already gained Leave Requests) got a second link,
+Availability, same local-swap pattern.
