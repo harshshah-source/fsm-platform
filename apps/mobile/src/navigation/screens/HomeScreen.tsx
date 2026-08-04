@@ -2,19 +2,21 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { DayPlanView, MeTicketRow } from '@fsm/shared';
-import { apiGetDayPlan, apiGetMyTickets } from '../../api/client';
+import { apiGetDayPlan, apiGetMyTickets, apiGetNotifications } from '../../api/client';
 import { getConnectivityState } from '../../api/connectivity';
 import { useAuth } from '../../auth/AuthProvider';
 import { getAccessToken } from '../../auth/tokenStore';
 import { ProgressBar } from '../../components/kit/ProgressBar';
 import { StatTile } from '../../components/kit/StatTile';
 import { computeHomeKpis } from '../../home/homeKpi';
+import { NotificationsScreen } from '../../notifications/NotificationsScreen';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 
 interface HomeState {
   status: 'loading' | 'ready' | 'offline';
   dayPlan: DayPlanView | null;
   tickets: MeTicketRow[];
+  unreadNotifications: number;
 }
 
 /**
@@ -28,8 +30,9 @@ interface HomeState {
 export function HomeScreen() {
   const { session } = useAuth();
   const navigation = useNavigation();
-  const [state, setState] = useState<HomeState>({ status: 'loading', dayPlan: null, tickets: [] });
+  const [state, setState] = useState<HomeState>({ status: 'loading', dayPlan: null, tickets: [], unreadNotifications: 0 });
   const [lastSyncAt, setLastSyncAt] = useState<Date | null>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,9 +45,13 @@ export function HomeScreen() {
       try {
         const token = await getAccessToken();
         if (!token) throw new Error('UNAUTHORIZED');
-        const [dayPlan, ticketsView] = await Promise.all([apiGetDayPlan(token), apiGetMyTickets(token)]);
+        const [dayPlan, ticketsView, notifications] = await Promise.all([
+          apiGetDayPlan(token),
+          apiGetMyTickets(token),
+          apiGetNotifications(token, { unreadOnly: true }),
+        ]);
         if (cancelled) return;
-        setState({ status: 'ready', dayPlan, tickets: ticketsView.items });
+        setState({ status: 'ready', dayPlan, tickets: ticketsView.items, unreadNotifications: notifications.unreadCount });
         setLastSyncAt(new Date());
       } catch {
         if (!cancelled) setState((s) => ({ ...s, status: 'offline' }));
@@ -59,6 +66,10 @@ export function HomeScreen() {
   const poolCount = state.tickets.filter((t) => !t.assigned).length;
   const firstStop = state.dayPlan?.stops[0] ?? null;
 
+  if (showNotifications) {
+    return <NotificationsScreen onBack={() => setShowNotifications(false)} />;
+  }
+
   return (
     <ScrollView testID="screen-home" style={styles.container}>
       <View style={styles.header}>
@@ -66,13 +77,23 @@ export function HomeScreen() {
           <Text style={styles.name}>{session?.profile?.name ?? ''}</Text>
           <Text style={styles.zone}>{session?.profile?.zoneName ?? ''}</Text>
         </View>
-        {state.status === 'offline' ? (
-          <View testID="home-offline-badge" style={styles.offlineBadge}>
-            <Text style={styles.offlineText}>Offline</Text>
-          </View>
-        ) : (
-          <Text style={styles.syncText}>{lastSyncAt ? 'Synced' : ''}</Text>
-        )}
+        <View style={styles.headerRight}>
+          <Pressable testID="notifications-button" onPress={() => setShowNotifications(true)} style={styles.notificationsButton}>
+            <Text style={styles.notificationsLabel}>Notifications</Text>
+            {state.unreadNotifications > 0 ? (
+              <View testID="notifications-unread-badge" style={styles.unreadBadge}>
+                <Text style={styles.unreadBadgeText}>{state.unreadNotifications}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+          {state.status === 'offline' ? (
+            <View testID="home-offline-badge" style={styles.offlineBadge}>
+              <Text style={styles.offlineText}>Offline</Text>
+            </View>
+          ) : (
+            <Text style={styles.syncText}>{lastSyncAt ? 'Synced' : ''}</Text>
+          )}
+        </View>
       </View>
 
       {state.status !== 'ready' ? null : state.dayPlan && !state.dayPlan.dispatched ? (
@@ -163,6 +184,35 @@ const styles = StyleSheet.create({
   zone: {
     ...typeScale.cellSecondary,
     color: color.inkMuted,
+  },
+  headerRight: {
+    alignItems: 'flex-end',
+    gap: spacing.xs,
+  },
+  notificationsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  notificationsLabel: {
+    ...typeScale.cellSecondary,
+    fontWeight: '600',
+    color: color.brand600,
+  },
+  unreadBadge: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: radius.full,
+    backgroundColor: color.critical,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xs / 2,
+  },
+  unreadBadgeText: {
+    ...typeScale.cellSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+    color: color.onColor,
   },
   offlineBadge: {
     backgroundColor: color.warningBg,

@@ -1,23 +1,34 @@
-import { afterEach, describe, expect, it, jest } from '@jest/globals';
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import type { DayPlanView, MeTicketRow, SessionView } from '@fsm/shared';
 import { HomeScreen } from './HomeScreen';
-import { apiGetDayPlan, apiGetMyTickets } from '../../api/client';
+import { apiGetDayPlan, apiGetMyTickets, apiGetNotifications } from '../../api/client';
 import { getConnectivityState } from '../../api/connectivity';
 import { useAuth } from '../../auth/AuthProvider';
 import { getAccessToken } from '../../auth/tokenStore';
 
 jest.mock('../../api/client', () => {
   const actual = jest.requireActual('../../api/client') as object;
-  return { ...actual, apiGetDayPlan: jest.fn(), apiGetMyTickets: jest.fn() };
+  return { ...actual, apiGetDayPlan: jest.fn(), apiGetMyTickets: jest.fn(), apiGetNotifications: jest.fn() };
 });
 jest.mock('../../api/connectivity', () => ({ getConnectivityState: jest.fn() }));
 jest.mock('../../auth/AuthProvider', () => ({ useAuth: jest.fn() }));
 jest.mock('../../auth/tokenStore', () => ({ getAccessToken: jest.fn() }));
+jest.mock('../../notifications/NotificationsScreen', () => {
+  const { Text } = jest.requireActual('react-native') as typeof import('react-native');
+  return {
+    NotificationsScreen: ({ onBack }: { onBack: () => void }) => (
+      <Text testID="mock-notifications-screen" onPress={onBack}>
+        Notifications
+      </Text>
+    ),
+  };
+});
 
 const mockGetDayPlan = jest.mocked(apiGetDayPlan);
 const mockGetMyTickets = jest.mocked(apiGetMyTickets);
+const mockGetNotifications = jest.mocked(apiGetNotifications);
 const mockGetConnectivity = jest.mocked(getConnectivityState);
 const mockUseAuth = jest.mocked(useAuth);
 const mockGetAccessToken = jest.mocked(getAccessToken);
@@ -96,6 +107,10 @@ function renderHome() {
 describe('HomeScreen', () => {
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  beforeEach(() => {
+    mockGetNotifications.mockResolvedValue({ items: [], unreadCount: 0 });
   });
 
   it('renders the SE name/zone from the session profile', async () => {
@@ -213,5 +228,69 @@ describe('HomeScreen', () => {
     renderHome();
 
     await waitFor(() => expect(screen.getByTestId('home-offline-badge')).toBeTruthy());
+  });
+
+  describe('#85 — Notifications entry point', () => {
+    it('opens NotificationsScreen when the header button is pressed, and returns to Home on back', async () => {
+      mockUseAuth.mockReturnValue({
+        session,
+        loading: false,
+        login: jest.fn<(email: string, password: string) => Promise<void>>(),
+        logout: jest.fn<() => Promise<void>>(),
+      });
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetConnectivity.mockResolvedValue('online');
+      mockGetDayPlan.mockResolvedValue(dayPlan);
+      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+
+      renderHome();
+      await waitFor(() => expect(screen.getByTestId('notifications-button')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('notifications-button'));
+
+      expect(screen.getByTestId('mock-notifications-screen')).toBeTruthy();
+      expect(screen.queryByTestId('screen-home')).toBeNull();
+
+      fireEvent.press(screen.getByTestId('mock-notifications-screen'));
+
+      expect(screen.getByTestId('screen-home')).toBeTruthy();
+    });
+
+    it('shows an unread-count badge when there are unread notifications', async () => {
+      mockUseAuth.mockReturnValue({
+        session,
+        loading: false,
+        login: jest.fn<(email: string, password: string) => Promise<void>>(),
+        logout: jest.fn<() => Promise<void>>(),
+      });
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetConnectivity.mockResolvedValue('online');
+      mockGetDayPlan.mockResolvedValue(dayPlan);
+      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+      mockGetNotifications.mockResolvedValue({ items: [], unreadCount: 4 });
+
+      renderHome();
+
+      await waitFor(() => expect(screen.getByTestId('notifications-unread-badge')).toBeTruthy());
+      expect(screen.getByText('4')).toBeTruthy();
+    });
+
+    it('shows no badge when there are no unread notifications', async () => {
+      mockUseAuth.mockReturnValue({
+        session,
+        loading: false,
+        login: jest.fn<(email: string, password: string) => Promise<void>>(),
+        logout: jest.fn<() => Promise<void>>(),
+      });
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetConnectivity.mockResolvedValue('online');
+      mockGetDayPlan.mockResolvedValue(dayPlan);
+      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+
+      renderHome();
+
+      await waitFor(() => expect(screen.getByTestId('notifications-button')).toBeTruthy());
+      expect(screen.queryByTestId('notifications-unread-badge')).toBeNull();
+    });
   });
 });

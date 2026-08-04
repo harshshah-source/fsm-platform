@@ -30,6 +30,7 @@ import {
   apiInstallFitted,
   apiInstallOnSite,
   apiLogin,
+  apiMarkAllNotificationsRead,
   apiMarkNotificationRead,
   apiMe,
   apiRecoveryMarkCollected,
@@ -869,6 +870,19 @@ describe('#77 — notifications endpoints', () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toMatch(/\/notifications\/n-1\/read$/);
+    expect(init).toMatchObject({ method: 'POST' });
+  });
+
+  it('apiMarkAllNotificationsRead POSTs to /notifications/read-all', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ updated: 3 }) } as unknown as Response);
+
+    const result = await apiMarkAllNotificationsRead('token');
+
+    expect(result).toEqual({ updated: 3 });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/notifications\/read-all$/);
     expect(init).toMatchObject({ method: 'POST' });
   });
 });

@@ -452,3 +452,12 @@ export async function apiMarkNotificationRead(accessToken: string, notificationI
     throw new Error('UNAUTHORIZED');
   }
 }
+
+export async function apiMarkAllNotificationsRead(accessToken: string): Promise<{ updated: number }> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/notifications/read-all`, { method: 'POST', headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as { updated: number };
+}
