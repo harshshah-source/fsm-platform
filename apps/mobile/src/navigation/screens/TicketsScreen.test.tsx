@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
-import { render, screen, waitFor } from '@testing-library/react-native';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 import type { MeTicketRow, MeTicketsView } from '@fsm/shared';
 import { TicketsScreen } from './TicketsScreen';
 import { apiGetMyTickets } from '../../api/client';
@@ -116,5 +116,52 @@ describe('TicketsScreen', () => {
 
     await waitFor(() => expect(screen.getByTestId('tickets-offline-banner')).toBeTruthy());
     expect(mockApiGetMyTickets).not.toHaveBeenCalled();
+  });
+
+  describe('filter chips', () => {
+    const items = [
+      row({ ticketId: 'urgent-1', workState: 'VISIT_NOW', vehicleNo: 'V-VISIT' }),
+      row({ ticketId: 'plan-1', workState: 'PLAN', vehicleNo: 'V-PLAN' }),
+      row({ ticketId: 'work-1', workState: 'IN_WORK', vehicleNo: 'V-WORK' }),
+      row({ ticketId: 'verify-1', workState: 'VERIFY', vehicleNo: 'V-VERIFY' }),
+    ];
+
+    async function renderReady() {
+      mockGetConnectivityState.mockResolvedValue('online');
+      mockGetAccessToken.mockResolvedValue('token');
+      mockApiGetMyTickets.mockResolvedValue({ items, cursor: null });
+      render(<TicketsScreen />);
+      await waitFor(() => expect(screen.getByText('V-VISIT')).toBeTruthy());
+    }
+
+    it('shows every row under the default "All" chip', async () => {
+      await renderReady();
+
+      expect(screen.getByText('V-VISIT')).toBeTruthy();
+      expect(screen.getByText('V-PLAN')).toBeTruthy();
+      expect(screen.getByText('V-WORK')).toBeTruthy();
+      expect(screen.getByText('V-VERIFY')).toBeTruthy();
+    });
+
+    it('narrows to only Plan rows when the Plan chip is pressed', async () => {
+      await renderReady();
+
+      fireEvent.press(screen.getByTestId('ticket-filter-PLAN'));
+
+      expect(screen.getByText('V-PLAN')).toBeTruthy();
+      expect(screen.queryByText('V-VISIT')).toBeNull();
+      expect(screen.queryByText('V-WORK')).toBeNull();
+      expect(screen.queryByText('V-VERIFY')).toBeNull();
+    });
+
+    it('returns to showing every row when All is pressed again', async () => {
+      await renderReady();
+
+      fireEvent.press(screen.getByTestId('ticket-filter-VERIFY'));
+      fireEvent.press(screen.getByTestId('ticket-filter-ALL'));
+
+      expect(screen.getByText('V-VISIT')).toBeTruthy();
+      expect(screen.getByText('V-PLAN')).toBeTruthy();
+    });
   });
 });

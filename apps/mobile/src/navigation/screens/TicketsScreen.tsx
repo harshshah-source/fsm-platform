@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import type { MeTicketRow } from '@fsm/shared';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import type { MeTicketRow, MeTicketWorkState } from '@fsm/shared';
 import { apiGetMyTickets } from '../../api/client';
 import { getConnectivityState } from '../../api/connectivity';
 import { getAccessToken } from '../../auth/tokenStore';
 import { TicketCard } from '../../components/kit/TicketCard';
-import { color, spacing, typeScale } from '../../theme/tokens';
+import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { formatSlaBucketLabel, slaBucketToStatus, workStateLabel } from '../../tickets/ticketDisplay';
 
 interface TicketsState {
@@ -13,6 +13,16 @@ interface TicketsState {
   items: MeTicketRow[];
   offline: boolean;
 }
+
+type TicketFilter = 'ALL' | MeTicketWorkState;
+
+const FILTER_CHIPS: { key: TicketFilter; label: string }[] = [
+  { key: 'ALL', label: 'All' },
+  { key: 'VISIT_NOW', label: 'Visit Now' },
+  { key: 'PLAN', label: 'Plan' },
+  { key: 'IN_WORK', label: 'In Work' },
+  { key: 'VERIFY', label: 'Verify' },
+];
 
 function toCardData(row: MeTicketRow) {
   return {
@@ -35,6 +45,7 @@ function toCardData(row: MeTicketRow) {
  *  Ticket Detail (M3/#57) is not wired — that screen doesn't exist yet. */
 export function TicketsScreen() {
   const [state, setState] = useState<TicketsState>({ status: 'loading', items: [], offline: false });
+  const [filter, setFilter] = useState<TicketFilter>('ALL');
 
   useEffect(() => {
     let cancelled = false;
@@ -58,14 +69,32 @@ export function TicketsScreen() {
     };
   }, []);
 
-  const visitNow = state.items.filter((i) => i.workState === 'VISIT_NOW');
-  const other = state.items.filter((i) => i.workState !== 'VISIT_NOW');
+  const visibleItems = filter === 'ALL' ? state.items : state.items.filter((i) => i.workState === filter);
+  const visitNow = visibleItems.filter((i) => i.workState === 'VISIT_NOW');
+  const other = visibleItems.filter((i) => i.workState !== 'VISIT_NOW');
 
   return (
     <View testID="screen-tickets" style={styles.container}>
       {state.offline ? (
         <View testID="tickets-offline-banner" style={styles.offlineBanner}>
           <Text style={styles.offlineText}>Offline — showing the last cached list</Text>
+        </View>
+      ) : null}
+      {state.status !== 'offline-no-cache' ? (
+        <View style={styles.chipRow}>
+          {FILTER_CHIPS.map((chip) => {
+            const active = filter === chip.key;
+            return (
+              <Pressable
+                key={chip.key}
+                testID={`ticket-filter-${chip.key}`}
+                onPress={() => setFilter(chip.key)}
+                style={[styles.chip, active ? styles.chipActive : null]}
+              >
+                <Text style={[styles.chipLabel, active ? styles.chipLabelActive : null]}>{chip.label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
       {state.status === 'offline-no-cache' ? (
@@ -115,6 +144,30 @@ const styles = StyleSheet.create({
     ...typeScale.cellSecondary,
     color: color.warning,
     textAlign: 'center',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    padding: spacing.lg,
+    paddingBottom: 0,
+  },
+  chip: {
+    borderRadius: radius.full,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    backgroundColor: color.surfaceSunken,
+  },
+  chipActive: {
+    backgroundColor: color.brand600,
+  },
+  chipLabel: {
+    ...typeScale.cellSecondary,
+    fontWeight: '600',
+    color: color.ink,
+  },
+  chipLabelActive: {
+    color: color.onColor,
   },
   section: {
     padding: spacing.lg,
