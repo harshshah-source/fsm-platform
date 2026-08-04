@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../auth/AuthProvider';
 import { apiApproveLeave, apiLeaveRequests, apiRejectLeave, type LeaveRequestRow } from '../../api/leaveRequests';
+import { istWindowEndDate, istWindowStartDate } from '../../lib/datetime';
 
 const STATUS_TONE: Record<string, string> = {
   PENDING: 'bg-amber-100 text-amber-800',
@@ -45,7 +46,6 @@ export function LeaveRequestsPage() {
     load();
   };
 
-  const fmt = (iso: string) => iso.slice(0, 10);
 
   return (
     <div>
@@ -85,7 +85,7 @@ export function LeaveRequestsPage() {
               <td className="py-2 pr-3 font-medium">{r.seName}</td>
               <td className="py-2 pr-3">{r.type}</td>
               <td className="py-2 pr-3 text-slate-600">
-                {fmt(r.windowStart)} – {fmt(r.windowEnd)}
+                {istWindowStartDate(r.windowStart)} – {istWindowEndDate(r.windowEnd)}
               </td>
               <td className="py-2 pr-3 text-slate-600">{r.reason ?? '—'}</td>
               <td className="py-2 pr-3">

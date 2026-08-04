@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { istWindowEnd, istWindowStart } from '../common/ist-day';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -49,12 +50,19 @@ export class LeaveRequestController {
   async submit(@CurrentUser() user: AccessTokenClaims, @Body() body: SubmitBody): Promise<LeaveOutcome> {
     if (!body.seId) throw new BadRequestException({ code: 'SE_REQUIRED' });
     if (!LEAVE_TYPES.includes(body.type)) throw new BadRequestException({ code: 'INVALID_LEAVE_TYPE' });
-    const windowStart = new Date(body.windowStart);
-    const windowEnd = new Date(body.windowEnd);
+    // #204 / B8 — a bare `YYYY-MM-DD` (what the mobile form sends) names an **IST calendar day**, so
+    // the pair becomes `[IST midnight of windowStart, IST midnight of the day after windowEnd)`; the
+    // active-window predicate is end-exclusive, which is what makes the end date's own day covered.
+    // Full ISO instants (admin) pass through untouched. See `common/ist-day.ts`.
+    const windowStart = istWindowStart(body.windowStart);
+    const windowEnd = istWindowEnd(body.windowEnd);
     if (Number.isNaN(windowStart.getTime()) || Number.isNaN(windowEnd.getTime())) {
       throw new BadRequestException({ code: 'INVALID_WINDOW' });
     }
-    if (windowEnd < windowStart) throw new BadRequestException({ code: 'WINDOW_ORDER' });
+    // `<=`, not `<`: with an end-exclusive window, an end that lands on or before the start covers no
+    // instant at all. Date-only makes that reachable — `windowEnd` one day before `windowStart` resolves
+    // to exactly `windowStart` — and a leave request that grants zero unavailability is not a success.
+    if (windowEnd <= windowStart) throw new BadRequestException({ code: 'WINDOW_ORDER' });
 
     const outcome = await this.leave.submit(
       { seId: body.seId, type: body.type, windowStart, windowEnd, reason: body.reason ?? null },

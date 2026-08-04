@@ -17,6 +17,7 @@ import {
 } from '../../components/data';
 import { Badge, Button, Field, Input } from '../../components/ui';
 import { FilterSelect } from '../../components/data';
+import { istWindowEndDate, istWindowStartDate } from '../../lib/datetime';
 import { PlantName, SLABadge } from '../../components/domain';
 import type { BadgeTone } from '../../components/ui/Badge';
 import type { MetricTone } from '../../components/data';
@@ -283,8 +284,8 @@ export function SeManagementPage() {
                   <ul>
                     {detail.availabilityRows.map((a, i) => (
                       <li key={i} className="text-xs text-ink-muted">
-                        {a.status} · {a.windowStart.slice(0, 10)}
-                        {a.windowEnd ? `–${a.windowEnd.slice(0, 10)}` : ''}
+                        {a.status} · {istWindowStartDate(a.windowStart)}
+                        {a.windowEnd ? `–${istWindowEndDate(a.windowEnd)}` : ''}
                       </li>
                     ))}
                   </ul>

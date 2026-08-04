@@ -15,6 +15,7 @@ import {
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { istWindowEnd, istWindowStart } from '../common/ist-day';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -211,11 +212,15 @@ export class EngineersController {
     if (!SETTABLE_STATUSES.includes(body.status)) {
       throw new BadRequestException({ code: 'INVALID_AVAILABILITY_STATUS' });
     }
-    const windowStart = new Date(body.windowStart);
+    // #204 / B8 — same window semantics as the leave form: a bare `YYYY-MM-DD` names an **IST calendar
+    // day**, so the end date resolves to the next IST midnight (the predicate is end-exclusive) and the
+    // named day is covered. This field is free text on mobile (`AvailabilityScreen.tsx:157`), so a
+    // date-only value is reachable here too; full ISO instants pass through untouched.
+    const windowStart = istWindowStart(body.windowStart);
     if (Number.isNaN(windowStart.getTime())) {
       throw new BadRequestException({ code: 'INVALID_WINDOW_START' });
     }
-    const windowEnd = body.windowEnd != null ? new Date(body.windowEnd) : null;
+    const windowEnd = body.windowEnd != null ? istWindowEnd(body.windowEnd) : null;
     if (windowEnd && Number.isNaN(windowEnd.getTime())) {
       throw new BadRequestException({ code: 'INVALID_WINDOW_END' });
     }

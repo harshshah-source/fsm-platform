@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { istDate, istDayStartInstant, IST_OFFSET_MS } from '../src/common/ist-day';
+import { istDate, istDayStartInstant, istWindowEnd, istWindowStart, IST_OFFSET_MS } from '../src/common/ist-day';
 
 /**
  * #204 / CONTEXT Decisions §19 — the operating day is the `Asia/Kolkata` calendar day.
@@ -83,6 +83,72 @@ describe('#204 — IST day boundary', () => {
       const now = new Date('2026-08-03T20:30:00Z'); // 02:00 IST on the 4th
       const removedAt = new Date('2026-08-03T17:30:00Z'); // 23:00 IST on the 3rd
       expect(removedAt.getTime()).toBeLessThan(istDayStartInstant(now).getTime());
+    });
+  });
+
+  /**
+   * B8 — the leave/availability window parsers. `leave_requests.window_*` and `se_availability.window_*`
+   * are `@db.Timestamptz` (real instants) and the active-window predicate is
+   * `windowStart <= now AND windowEnd > now` (`se-availability.service.ts:45,73`) — **end-exclusive**.
+   * So an SE who names a single IST calendar day must get `[IST midnight of it, IST midnight of the next)`.
+   */
+  describe('istWindowStart / istWindowEnd — date-only means an IST calendar day', () => {
+    it('THE B8 REGRESSION: a date-only start is IST midnight, not UTC midnight', () => {
+      // `new Date('2026-08-10')` yields 2026-08-10T00:00Z = 05:30 IST, leaving the SE bookable for
+      // the first 5h30m of the day they booked off.
+      expect(istWindowStart('2026-08-10').toISOString()).toBe('2026-08-09T18:30:00.000Z');
+    });
+
+    it('a date-only end is the NEXT IST midnight, so the named day is fully covered', () => {
+      expect(istWindowEnd('2026-08-10').toISOString()).toBe('2026-08-10T18:30:00.000Z');
+    });
+
+    it('a single-day leave covers 00:15 and 23:45 IST of that day and stops at the next midnight', () => {
+      const start = istWindowStart('2026-08-10').getTime();
+      const end = istWindowEnd('2026-08-10').getTime();
+      const at = (iso: string) => new Date(iso).getTime();
+      const active = (t: number) => start <= t && end > t; // the service's own predicate
+
+      expect(active(at('2026-08-09T18:45:00Z'))).toBe(true); // 00:15 IST on the 10th
+      expect(active(at('2026-08-10T18:15:00Z'))).toBe(true); // 23:45 IST on the 10th
+      expect(active(at('2026-08-10T18:45:00Z'))).toBe(false); // 00:15 IST on the 11th
+      expect(active(at('2026-08-09T18:15:00Z'))).toBe(false); // 23:45 IST on the 9th
+    });
+
+    it('a multi-day range covers every IST day inclusive of the end date', () => {
+      const start = istWindowStart('2026-08-10').getTime();
+      const end = istWindowEnd('2026-08-12').getTime();
+      const at = (iso: string) => new Date(iso).getTime();
+      expect(start <= at('2026-08-11T18:45:00Z') && end > at('2026-08-11T18:45:00Z')).toBe(true); // 00:15 IST 12th
+      expect(end).toBe(at('2026-08-12T18:30:00Z')); // stops at IST midnight opening the 13th
+    });
+
+    it('leaves a full ISO instant alone — admin sends `datetime-local` converted to UTC', () => {
+      // SeManagementPage.tsx:89 does `new Date(value).toISOString()`; that is a real instant and must
+      // NOT be re-read as an IST calendar day.
+      expect(istWindowStart('2026-08-10T09:00:00.000Z').toISOString()).toBe('2026-08-10T09:00:00.000Z');
+      expect(istWindowEnd('2026-08-10T17:00:00.000Z').toISOString()).toBe('2026-08-10T17:00:00.000Z');
+    });
+
+    it('leaves an instant that happens to be UTC midnight alone (the Z is explicit intent)', () => {
+      expect(istWindowStart('2026-08-10T00:00:00Z').toISOString()).toBe('2026-08-10T00:00:00.000Z');
+    });
+
+    it('is Invalid Date for garbage, so callers keep emitting their INVALID_WINDOW 400', () => {
+      expect(Number.isNaN(istWindowStart('not-a-date').getTime())).toBe(true);
+      expect(Number.isNaN(istWindowEnd('').getTime())).toBe(true);
+    });
+
+    it('rejects a date-only value whose day does not exist rather than rolling it over', () => {
+      // `Date.UTC(2026, 1, 31)` would silently become 3 March; the old `new Date('2026-02-31')` was
+      // Invalid Date, and that 400 must survive.
+      expect(Number.isNaN(istWindowStart('2026-02-31').getTime())).toBe(true);
+      expect(Number.isNaN(istWindowStart('2026-13-01').getTime())).toBe(true);
+    });
+
+    it('a date-only range crossing a month end still orders correctly', () => {
+      expect(istWindowStart('2026-08-31').toISOString()).toBe('2026-08-30T18:30:00.000Z');
+      expect(istWindowEnd('2026-08-31').toISOString()).toBe('2026-08-31T18:30:00.000Z');
     });
   });
 });

@@ -11,6 +11,7 @@ import { apiListSchedules, apiZoneEngineers, type ScheduleRow, type ZoneEngineer
 import { DateRangeChips, FilterSelect, MetricStrip, PageHeader, type Metric } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { cn } from '../../lib/cn';
+import { addIsoDays, istIsoDate } from '../../lib/datetime';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 
 /**
@@ -30,20 +31,16 @@ import { formatPlantDisplayName } from '../../lib/plantNames';
  */
 const WINDOW_DAYS = 7;
 
-/** Local-time YYYY-MM-DD (avoids the UTC shift that `toISOString` would introduce near midnight). */
-function isoDate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function buildWindow(start: Date, days: number): string[] {
-  return Array.from({ length: days }, (_, i) => {
-    const d = new Date(start);
-    d.setDate(start.getDate() + i);
-    return isoDate(d);
-  });
+/**
+ * The window opens on the **IST** operating day (CONTEXT.md Decisions §19, #204) — `istIsoDate`, not a
+ * device-local `getFullYear/getMonth/getDate`. The old local derivation agreed with the backend only on
+ * a machine set to IST, and disagreed for every session between 00:00 and 05:29 IST: `planned_date` is a
+ * `@db.Date` the backend buckets on the IST day, so a ZM planning at 02:00 IST was writing intents onto
+ * the previous day's column.
+ */
+function buildWindow(now: Date, days: number): string[] {
+  const start = istIsoDate(now);
+  return Array.from({ length: days }, (_, i) => addIsoDays(start, i));
 }
 
 export function PlannerPage() {

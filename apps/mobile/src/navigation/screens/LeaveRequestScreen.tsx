@@ -5,7 +5,13 @@ import { apiGetMyLeaveRequests } from '../../api/client';
 import { getAccessToken } from '../../auth/tokenStore';
 import { StatusPill } from '../../components/kit/StatusPill';
 import { LeaveRequestFormScreen } from '../../leave/LeaveRequestFormScreen';
-import { formatLeaveDate, formatLeaveTypeLabel, leaveStatusLabel, leaveStatusSemantic } from '../../leave/leaveDisplay';
+import {
+  formatLeaveTypeLabel,
+  formatLeaveWindowEnd,
+  formatLeaveWindowStart,
+  leaveStatusLabel,
+  leaveStatusSemantic,
+} from '../../leave/leaveDisplay';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 
 type Status = 'loading' | 'ready' | 'offline';
@@ -97,7 +103,7 @@ function LeaveRow({ row }: { row: LeaveRequestRow }) {
         <StatusPill label={leaveStatusLabel(row.status)} status={leaveStatusSemantic(row.status)} />
       </View>
       <Text style={styles.rowWindow}>
-        {formatLeaveDate(row.windowStart)} – {formatLeaveDate(row.windowEnd)}
+        {formatLeaveWindowStart(row.windowStart)} – {formatLeaveWindowEnd(row.windowEnd)}
       </Text>
       {row.status === 'REJECTED' && row.decisionReason ? (
         <Text style={styles.decisionReason}>{row.decisionReason}</Text>

@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { SeAvailabilityService } from '../src/engineers/se-availability.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -89,6 +90,33 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
   it('rejects an invalid leave type (400)', async () => {
     const token = await login('zm.north@fsm.test');
     await submit(token, { seId: se, type: 'NOPE', ...WIN }).expect(400);
+  });
+
+  /**
+   * #204 / B8 — a date-only `YYYY-MM-DD` (what the mobile form sends, `LeaveRequestFormScreen.tsx:46`)
+   * names an **IST calendar day**. Before this, `new Date('2026-09-14')` gave UTC midnight = 05:30 IST,
+   * so an SE on approved leave stayed bookable for the first 5h30m of the day they booked off.
+   * Asserted through the same predicate the Recommender consumes, not by reading the stored columns.
+   */
+  it('B8 — a single-day leave covers that whole IST day (00:15 and 23:45 IST), and stops at the next IST midnight', async () => {
+    const token = await login('zm.north@fsm.test');
+    const sub = await submit(token, { seId: se, type: 'ON_LEAVE', windowStart: '2026-09-14', windowEnd: '2026-09-14' }).expect(201);
+    await request(app.getHttpServer())
+      .post(`/api/leave-requests/${sub.body.id}/approve`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const availability = app.get(SeAvailabilityService);
+    // 00:15 IST on the 14th — the instant the old UTC-midnight window missed entirely.
+    expect(await availability.currentStatus(se, new Date('2026-09-13T18:45:00Z'))).toBe('ON_LEAVE');
+    expect(await availability.currentStatus(se, new Date('2026-09-14T18:15:00Z'))).toBe('ON_LEAVE'); // 23:45 IST
+    expect(await availability.currentStatus(se, new Date('2026-09-14T18:45:00Z'))).toBe('AVAILABLE'); // 00:15 IST, 15th
+    expect(await availability.currentStatus(se, new Date('2026-09-13T18:15:00Z'))).toBe('AVAILABLE'); // 23:45 IST, 13th
+  });
+
+  it('B8 — an end date one day before the start is still WINDOW_ORDER, not a zero-length window', async () => {
+    const token = await login('zm.north@fsm.test');
+    await submit(token, { seId: se, type: 'ON_LEAVE', windowStart: '2026-09-14', windowEnd: '2026-09-13' }).expect(400);
   });
 
   it('forbids an SE from the manager leave list (403) and unauth is 401', async () => {
