@@ -2,12 +2,17 @@ import Constants from 'expo-constants';
 import type {
   ConfirmReceiptConflictBody,
   ConfirmReceiptResponse,
+  CreateVoucherRequest,
+  CreateVoucherResponse,
   DayPlanView,
   LoginRequest,
   LoginResponse,
+  MediaKind,
+  MediaSlot,
   MeComponentRequestsView,
   MeTicketDetailView,
   MeTicketsView,
+  MeVouchersView,
   SessionView,
   SetSoftStateRequest,
   SetSoftStateResponse,
@@ -15,6 +20,7 @@ import type {
   TroubleshootConflictBody,
   TroubleshootSubmitRequest,
   TroubleshootSubmitResponse,
+  UploadMediaResponse,
   VanStockView,
   VerificationView,
 } from '@fsm/shared';
@@ -241,4 +247,56 @@ export async function apiGetDayPlan(accessToken: string): Promise<DayPlanView> {
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as DayPlanView;
+}
+
+/** #81 — turns a captured photo into an opaque `photoRef`. No `Content-Type` header: fetch/RN sets
+ *  the multipart boundary itself from the `FormData` body. */
+export async function apiUploadMedia(
+  accessToken: string,
+  kind: MediaKind,
+  slot: MediaSlot,
+  file: { uri: string; name: string; type: string },
+): Promise<UploadMediaResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const form = new FormData();
+  form.append('kind', kind);
+  form.append('slot', slot);
+  // RN's FormData accepts this {uri,name,type} shape for a file field; not expressible in the DOM
+  // FormData typings, hence the cast.
+  form.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+  const res = await fetch(`${BASE_URL}/media/upload`, { method: 'POST', headers, body: form });
+  if (res.status === 400) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as UploadMediaResponse;
+}
+
+export async function apiCreateVoucher(accessToken: string, body: CreateVoucherRequest): Promise<CreateVoucherResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/vouchers`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (res.status === 400) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as CreateVoucherResponse;
+}
+
+export async function apiGetMyVouchers(accessToken: string): Promise<MeVouchersView> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/me/vouchers`, { headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as MeVouchersView;
 }

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import * as Keychain from 'react-native-keychain';
 import type {
+  CreateVoucherRequest,
   DayPlanView,
   LoginResponse,
   MeComponentRequestsView,
   MeTicketDetailView,
   MeTicketsView,
+  MeVouchersView,
   SessionView,
   TroubleshootSubmitRequest,
   VanStockView,
@@ -13,9 +15,11 @@ import type {
 } from '@fsm/shared';
 import {
   apiConfirmReceipt,
+  apiCreateVoucher,
   apiGetDayPlan,
   apiGetMyComponentRequests,
   apiGetMyTickets,
+  apiGetMyVouchers,
   apiGetTicketDetail,
   apiGetTicketVerification,
   apiGetVanStock,
@@ -24,6 +28,7 @@ import {
   apiRefresh,
   apiSetSoftState,
   apiSubmitTroubleshoot,
+  apiUploadMedia,
   ConfirmReceiptConflictError,
   SoftStateConflictError,
   TroubleshootConflictError,
@@ -489,5 +494,103 @@ describe('apiGetDayPlan', () => {
     installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
 
     await expect(apiGetDayPlan('bad-token')).rejects.toThrow('UNAUTHORIZED');
+  });
+});
+
+describe('apiUploadMedia', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('POSTs a multipart form to /media/upload and returns the photoRef', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = { photoRef: 'media-1', kind: 'VOUCHER', slot: 'RECEIPT' };
+    fetchMock.mockResolvedValue({ ok: true, status: 201, json: async () => response } as unknown as Response);
+
+    const result = await apiUploadMedia('token', 'VOUCHER', 'RECEIPT', {
+      uri: 'file:///photo.jpg',
+      name: 'photo.jpg',
+      type: 'image/jpeg',
+    });
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/media\/upload$/);
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBeInstanceOf(FormData);
+    expect((init?.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+  });
+
+  it('throws the server 400 code verbatim', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'FILE_TOO_LARGE' }),
+    } as unknown as Response);
+
+    await expect(
+      apiUploadMedia('token', 'VOUCHER', 'RECEIPT', { uri: 'file:///photo.jpg', name: 'photo.jpg', type: 'image/jpeg' }),
+    ).rejects.toThrow('FILE_TOO_LARGE');
+  });
+});
+
+describe('apiCreateVoucher', () => {
+  const request: CreateVoucherRequest = {
+    clientSubmissionId: 'sub-1',
+    items: [{ category: 'TRAVEL', amount: 100, photoRef: 'media-1' }],
+  };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('POSTs the voucher to /vouchers', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = {
+      voucher: { voucherId: 'v-1', seId: 'se-1', clientSubmissionId: 'sub-1', status: 'ZONAL_MANAGER_REVIEW', totalAmount: 100, submittedAt: null },
+      duplicate: false,
+    };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+
+    const result = await apiCreateVoucher('token', request);
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/vouchers$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify(request) });
+  });
+
+  it('throws the server 400 code verbatim (e.g. PHOTO_REQUIRED)', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'PHOTO_REQUIRED' }),
+    } as unknown as Response);
+
+    await expect(apiCreateVoucher('token', request)).rejects.toThrow('PHOTO_REQUIRED');
+  });
+});
+
+describe('apiGetMyVouchers', () => {
+  const view: MeVouchersView = { items: [], cursor: null, summary: { claimedTotal: 0, pendingCount: 0, approvedCount: 0 } };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('GETs /me/vouchers with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetMyVouchers('token');
+
+    expect(result).toEqual(view);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/me\/vouchers$/);
   });
 });

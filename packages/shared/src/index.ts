@@ -571,3 +571,98 @@ export interface UploadMediaResponse {
   kind: MediaKind;
   slot: MediaSlot;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #61 — Vouchers (mobile capture). `POST /api/vouchers` (Issue 38) + `GET /api/me/vouchers` (#163
+// item 1). Mirrors vouchers/vouchers.controller.ts + vouchers/me-vouchers.service.ts.
+// ---------------------------------------------------------------------------------------------
+
+export type VoucherStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'ZONAL_MANAGER_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'NEEDS_CLARIFICATION'
+  | 'PAID';
+
+export type ExpenseCategory = 'TRAVEL' | 'ACCOMMODATION' | 'PARTS' | 'TOOLS' | 'MEAL' | 'OTHER';
+
+export const EXPENSE_CATEGORIES: readonly ExpenseCategory[] = [
+  'TRAVEL',
+  'ACCOMMODATION',
+  'PARTS',
+  'TOOLS',
+  'MEAL',
+  'OTHER',
+];
+
+export interface CreateVoucherItemRequest {
+  category: ExpenseCategory;
+  amount: number;
+  merchantVendorName?: string | null;
+  expenseDatetime?: string | null;
+  photoRef?: string | null;
+}
+
+/** `POST /api/vouchers` body. `clientSubmissionId` makes a resubmit-after-network-drop idempotent —
+ *  the server returns the existing voucher rather than creating a second one. */
+export interface CreateVoucherRequest {
+  clientSubmissionId: string;
+  plantId?: number | string | null;
+  ticketId?: string | null;
+  vehicleId?: number | string | null;
+  items: CreateVoucherItemRequest[];
+}
+
+export interface VoucherView {
+  voucherId: string;
+  seId: string;
+  clientSubmissionId: string;
+  status: VoucherStatus;
+  totalAmount: number;
+  submittedAt: string | null;
+}
+
+export interface CreateVoucherResponse {
+  voucher: VoucherView;
+  duplicate: boolean;
+}
+
+export interface MeVoucherItemView {
+  itemId: string;
+  category: ExpenseCategory;
+  amount: number;
+  merchantVendorName: string | null;
+  expenseDatetime: string | null;
+  photoRef: string | null;
+  limit: number;
+  overLimit: boolean;
+}
+
+export interface MeVoucherRow {
+  voucherId: string;
+  status: VoucherStatus;
+  plantId: number | null;
+  plantName: string | null;
+  ticketId: string | null;
+  vehicleId: number | null;
+  totalAmount: number;
+  submittedAt: string | null;
+  reviewNotes: string | null;
+  reviewerName: string | null;
+  items: MeVoucherItemView[];
+  createdAt: string;
+}
+
+export interface MeVouchersSummary {
+  claimedTotal: number;
+  pendingCount: number;
+  approvedCount: number;
+}
+
+export interface MeVouchersView {
+  items: MeVoucherRow[];
+  cursor: null;
+  summary: MeVouchersSummary;
+}
