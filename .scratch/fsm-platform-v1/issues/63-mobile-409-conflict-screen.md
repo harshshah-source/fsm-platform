@@ -1,6 +1,6 @@
 # 63 — SE mobile full-screen 409 (Ticket already closed) screen
 
-Status: ready-for-agent
+Status: done except Shadow-Use end-to-end demonstration (blocked on #101)
 Type: AFK · Mobile
 
 ## What to build
@@ -18,10 +18,10 @@ Use and will be reconciled by the Warehouse." with **View Van Stock** / **Go Bac
 
 ## Acceptance criteria
 
-- [ ] On a 409 `TICKET_ALREADY_CLOSED` submit response, the full-screen conflict screen renders
-- [ ] Copy shows the winning SE + time and whether Shadow Use was logged
-- [ ] View Van Stock navigates to the Stock screen; Go Back returns to the Day Plan
-- [ ] Idempotency duplicates (not 409) do not trigger this screen
+- [x] On a 409 `TICKET_ALREADY_CLOSED` submit response, the full-screen conflict screen renders
+- [x] Copy shows the winning SE + time and whether Shadow Use was logged
+- [x] View Van Stock navigates to the Stock screen; Go Back returns to the Day Plan
+- [x] Idempotency duplicates (not 409) do not trigger this screen
 
 ## API contract (authority: backend on `main`)
 
@@ -104,3 +104,19 @@ be a lie. This issue's payload list omits `status` — add it.
 Also needed: `shadowUseComponents: [{componentId, name, qty}]` (PRD:593 says "components", plural),
 and for an offline-replay 409, which queued submission was rejected — that needs the
 `offline_submission_receipts` ledger (**D2**), which does not exist.
+
+### 2026-08-04 — DONE except Shadow-Use end-to-end (blocked on #101)
+
+The headline-field blocker is resolved: `handleConflict()` now resolves the winner's `User.name`
+via `EngineerMaster.user` (one extra join) and returns `winnerSeName` alongside `winnerSeId` in the
+409 body. `ConflictScreen` (mobile) renders PRD:593's exact copy, replacing `TroubleshootFormScreen`
+entirely — not the inline banner #58 shipped as an interim. `status === 'CLOSED_AUTO_RECOVERY'`
+renders without naming an SE (matches this comment's own note that there is no winner in that case).
+
+**Still not built:** the Shadow-Use AC can't be demonstrated end-to-end over HTTP —
+`TroubleshootSubmitRequest` still has no `consumedComponents` field, so `shadowUseRecorded` stays
+permanently `false` from a real client submission (structural gap, still owned by #101, unchanged
+from the original finding above). `ConflictScreen`'s Shadow-Use line is correct and will render
+once #101 wires that field through; not exercised by a real HTTP payload today. `shadowUseComponents`
+(plural, itemized) and the offline-replay 409 case (needs D2's `offline_submission_receipts` ledger)
+remain unbuilt for the same reason — no consuming feature produces that data yet.
