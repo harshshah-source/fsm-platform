@@ -873,6 +873,28 @@ describe('#77 — notifications endpoints', () => {
     expect(init).toMatchObject({ method: 'POST' });
   });
 
+  it('apiMarkNotificationRead throws INVALID_NOTIFICATION_ID verbatim on a 400', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'INVALID_NOTIFICATION_ID' }),
+    } as unknown as Response);
+
+    await expect(apiMarkNotificationRead('token', 'not-a-number')).rejects.toThrow('INVALID_NOTIFICATION_ID');
+  });
+
+  it('apiMarkNotificationRead throws NOTIFICATION_NOT_FOUND verbatim on a 404', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ code: 'NOTIFICATION_NOT_FOUND' }),
+    } as unknown as Response);
+
+    await expect(apiMarkNotificationRead('token', '999')).rejects.toThrow('NOTIFICATION_NOT_FOUND');
+  });
+
   it('apiMarkAllNotificationsRead POSTs to /notifications/read-all', async () => {
     keychain.getGenericPassword.mockResolvedValue(false);
     const fetchMock = installFetchMock();

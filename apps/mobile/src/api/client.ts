@@ -448,6 +448,10 @@ export async function apiGetNotifications(accessToken: string, opts: { unreadOnl
 export async function apiMarkNotificationRead(accessToken: string, notificationId: string): Promise<void> {
   const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
   const res = await fetch(`${BASE_URL}/notifications/${notificationId}/read`, { method: 'POST', headers });
+  if (res.status === 400 || res.status === 404) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
   if (!res.ok) {
     throw new Error('UNAUTHORIZED');
   }
