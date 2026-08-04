@@ -317,6 +317,59 @@ describe('#161 item 1 — GET /api/me/tickets/:id (e2e)', () => {
     await request(app.getHttpServer()).get(`/api/me/tickets/${ticketId}`).expect(401);
   });
 
+  it('#171 — transporterContact resolves from the master Transporter.contactPhone', async () => {
+    const transporter = await prisma.transporter.create({ data: { name: 'Rapid Fleet', companyId, contactPhone: '+91-9000000000' } });
+    const vehicle = await prisma.vehicle.create({
+      data: { vehicleNo: 'VEH-171-' + NS, plantId, companyId, transporterId: transporter.transporterId },
+    });
+    const deviceId = await makeDevice();
+    const ticket = await prisma.ticket.create({
+      data: {
+        workType: 'RECOVERY', status: 'SCHEDULED', deviceId, vehicleId: vehicle.vehicleId, plantId, companyId,
+        companyTier: 'GOLD', assignedSeId: seA, lastStateChangedAt: NOW,
+      },
+    });
+    ticketIds.push(ticket.ticketId);
+
+    try {
+      const res = await request(app.getHttpServer())
+        .get(`/api/me/tickets/${ticket.ticketId}`)
+        .set('Authorization', `Bearer ${tokenFor(seA)}`)
+        .expect(200);
+      expect(res.body.transporterName).toBe('Rapid Fleet');
+      expect(res.body.transporterContact).toBe('+91-9000000000');
+    } finally {
+      await prisma.vehicle.deleteMany({ where: { vehicleId: vehicle.vehicleId } });
+      await prisma.transporter.deleteMany({ where: { transporterId: transporter.transporterId } });
+    }
+  });
+
+  it('#171 — transporterContact is null when the master has no contact on file', async () => {
+    const transporter = await prisma.transporter.create({ data: { name: 'No Contact Transport', companyId } });
+    const vehicle = await prisma.vehicle.create({
+      data: { vehicleNo: 'VEH-171b-' + NS, plantId, companyId, transporterId: transporter.transporterId },
+    });
+    const deviceId = await makeDevice();
+    const ticket = await prisma.ticket.create({
+      data: {
+        workType: 'RECOVERY', status: 'SCHEDULED', deviceId, vehicleId: vehicle.vehicleId, plantId, companyId,
+        companyTier: 'GOLD', assignedSeId: seA, lastStateChangedAt: NOW,
+      },
+    });
+    ticketIds.push(ticket.ticketId);
+
+    try {
+      const res = await request(app.getHttpServer())
+        .get(`/api/me/tickets/${ticket.ticketId}`)
+        .set('Authorization', `Bearer ${tokenFor(seA)}`)
+        .expect(200);
+      expect(res.body.transporterContact).toBeNull();
+    } finally {
+      await prisma.vehicle.deleteMany({ where: { vehicleId: vehicle.vehicleId } });
+      await prisma.transporter.deleteMany({ where: { transporterId: transporter.transporterId } });
+    }
+  });
+
   describe('#84 — technicalHealth (derived Technical Hints + raw telemetry)', () => {
     it('missing snapshot → available:false, empty hints, null raw telemetry, null dataAsOf', async () => {
       const { ticketId } = await makePoolTicketWithDevice();

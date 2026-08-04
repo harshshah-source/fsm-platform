@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { MeTicketDetailView, VerificationView } from '@fsm/shared';
 import { apiGetTicketDetail, apiGetTicketVerification, apiSetSoftState, SoftStateConflictError } from '../../api/client';
 import { getAccessToken } from '../../auth/tokenStore';
@@ -7,6 +7,7 @@ import { StatusPill } from '../../components/kit/StatusPill';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { formatSlaBucketLabel, slaBucketToStatus } from '../ticketDisplay';
 import { TroubleshootFormScreen } from '../troubleshoot/TroubleshootFormScreen';
+import { VehicleUnavailabilityFormScreen } from '../vehicle-unavailability/VehicleUnavailabilityFormScreen';
 import { VerificationScreen } from '../verification/VerificationScreen';
 import { captureLocation } from './captureLocation';
 import { formatInactiveDuration } from './ticketDetailDisplay';
@@ -47,6 +48,7 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
   const [settingOnSite, setSettingOnSite] = useState(false);
   const [showTroubleshootForm, setShowTroubleshootForm] = useState(false);
   const [showVerification, setShowVerification] = useState(false);
+  const [showVehicleUnavailability, setShowVehicleUnavailability] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -146,6 +148,21 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
         ticketNoDisplay={state.detail.ticketNoDisplay}
         ticketStatus={state.detail.status}
         onBack={() => setShowVerification(false)}
+      />
+    );
+  }
+
+  if (showVehicleUnavailability && (state.status === 'ready' || state.status === 'verification-pending')) {
+    return (
+      <VehicleUnavailabilityFormScreen
+        ticketId={ticketId}
+        transporterName={state.detail.transporterName}
+        transporterContact={state.detail.transporterContact}
+        onSubmitted={() => {
+          setShowVehicleUnavailability(false);
+          void load();
+        }}
+        onCancel={() => setShowVehicleUnavailability(false)}
       />
     );
   }
@@ -262,9 +279,27 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
       {detail.transporterName ? (
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Transporter</Text>
-          <Text style={styles.infoValue}>{detail.transporterName}</Text>
+          {detail.transporterContact ? (
+            <Pressable testID="transporter-call-button" onPress={() => void Linking.openURL(`tel:${detail.transporterContact}`)}>
+              <Text style={[styles.infoValue, styles.transporterCallValue]}>
+                {detail.transporterName} — {detail.transporterContact}
+              </Text>
+            </Pressable>
+          ) : (
+            <Text testID="transporter-no-contact" style={styles.infoValueMuted}>
+              {detail.transporterName} (no contact on file)
+            </Text>
+          )}
         </View>
       ) : null}
+
+      <Pressable
+        testID="report-vehicle-unavailable-button"
+        onPress={() => setShowVehicleUnavailability(true)}
+        style={styles.vehicleUnavailableLink}
+      >
+        <Text style={styles.vehicleUnavailableLinkLabel}>Report Vehicle Unavailable</Text>
+      </Pressable>
 
       {detail.technicalHealth.available ? (
         <View style={styles.section}>
@@ -391,6 +426,24 @@ const styles = StyleSheet.create({
     ...typeScale.body,
     fontWeight: '600',
     color: color.inkStrong,
+  },
+  infoValueMuted: {
+    ...typeScale.body,
+    fontWeight: '600',
+    color: color.inkMuted,
+  },
+  transporterCallValue: {
+    color: color.brand600,
+    textDecorationLine: 'underline',
+  },
+  vehicleUnavailableLink: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  vehicleUnavailableLinkLabel: {
+    ...typeScale.cellSecondary,
+    fontWeight: '600',
+    color: color.brand600,
   },
   section: {
     padding: spacing.lg,

@@ -5,6 +5,7 @@ import type {
   CreateVoucherRequest,
   CreateVoucherResponse,
   DayPlanView,
+  FileVehicleUnavailabilityRequest,
   LoginRequest,
   LoginResponse,
   MediaKind,
@@ -22,6 +23,7 @@ import type {
   TroubleshootSubmitResponse,
   UploadMediaResponse,
   VanStockView,
+  VehicleUnavailabilityResponse,
   VerificationView,
 } from '@fsm/shared';
 import { getDeviceId } from '../device/deviceId';
@@ -300,4 +302,24 @@ export async function apiGetMyVouchers(accessToken: string): Promise<MeVouchersV
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as MeVouchersView;
+}
+
+export async function apiFileVehicleUnavailability(
+  accessToken: string,
+  body: FileVehicleUnavailabilityRequest,
+): Promise<VehicleUnavailabilityResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/vehicle-unavailability`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (res.status === 400) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as VehicleUnavailabilityResponse;
 }

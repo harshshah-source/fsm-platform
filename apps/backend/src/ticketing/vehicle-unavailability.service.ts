@@ -14,6 +14,9 @@ export interface FileReportInput {
   seId: string;
   reasonCode: VehicleUnavailReason;
   transporterContacted: boolean;
+  /** #171 — the name/number the SE actually used, distinct from the master `Transporter.contactPhone`. */
+  transporterName?: string | null;
+  transporterContact?: string | null;
   expectedFrom: Date;
   expectedTo?: Date | null;
   notes?: string | null;
@@ -80,6 +83,8 @@ export class VehicleUnavailabilityService {
           seId: input.seId,
           reasonCode: input.reasonCode,
           transporterContacted: input.transporterContacted,
+          transporterName: input.transporterName ?? null,
+          transporterContact: input.transporterContact ?? null,
           expectedFrom: input.expectedFrom,
           expectedTo: input.expectedTo ?? null,
           notes: input.notes ?? null,

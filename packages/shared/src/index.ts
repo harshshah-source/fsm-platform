@@ -238,7 +238,8 @@ export interface TechnicalHealth {
 /**
  * `GET /api/me/tickets/:id` (#161 item 1 / #57) — the mobile Ticket Detail read. Covers
  * TROUBLESHOOT/RECOVERY/INSTALL uniformly. `companyTier` is stamped-at-creation, may diverge from
- * the live effective tier by design. `transporterName` only — phone is #171's gap.
+ * the live effective tier by design. `transporterContact` (#171) is a single, server-resolved
+ * field — `null` renders an honest "no contact on file" state, never a dead tap-to-call button.
  * `readinessHint` is always `'UNKNOWN'` today (no per-ticket value persisted anywhere).
  */
 export interface MeTicketDetailView {
@@ -251,6 +252,7 @@ export interface MeTicketDetailView {
   companyName: string;
   companyTier: string;
   transporterName: string | null;
+  transporterContact: string | null;
   slaBucket: string | null;
   workType: string;
   status: string;
@@ -669,4 +671,47 @@ export interface MeVouchersView {
   items: MeVoucherRow[];
   cursor: null;
   summary: MeVouchersSummary;
+}
+
+// ---------------------------------------------------------------------------------------------
+// #64 — Vehicle Unavailability Report (Issue 28's `POST /api/vehicle-unavailability`, SE leg).
+// Filing pauses the primary SLA; the SE never sees the manager-only Secondary SLA Clock.
+// ---------------------------------------------------------------------------------------------
+
+export type VehicleUnavailReason =
+  | 'VEHICLE_ON_TRIP'
+  | 'VEHICLE_NOT_AT_PLANT'
+  | 'DRIVER_NOT_AVAILABLE'
+  | 'CUSTOMER_REFUSED'
+  | 'OTHER';
+
+export const VEHICLE_UNAVAIL_REASONS: readonly VehicleUnavailReason[] = [
+  'VEHICLE_ON_TRIP',
+  'VEHICLE_NOT_AT_PLANT',
+  'DRIVER_NOT_AVAILABLE',
+  'CUSTOMER_REFUSED',
+  'OTHER',
+];
+
+/** `POST /api/vehicle-unavailability` body. `seId` is always the caller's own id for an SE —
+ *  the server 403s (`VU_FORBIDDEN`) if it isn't. `transporterName`/`transporterContact` (#171) are
+ *  the number the SE actually used, distinct from — and a correction signal for — the master
+ *  `Transporter.contactPhone` shown on Ticket Detail. */
+export interface FileVehicleUnavailabilityRequest {
+  ticketId: string;
+  seId: string;
+  reasonCode: VehicleUnavailReason;
+  transporterContacted?: boolean;
+  transporterName?: string | null;
+  transporterContact?: string | null;
+  expectedFrom: string;
+  expectedTo?: string | null;
+  notes?: string | null;
+  gpsLat?: number | null;
+  gpsLng?: number | null;
+}
+
+export interface VehicleUnavailabilityResponse {
+  result: 'OK';
+  id: string;
 }

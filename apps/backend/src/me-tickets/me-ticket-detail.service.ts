@@ -14,7 +14,8 @@ const MAX_FAILURE_HISTORY_DEPTH = 10;
 /**
  * The mobile M3 Ticket Detail read (#161 item 1). `MeTicketDetailView`/`FailureCycleHistoryEntry`/
  * `ComponentRequestEntry` now live in `@fsm/shared` (#57) — see their doc comments there for the
- * field-by-field contract (`companyTier` staleness-by-design, `transporterName`-only pending #171,
+ * field-by-field contract (`companyTier` staleness-by-design, `transporterContact` resolved from
+ * the #171 FSM-owned master column (nullable, honest "no contact on file" until populated),
  * `readinessHint` always `'UNKNOWN'` pending the Recommender persisting a real value).
  */
 
@@ -49,7 +50,7 @@ export class MeTicketDetailService {
       include: {
         plant: { select: { name: true } },
         company: { select: { name: true } },
-        vehicle: { select: { vehicleNo: true, transporter: { select: { name: true } } } },
+        vehicle: { select: { vehicleNo: true, transporter: { select: { name: true, contactPhone: true } } } },
         device: { select: { state: { select: { slaBucket: true } } } },
         failureCycle: { select: { cycleId: true, state: true, slaPausedAt: true, previousFailureCycleId: true } },
       },
@@ -81,6 +82,7 @@ export class MeTicketDetailService {
       companyName: ticket.company.name,
       companyTier: ticket.companyTier,
       transporterName: ticket.vehicle?.transporter?.name ?? null,
+      transporterContact: ticket.vehicle?.transporter?.contactPhone ?? null,
       slaBucket: ticket.device.state?.slaBucket ?? null,
       workType: ticket.workType,
       status: ticket.status,

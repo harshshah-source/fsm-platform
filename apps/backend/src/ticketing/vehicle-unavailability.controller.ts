@@ -36,6 +36,8 @@ interface FileBody {
   seId: string;
   reasonCode: VehicleUnavailReason;
   transporterContacted?: boolean;
+  transporterName?: string | null;
+  transporterContact?: string | null;
   expectedFrom: string;
   expectedTo?: string | null;
   notes?: string | null;
@@ -71,6 +73,8 @@ export class VehicleUnavailabilityController {
           seId: body.seId,
           reasonCode: body.reasonCode,
           transporterContacted: body.transporterContacted ?? false,
+          transporterName: body.transporterName ?? null,
+          transporterContact: body.transporterContact ?? null,
           expectedFrom,
           expectedTo,
           notes: body.notes ?? null,

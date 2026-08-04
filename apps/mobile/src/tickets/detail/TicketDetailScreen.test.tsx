@@ -39,6 +39,16 @@ jest.mock('../verification/VerificationScreen', () => {
     ),
   };
 });
+jest.mock('../vehicle-unavailability/VehicleUnavailabilityFormScreen', () => {
+  const { Text } = jest.requireActual('react-native') as typeof import('react-native');
+  return {
+    VehicleUnavailabilityFormScreen: ({ onSubmitted }: { onSubmitted: () => void }) => (
+      <Text testID="mock-vu-form" onPress={onSubmitted}>
+        Vehicle Unavailability Form
+      </Text>
+    ),
+  };
+});
 
 const mockGetDetail = jest.mocked(apiGetTicketDetail);
 const mockGetVerification = jest.mocked(apiGetTicketVerification);
@@ -57,6 +67,7 @@ function detail(overrides: Partial<MeTicketDetailView>): MeTicketDetailView {
     companyName: 'L&T',
     companyTier: 'GOLD',
     transporterName: 'Rapid Fleet',
+    transporterContact: '+91-9000000000',
     slaBucket: 'CRITICAL',
     workType: 'TROUBLESHOOT',
     status: 'OPEN',
@@ -88,7 +99,7 @@ describe('TicketDetailScreen', () => {
     await waitFor(() => expect(screen.getByText('KA05 CD 8845')).toBeTruthy());
     expect(screen.getByText('TCK-00306')).toBeTruthy();
     expect(screen.getByText('L&T - Bengaluru Plant')).toBeTruthy();
-    expect(screen.getByText('Rapid Fleet')).toBeTruthy();
+    expect(screen.getByText(/Rapid Fleet/)).toBeTruthy();
     expect(mockGetVerification).not.toHaveBeenCalled();
   });
 
@@ -340,6 +351,49 @@ describe('TicketDetailScreen', () => {
 
       await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
       expect(screen.queryByTestId('mock-troubleshoot-form')).toBeNull();
+    });
+  });
+
+  describe('#64/#171 — transporter contact + Vehicle Unavailability', () => {
+    it('tapping the transporter calls Linking.openURL with tel:<contact>', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ transporterName: 'Rapid Fleet', transporterContact: '+91-9000000000' }));
+
+      const { Linking } = jest.requireActual('react-native') as typeof import('react-native');
+      const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('transporter-call-button')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('transporter-call-button'));
+
+      expect(openURL).toHaveBeenCalledWith('tel:+91-9000000000');
+      openURL.mockRestore();
+    });
+
+    it('renders an honest "no contact on file" state when transporterContact is null', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ transporterName: 'Rapid Fleet', transporterContact: null }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+
+      await waitFor(() => expect(screen.getByTestId('transporter-no-contact')).toBeTruthy());
+      expect(screen.queryByTestId('transporter-call-button')).toBeNull();
+    });
+
+    it('opens the Vehicle Unavailability form and returns to the detail view, refetching, on submit', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({}));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('report-vehicle-unavailable-button')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('report-vehicle-unavailable-button'));
+      await waitFor(() => expect(screen.getByTestId('mock-vu-form')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('mock-vu-form'));
+
+      await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
+      expect(screen.queryByTestId('mock-vu-form')).toBeNull();
     });
   });
 });

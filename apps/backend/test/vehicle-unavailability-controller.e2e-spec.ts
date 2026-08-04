@@ -91,4 +91,26 @@ describe('Issue 28 slice 3 — Vehicle Unavailability HTTP (e2e)', () => {
       .send({ ticketId, seId: randomUUID(), reasonCode: 'NOPE', expectedFrom: '2026-06-26T09:00:00Z' })
       .expect(400);
   });
+
+  // #171 — the per-report capture of what the SE actually dialed, distinct from the master
+  // Transporter.contactPhone shown on Ticket Detail.
+  it('#171 — captures transporterName/transporterContact on the report row', async () => {
+    const token = await login('zm.north@fsm.test');
+    const res = await request(app.getHttpServer())
+      .post('/api/vehicle-unavailability')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        ticketId,
+        seId: randomUUID(),
+        reasonCode: 'VEHICLE_NOT_AT_PLANT',
+        transporterName: 'Rapid Fleet',
+        transporterContact: '+91-9000000000',
+        expectedFrom: '2026-06-26T09:00:00Z',
+      })
+      .expect(201);
+
+    const row = await prisma.vehicleUnavailabilityReport.findUniqueOrThrow({ where: { id: BigInt(res.body.id) } });
+    expect(row.transporterName).toBe('Rapid Fleet');
+    expect(row.transporterContact).toBe('+91-9000000000');
+  });
 });
