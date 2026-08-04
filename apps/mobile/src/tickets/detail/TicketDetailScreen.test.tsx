@@ -17,6 +17,18 @@ jest.mock('../../api/client', () => {
 });
 jest.mock('../../auth/tokenStore', () => ({ getAccessToken: jest.fn() }));
 jest.mock('./captureLocation', () => ({ captureLocation: jest.fn() }));
+// Unit-test the navigation wiring only — TroubleshootFormScreen's own behavior is covered by its
+// own test file.
+jest.mock('../troubleshoot/TroubleshootFormScreen', () => {
+  const { Text } = jest.requireActual('react-native') as typeof import('react-native');
+  return {
+    TroubleshootFormScreen: ({ onSubmitted }: { onSubmitted: () => void }) => (
+      <Text testID="mock-troubleshoot-form" onPress={onSubmitted}>
+        Troubleshoot Form
+      </Text>
+    ),
+  };
+});
 
 const mockGetDetail = jest.mocked(apiGetTicketDetail);
 const mockGetVerification = jest.mocked(apiGetTicketVerification);
@@ -239,5 +251,51 @@ describe('TicketDetailScreen', () => {
 
     await waitFor(() => expect(screen.getByTestId('screen-ticket-detail')).toBeTruthy());
     expect(screen.queryByTestId('ticket-detail-back')).toBeNull();
+  });
+
+  describe('Start Troubleshooting (#58 wiring)', () => {
+    it('shows a Start Troubleshooting button once ON_SITE, which posts TROUBLESHOOT_STARTED and opens the form', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ activeSoftState: 'ON_SITE' }));
+      mockSetSoftState.mockResolvedValue({ result: 'OK', softState: {} as never });
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('start-troubleshooting-button')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('start-troubleshooting-button'));
+
+      await waitFor(() =>
+        expect(mockSetSoftState).toHaveBeenCalledWith('token', 't-1', { target: 'TROUBLESHOOT_STARTED' }),
+      );
+      expect(screen.getByTestId('mock-troubleshoot-form')).toBeTruthy();
+    });
+
+    it('does not show Start Troubleshooting before ON_SITE', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ activeSoftState: null }));
+      mockSetSoftState.mockResolvedValue({ result: 'OK', softState: {} as never });
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+
+      await waitFor(() => expect(screen.getByTestId('on-site-button')).toBeTruthy());
+      expect(screen.queryByTestId('start-troubleshooting-button')).toBeNull();
+    });
+
+    it('returns to the detail view and refetches once the form submits', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ activeSoftState: 'ON_SITE' }));
+      mockSetSoftState.mockResolvedValue({ result: 'OK', softState: {} as never });
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('start-troubleshooting-button')).toBeTruthy());
+      fireEvent.press(screen.getByTestId('start-troubleshooting-button'));
+      await waitFor(() => expect(screen.getByTestId('mock-troubleshoot-form')).toBeTruthy());
+
+      mockGetDetail.mockResolvedValueOnce(detail({ status: 'VERIFICATION_PENDING' }));
+      fireEvent.press(screen.getByTestId('mock-troubleshoot-form'));
+
+      await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
+      expect(screen.queryByTestId('mock-troubleshoot-form')).toBeNull();
+    });
   });
 });

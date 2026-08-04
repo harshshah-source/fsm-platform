@@ -6,6 +6,7 @@ import { getAccessToken } from '../../auth/tokenStore';
 import { StatusPill } from '../../components/kit/StatusPill';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { formatSlaBucketLabel, slaBucketToStatus } from '../ticketDisplay';
+import { TroubleshootFormScreen } from '../troubleshoot/TroubleshootFormScreen';
 import { captureLocation } from './captureLocation';
 import { formatInactiveDuration } from './ticketDetailDisplay';
 
@@ -35,14 +36,15 @@ export interface TicketDetailScreenProps {
  * `MeTicketDetailView` carries no generic lifecycle-events field to source it from; not fabricated
  * from unrelated data.
  *
- * TROUBLESHOOT_STARTED is deliberately not posted from here: CONTEXT §347 defines it as "SE has
- * opened and is actively working the troubleshooting form" — that's #58's screen, which doesn't
- * exist yet. This screen only ever advances VIEWED -> ON_SITE.
+ * TROUBLESHOOT_STARTED (CONTEXT §347: "SE has opened and is actively working the troubleshooting
+ * form") is posted when the SE taps Start Troubleshooting, immediately before opening #58's form —
+ * the tap itself is "opening" the form, so this is the one legitimate place to set it.
  */
 export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps) {
   const [state, setState] = useState<ScreenState>({ status: 'loading' });
   const [conflict, setConflict] = useState<{ from: string | null; to: string } | null>(null);
   const [settingOnSite, setSettingOnSite] = useState(false);
+  const [showTroubleshootForm, setShowTroubleshootForm] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -109,6 +111,31 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
       setSettingOnSite(false);
     }
   }, [ticketId, load]);
+
+  const handleStartTroubleshooting = useCallback(async () => {
+    const token = await getAccessToken();
+    if (token) {
+      try {
+        await apiSetSoftState(token, ticketId, { target: 'TROUBLESHOOT_STARTED' });
+      } catch {
+        // Best-effort — an SE already past this transition (idempotent re-tap) or a stale read
+        // shouldn't block opening the form itself.
+      }
+    }
+    setShowTroubleshootForm(true);
+  }, [ticketId]);
+
+  if (showTroubleshootForm) {
+    return (
+      <TroubleshootFormScreen
+        ticketId={ticketId}
+        onSubmitted={() => {
+          setShowTroubleshootForm(false);
+          void load();
+        }}
+      />
+    );
+  }
 
   if (state.status === 'loading') {
     return <View testID="ticket-detail-loading" style={styles.container} />;
@@ -183,6 +210,13 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
             <>
               <Text style={styles.cardTitle}>On site</Text>
               <Text style={styles.cardSubtitle}>Continue in the Troubleshoot form.</Text>
+              <Pressable
+                testID="start-troubleshooting-button"
+                onPress={() => void handleStartTroubleshooting()}
+                style={styles.startButton}
+              >
+                <Text style={styles.startButtonLabel}>Start Troubleshooting</Text>
+              </Pressable>
             </>
           ) : (
             <>
