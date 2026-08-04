@@ -75,7 +75,7 @@ Idempotent submit via `client_submission_id`. Also hosts the resubmit form for t
 ## Blocked by
 
 - #54, #16
-- (photo AC) #81 — Media Upload API
+- ~~(photo AC) #81 — Media Upload API~~ — **#81 is done (see 2026-08-04 contract-audit comment); the photo AC is unblocked and buildable now**
 
 ## Comments
 
@@ -121,3 +121,32 @@ Issue 21/22"); only the boolean `componentUnavailable` flag is wired, which is w
 own ACs actually name. 409 shows an inline message, not the full #63 screen — #63 has its own
 unresolved gaps (`winnerSeId` has no name-resolution endpoint, `shadowUseRecorded` is permanently
 `false` server-side), recorded on #63 already, not re-litigated here.
+
+### 2026-08-04 (later, contract audit) — CORRECTION: the photo AC's blocker is gone; #81 is done
+
+The remaining open work on this issue is the **photo AC only**, and its stated blocker is stale:
+
+1. **#81 (Media Upload API) is `Status: done`.** `POST /api/media/upload` exists and is already
+   consumed by two other mobile forms — `VoucherFormScreen.tsx` (capture → `apiUploadMedia(token,
+   'VOUCHER', 'RECEIPT', …)` → `photoRef`) and `InstallFormScreen.tsx` (`'INSTALL'`,
+   `'INSTALL_PHOTO'`) — so the capture-and-upload pattern this form needs is established, not
+   novel. The comment above ("unbuilt — confirmed zero hits") was true when written and is not
+   edited; this comment supersedes it.
+2. **The backend already accepts the result.** `troubleshoot.controller.ts:66` passes
+   `body.photoRefs` through today; `TroubleshootSubmitRequest.photoRefs?: string[]` is in
+   `@fsm/shared` (index.ts:405). Note the shared doc comments at index.ts:389-390 and :404 still
+   say "photo capture is blocked on #81 (unbuilt)" — stale, fix alongside.
+3. **Slot semantics are ready.** #172 Decision 6's four named slots (`BEFORE`/`AFTER`/`PART`/
+   `PLATE`) are already in `MediaSlot` + `MEDIA_SLOTS_BY_KIND.TROUBLESHOOT` (index.ts:563-568) —
+   what decision 6's own text said "#81 now owes" has been delivered. Slot identity rides on the
+   upload (`kind` + `slot` per media object); the submit body's flat `photoRefs: string[]` stays
+   as-is.
+4. **Also stale in the comment above:** "409 shows an inline message, not the full #63 screen" —
+   the full-screen `ConflictScreen` has since been wired (`TroubleshootFormScreen.tsx:44` renders
+   it, replacing the form).
+
+**Remaining scope for this issue, precisely:** wire `PhotoCaptureRow` (4 named slots) +
+`expo-image-picker` capture + `apiUploadMedia(token, 'TROUBLESHOOT', <slot>, …)` into
+`TroubleshootFormScreen`, thread the returned refs into `photoRefs` on submit — following the
+Voucher/Install pattern verbatim. The `componentUnavailableItem` catalog picker remains separately
+blocked (no component catalog read exists) and is NOT revived by this correction.
