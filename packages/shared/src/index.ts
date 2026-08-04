@@ -328,3 +328,91 @@ export interface SoftStateConflictBody {
   from: SoftStateType | null;
   to: SoftStateType;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #58 — POST /api/tickets/:id/troubleshoot. Mirrors ticketing/troubleshoot.controller.ts /
+// ticketing/troubleshoot-submission.service.ts.
+// ---------------------------------------------------------------------------------------------
+
+/** The real, validated server enum (`troubleshoot.controller.ts`'s `ROOT_CAUSE_CATEGORIES`) — the
+ *  Issue-Found tile picker's choices come from here, not the reference image's mismatched labels
+ *  (#172 Decision 8: "rootCauseCategory is a proper server enum"). */
+export type RootCauseCategory =
+  | 'POWER_ISSUE'
+  | 'SIM_NETWORK_ISSUE'
+  | 'GPS_ANTENNA_ISSUE'
+  | 'DEVICE_HARDWARE_FAULT'
+  | 'WIRING_ISSUE'
+  | 'CONFIGURATION_ISSUE'
+  | 'VEHICLE_ACCESS_ISSUE'
+  | 'INSTALLATION_ISSUE'
+  | 'CUSTOMER_SIDE_ISSUE'
+  | 'UNKNOWN';
+
+export const ROOT_CAUSE_CATEGORIES: RootCauseCategory[] = [
+  'POWER_ISSUE',
+  'SIM_NETWORK_ISSUE',
+  'GPS_ANTENNA_ISSUE',
+  'DEVICE_HARDWARE_FAULT',
+  'WIRING_ISSUE',
+  'CONFIGURATION_ISSUE',
+  'VEHICLE_ACCESS_ISSUE',
+  'INSTALLATION_ISSUE',
+  'CUSTOMER_SIDE_ISSUE',
+  'UNKNOWN',
+];
+
+/** `POST /api/tickets/:id/troubleshoot` request body. `actionTakenCategory` is still an unvalidated
+ *  free string server-side (#172 Decision 8: "becomes an enum" is #169/#174's still-open work) —
+ *  the mobile tile picker sends the reference image's own literal labels as plain strings, the only
+ *  vocabulary that exists anywhere for this field today. `photoRefs` is deliberately omitted here:
+ *  photo capture is blocked on #81 (Media Upload API, unbuilt) and not sent by this build. */
+export interface TroubleshootSubmitRequest {
+  clientSubmissionId: string;
+  rootCauseCategory: RootCauseCategory;
+  rootCauseSubcategory?: string;
+  rootCauseNotes?: string;
+  actionTakenCategory?: string;
+  actionTakenNotes?: string;
+  /** Server-internal-only field (never rendered to the SE) — not sent by this build. */
+  diagnosisNotes?: string;
+  componentUnavailable?: boolean;
+  /** A component catalog id, stringified (the controller `BigInt()`-parses it). Not sent by this
+   *  build — no component catalog/picker is wired yet, only the boolean flag above. */
+  componentUnavailableItem?: string;
+  /** Not sent by this build — photo capture is blocked on #81 (Media Upload API, unbuilt). */
+  photoRefs?: string[];
+  seGps?: { lat: number; lon: number };
+}
+
+export interface TroubleshootSubmissionView {
+  submissionId: string;
+  ticketId: string;
+  seId: string;
+  clientSubmissionId: string;
+  rootCauseCategory: RootCauseCategory;
+  componentUnavailable: boolean;
+  presenceSource: string;
+  seGpsLat: number | null;
+  seGpsLon: number | null;
+  submittedAt: string;
+}
+
+export interface TroubleshootSubmitResponse {
+  result: 'OK' | 'DUPLICATE';
+  duplicate: boolean;
+  submission: TroubleshootSubmissionView;
+}
+
+/** Business 409 (CONTEXT §Business 409 Conflict) — another SE's submission already won, or
+ *  auto-recovery closed the ticket. Distinct from a `DUPLICATE`, which is a 200. #63 (the
+ *  full-screen conflict result) is not built yet — `winnerSeId` has no name-resolution endpoint
+ *  and `shadowUseRecorded` is permanently `false` server-side (structural gap, see #63's own
+ *  2026-07-28 comment); this type exists so a caller can at least render *something* honest. */
+export interface TroubleshootConflictBody {
+  code: 'TICKET_ALREADY_CLOSED';
+  status: string;
+  winnerSeId: string | null;
+  winnerAt: string | null;
+  shadowUseRecorded: boolean;
+}

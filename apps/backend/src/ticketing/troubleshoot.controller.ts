@@ -8,42 +8,15 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { ROOT_CAUSE_CATEGORIES, type TroubleshootSubmissionView, type TroubleshootSubmitRequest as TroubleshootBody } from '@fsm/shared';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
-import { type RootCauseCategory } from '../generated/prisma/enums';
 import { type SubmissionView, TroubleshootSubmissionService } from './troubleshoot-submission.service';
 
-const ROOT_CAUSE_CATEGORIES: RootCauseCategory[] = [
-  'POWER_ISSUE',
-  'SIM_NETWORK_ISSUE',
-  'GPS_ANTENNA_ISSUE',
-  'DEVICE_HARDWARE_FAULT',
-  'WIRING_ISSUE',
-  'CONFIGURATION_ISSUE',
-  'VEHICLE_ACCESS_ISSUE',
-  'INSTALLATION_ISSUE',
-  'CUSTOMER_SIDE_ISSUE',
-  'UNKNOWN',
-];
-
-interface TroubleshootBody {
-  clientSubmissionId: string;
-  rootCauseCategory: RootCauseCategory;
-  rootCauseSubcategory?: string;
-  rootCauseNotes?: string;
-  actionTakenCategory?: string;
-  actionTakenNotes?: string;
-  diagnosisNotes?: string;
-  componentUnavailable?: boolean;
-  componentUnavailableItem?: string;
-  photoRefs?: string[];
-  seGps?: { lat: number; lon: number };
-}
-
-function serialize(s: SubmissionView) {
+function serialize(s: SubmissionView): TroubleshootSubmissionView {
   return {
     submissionId: s.submissionId,
     ticketId: s.ticketId,
@@ -54,7 +27,7 @@ function serialize(s: SubmissionView) {
     presenceSource: s.presenceSource,
     seGpsLat: s.seGpsLat,
     seGpsLon: s.seGpsLon,
-    submittedAt: s.submittedAt,
+    submittedAt: s.submittedAt.toISOString(),
   };
 }
 
