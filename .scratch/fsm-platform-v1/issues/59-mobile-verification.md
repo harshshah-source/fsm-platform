@@ -16,9 +16,9 @@ already-built backend.
 
 ## Acceptance criteria
 
-- [ ] Verification status (three-phase outcome) rendered from `/api/tickets/:id/verification`
-- [ ] PARTIAL_RECOVERY badge shown when applicable (derived, per backend rule)
-- [ ] Verification CTA wired
+- [x] Verification status (three-phase outcome) rendered from `/api/tickets/:id/verification`
+- [x] PARTIAL_RECOVERY badge shown when applicable (derived, per backend rule)
+- [x] Verification CTA wired — "View Verification" from Ticket Detail's compact card, "Back to Ticket" returns
 
 ## API contract (authority: backend on `main`)
 
@@ -157,3 +157,24 @@ this screen is otherwise built.
 verified", "Historical mapping checked") have no source in `verification-criteria.ts` today — that
 backend slice + those two checks' concrete definitions still need attention before this issue is
 buildable end-to-end.
+
+### 2026-08-04 — DONE, shipping 3 of 5 named checks per the operator's decision
+
+Second operator decision closed this issue's remaining blocker: **ship only the 3 checks with a
+real source** (`Live GPS received`, `Multiple pings detected`, `Stability window`) rather than
+guess at "Device mapping verified" / "Historical mapping checked" — those two simply don't render
+yet, to be added once their definitions are settled.
+
+Backend: `VerificationView` gained `deviceId`, `checks[]`, `startedAt`, `partialDeadline` (all
+previously missing from the SE route — see the 2026-07-28 comment above). A check is `FAIL` only
+once the run has concluded (`outcome` set) and never passed; otherwise `PENDING`. `partialDeadline`
+mirrors the manager review row's own derivation (`startedAt` + 24h while `PARTIAL_RECOVERY`). 2 new
+e2e cases (PARTIAL_RECOVERY and CLOSED), 9/9 green.
+
+Mobile: `VerificationScreen` — checks list (color-coded PASS/FAIL/PENDING), Device Guard card
+("GPS909 only"), a static possible-outcomes legend, Back to Ticket. Escalated renders from
+`ticket.status` independently of the verification badge (no `VerifyOutcome` change, per the first
+operator decision). Wired from Ticket Detail's compact verification-pending card via a new "View
+Verification" button — same local-state show/hide pattern as #58's Start Troubleshooting.
+
+165 mobile tests green, `tsc`/`eslint` clean both apps.
