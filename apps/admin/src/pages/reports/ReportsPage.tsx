@@ -23,7 +23,7 @@ import {
 } from '../../components/data';
 import { BarChartCard, BarList, CHART, ChartCard, ReportGrid, TrendChart, type BarDatum, type BarListItem, type TrendDatum } from '../../components/charts';
 import { Button } from '../../components/ui';
-import { SLA_BUCKETS, BUCKET_LABEL, BUCKET_HEX, type SlaBucket } from '../../lib/slaBucket';
+import { SLA_BUCKETS, BUCKET_LABEL, BUCKET_COLOR, type SlaBucket } from '../../lib/slaBucket';
 
 /** Buckets counted as "Critical+" — CRITICAL severity and worse (CONTEXT SLA Bucket table). */
 const CRITICAL_PLUS: SlaBucket[] = ['LONG_PENDING', 'VERY_SEVERE', 'SEVERE', 'HIGH_CRITICAL', 'CRITICAL'];
@@ -122,7 +122,7 @@ export function ReportsPage() {
     return SLA_BUCKETS.map((k) => ({
       name: BUCKET_LABEL[k],
       value: zones.reduce((s, z) => s + (z.byBucket[k] ?? 0), 0),
-      color: BUCKET_HEX[k],
+      color: BUCKET_COLOR[k],
     })).filter((b) => b.value > 0);
   }, [zones]);
 

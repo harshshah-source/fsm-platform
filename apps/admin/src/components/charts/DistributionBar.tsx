@@ -13,18 +13,24 @@ export interface DistSegment {
 export function DistributionBar({
   segments,
   className,
+  testId,
 }: {
   segments: DistSegment[];
   className?: string;
+  testId?: string;
 }) {
   const total = segments.reduce((s, x) => s + x.value, 0) || 1;
   return (
-    <div className={className}>
-      <div className="flex h-3 w-full overflow-hidden rounded-full bg-surface-sunken">
-        {segments.map((s, i) => (
+    <div className={className} data-testid={testId}>
+      {/* A 2px surface gap between adjacent fills: without it two neighbouring ramp steps read as one
+          longer segment, which is exactly the misreading an ordinal ramp invites. Zero-value segments
+          are dropped so they cannot contribute a stray gap of their own. */}
+      <div className="flex h-3 w-full gap-[2px] overflow-hidden rounded-full bg-surface-sunken">
+        {segments.filter((s) => s.value > 0).map((s, i) => (
           <div
             key={i}
             title={`${s.label}: ${s.value}`}
+            className="first:rounded-l-full last:rounded-r-full"
             style={{ width: `${(100 * s.value) / total}%`, background: s.color }}
           />
         ))}

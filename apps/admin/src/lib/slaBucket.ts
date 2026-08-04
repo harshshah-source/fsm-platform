@@ -105,29 +105,62 @@ function formatBucketRange(lowerHours: number, upperHours: number): string {
 }
 
 /**
- * Concrete hex per bucket for chart surfaces that need colour strings rather than Tailwind classes
- * (the Ops-Head SLA `DistributionBar`, reference 04 §1.6). Same green→red→violet heat ramp as
- * `BUCKET_CLASS`; this is the single SLA-colour source promoted for chart use (DESIGN-SYSTEM §9.3).
+ * Concrete LIGHT-MODE hex per bucket. Kept for the few places that need a real colour value rather
+ * than a CSS reference (canvas paths, exported files, tests). **Charts should use
+ * {@link BUCKET_COLOR}**, which re-points with the theme.
+ *
+ * This is an ORDINAL ramp, not a categorical palette: severity is carried by lightness first and hue
+ * second, so it stays readable under red/green colour blindness — deuteranopia collapses the hues but
+ * not the light→dark progression. Steps are monotone in OKLab L with a ≥0.06 gap between neighbours.
+ * Validated with the dataviz `validate_palette.js --ordinal` checks (monotone L ✓, adjacent ΔL ✓,
+ * light-end contrast 2.06:1 ✓); the "single hue" check is a deliberate, documented deviation —
+ * PRD:302 specifies the green→red coding, and semantic heat is the sanctioned multi-hue sequential
+ * exception, so every surface using it carries a legend.
+ *
+ * The values live in `index.css` as `--sla-*` and are mirrored here; the two must stay in step.
  */
 export const BUCKET_HEX: Record<SlaBucket, string> = {
-  LONG_PENDING: '#6d28d9',
-  VERY_SEVERE: '#8f1d12',
-  SEVERE: '#c4341f',
-  HIGH_CRITICAL: '#e0492e',
-  CRITICAL: '#f08a24',
-  RISK: '#eab308',
-  EARLY_RISK: '#9acd32',
-  WARNING: '#3fae6a',
+  LONG_PENDING: '#610017',
+  VERY_SEVERE: '#7f0010',
+  SEVERE: '#971b00',
+  HIGH_CRITICAL: '#a24100',
+  CRITICAL: '#ac5f00',
+  RISK: '#ab8000',
+  EARLY_RISK: '#81aa43',
+  WARNING: '#66c58b',
 };
 
-/** Colour coding per the severity table — deepest red at the top, cooling toward WARNING. */
+/**
+ * Theme-aware SLA colour per bucket — a `var(--sla-…)` reference, so a bucket is the same colour in
+ * every chart AND re-points on the dark canvas (where the deep-red end would otherwise vanish into
+ * the near-black surface). SVG `fill`/`stroke` and CSS `background` resolve these natively.
+ *
+ * Prefer this over {@link BUCKET_HEX} anywhere the colour is rendered in the app.
+ */
+export const BUCKET_COLOR: Record<SlaBucket, string> = {
+  LONG_PENDING: 'var(--sla-long-pending)',
+  VERY_SEVERE: 'var(--sla-very-severe)',
+  SEVERE: 'var(--sla-severe)',
+  HIGH_CRITICAL: 'var(--sla-high-critical)',
+  CRITICAL: 'var(--sla-critical)',
+  RISK: 'var(--sla-risk)',
+  EARLY_RISK: 'var(--sla-early-risk)',
+  WARNING: 'var(--sla-warning)',
+};
+
+/**
+ * Badge/pill colour coding per the severity table, driven by the SAME ramp as the charts (via the
+ * `--sla-*` tokens) so a bucket can never be one colour in a table and another in a chart beside it.
+ * Text is white throughout except the two lightest steps, whose lightness (L ≥ 0.69) needs dark ink
+ * to stay legible.
+ */
 export const BUCKET_CLASS: Record<SlaBucket, string> = {
-  LONG_PENDING: 'bg-red-900 text-white',
-  VERY_SEVERE: 'bg-red-700 text-white',
-  SEVERE: 'bg-red-500 text-white',
-  HIGH_CRITICAL: 'bg-orange-500 text-white',
-  CRITICAL: 'bg-amber-400 text-amber-950',
-  RISK: 'bg-yellow-300 text-yellow-900',
-  EARLY_RISK: 'bg-lime-200 text-lime-900',
-  WARNING: 'bg-slate-200 text-slate-700',
+  LONG_PENDING: 'bg-[var(--sla-long-pending)] text-white',
+  VERY_SEVERE: 'bg-[var(--sla-very-severe)] text-white',
+  SEVERE: 'bg-[var(--sla-severe)] text-white',
+  HIGH_CRITICAL: 'bg-[var(--sla-high-critical)] text-white',
+  CRITICAL: 'bg-[var(--sla-critical)] text-white',
+  RISK: 'bg-[var(--sla-risk)] text-white',
+  EARLY_RISK: 'bg-[var(--sla-early-risk)] text-[#14200a]',
+  WARNING: 'bg-[var(--sla-warning)] text-[#06210f]',
 };

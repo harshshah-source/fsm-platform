@@ -94,6 +94,31 @@
   --color-neutral: #4b5563;
   --color-neutral-bg: #eeeef0;
 
+  /* ── SLA severity ramp ──────────────────────────────────────────────────────────
+   * The eight SLA bands as an ORDINAL ramp: severity is carried by LIGHTNESS first and hue second,
+   * so it survives red/green colour blindness — under deuteranopia the hues collapse but the
+   * light→dark progression does not. Steps are monotone in OKLab L with a ≥0.06 gap between
+   * neighbours; the light end still clears the card surface at ≥2:1.
+   *
+   * The previous ramp was picked by eye and failed exactly where it mattered: EARLY_RISK (#9acd32)
+   * and RISK (#eab308) sat 0.01 L apart — ΔE 2.7 under deuteranopia, i.e. indistinguishable — and
+   * SEVERE/HIGH_CRITICAL were ΔE 7.1 apart even with full colour vision. Lightness also ran
+   * non-monotonically (up, then down, then up again for the violet top band), so "darker" did not
+   * mean "worse" anywhere on the scale.
+   *
+   * It stays a multi-hue green→red heat ramp rather than collapsing to one hue because PRD:302
+   * specifies that coding ("LONG_PENDING (deep red) › … › WARNING (green)"); semantic heat is the
+   * documented exception to the one-hue rule, and it ships with a legend wherever it is used.
+   * Dark-mode steps are SELECTED against the dark surface, not flipped from these. */
+  --sla-warning: #66c58b;
+  --sla-early-risk: #81aa43;
+  --sla-risk: #ab8000;
+  --sla-critical: #ac5f00;
+  --sla-high-critical: #a24100;
+  --sla-severe: #971b00;
+  --sla-very-severe: #7f0010;
+  --sla-long-pending: #610017;
+
   /* Radius — soft rounded cards per the reference */
   --radius-card: 1rem;
 
@@ -182,6 +207,18 @@
   --color-critical-bg: #2c1315;
   --color-neutral: #a3a3a3;
   --color-neutral-bg: #1f1f1f;
+
+  /* SLA ramp, re-stepped for the dark canvas (see the light block for the rules). Same hue path and
+   * the same monotone-lightness contract, lifted so the DARKEST step — LONG_PENDING, the one that
+   * matters most — still clears the near-black card surface at ≥2:1 instead of disappearing into it. */
+  --sla-warning: #8befb0;
+  --sla-early-risk: #a6d367;
+  --sla-risk: #d9a401;
+  --sla-critical: #df7d01;
+  --sla-high-critical: #d75a06;
+  --sla-severe: #c63b20;
+  --sla-very-severe: #ae2328;
+  --sla-long-pending: #92112c;
 
   /* Elevation — over a dark canvas, depth comes from black shadow, not from a grey tint. */
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.5), 0 12px 30px rgb(0 0 0 / 0.4);

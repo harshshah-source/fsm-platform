@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import {
-  BUCKET_HEX,
+  BUCKET_COLOR,
   BUCKET_LABEL,
   BUCKET_LABEL_RANGE,
   SLA_BUCKETS,
@@ -56,7 +56,7 @@ function PillTooltip({
   return (
     <div className="rounded-lg bg-chrome-900 px-3 py-2 text-xs text-white shadow-floating ring-1 ring-white/10">
       <div className="mb-1 flex items-center gap-1.5 font-semibold">
-        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_HEX[bucket] }} />
+        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_COLOR[bucket] }} />
         {BUCKET_LABEL_RANGE[bucket]}
       </div>
       {payload.map((p) => {
@@ -84,7 +84,7 @@ function PillTooltip({
  * Distribution.jpg): thin rounded per-zone bars grouped by SLA bucket on a soft raised plot panel,
  * a dashed fleet-average line, and a dark hover pill. Clicking a bar isolates that zone — other
  * zones' bars dim, and a callout chip names the zone, bucket, count and zone total (click the bar
- * again or the × to clear). Bar colours are the pinned semantic SLA heat ramp (`BUCKET_HEX`) —
+ * again or the × to clear). Bar colours are the pinned semantic SLA heat ramp (`BUCKET_COLOR`) —
  * never restyled. The legend pills below carry the same label(range) + total per bucket the
  * previous `DistributionBar` legend showed, so the counts stay readable without hover.
  */
@@ -197,7 +197,7 @@ export function SlaBucketBarChart({
                     return (
                       <Cell
                         key={b}
-                        fill={BUCKET_HEX[b]}
+                        fill={BUCKET_COLOR[b]}
                         fillOpacity={selected && selected.zone !== name ? 0.22 : 1}
                         // Selection outline: the page ink, so it stays visible when the canvas inverts.
                         stroke={isClickedBar ? 'var(--color-ink-strong)' : undefined}
@@ -219,7 +219,7 @@ export function SlaBucketBarChart({
           data-testid="sla-zone-callout"
           className="mt-3 inline-flex max-w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-line bg-chrome-900 px-3 py-2 text-xs text-white shadow-card"
         >
-          <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_HEX[selected.bucket] }} />
+          <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_COLOR[selected.bucket] }} />
           <span className="font-bold">{selected.zone} zone</span>
           <span className="text-white/60">{BUCKET_LABEL_RANGE[selected.bucket]}</span>
           <span className="font-bold tabular-nums">{nf.format(selected.value)} devices</span>
@@ -243,7 +243,7 @@ export function SlaBucketBarChart({
             key={bucket}
             className="flex items-center gap-1.5 rounded-full border border-line bg-surface-card px-2.5 py-1 shadow-sm"
           >
-            <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: BUCKET_HEX[bucket] }} />
+            <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: BUCKET_COLOR[bucket] }} />
             <span className="text-ink-muted">{BUCKET_LABEL_RANGE[bucket]}</span>
             <span className="font-semibold tabular-nums text-ink-strong">{nf.format(total)}</span>
           </li>

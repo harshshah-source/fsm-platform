@@ -24,6 +24,14 @@ export interface Metric {
    * headline KPI; content, testId and click behaviour are identical to a regular card.
    */
   hero?: boolean;
+  /**
+   * This metric's share of its own whole, 0–1. Renders a thin proportion bar under the value in the
+   * card's tone — the reference point a bare count cannot give you ("874 inactive" means nothing
+   * until you can see it is a third of the fleet). Supply it only where a share is actually
+   * meaningful: a count against the population it came out of. Omit for rates (already a share of
+   * something) and for counts with no natural denominator.
+   */
+  share?: number | null;
 }
 
 const ACCENT: Record<MetricTone, string> = {
@@ -34,6 +42,18 @@ const ACCENT: Record<MetricTone, string> = {
   critical: 'before:bg-critical',
   verified: 'before:bg-verified',
   neutral: 'before:bg-neutral',
+};
+
+/* Fill for the optional share bar — the same tone the card's left accent already carries, so the two
+ * cannot disagree about what kind of number this is. */
+const SHARE_FILL: Record<MetricTone, string> = {
+  brand: 'bg-brand-600',
+  info: 'bg-info',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  critical: 'bg-critical',
+  verified: 'bg-verified',
+  neutral: 'bg-neutral',
 };
 
 /* Frosted-glass tint per tone (DashboardHero cards floating over the truck imagery) — a translucent
@@ -62,6 +82,7 @@ export function MetricCard({
   onClick,
   hero = false,
   glass = false,
+  share = null,
 }: Metric & { glass?: boolean }) {
   const className = cn(
     'group relative block w-full overflow-hidden rounded-card border p-4 text-left shadow-card transition-all hover:-translate-y-0.5 hover:shadow-card-hover',
@@ -74,11 +95,42 @@ export function MetricCard({
     onClick && 'cursor-pointer focus-ring',
     onClick && !hero && 'hover:border-line-strong',
   );
+  // The number leads. A KPI card is read by scanning values down a row and stopping at the one that
+  // looks wrong — a caps label above the figure puts the least distinctive thing in the scan path, so
+  // the value now comes first at a size that reads at arm's length, with the label secondary beneath
+  // it. `tabular-nums` keeps digits column-aligned so two cards' values can be compared by width.
   const body = (
     <div className="pl-1.5">
-      <div className={cn('text-[11px] font-semibold uppercase tracking-wider', hero ? 'text-white/55' : 'text-ink-caps')}>{label}</div>
-      <div className={cn('mt-1 text-2xl font-bold tracking-tight', hero ? 'text-white' : 'text-ink-strong')}>{value}</div>
-      {hint && <div className={cn('mt-0.5 text-xs', hero ? 'text-white/45' : 'text-ink-muted')}>{hint}</div>}
+      <div
+        className={cn(
+          'text-[28px] font-bold leading-none tracking-tight tabular-nums',
+          hero ? 'text-white' : 'text-ink-strong',
+        )}
+      >
+        {value}
+      </div>
+      <div
+        className={cn(
+          'mt-1.5 text-[11px] font-semibold uppercase tracking-wider',
+          hero ? 'text-white/55' : 'text-ink-caps',
+        )}
+      >
+        {label}
+      </div>
+      {share != null && Number.isFinite(share) && (
+        <div
+          className={cn('mt-2 h-1 w-full overflow-hidden rounded-full', hero ? 'bg-white/15' : 'bg-surface-sunken')}
+          // The bar restates the value's share of its own whole; the hint below names the whole, so
+          // the pair is self-describing and the bar is never decoration.
+          aria-hidden
+        >
+          <span
+            className={cn('block h-full rounded-full', hero ? 'bg-white/70' : SHARE_FILL[tone])}
+            style={{ width: `${Math.max(0, Math.min(1, share)) * 100}%` }}
+          />
+        </div>
+      )}
+      {hint && <div className={cn('mt-1 text-xs', hero ? 'text-white/45' : 'text-ink-muted')}>{hint}</div>}
     </div>
   );
   const card = onClick ? (
