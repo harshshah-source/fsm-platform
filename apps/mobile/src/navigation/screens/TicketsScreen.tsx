@@ -45,10 +45,23 @@ function toCardData(row: MeTicketRow) {
   };
 }
 
+/** #77 — an intraday-CRITICAL-insertion-accepted ticket rides the existing #66 addedIds mechanism
+ *  (it's newly `assigned:true` the moment it lands) but needs its own label, not the generic
+ *  "Newly Added" — the caller (`SeTabShell`) passes the ticketId it just watched get accepted. */
+function badgeFor(ticketId: string, justAcceptedTicketId: string | null | undefined, addedIds: Set<string>) {
+  if (justAcceptedTicketId && ticketId === justAcceptedTicketId) return { label: 'CRITICAL INSERTION', status: 'critical' as const };
+  if (addedIds.has(ticketId)) return { label: 'Newly Added', status: 'info' as const };
+  return undefined;
+}
+
+export interface TicketsScreenProps {
+  justAcceptedTicketId?: string | null;
+}
+
 /** #56 (M2) — per #172 Decision 3, one merged list grouped by urgency, no assigned/pool visual
  *  split. "Visit Now" = workState VISIT_NOW; "Other Tickets" = PLAN/IN_WORK/VERIFY. Row tap opens
  *  Ticket Detail (M3/#57) via local state, not a stack navigator — none wraps this tab yet. */
-export function TicketsScreen() {
+export function TicketsScreen({ justAcceptedTicketId }: TicketsScreenProps = {}) {
   const [state, setState] = useState<TicketsState>({ status: 'loading', items: [], offline: false, cues: NO_CUES });
   const [filter, setFilter] = useState<TicketFilter>('ALL');
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
@@ -140,7 +153,7 @@ export function TicketsScreen() {
                     key={row.ticketId}
                     ticket={toCardData(row)}
                     onPress={() => setSelectedTicketId(row.ticketId)}
-                    badge={state.cues.addedIds.has(row.ticketId) ? { label: 'Newly Added', status: 'info' } : undefined}
+                    badge={badgeFor(row.ticketId, justAcceptedTicketId, state.cues.addedIds)}
                   />
                 ))}
               </>
@@ -163,7 +176,7 @@ export function TicketsScreen() {
                     key={row.ticketId}
                     ticket={toCardData(row)}
                     onPress={() => setSelectedTicketId(row.ticketId)}
-                    badge={state.cues.addedIds.has(row.ticketId) ? { label: 'Newly Added', status: 'info' } : undefined}
+                    badge={badgeFor(row.ticketId, justAcceptedTicketId, state.cues.addedIds)}
                   />
                 ))}
               </>

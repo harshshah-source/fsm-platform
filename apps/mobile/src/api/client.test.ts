@@ -14,18 +14,23 @@ import type {
   VerificationView,
 } from '@fsm/shared';
 import {
+  apiAcceptIntradayInsertion,
   apiConfirmReceipt,
   apiCreateVoucher,
+  apiDeclineIntradayInsertion,
   apiGetDayPlan,
   apiGetMyComponentRequests,
+  apiGetMyIntradayOffers,
   apiGetMyTickets,
   apiGetMyVouchers,
+  apiGetNotifications,
   apiGetTicketDetail,
   apiGetTicketVerification,
   apiGetVanStock,
   apiInstallFitted,
   apiInstallOnSite,
   apiLogin,
+  apiMarkNotificationRead,
   apiMe,
   apiRecoveryMarkCollected,
   apiRecoveryOnSite,
@@ -752,5 +757,118 @@ describe('#71 — install action endpoints', () => {
     await expect(
       apiInstallFitted('token', 't-1', { gpsDeviceSerial: '9800001', simSerial: '' }),
     ).rejects.toThrow('SERIAL_REQUIRED');
+  });
+});
+
+describe('#77 — intraday insertion endpoints', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('apiGetMyIntradayOffers GETs /me/intraday-insertions with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const view = { items: [], cursor: null };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetMyIntradayOffers('token');
+
+    expect(result).toEqual(view);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/me\/intraday-insertions$/);
+  });
+
+  it('apiAcceptIntradayInsertion POSTs to /intraday-insertions/:id/accept with no body', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = { result: 'OK', insertionId: 'i-1', scheduleId: 's-1', batchId: 'b-1', ticketId: 't-1', seId: 'se-1' };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+
+    const result = await apiAcceptIntradayInsertion('token', 'i-1');
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/intraday-insertions\/i-1\/accept$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({}) });
+  });
+
+  it('apiAcceptIntradayInsertion throws INSERTION_NOT_PENDING verbatim on a 409', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ code: 'INSERTION_NOT_PENDING', status: 'ACCEPTED' }),
+    } as unknown as Response);
+
+    await expect(apiAcceptIntradayInsertion('token', 'i-1')).rejects.toThrow('INSERTION_NOT_PENDING');
+  });
+
+  it('apiDeclineIntradayInsertion POSTs the reason code to /intraday-insertions/:id/decline', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = { result: 'OK', status: 'PENDING_ACCEPTANCE', nextSeId: 'se-2' };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+
+    const result = await apiDeclineIntradayInsertion('token', 'i-1', { reasonCode: 'AT_CAPACITY' });
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/intraday-insertions\/i-1\/decline$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ reasonCode: 'AT_CAPACITY' }) });
+  });
+
+  it('apiDeclineIntradayInsertion throws INVALID_REASON_CODE verbatim on a 400', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'INVALID_REASON_CODE' }),
+    } as unknown as Response);
+
+    await expect(
+      apiDeclineIntradayInsertion('token', 'i-1', { reasonCode: 'OTHER' }),
+    ).rejects.toThrow('INVALID_REASON_CODE');
+  });
+});
+
+describe('#77 — notifications endpoints', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('apiGetNotifications GETs /notifications with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const list = { items: [], unreadCount: 0 };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => list } as unknown as Response);
+
+    const result = await apiGetNotifications('token');
+
+    expect(result).toEqual(list);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/notifications$/);
+  });
+
+  it('apiGetNotifications GETs /notifications?unread=true when unreadOnly is passed', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ items: [], unreadCount: 0 }) } as unknown as Response);
+
+    await apiGetNotifications('token', { unreadOnly: true });
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/notifications\?unread=true$/);
+  });
+
+  it('apiMarkNotificationRead POSTs to /notifications/:id/read', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) } as unknown as Response);
+
+    await apiMarkNotificationRead('token', 'n-1');
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/notifications\/n-1\/read$/);
+    expect(init).toMatchObject({ method: 'POST' });
   });
 });

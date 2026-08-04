@@ -785,3 +785,92 @@ export interface InstallActionResponse {
   activatedAt: string | null;
   closedAt: string | null;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #77 — SE mobile intra-day CRITICAL insertion Accept/Decline (Issues 29/30's
+// `/api/intraday-insertions/:id/{accept,decline}` + #163's SE-scoped
+// `GET /api/me/intraday-insertions`). The offered ticket itself stays OPEN + UNASSIGNED until
+// accepted, so it's already readable via the existing `GET /api/me/tickets/:id` — no separate
+// plant/vehicle chrome needed here.
+// ---------------------------------------------------------------------------------------------
+
+export type IntradayDeclineReasonCode = 'AT_CAPACITY' | 'TRAVEL_TOO_FAR' | 'VEHICLE_TROUBLE' | 'OTHER';
+
+export const INTRADAY_DECLINE_REASON_CODES: readonly IntradayDeclineReasonCode[] = [
+  'AT_CAPACITY',
+  'TRAVEL_TOO_FAR',
+  'VEHICLE_TROUBLE',
+  'OTHER',
+];
+
+/** Mirrors `IntradayInsertionRow` (`intraday-insertion.service.ts`) — already JSON-safe
+ *  (`String()`-converted ids, ISO dates) server-side. */
+export interface IntradayInsertionOffer {
+  insertionId: string;
+  ticketId: string;
+  zoneId: string;
+  companyId: string;
+  companyTier: string;
+  insertionType: string;
+  slaBucket: string | null;
+  offeredSeId: string;
+  offeredAt: string;
+  acceptanceDeadline: string;
+  status: string;
+  declineReasonCode: string | null;
+  retryCount: number;
+  whatsappSent: boolean;
+  createdAt: string;
+}
+
+/** `GET /api/me/intraday-insertions` — the caller's own currently-live (`PENDING_ACCEPTANCE`)
+ *  offer(s); empty, never 403, when nothing is offered. */
+export interface MyIntradayOffersView {
+  items: IntradayInsertionOffer[];
+  cursor: null;
+}
+
+/** `POST /api/intraday-insertions/:id/decline` body. */
+export interface DeclineIntradayInsertionRequest {
+  reasonCode: IntradayDeclineReasonCode;
+}
+
+export interface AcceptIntradayInsertionResponse {
+  result: 'OK';
+  insertionId: string;
+  scheduleId: string;
+  batchId: string;
+  ticketId: string;
+  seId: string;
+}
+
+export interface DeclineIntradayInsertionResponse {
+  result: 'OK';
+  status: 'PENDING_ACCEPTANCE' | 'ESCALATION_REQUIRED';
+  nextSeId: string | null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// #77 — the generic in-app notification read (Issue 03's spine, `GET /api/notifications`), reused
+// here for the one-time ghost-assignment toast (`type === 'INTRADAY_GHOST_ASSIGNMENT'`). Not gated
+// behind #85's Notifications screen or #89's push delivery — this read endpoint already exists for
+// any authenticated user.
+// ---------------------------------------------------------------------------------------------
+
+export interface NotificationListItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  metadata: unknown;
+  read: boolean;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationList {
+  items: NotificationListItem[];
+  unreadCount: number;
+}

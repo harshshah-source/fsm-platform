@@ -269,4 +269,45 @@ describe('TicketsScreen', () => {
       expect(screen.getByText('Removed')).toBeTruthy();
     });
   });
+
+  describe('#77 — CRITICAL INSERTION badge override', () => {
+    it('badges the justAcceptedTicketId row CRITICAL INSERTION instead of the generic Newly Added label', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetConnectivityState.mockResolvedValue('online');
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' })],
+        cursor: null,
+      });
+      const first = render(<TicketsScreen />);
+      await waitFor(() => expect(first.getByText('V-A')).toBeTruthy());
+      first.unmount();
+
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [
+          row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' }),
+          row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B' }),
+        ],
+        cursor: null,
+      });
+      render(<TicketsScreen justAcceptedTicketId="b" />);
+
+      await waitFor(() => expect(screen.getByText('V-B')).toBeTruthy());
+      expect(screen.getByText('CRITICAL INSERTION')).toBeTruthy();
+      expect(screen.queryByText('Newly Added')).toBeNull();
+    });
+
+    it('does not badge anything CRITICAL INSERTION when justAcceptedTicketId is not given', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetConnectivityState.mockResolvedValue('online');
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' })],
+        cursor: null,
+      });
+
+      render(<TicketsScreen />);
+
+      await waitFor(() => expect(screen.getByText('V-A')).toBeTruthy());
+      expect(screen.queryByText('CRITICAL INSERTION')).toBeNull();
+    });
+  });
 });

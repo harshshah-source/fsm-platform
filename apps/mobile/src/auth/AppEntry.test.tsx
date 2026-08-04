@@ -11,6 +11,9 @@ jest.mock('./AuthProvider', () => ({ useAuth: jest.fn() }));
 jest.mock('../api/connectivity', () => ({
   getConnectivityState: jest.fn<() => Promise<'online' | 'offline'>>().mockResolvedValue('offline'),
 }));
+// #77 — SeTabShell's one-time intraday-offer/ghost-toast check on mount. No token here, so it
+// short-circuits before touching the client — see SeTabShell's own test file for that behavior.
+jest.mock('../auth/tokenStore', () => ({ getAccessToken: jest.fn<() => Promise<string | null>>().mockResolvedValue(null) }));
 
 const mockUseAuth = jest.mocked(useAuth);
 
@@ -49,7 +52,7 @@ describe('AppEntry', () => {
     setAuth({ user_id: 'se-1', role: 'SERVICE_ENGINEER', zone_id: 1, acted_as_role: null });
     render(<AppEntry />);
 
-    expect(screen.getByTestId('screen-home')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('screen-home')).toBeTruthy());
     expect(screen.getByTestId('tab-Tickets')).toBeTruthy();
     expect(screen.queryByTestId('logout')).toBeNull();
     await waitFor(() => expect(screen.getByTestId('home-offline-badge')).toBeTruthy());
