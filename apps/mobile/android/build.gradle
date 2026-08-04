@@ -1,0 +1,110 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath('com.android.tools.build:gradle')
+    classpath('com.facebook.react:react-native-gradle-plugin')
+    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+  }
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// #209 — Windows MAX_PATH. pnpm's store segment (`.pnpm/<pkg>@<version>_<32-hex-hash>/node_modules/`)
+// appears TWICE in every C++ object path: once in the source path, and again mirrored under
+// `CMakeFiles/<target>.dir/C_/...`. A measured example reached 367 characters against a 260-char
+// MAX_PATH, so CMake regenerated `build.ninja` on every pass and ninja gave up with
+// "manifest 'build.ninja' still dirty after 100 tries" — killing :react-native-screens,
+// :expo-modules-core and :react-native-worklets on arm64-v8a.
+//
+// THREE changes are required and none works alone:
+//   1. `HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled = 1` — machine-level,
+//      needs admin, cannot live in this repo. A fresh clone on a machine without it fails the
+//      same way. See docs/runbooks/mobile-android-build.md.
+//   2. `-DCMAKE_OBJECT_PATH_MAX=1024` below — CMake's own check defaults to 250 and is
+//      independent of the registry setting, so it trips even once long paths are enabled.
+//   3. `buildStagingDirectory` below, which is what actually fixes the ninja loop. Measured:
+//      ninja resolves the prefab dependency as `<build>/arm64-v8a/../prefab/...` WITHOUT
+//      collapsing the `..`, giving 268-274 characters for these four modules — and the bundled
+//      `ninja.exe` (Android CMake 3.22.1) carries NO `longPathAware` manifest flag, so change 1
+//      does not reach it. The only fix ninja respects is a genuinely shorter path, so the .cxx
+//      tree is relocated out of the deep pnpm store directory.
+//
+// This is a HAND EDIT to a prebuild-generated file. It persists because android/ is tracked
+// (#209 decision) and `expo prebuild --clean` is deliberately not part of the runbook. If anyone
+// does run --clean, this block must be re-applied or the build fails again exactly as above.
+// ---------------------------------------------------------------------------------------------
+// ORDER MATTERS: this block must sit ABOVE the two `apply plugin` lines below. `expo-root-project`
+// evaluates the autolinked module subprojects as it is applied, so a `subprojects {}` block placed
+// after it registers against projects Gradle has already finished — which fails the build outright
+// with "Cannot run Project.afterEvaluate(Closure) when the project is already evaluated".
+// `plugins.withId` rather than `afterEvaluate` for the same reason: it fires whenever the Android
+// plugin is applied, and fires immediately for a module that already applied it.
+def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+// Override with -Pfsm.cxxRoot=<path> if C:/fsmcxx is unavailable. Null on non-Windows: no other
+// platform has a 260-char path ceiling, so the relocation is pure noise there.
+def cxxRoot = project.findProperty('fsm.cxxRoot') ?: (isWindows ? 'C:/x' : null)
+// NOT VIABLE, recorded so nobody retries it: relocating each library module's Gradle buildDir to a
+// short root would have cut 69 characters off the codegen object path, but React Native's generated
+// `Android-autolinking.cmake` derives the codegen directory as `<projectDir>/android/build/
+// generated/source/codegen/jni/` — from the project directory, NOT from the module's configured
+// buildDir. Relocating therefore breaks configuration outright:
+//   CMake Error at .../Android-autolinking.cmake:11 (add_subdirectory):
+//     add_subdirectory given source ".../react-native-gesture-handler/android/build/generated/
+//     source/codegen/jni/" which is not an existing directory.
+// The path budget is instead solved by making the toolchain long-path aware — see §3c of the
+// runbook and the cmakeVersion pin below.
+
+subprojects { subproject ->
+  ['com.android.application', 'com.android.library'].each { pluginId ->
+    subproject.plugins.withId(pluginId) {
+      subproject.android {
+        externalNativeBuild {
+          cmake {
+            // THE root-cause fix. Android CMake 3.22.1 (the default) bundles ninja 1.10, whose
+            // executable manifest does NOT declare `longPathAware` — so it is capped at 260
+            // characters no matter what the registry says, and no amount of path shortening was
+            // ever going to be enough (React Native's own fixed directory structure accounts for
+            // 175 of the 319 characters). CMake 3.31.6 bundles ninja 1.12.1, which IS
+            // longPathAware and therefore honours fix 1. Install it with:
+            //   sdkmanager "cmake;3.31.6"
+            // Pinned, not floating: this is the version the build is known to work on, and 4.x is
+            // NOT a safe upgrade — it drops support for the `cmake_minimum_required` values React
+            // Native still declares.
+            version "3.31.6"
+
+            if (cxxRoot != null) {
+              // Keyed by module name — a shared staging directory would make the modules
+              // overwrite each other's generated ninja manifests. Kept alongside the CMake
+              // upgrade: it costs nothing and keeps a large margin on every native path.
+              buildStagingDirectory new File("${cxxRoot}/${subproject.name}")
+            }
+          }
+        }
+        defaultConfig {
+          externalNativeBuild {
+            cmake {
+              // Additive (`arguments "..."`, not `arguments = [...]`) so the module's own CMake
+              // flags — e.g. react-native-screens' -DANDROID_STL — are not clobbered.
+              arguments "-DCMAKE_OBJECT_PATH_MAX=1024"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+apply plugin: "expo-root-project"
+apply plugin: "com.facebook.react.rootproject"

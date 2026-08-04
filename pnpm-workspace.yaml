@@ -1,6 +1,22 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# #209 — Windows MAX_PATH, required for the mobile Android native build.
+# CMake mirrors each source file's full path INSIDE the object directory, so pnpm's default virtual
+# store location (`<repo>/node_modules/.pnpm/<pkg>@<version>_<32-hex-hash>/node_modules/<pkg>/`)
+# lands in native build paths twice. react-native-reanimated's deepest object path measured 288
+# characters against a 260 limit, failing as
+# `ninja: error: mkdir(.../reanimated/AnimatedSensor): No such file or directory`.
+# These two settings take that same path to 228 — 32 characters of headroom:
+#   virtualStoreDir        relocates the store off the deep repo path (-36 chars)
+#   virtualStoreDirMaxLength truncates the long <pkg>@<version>_<hash> directory names (-24 chars)
+# Chosen over `nodeLinker: hoisted` deliberately: this keeps pnpm's isolated linking, so module
+# resolution is unchanged and phantom dependencies still fail loudly in backend/admin.
+# Consequence: the virtual store lives OUTSIDE the repo — deleting node_modules no longer fully
+# cleans, and a new machine needs the C: drive available. See docs/runbooks/mobile-android-build.md.
+virtualStoreDir: C:/pv
+virtualStoreDirMaxLength: 40
 allowBuilds:
   '@nestjs/core': true
   '@prisma/engines': true

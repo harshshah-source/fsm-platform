@@ -39,5 +39,9 @@ yarn-error.*
 app-example
 
 # generated native folders
+# iOS stays untracked — D1 settled FCM/Android-only for v1 (#76:113-116), so no ios/ is ever
+# generated here. Android is DELIBERATELY TRACKED (#209): a native tweak silently wiped by the
+# next `expo prebuild` is a worse failure than a noisy diff, so android/ is a reviewable artifact.
+# Reproducibility comes from pinned versions (see docs/runbooks/mobile-android-build.md), not from
+# regenerating the folder on every machine. Build outputs are excluded by android/.gitignore.
 /ios
-/android

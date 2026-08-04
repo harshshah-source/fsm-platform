@@ -86,8 +86,12 @@ export class TroubleshootConflictError extends Error {
   }
 }
 
-// Expo inlines EXPO_PUBLIC_* at build time. Default targets the host machine's backend from
-// the Android emulator, where 10.0.2.2 is the loopback alias for the host's localhost.
+// Expo inlines EXPO_PUBLIC_* at BUNDLE time, from `apps/mobile/.env` — so changing the backend
+// address is an `.env` edit plus a Metro restart, never a code edit. Static dot notation is
+// mandatory: `process.env['EXPO_PUBLIC_API_URL']` is not inlined and resolves to undefined.
+// The default below is the Android EMULATOR's loopback alias for the host and routes nowhere on a
+// physical handset; both handset routes (LAN IP and `adb reverse`) are in `.env.example` and
+// docs/runbooks/mobile-android-build.md (#209).
 // #169 Wave 0 serves both /api and /api/v1 — v1 is the path this client pins to (#54 AC).
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://10.0.2.2:3000/api/v1';
 
