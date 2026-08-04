@@ -156,9 +156,14 @@ export class NotificationService {
       });
 
     if ((input.deliveryModel ?? 'GENERAL') === 'SE_ACCEPTANCE') {
-      // WhatsApp Confirmation is first-class for SE Acceptance — committed as SENT (shown as "sent").
-      await send('WHATSAPP');
-      deliveries.push({ channel: 'WHATSAPP', status: 'SENT', firstClass: true });
+      // #76 — WhatsApp Confirmation is first-class for SE Acceptance (the *display* layer may still
+      // label it "sent" per product choice, PRD:305), but `notification_deliveries.status` must
+      // record what actually happened — a delivery that provably did not occur is a false record in
+      // the audit trail, not a harmless simplification (the 10-min intraday acceptance timeout runs
+      // on wall-clock regardless of delivery, so a false SENT here means an SE can be recorded as
+      // notified, never actually notified, and rerouted for non-response with no way to contest it).
+      const result = await send('WHATSAPP');
+      deliveries.push({ channel: 'WHATSAPP', status: result === 'SENT' ? 'SENT' : 'ATTEMPTED', firstClass: true });
     } else {
       for (const channel of GENERAL_CHAIN) {
         const result = await send(channel);

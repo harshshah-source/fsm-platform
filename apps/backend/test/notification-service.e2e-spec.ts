@@ -72,9 +72,9 @@ describe('Issue 03 slice 2 — NotificationService.notify', () => {
     expect(byChannel.EMAIL).toBeUndefined();
   });
 
-  it('SE_ACCEPTANCE delivers WhatsApp as a first-class channel, recorded SENT (shown as "sent")', async () => {
+  it('SE_ACCEPTANCE delivers WhatsApp as a first-class channel, recorded SENT when the gateway actually sends it', async () => {
     const userId = await makeUser();
-    const [n] = await svc(new FakeGateway()).notify({
+    const [n] = await svc(new FakeGateway({ WHATSAPP: 'SENT' })).notify({
       recipients: [{ userId, role: 'SERVICE_ENGINEER' }],
       type: 'SE_ACCEPTANCE_CONFIRMATION',
       title: 'You accepted ticket #42',
@@ -87,6 +87,22 @@ describe('Issue 03 slice 2 — NotificationService.notify', () => {
     expect(d.find((x) => x.channel === 'IN_APP')?.status).toBe('SENT');
     // SE_ACCEPTANCE is not the general fallback chain — no PUSH/SMS/EMAIL rows.
     expect(d.some((x) => x.channel === 'PUSH' || x.channel === 'EMAIL')).toBe(false);
+  });
+
+  it('#76 — SE_ACCEPTANCE never records a false SENT: an unavailable gateway is recorded ATTEMPTED', async () => {
+    const userId = await makeUser();
+    const [n] = await svc(new FakeGateway()).notify({
+      recipients: [{ userId, role: 'SERVICE_ENGINEER' }],
+      type: 'SE_ACCEPTANCE_CONFIRMATION',
+      title: 'You accepted ticket #42',
+      deliveryModel: 'SE_ACCEPTANCE',
+    });
+    const d = await deliveriesOf(n.id);
+    const wa = d.find((x) => x.channel === 'WHATSAPP');
+    expect(wa?.status).toBe('ATTEMPTED');
+    // Still first-class by product choice — the display layer may still label it "sent" — but the
+    // delivery record itself must be truthful about what actually happened.
+    expect(wa?.firstClass).toBe(true);
   });
 
   it('writes one notification per recipient', async () => {

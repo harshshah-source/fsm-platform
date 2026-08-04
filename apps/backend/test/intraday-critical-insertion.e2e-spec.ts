@@ -185,12 +185,15 @@ describe('Issue 29/30 — intra-day CRITICAL insertion + accept/decline + timeou
     const batch = await prisma.plantBatchAssignment.findUniqueOrThrow({ where: { batchId: BigInt(after.assignedBatchId!) } });
     expect(batch.stopSequence).toBe(1);
 
-    // First-class WhatsApp Confirmation recorded SENT.
+    // First-class WhatsApp Confirmation — #76: recorded ATTEMPTED, not a false SENT, since this test
+    // wires the real NotificationService with the default LoggingChannelGateway (no adapter yet, so
+    // every send is UNAVAILABLE). `notification-service.e2e-spec.ts` proves the true-SENT case with a
+    // gateway that actually reports SENT.
     const confirm = await prisma.notification.findFirstOrThrow({
       where: { recipientUserId: ins.offeredSeId, type: 'INTRADAY_ACCEPTED_CONFIRMATION', entityId: ticketId },
     });
     const wa = await prisma.notificationDelivery.findFirstOrThrow({ where: { notificationId: confirm.id, channel: 'WHATSAPP' } });
-    expect(wa.status).toBe('SENT');
+    expect(wa.status).toBe('ATTEMPTED');
     expect(wa.firstClass).toBe(true);
   });
 
