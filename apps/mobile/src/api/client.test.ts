@@ -23,6 +23,8 @@ import {
   apiGetTicketDetail,
   apiGetTicketVerification,
   apiGetVanStock,
+  apiInstallFitted,
+  apiInstallOnSite,
   apiLogin,
   apiMe,
   apiRecoveryMarkCollected,
@@ -674,5 +676,81 @@ describe('#68 — recovery action endpoints', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toMatch(/\/recovery\/t-1\/unable-to-collect$/);
     expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ reasonCode: 'DEVICE_MISSING' }) });
+  });
+});
+
+describe('#71 — install action endpoints', () => {
+  const response = {
+    ticketId: 't-1',
+    status: 'ON_SITE',
+    deviceId: '9800001',
+    assignedSeId: 'se-1',
+    fittedGpsSerial: null,
+    fittedSimSerial: null,
+    fittedPhotoRef: null,
+    fittedAt: null,
+    activatedAt: null,
+    closedAt: null,
+  };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('apiInstallOnSite POSTs to /install/:id/on-site with no body fields', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+
+    const result = await apiInstallOnSite('token', 't-1');
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/install\/t-1\/on-site$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({}) });
+  });
+
+  it('apiInstallFitted POSTs the GPS serial, SIM serial, and optional photoRef to /install/:id/fitted', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...response, status: 'ACTIVATED' }),
+    } as unknown as Response);
+
+    await apiInstallFitted('token', 't-1', { gpsDeviceSerial: '9800001', simSerial: '8991000', photoRef: 'media-1' });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/install\/t-1\/fitted$/);
+    expect(init).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ gpsDeviceSerial: '9800001', simSerial: '8991000', photoRef: 'media-1' }),
+    });
+  });
+
+  it('apiInstallFitted throws INVALID_SERIAL verbatim on a GPS serial mismatch', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'INVALID_SERIAL' }),
+    } as unknown as Response);
+
+    await expect(
+      apiInstallFitted('token', 't-1', { gpsDeviceSerial: 'wrong', simSerial: '8991000' }),
+    ).rejects.toThrow('INVALID_SERIAL');
+  });
+
+  it('apiInstallFitted throws SERIAL_REQUIRED verbatim on a blank SIM serial', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'SERIAL_REQUIRED' }),
+    } as unknown as Response);
+
+    await expect(
+      apiInstallFitted('token', 't-1', { gpsDeviceSerial: '9800001', simSerial: '' }),
+    ).rejects.toThrow('SERIAL_REQUIRED');
   });
 });

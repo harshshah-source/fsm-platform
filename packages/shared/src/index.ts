@@ -755,3 +755,33 @@ export interface RecoveryActionResponse {
   closureType: string | null;
   closedAt: string | null;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #71 — SE mobile Install screens (Issue 34's `/api/install/:id/{on-site,fitted}`, SE leg).
+// GPS device serial is server-validated against the ticket's device; SIM serial only needs to be
+// non-empty. `GET /api/install/:id` is NOT SE-readable (WM/manager only) — the mobile app polls
+// `GET /api/me/tickets/:id` (`MeTicketDetailView.status`) for the ACTIVATED -> CLOSED /
+// FAILED_ACTIVATION activation outcome instead.
+// ---------------------------------------------------------------------------------------------
+
+/** `POST /api/install/:id/fitted` body. */
+export interface MarkInstallFittedRequest {
+  gpsDeviceSerial: string;
+  simSerial: string;
+  photoRef?: string | null;
+}
+
+/** JSON-safe (`deviceId` as `string`) shape of the install ticket returned by every
+ *  `/api/install/:id/*` action — mirrors `InstallView` (`install-lifecycle.service.ts`). */
+export interface InstallActionResponse {
+  ticketId: string;
+  status: string;
+  deviceId: string;
+  assignedSeId: string | null;
+  fittedGpsSerial: string | null;
+  fittedSimSerial: string | null;
+  fittedPhotoRef: string | null;
+  fittedAt: string | null;
+  activatedAt: string | null;
+  closedAt: string | null;
+}

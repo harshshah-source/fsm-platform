@@ -5,6 +5,7 @@ import { TicketDetailScreen } from './TicketDetailScreen';
 import {
   apiGetTicketDetail,
   apiGetTicketVerification,
+  apiInstallOnSite,
   apiRecoveryOnSite,
   apiSetSoftState,
   SoftStateConflictError,
@@ -20,6 +21,7 @@ jest.mock('../../api/client', () => {
     apiGetTicketVerification: jest.fn(),
     apiSetSoftState: jest.fn(),
     apiRecoveryOnSite: jest.fn(),
+    apiInstallOnSite: jest.fn(),
   };
 });
 jest.mock('../../auth/tokenStore', () => ({ getAccessToken: jest.fn() }));
@@ -76,11 +78,22 @@ jest.mock('../recovery/UnableToCollectScreen', () => {
     ),
   };
 });
+jest.mock('../install/InstallFormScreen', () => {
+  const { Text } = jest.requireActual('react-native') as typeof import('react-native');
+  return {
+    InstallFormScreen: ({ onSubmitted }: { onSubmitted: () => void }) => (
+      <Text testID="mock-install-form" onPress={onSubmitted}>
+        Install Form
+      </Text>
+    ),
+  };
+});
 
 const mockGetDetail = jest.mocked(apiGetTicketDetail);
 const mockGetVerification = jest.mocked(apiGetTicketVerification);
 const mockSetSoftState = jest.mocked(apiSetSoftState);
 const mockRecoveryOnSite = jest.mocked(apiRecoveryOnSite);
+const mockInstallOnSite = jest.mocked(apiInstallOnSite);
 const mockGetAccessToken = jest.mocked(getAccessToken);
 const mockCaptureLocation = jest.mocked(captureLocation);
 
@@ -510,6 +523,93 @@ describe('TicketDetailScreen', () => {
       expect(screen.queryByTestId('recovery-onsite-button')).toBeNull();
       expect(screen.queryByTestId('recovery-collection-form-button')).toBeNull();
       expect(screen.queryByTestId('recovery-unable-button')).toBeNull();
+    });
+  });
+
+  describe('#71 — INSTALL work-type card', () => {
+    it('renders an install card with the lifecycle status, and never auto-posts VIEWED (INSTALL has no soft-state chain)', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'INSTALL', status: 'SCHEDULED' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+
+      await waitFor(() => expect(screen.getByTestId('install-card')).toBeTruthy());
+      expect(screen.getByText(/Scheduled/)).toBeTruthy();
+      expect(mockSetSoftState).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('ready-card')).toBeNull();
+    });
+
+    it('shows Mark On-Site only while SCHEDULED, posts it, and refetches on success', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'INSTALL', status: 'SCHEDULED' }));
+      mockInstallOnSite.mockResolvedValue({
+        ticketId: 't-1', status: 'ON_SITE', deviceId: 'GPS502', assignedSeId: 'se-1',
+        fittedGpsSerial: null, fittedSimSerial: null, fittedPhotoRef: null,
+        fittedAt: null, activatedAt: null, closedAt: null,
+      });
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('install-onsite-button')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('install-onsite-button'));
+
+      await waitFor(() => expect(mockInstallOnSite).toHaveBeenCalledWith('token', 't-1'));
+      await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
+    });
+
+    it('shows the Install Form button only while ON_SITE, opening the screen and refetching on submit', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'INSTALL', status: 'ON_SITE' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('install-form-button')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('install-form-button'));
+      expect(screen.getByTestId('mock-install-form')).toBeTruthy();
+
+      mockGetDetail.mockResolvedValueOnce(detail({ workType: 'INSTALL', status: 'ACTIVATED' }));
+      fireEvent.press(screen.getByTestId('mock-install-form'));
+
+      await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
+      expect(screen.queryByTestId('mock-install-form')).toBeNull();
+    });
+
+    it('shows a pending message and a Check Status refresh while ACTIVATED', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'INSTALL', status: 'ACTIVATED' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('install-check-status-button')).toBeTruthy());
+      expect(screen.queryByTestId('install-onsite-button')).toBeNull();
+      expect(screen.queryByTestId('install-form-button')).toBeNull();
+
+      fireEvent.press(screen.getByTestId('install-check-status-button'));
+
+      await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
+    });
+
+    it('shows a verified success message once CLOSED, with no action buttons', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'INSTALL', status: 'CLOSED' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+
+      await waitFor(() => expect(screen.getByTestId('install-verified-message')).toBeTruthy());
+      expect(screen.queryByTestId('install-onsite-button')).toBeNull();
+      expect(screen.queryByTestId('install-form-button')).toBeNull();
+      expect(screen.queryByTestId('install-check-status-button')).toBeNull();
+    });
+
+    it('shows a failed-activation message once FAILED_ACTIVATION, with no action buttons', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'INSTALL', status: 'FAILED_ACTIVATION' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+
+      await waitFor(() => expect(screen.getByTestId('install-failed-message')).toBeTruthy());
+      expect(screen.queryByTestId('install-onsite-button')).toBeNull();
+      expect(screen.queryByTestId('install-form-button')).toBeNull();
+      expect(screen.queryByTestId('install-check-status-button')).toBeNull();
     });
   });
 });

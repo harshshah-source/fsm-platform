@@ -6,8 +6,10 @@ import type {
   CreateVoucherResponse,
   DayPlanView,
   FileVehicleUnavailabilityRequest,
+  InstallActionResponse,
   LoginRequest,
   LoginResponse,
+  MarkInstallFittedRequest,
   MarkRecoveryCollectedRequest,
   MarkRecoveryUnableToCollectRequest,
   MediaKind,
@@ -363,4 +365,32 @@ export async function apiRecoveryUnableToCollect(
   body: MarkRecoveryUnableToCollectRequest,
 ): Promise<RecoveryActionResponse> {
   return recoveryPost(accessToken, ticketId, 'unable-to-collect', body);
+}
+
+/** Same uniform `{code}` error-body contract as `recoveryPost` — `install.controller.ts`'s own
+ *  `unwrap()` maps every outcome the same way (400/403/404/409, always `{code}`). */
+async function installPost(accessToken: string, ticketId: string, action: string, body?: object): Promise<InstallActionResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/install/${ticketId}/${action}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
+  return (await res.json()) as InstallActionResponse;
+}
+
+export async function apiInstallOnSite(accessToken: string, ticketId: string): Promise<InstallActionResponse> {
+  return installPost(accessToken, ticketId, 'on-site');
+}
+
+export async function apiInstallFitted(
+  accessToken: string,
+  ticketId: string,
+  body: MarkInstallFittedRequest,
+): Promise<InstallActionResponse> {
+  return installPost(accessToken, ticketId, 'fitted', body);
 }

@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { MeTicketDetailView, VerificationView } from '@fsm/shared';
-import { apiGetTicketDetail, apiGetTicketVerification, apiRecoveryOnSite, apiSetSoftState, SoftStateConflictError } from '../../api/client';
+import {
+  apiGetTicketDetail,
+  apiGetTicketVerification,
+  apiInstallOnSite,
+  apiRecoveryOnSite,
+  apiSetSoftState,
+  SoftStateConflictError,
+} from '../../api/client';
 import { getAccessToken } from '../../auth/tokenStore';
 import { StatusPill } from '../../components/kit/StatusPill';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { formatSlaBucketLabel, slaBucketToStatus } from '../ticketDisplay';
+import { InstallFormScreen } from '../install/InstallFormScreen';
+import { formatInstallStatusLabel } from '../install/installDisplay';
 import { CollectionFormScreen } from '../recovery/CollectionFormScreen';
 import { formatRecoveryStatusLabel } from '../recovery/recoveryDisplay';
 import { UnableToCollectScreen } from '../recovery/UnableToCollectScreen';
@@ -55,6 +64,8 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
   const [settingRecoveryOnSite, setSettingRecoveryOnSite] = useState(false);
   const [showCollectionForm, setShowCollectionForm] = useState(false);
   const [showUnableToCollect, setShowUnableToCollect] = useState(false);
+  const [settingInstallOnSite, setSettingInstallOnSite] = useState(false);
+  const [showInstallForm, setShowInstallForm] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -86,7 +97,10 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
   // never for verification-pending (the ticket is no longer OPEN; `assertInScope` would 404 it) and
   // never once already past ON_SITE (a backward transition, 409s).
   useEffect(() => {
-    if (state.status !== 'ready' || state.detail.workType === 'RECOVERY' || PAST_ON_SITE.has(state.detail.activeSoftState ?? '')) return;
+    // The VIEWED/ON_SITE/TROUBLESHOOT_STARTED soft-state chain is TROUBLESHOOT-only (backend's own
+    // `soft-state.service.ts` `assertInScope` requires `status === 'OPEN'`, which RECOVERY and
+    // INSTALL tickets never are — each drives its own on-site tracking via its own `/on-site` route).
+    if (state.status !== 'ready' || state.detail.workType !== 'TROUBLESHOOT' || PAST_ON_SITE.has(state.detail.activeSoftState ?? '')) return;
     let cancelled = false;
     void (async () => {
       const token = await getAccessToken();
@@ -131,6 +145,18 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
       await load();
     } finally {
       setSettingRecoveryOnSite(false);
+    }
+  }, [ticketId, load]);
+
+  const handleInstallOnSite = useCallback(async () => {
+    setSettingInstallOnSite(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error('UNAUTHORIZED');
+      await apiInstallOnSite(token, ticketId);
+      await load();
+    } finally {
+      setSettingInstallOnSite(false);
     }
   }, [ticketId, load]);
 
@@ -212,6 +238,20 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
     );
   }
 
+  if (showInstallForm && state.status === 'ready') {
+    return (
+      <InstallFormScreen
+        ticketId={ticketId}
+        expectedDeviceSerial={state.detail.deviceId}
+        onSubmitted={() => {
+          setShowInstallForm(false);
+          void load();
+        }}
+        onCancel={() => setShowInstallForm(false)}
+      />
+    );
+  }
+
   if (state.status === 'loading') {
     return <View testID="ticket-detail-loading" style={styles.container} />;
   }
@@ -272,7 +312,42 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
         </View>
       ) : null}
 
-      {detail.workType === 'RECOVERY' ? (
+      {detail.workType === 'INSTALL' ? (
+        <View testID="install-card" style={styles.card}>
+          <Text style={styles.cardTitle}>Install — {formatInstallStatusLabel(detail.status)}</Text>
+          {detail.status === 'SCHEDULED' ? (
+            <Pressable
+              testID="install-onsite-button"
+              disabled={settingInstallOnSite}
+              onPress={() => void handleInstallOnSite()}
+              style={[styles.startButton, settingInstallOnSite ? styles.startButtonDisabled : null]}
+            >
+              <Text style={styles.startButtonLabel}>{settingInstallOnSite ? 'Marking On-Site…' : 'Mark On-Site'}</Text>
+            </Pressable>
+          ) : null}
+          {detail.status === 'ON_SITE' ? (
+            <Pressable testID="install-form-button" onPress={() => setShowInstallForm(true)} style={styles.startButton}>
+              <Text style={styles.startButtonLabel}>Install Form</Text>
+            </Pressable>
+          ) : null}
+          {detail.status === 'ACTIVATED' ? (
+            <>
+              <Text style={styles.cardSubtitle}>Awaiting the device&apos;s first GPS ping to verify the install.</Text>
+              <Pressable testID="install-check-status-button" onPress={() => void load()} style={styles.secondaryButton}>
+                <Text style={styles.secondaryButtonLabel}>Check Status</Text>
+              </Pressable>
+            </>
+          ) : null}
+          {detail.status === 'CLOSED' ? (
+            <Text testID="install-verified-message" style={styles.cardSubtitle}>Installed &amp; verified.</Text>
+          ) : null}
+          {detail.status === 'FAILED_ACTIVATION' ? (
+            <Text testID="install-failed-message" style={styles.cardSubtitle}>
+              No GPS ping received — activation failed.
+            </Text>
+          ) : null}
+        </View>
+      ) : detail.workType === 'RECOVERY' ? (
         <View testID="recovery-card" style={styles.card}>
           <Text style={styles.cardTitle}>Recovery — {formatRecoveryStatusLabel(detail.status)}</Text>
           {detail.status === 'SCHEDULED' ? (
