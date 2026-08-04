@@ -1,4 +1,4 @@
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { notDeferredOn } from '../ticketing/deferral';
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
@@ -104,7 +104,7 @@ export class IntradayInsertionService {
         assignmentState: 'UNASSIGNED',
         // #146 — a ZM-deferred ticket must not be offered back to an SE as an intraday CRITICAL
         // insertion on the very day it was deferred off the plan.
-        ...notDeferredOn(utcDayStart(now)),
+        ...notDeferredOn(istDate(now)),
         plant: { zoneId },
         device: { state: { slaBucket: { in: TRIGGER_BUCKETS } } },
         intradayInsertions: { none: { status: { in: ['PENDING_ACCEPTANCE', 'ACCEPTED'] } } },

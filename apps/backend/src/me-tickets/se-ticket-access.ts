@@ -1,4 +1,4 @@
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
@@ -31,7 +31,7 @@ export async function isTicketReadableBySe(
   if (ticket.assignedSeId === seId) return true;
   if (await assignedViaSchedule(prisma, ticket.ticketId, seId)) return true;
 
-  const notDeferred = ticket.deferredUntil === null || ticket.deferredUntil <= utcDayStart(now);
+  const notDeferred = ticket.deferredUntil === null || ticket.deferredUntil <= istDate(now);
   if (ticket.status !== 'OPEN' || ticket.assignmentState !== 'UNASSIGNED' || !notDeferred) return false;
   return coverage.isPlantCovered(seId, ticket.plantId);
 }

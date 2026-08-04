@@ -9,7 +9,7 @@ import {
 } from '../ingestion/autoplant/mapping-table-zone-resolver';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { resolveActiveOverrides, tierOverrideKey } from './effective-tier';
 
 export interface ZoneMappingView {
@@ -206,7 +206,7 @@ export class ZoneMappingService {
     });
     if (!plant) throw new NotFoundException(`No synced plant with source id ${sourcePlantId}`);
 
-    const day = utcDayStart(new Date());
+    const day = istDate(new Date());
     const [deviceCount, openTicketCount, dispatchedTodayCount, openTicketCompanies] = await Promise.all([
       this.prisma.device.count({ where: { currentVehicle: { plantId: plant.plantId } } }),
       this.prisma.ticket.count({ where: { plantId: plant.plantId, status: 'OPEN' } }),

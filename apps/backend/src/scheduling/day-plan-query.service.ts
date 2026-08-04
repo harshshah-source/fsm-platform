@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { DayPlanStop, DayPlanStopTicket, DayPlanView } from '@fsm/shared';
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from './schedule-status';
 
@@ -24,7 +24,7 @@ export class DayPlanQueryService {
    * production always passes nothing and gets the wall clock.
    */
   async getDayPlan(seId: string, opts: { now?: Date } = {}): Promise<DayPlanView> {
-    const today = utcDayStart(opts.now ?? new Date());
+    const today = istDate(opts.now ?? new Date());
     const schedule = await this.prisma.workSchedule.findFirst({
       // #153 — a ZM override flips the schedule to OVERRIDDEN but the SE still has to work it; filtering
       // to ACTIVE alone blanked the entire day plan the moment a ZM touched anything.

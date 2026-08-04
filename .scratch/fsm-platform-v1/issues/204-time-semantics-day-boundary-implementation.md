@@ -76,3 +76,59 @@ against the same unexamined assumption.
 
 M-L, depending on the ruling. Option B (keep UTC, document it) is S. Option A/C is M-L — ~15 call
 sites plus every test that pins a day.
+
+---
+
+## 2026-08-04 — implementation notes + one discovered scope question
+
+### The single helper had to become two (design correction found while building)
+
+`utcDayStart` was used against **two different column types**, and the correct IST replacement differs
+for each — so a straight swap of the function body would have silently shifted one family of queries
+by 5h30m:
+
+| Column type | Correct boundary | Helper |
+|---|---|---|
+| `@db.Date` — `deferred_until`, `deferred_to_date`, `date_from`, `date_to` | **UTC midnight of the IST calendar date** (Postgres `DATE` carries no timezone; Prisma marshals to/from UTC midnight) | `istDate(now)` |
+| `@db.Timestamptz` — `removed_at` | **the real instant IST midnight occurred** (UTC 18:30 previous day) | `istDayStartInstant(now)` |
+
+12 of the 13 call sites are the DATE form. The one timestamptz site is
+`me-tickets-query.service.ts` (the "removed from plan today" window) — which was therefore *already*
+subtly wrong under the old helper, spanning 05:30 IST → 05:30 IST. Both helpers live in
+`src/common/ist-day.ts` with the distinction documented at the top; `src/common/utc-day.ts` is deleted
+so there is exactly one definition, which was the point of #146's original consolidation.
+
+Pinned by `test/ist-day.spec.ts` (12 tests), including the two boundary instants either side of IST
+midnight, UTC month/year rollovers that IST has already crossed, and idempotency.
+
+### Cron timezone
+
+`@Cron(..., { timeZone: BUSINESS_TIMEZONE })` on `business-dispatch`, with `BUSINESS_TIMEZONE =
+'Asia/Kolkata'` exported from `dispatch-scheduler.service.ts` for reuse. Asserted **behaviourally**
+rather than by decorator metadata — the test boots `ScheduleModule`, reads the registered job and
+checks its next fire is 23:30 UTC (= 05:00 IST). It failed `expected 5 to be 23` before the fix,
+confirming the diagnosis exactly: the job was firing at 05:00 in the host's own zone.
+
+### DISCOVERED — not changed, needs a ruling: the analytics day is still UTC
+
+`business-sweep-scheduler.service.ts:89` defines its **own** `previousUtcDayStart` (unrelated to
+`utcDayStart`, so it was not caught by the migration sweep) and feeds it to
+`SystemEfficiencyAggregationService.computeDay` at `:189`. That cube therefore buckets a "day" as
+**00:00–00:00 UTC** while every operational read now buckets **00:00–00:00 IST**. A ticket closed at
+02:00 IST now sits on today's Day Plan but in yesterday's efficiency cube.
+
+Deliberately left alone, because changing it is not a like-for-like fix:
+
+- `system_efficiency_summary_daily` **already holds rows computed on UTC boundaries**. Switching the
+  boundary makes historical rows and future rows mean different things unless the cube is recomputed,
+  and recompute rewrites recorded history.
+- The same question applies to the other month/day cubes (`fleet uptime`, `root cause`,
+  `zm performance`, `soft inactive`), which were not audited here.
+- It is outside this issue's stated ACs, which enumerate the `utcDayStart` call sites.
+
+**Options for the ruling:** (a) leave analytics on UTC and document the discontinuity, accepting that
+reports and operations disagree for 5h30m of each day; (b) move analytics to the IST day and recompute
+the affected cubes, accepting rewritten history for a stated range; (c) move analytics to IST from a
+cutover date forward and leave prior rows on UTC, accepting a documented seam in the series.
+Recommend raising this before #204 is closed — it is small to decide and expensive to discover later
+from a report that disagrees with the floor.

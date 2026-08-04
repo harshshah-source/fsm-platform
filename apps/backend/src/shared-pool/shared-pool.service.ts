@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { notDeferredOn } from '../ticketing/deferral';
 import { SeCoverageService } from './se-coverage.service';
 
@@ -45,7 +45,7 @@ export class SharedPoolService {
         assignmentState: 'UNASSIGNED',
         // #146 — a deferred ticket returns to UNASSIGNED so it can be re-planned later; offering it
         // here would hand it straight back to an SE as pickable work on the day it was deferred off.
-        ...notDeferredOn(utcDayStart(now)),
+        ...notDeferredOn(istDate(now)),
       },
       orderBy: [{ plantId: 'asc' }, { createdAt: 'asc' }],
       include: {

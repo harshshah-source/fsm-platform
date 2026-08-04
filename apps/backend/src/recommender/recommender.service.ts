@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { Prisma } from '../generated/prisma/client';
 import { type SeAvailabilityStatus } from '../generated/prisma/enums';
@@ -117,7 +117,7 @@ export class RecommenderService {
         assignmentState: 'UNASSIGNED',
         // #146 — a ZM-deferred ticket is UNASSIGNED precisely so it can come back, but not before the
         // date the ZM chose. Without this it would be re-dispatched on the same run that removed it.
-        ...notDeferredOn(utcDayStart(now)),
+        ...notDeferredOn(istDate(now)),
         // Deactivated plants (Issue 119) are skipped by dispatch — no SE is sent to a shut plant.
         plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
         // Departed devices (Issue 128) likewise — no SE is sent to a device that left the fleet.
@@ -167,7 +167,7 @@ export class RecommenderService {
     }));
     const runList: RunCandidate[] = [
       ...tsRun,
-      ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId, utcDayStart(now), overrides) : []),
+      ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId, istDate(now), overrides) : []),
     ];
 
     const { weights, weightSetRef } = await this.activeWeights(mode);
@@ -179,7 +179,7 @@ export class RecommenderService {
     // isolation. Without this a cross-zone floating/multi-plant SE is dispatched up to capacity in every
     // zone the daily loop visits (each `runForZone` started the map at 0). The in-run increments below add
     // this zone's suggestions on top, giving a running whole-day total to check against the cap.
-    const assigned = await this.committedDayLoad(utcDayStart(now)); // se_id → tickets on the SE's day plan
+    const assigned = await this.committedDayLoad(istDate(now)); // se_id → tickets on the SE's day plan
     const seededPlants = new Set<string>(); // plant_id → already has a cluster seed this run
     const plannerByPlant = await this.plannerForDate(zoneId, now); // plant_id → planned se_ids (soft bias)
     const kitStatusBySe = new Map<string, CommonKitStatus>(); // memoised Common-Kit status per SE

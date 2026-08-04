@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -347,7 +347,7 @@ export class OverrideService {
         // #146 — a bulk "assign this plant's open work to an SE" must not silently resurrect a ticket
         // another ZM deliberately deferred to a future date. The deferral is still an explicit human
         // decision; a ZM who wants it back today can re-assign that ticket directly.
-        where: { plantId, status: 'OPEN', assignmentState: 'UNASSIGNED', ...notDeferredOn(utcDayStart(now)) },
+        where: { plantId, status: 'OPEN', assignmentState: 'UNASSIGNED', ...notDeferredOn(istDate(now)) },
         select: { ticketId: true },
         orderBy: { createdAt: 'asc' },
       });

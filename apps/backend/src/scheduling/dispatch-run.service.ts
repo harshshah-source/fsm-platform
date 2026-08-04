@@ -1,4 +1,4 @@
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { buildStampFields } from '../build-info/run-stamp';
@@ -77,7 +77,7 @@ export class DispatchRunService {
     const trigger: DispatchRunTrigger = opts.trigger ?? 'CRON';
     const actorId = opts.actorUserId ?? 'SYSTEM';
     const actorRole = opts.actorRole ?? 'SYSTEM';
-    const day = utcDayStart(now);
+    const day = istDate(now);
     const zoneIds = opts.zoneId != null ? [opts.zoneId] : await this.activeZoneIds();
 
     const run = await this.prisma.dispatchRun.create({

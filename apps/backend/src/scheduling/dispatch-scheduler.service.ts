@@ -4,8 +4,21 @@ import type { SchedulerTickOutcome } from './business-sweep-scheduler.service';
 import { DispatchRunService } from './dispatch-run.service';
 
 /**
- * Default cron for the daily Recommender → Day-Plan dispatch run — early morning, before the field day
+ * The business timezone (CONTEXT.md Decisions §19, ruled 2026-08-04). Every scheduled business job
+ * that means a wall-clock hour to an operator must pin this — an unpinned `@Cron` fires in the host
+ * process timezone, and no `TZ` is set in any compose/Dockerfile/env in this repo, so "05:00" landed
+ * at 10:30 IST on a UTC host: hours *into* the field day the run is meant to precede.
+ */
+export const BUSINESS_TIMEZONE = 'Asia/Kolkata';
+
+/**
+ * Default cron for the daily Recommender → Day-Plan dispatch run — 05:00 **IST**, before the field day
  * starts (Schedule Cadence: daily). Overridable via `BUSINESS_SWEEP_DISPATCH_CRON`.
+ *
+ * #213 supersedes the env var as the source of truth: the schedule moves into `system_settings` with
+ * this value demoted to the bootstrap default used only when no setting row exists. Note the `@Cron`
+ * decorator below evaluates its expression once at class-decoration time, which is precisely why
+ * #213 has to re-register the job on write rather than re-read the value per tick.
  */
 export const DEFAULT_DISPATCH_CRON = '0 5 * * *';
 
@@ -47,7 +60,7 @@ export class DispatchSchedulerService {
     this.config = { ...readDispatchSchedulerConfig(), ...config };
   }
 
-  @Cron(readDispatchSchedulerConfig().dispatchCron, { name: 'business-dispatch' })
+  @Cron(readDispatchSchedulerConfig().dispatchCron, { name: 'business-dispatch', timeZone: BUSINESS_TIMEZONE })
   async dispatchTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     if (this.inFlight) {

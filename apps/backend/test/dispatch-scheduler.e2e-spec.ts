@@ -82,4 +82,38 @@ describe('Issue 113 — DispatchSchedulerService', () => {
       await app.close();
     }
   });
+
+  /**
+   * #204 / CONTEXT Decisions §19 — the dispatch run must fire at 05:00 **IST**, not 05:00 in
+   * whatever timezone the host happens to have. Before this, `@Cron` carried no `timeZone` and no
+   * `TZ` is set in any compose/Dockerfile/env in the repo, so on a UTC host the run landed at 10:30
+   * IST — hours *into* the field day it is meant to precede.
+   *
+   * Asserted behaviourally (when does it actually next fire, in absolute terms) rather than by
+   * reading the decorator's metadata, so it stays true regardless of how `@nestjs/schedule` stores
+   * its options. 05:00 IST == 23:30 UTC the previous day.
+   */
+  it('#204: the business-dispatch cron fires at 05:00 IST regardless of host timezone', async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { ScheduleModule, SchedulerRegistry } = await import('@nestjs/schedule');
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [ScheduleModule.forRoot()],
+      providers: [{ provide: DispatchSchedulerService, useFactory: () => makeScheduler(makeRun(), false) }],
+    }).compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+    try {
+      const job = app.get(SchedulerRegistry).getCronJob('business-dispatch');
+      const next = job.nextDate();
+      // `cron` v3 returns a Luxon DateTime, v2 a Date — normalise to an absolute epoch either way.
+      const nextUtc = new Date(typeof (next as { toJSDate?: unknown }).toJSDate === 'function'
+        ? (next as unknown as { toJSDate: () => Date }).toJSDate()
+        : (next as unknown as Date));
+      expect(nextUtc.getUTCHours()).toBe(23);
+      expect(nextUtc.getUTCMinutes()).toBe(30);
+    } finally {
+      await app.close();
+    }
+  });
 });

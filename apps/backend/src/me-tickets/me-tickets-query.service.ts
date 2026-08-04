@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { MeTicketRow, MeTicketWorkState, MeTicketsView } from '@fsm/shared';
-import { utcDayStart } from '../common/utc-day';
+import { istDate, istDayStartInstant } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
@@ -61,7 +61,10 @@ export class MeTicketsQueryService {
     const removedTodayByTicket = new Map<string, { removedAt: Date; deferredToDate: Date | null }>();
     if (schedule) {
       const removedRows = await this.prisma.batchAssignmentTicket.findMany({
-        where: { batch: { scheduleId: schedule.scheduleId }, removedAt: { gte: utcDayStart(now) } },
+        // `removed_at` is a Timestamptz, not a Date — so this needs the real instant IST midnight
+        // occurred, NOT the UTC-midnight DATE form. Using the DATE form here would shift the
+        // "removed today" window by 5h30m, which is what the retired `utcDayStart` did (#204).
+        where: { batch: { scheduleId: schedule.scheduleId }, removedAt: { gte: istDayStartInstant(now) } },
         select: { ticketId: true, removedAt: true, deferredToDate: true },
       });
       for (const r of removedRows) removedTodayByTicket.set(r.ticketId, { removedAt: r.removedAt!, deferredToDate: r.deferredToDate });
@@ -75,7 +78,7 @@ export class MeTicketsQueryService {
             plantId: { in: coveredPlantIds },
             status: 'OPEN',
             assignmentState: 'UNASSIGNED',
-            ...notDeferredOn(utcDayStart(now)),
+            ...notDeferredOn(istDate(now)),
           },
           { ticketId: { in: [...removedTodayByTicket.keys()] } },
           // #68 — RECOVERY (and INSTALL) dispatch sets `assignedSeId` directly with no

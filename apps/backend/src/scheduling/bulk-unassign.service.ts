@@ -2,7 +2,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { buildStampFields } from '../build-info/run-stamp';
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -153,7 +153,7 @@ export class BulkUnassignService {
   ) {}
 
   async preview(req: Pick<BulkUnassignRequest, 'scope' | 'zoneId' | 'reasonCode'>, now: Date = new Date()): Promise<PreviewResult> {
-    const targetDate = utcDayStart(now);
+    const targetDate = istDate(now);
     const zoneIds = await this.resolveZoneIds(req.scope, req.zoneId);
     const zones = await this.prisma.zone.findMany({ where: { zoneId: { in: zoneIds } }, orderBy: { zoneId: 'asc' } });
 
@@ -209,7 +209,7 @@ export class BulkUnassignService {
   }
 
   async execute(req: BulkUnassignRequest, actor: BulkUnassignActor, now: Date = new Date()): Promise<ExecuteOutcome> {
-    const targetDate = utcDayStart(now);
+    const targetDate = istDate(now);
 
     // Pan-India requires a preview token (D-gate); a zone-scoped rebalance does not.
     if (req.scope === 'PAN_INDIA' && !req.previewToken) return { result: 'TOKEN_REQUIRED' };

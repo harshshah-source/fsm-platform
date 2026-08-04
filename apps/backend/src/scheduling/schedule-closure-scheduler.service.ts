@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { type TicketStatus } from '../generated/prisma/enums';
-import { utcDayStart } from '../common/utc-day';
+import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { dispatchZoneLockKey } from './dispatch-zone-lock';
 import { liveScheduleFilter } from './schedule-status';
@@ -97,7 +97,7 @@ export class ScheduleClosureScheduler {
     }
     this.inFlight = true;
     try {
-      const today = utcDayStart(opts.now ?? new Date());
+      const today = istDate(opts.now ?? new Date());
 
       // Zone-at-a-time, because the lock is per zone: one zone mid-dispatch must not hold up the rest.
       const zones = await this.prisma.workSchedule.findMany({
