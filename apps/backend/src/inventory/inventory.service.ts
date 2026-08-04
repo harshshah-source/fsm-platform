@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import type { CommonKitMissing, CommonKitStatus, VanStockItem } from '@fsm/shared';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+export type { CommonKitMissing, CommonKitStatus, VanStockItem } from '@fsm/shared';
 
 /**
  * Van Stock + Common Kit (Issue 21, schema D12). Reads the components an SE carries (`se_van_stock`)
@@ -9,25 +12,9 @@ import { PrismaService } from '../prisma/prisma.service';
  * Component-Blocked Queue: tickets the Recommender dropped because the eligible SE's kit is incomplete.
  *
  * Stock is read-only to the SE and mutated only via inventory transactions (Issue 22/24); this slice
- * provides reads + the queue, not consumption.
+ * provides reads + the queue, not consumption. `VanStockItem`/`CommonKitMissing`/`CommonKitStatus`
+ * now live in `@fsm/shared` (#60).
  */
-export interface VanStockItem {
-  componentId: string;
-  name: string;
-  qty: number;
-}
-
-export interface CommonKitMissing {
-  componentId: string;
-  name: string;
-  shortBy: number;
-}
-
-export interface CommonKitStatus {
-  complete: boolean;
-  missing: CommonKitMissing[];
-}
-
 export interface ComponentBlockedRow {
   id: string;
   ticketId: string;

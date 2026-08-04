@@ -416,3 +416,86 @@ export interface TroubleshootConflictBody {
   winnerAt: string | null;
   shadowUseRecorded: boolean;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #60 — GET /api/me/van-stock, GET /api/me/component-requests, POST
+// /api/component-requests/:id/confirm-receipt. Mirrors inventory/inventory.service.ts,
+// component-request/component-request.service.ts.
+// ---------------------------------------------------------------------------------------------
+
+/** One component the SE currently carries (`se_van_stock`). No status/threshold field — LOW vs OK
+ *  is derived client-side by cross-referencing `CommonKitStatus.missing` (see #60's
+ *  `vanStockDisplay.ts`), not a column that exists here. */
+export interface VanStockItem {
+  componentId: string;
+  name: string;
+  qty: number;
+}
+
+export interface CommonKitMissing {
+  componentId: string;
+  name: string;
+  shortBy: number;
+}
+
+/** Every active kit component carried at >= its `min_qty`. An SE with no van-stock records at all,
+ *  or no active kit definition, is trivially `complete` (seam-default — don't ground an SE on a
+ *  data gap). */
+export interface CommonKitStatus {
+  complete: boolean;
+  missing: CommonKitMissing[];
+}
+
+export interface VanStockView {
+  stock: VanStockItem[];
+  commonKit: CommonKitStatus;
+}
+
+export type ComponentRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'SHIPPED' | 'RECEIVED';
+export type DeliveryDestination = 'SE_LOCATION' | 'PLANT_WAREHOUSE';
+
+/** `GET /api/me/component-requests` (#163 item 5) row — the SE-readable variant of the manager
+ *  oversight read. */
+export interface ComponentRequestRow {
+  requestId: string;
+  ticketId: string;
+  seId: string;
+  componentId: string | null;
+  componentName: string | null;
+  status: ComponentRequestStatus;
+  deliveryDestination: DeliveryDestination | null;
+  trackingRef: string | null;
+  rejectionReason: string | null;
+  companyName: string;
+  zoneName: string;
+  ageDays: number;
+  createdAt: string;
+}
+
+export interface MeComponentRequestsView {
+  items: ComponentRequestRow[];
+  cursor: null;
+}
+
+/** `POST /api/component-requests/:id/confirm-receipt` 200 response — marks `RECEIVED`, resumes the
+ *  SLA clock server-side. 409 (`COMPONENT_REQUEST_INVALID_STATE`) when the request isn't currently
+ *  `SHIPPED`; carries the real current `status` so the client can render *why*, not just that it
+ *  failed. */
+export interface ConfirmReceiptResponse {
+  request: {
+    requestId: string;
+    ticketId: string;
+    seId: string;
+    componentId: string | null;
+    status: ComponentRequestStatus;
+    deliveryDestination: DeliveryDestination | null;
+    trackingRef: string | null;
+    rejectionReason: string | null;
+    createdAt: string;
+  };
+}
+
+export interface ConfirmReceiptConflictBody {
+  code: 'COMPONENT_REQUEST_INVALID_STATE';
+  status: ComponentRequestStatus;
+}
