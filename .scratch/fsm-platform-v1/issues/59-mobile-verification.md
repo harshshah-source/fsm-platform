@@ -115,3 +115,30 @@ from the ticket's `ESCALATED` state.
 
 Backend fields are owned by #161; the missing scoping on this route (unscoped for **every** role,
 not just SE) is #162.
+
+### 2026-08-04 — re-verified against source, still stale; not built
+
+Picked up after #58. Re-checked both gaps this comment names, directly against
+`verification-query.service.ts` and `verification-criteria.ts` (not trusting the 07-28 note's age):
+
+- **Still true.** `deviceId`/`startedAt`/`partialDeadline` exist only on `VerificationReviewRow`
+  (the manager row, `:37,46,48`) — the SE-facing `forTicket`/`VerificationView` read (`:64-72`, now
+  in `@fsm/shared` as of #57) still has none of them. The #172 Decision 4 ratified shape
+  (`checks[]`, `partialDeadline`, `startedAt`, `deviceId`) has not landed.
+- **New finding, not in the 07-28 note:** `verification-criteria.ts` (`evaluatePhase1`/
+  `evaluatePhase2`) only returns *aggregate* pass/fail results (ping count, span, gap checks) — it
+  has no concept of the mockup's 5 named checks (`Live GPS received`, `Multiple pings detected`,
+  `Stability window`, `Device mapping verified`, `Historical mapping checked`). Building the ratified
+  `checks[]` array is not a mechanical re-expose of existing data — "Device mapping verified" and
+  "Historical mapping checked" in particular have no obvious 1:1 source in the current Phase1/Phase2
+  result shape. Deriving them means deciding what those two checks concretely test, which is a
+  backend design question in its own right, not just plumbing.
+
+**Not built.** This needs a backend slice (owned by #161/#162 per the original note) to (a) land
+the ratified `checks[]`/`partialDeadline`/`startedAt`/`deviceId` shape and (b) resolve what the two
+under-specified checks actually measure — plus the **still-open `Escalated`-outcome sub-question**
+from Decision 4 (it appears in the PRD only as a *ticket* badge, not a `VerifyOutcome` value; unclear
+whether it becomes a real verification outcome or is rendered from the ticket's own `ESCALATED`
+status). That sub-question is explicitly phrased as needing a decision, not an implementation
+default — Strategic HITL, not mine to resolve under AFK authorization. Continuing to #60, which the
+Stock/Inventory backend surface makes more clearly buildable.
