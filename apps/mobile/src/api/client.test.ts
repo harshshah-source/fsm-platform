@@ -374,6 +374,7 @@ describe('apiSubmitTroubleshoot', () => {
         code: 'TICKET_ALREADY_CLOSED',
         status: 'CLOSED',
         winnerSeId: 'se-2',
+        winnerSeName: 'SE South',
         winnerAt: '2026-05-11T16:00:00Z',
         shadowUseRecorded: true,
       }),
@@ -384,6 +385,7 @@ describe('apiSubmitTroubleshoot', () => {
     await expect(promise).rejects.toBeInstanceOf(TroubleshootConflictError);
     await expect(promise.catch((e: TroubleshootConflictError) => e)).resolves.toMatchObject({
       winnerSeId: 'se-2',
+      winnerSeName: 'SE South',
       shadowUseRecorded: true,
     });
   });

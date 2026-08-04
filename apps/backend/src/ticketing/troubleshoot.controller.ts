@@ -76,6 +76,7 @@ export class TroubleshootController {
         code: 'TICKET_ALREADY_CLOSED',
         status: outcome.status,
         winnerSeId: outcome.conflict.winnerSeId,
+        winnerSeName: outcome.conflict.winnerSeName,
         winnerAt: outcome.conflict.winnerAt,
         shadowUseRecorded: outcome.shadowUseRecorded,
       });

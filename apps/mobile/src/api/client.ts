@@ -49,11 +49,11 @@ export class SoftStateConflictError extends Error {
 }
 
 /** Business 409 (CONTEXT §Business 409 Conflict) — never thrown for an idempotency duplicate,
- *  which is a 200. #63 (the full-screen result) isn't built; carries the raw payload so a caller
- *  can render whatever it honestly can. */
+ *  which is a 200. Carries the raw payload for #63's full-screen conflict result. */
 export class TroubleshootConflictError extends Error {
   readonly status: string;
   readonly winnerSeId: string | null;
+  readonly winnerSeName: string | null;
   readonly winnerAt: string | null;
   readonly shadowUseRecorded: boolean;
 
@@ -62,6 +62,7 @@ export class TroubleshootConflictError extends Error {
     this.name = 'TroubleshootConflictError';
     this.status = body.status;
     this.winnerSeId = body.winnerSeId;
+    this.winnerSeName = body.winnerSeName;
     this.winnerAt = body.winnerAt;
     this.shadowUseRecorded = body.shadowUseRecorded;
   }

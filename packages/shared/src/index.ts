@@ -424,14 +424,18 @@ export interface TroubleshootSubmitResponse {
 }
 
 /** Business 409 (CONTEXT §Business 409 Conflict) — another SE's submission already won, or
- *  auto-recovery closed the ticket. Distinct from a `DUPLICATE`, which is a 200. #63 (the
- *  full-screen conflict result) is not built yet — `winnerSeId` has no name-resolution endpoint
- *  and `shadowUseRecorded` is permanently `false` server-side (structural gap, see #63's own
- *  2026-07-28 comment); this type exists so a caller can at least render *something* honest. */
+ *  auto-recovery closed the ticket (`status === 'CLOSED_AUTO_RECOVERY'` — no winning SE at all,
+ *  `winnerSeId`/`winnerSeName`/`winnerAt` all null; render accordingly, never a lie like "closed
+ *  by null"). Distinct from a `DUPLICATE`, which is a 200. `winnerSeName` resolves the winner's
+ *  `User.name` server-side (#63) so the client never renders a bare UUID at a field engineer.
+ *  `shadowUseRecorded` is still permanently `false` over HTTP today — `TroubleshootSubmitRequest`
+ *  carries no `consumedComponents` field yet (structural gap owned by #101) — but the type is
+ *  correct for whenever that lands. */
 export interface TroubleshootConflictBody {
   code: 'TICKET_ALREADY_CLOSED';
   status: string;
   winnerSeId: string | null;
+  winnerSeName: string | null;
   winnerAt: string | null;
   shadowUseRecorded: boolean;
 }

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { NavigationContainer } from '@react-navigation/native';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 import type { TroubleshootSubmitResponse } from '@fsm/shared';
 import { TroubleshootFormScreen } from './TroubleshootFormScreen';
@@ -115,7 +116,7 @@ describe('TroubleshootFormScreen', () => {
     expect(secondId).not.toBe(firstId);
   });
 
-  it('shows an inline conflict message on TroubleshootConflictError (409), not a crash', async () => {
+  it('shows the full-screen #63 ConflictScreen on TroubleshootConflictError (409), not a crash', async () => {
     mockGetAccessToken.mockResolvedValue('token');
     mockCaptureLocation.mockResolvedValue(undefined);
     mockSubmit.mockRejectedValue(
@@ -123,15 +124,21 @@ describe('TroubleshootFormScreen', () => {
         code: 'TICKET_ALREADY_CLOSED',
         status: 'CLOSED',
         winnerSeId: 'se-2',
+        winnerSeName: 'SE South',
         winnerAt: '2026-05-11T16:00:00Z',
         shadowUseRecorded: true,
       }),
     );
 
-    render(<TroubleshootFormScreen ticketId="t-1" onSubmitted={jest.fn()} />);
+    render(
+      <NavigationContainer>
+        <TroubleshootFormScreen ticketId="t-1" onSubmitted={jest.fn()} />
+      </NavigationContainer>,
+    );
     fireEvent.press(screen.getByTestId('issue-tile-POWER_ISSUE'));
     fireEvent.press(screen.getByTestId('troubleshoot-submit'));
 
-    await waitFor(() => expect(screen.getByTestId('troubleshoot-conflict')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('screen-troubleshoot-conflict')).toBeTruthy());
+    expect(screen.queryByTestId('screen-troubleshoot-form')).toBeNull();
   });
 });

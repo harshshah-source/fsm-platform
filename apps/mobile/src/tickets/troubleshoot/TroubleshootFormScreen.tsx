@@ -8,6 +8,7 @@ import { getAccessToken } from '../../auth/tokenStore';
 import { TilePicker } from '../../components/kit/TilePicker';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { captureLocation } from '../detail/captureLocation';
+import { ConflictScreen } from './ConflictScreen';
 import { ACTION_TAKEN_OPTIONS, formatRootCauseLabel } from './troubleshootDisplay';
 
 const ROOT_CAUSE_OPTIONS = ROOT_CAUSE_CATEGORIES.map((value) => ({ value, label: formatRootCauseLabel(value) }));
@@ -21,11 +22,12 @@ export interface TroubleshootFormScreenProps {
 /**
  * #58 (M4) — the structured Troubleshoot form. `POST /tickets/:id/troubleshoot`.
  *
- * Not built here: photo capture (blocked on #81, Media Upload API — unbuilt) and the specific
- * `componentUnavailableItem` catalog picker (no component catalog/read exists to populate one from
- * — only the boolean `componentUnavailable` flag is in scope, which #58's own ACs name explicitly).
- * A 409 shows what this build can honestly render inline, not the full #63 screen (blocked on its
- * own gaps — see `TroubleshootConflictError`'s doc comment).
+ * Not built here: photo capture (#81, Media Upload API, has since landed but this form hasn't been
+ * wired to it yet — see #61's `VoucherFormScreen` for the established capture-and-upload pattern)
+ * and the specific `componentUnavailableItem` catalog picker (no component catalog/read exists to
+ * populate one from — only the boolean `componentUnavailable` flag is in scope, which #58's own
+ * ACs name explicitly). A 409 (`TroubleshootConflictError`) renders the full-screen `ConflictScreen`
+ * (#63), replacing this form entirely — never an inline banner over still-editable fields.
  */
 export function TroubleshootFormScreen({ ticketId, onSubmitted }: TroubleshootFormScreenProps) {
   const [rootCause, setRootCause] = useState<RootCauseCategory | null>(null);
@@ -37,6 +39,10 @@ export function TroubleshootFormScreen({ ticketId, onSubmitted }: TroubleshootFo
   const [conflict, setConflict] = useState<TroubleshootConflictError | null>(null);
 
   const canSubmit = rootCause !== null && !submitting;
+
+  if (conflict) {
+    return <ConflictScreen error={conflict} />;
+  }
 
   const handleSubmit = async () => {
     if (!rootCause) return;
@@ -67,15 +73,6 @@ export function TroubleshootFormScreen({ ticketId, onSubmitted }: TroubleshootFo
 
   return (
     <ScrollView testID="screen-troubleshoot-form" style={styles.container}>
-      {conflict ? (
-        <View testID="troubleshoot-conflict" style={styles.conflictBanner}>
-          <Text style={styles.conflictText}>
-            This ticket was already closed{conflict.winnerAt ? ` at ${conflict.winnerAt}` : ''}.
-            {conflict.shadowUseRecorded ? ' Your consumed components were logged as Shadow Use.' : ''}
-          </Text>
-        </View>
-      ) : null}
-
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Issue Found</Text>
         <TilePicker options={ROOT_CAUSE_OPTIONS} value={rootCause} onChange={setRootCause} testIDPrefix="issue" />
@@ -133,16 +130,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: color.surfaceApp,
-  },
-  conflictBanner: {
-    margin: spacing.lg,
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: color.warningBg,
-  },
-  conflictText: {
-    ...typeScale.cellSecondary,
-    color: color.warning,
   },
   section: {
     padding: spacing.lg,

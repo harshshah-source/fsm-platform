@@ -162,4 +162,37 @@ describe('Issue 16 slices 2–3 — troubleshoot submission', () => {
     expect(outcome.result).toBe('CONFLICT');
     expect(outcome.result === 'CONFLICT' && outcome.shadowUseRecorded).toBe(false);
   });
+
+  // #63 — PRD:593 renders "already closed by [SE Name]"; the 409 must carry a resolved name, not
+  // just the winner's bare seId, so the loser SE's mobile screen never shows a raw UUID.
+  it('#63 — a CONFLICT from a DIFFERENT SE resolves the winner\'s name, not just their id', async () => {
+    const { ticketId } = await makeTicket();
+    const tag = randomUUID().slice(0, 8);
+    const winnerUser = await prisma.user.create({
+      data: { name: 'SE Winner ' + tag, role: 'SERVICE_ENGINEER', phone: 'ph-win-' + tag, email: `win-${tag}@tf.test`, zoneId },
+    });
+    await prisma.engineerMaster.create({ data: { engineerId: winnerUser.userId, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+    await prisma.seCoverage.create({ data: { seId: winnerUser.userId, plantId, coverageType: 'DEDICATED' } });
+
+    try {
+      await svc.submit({
+        ticketId,
+        seId: winnerUser.userId,
+        clientSubmissionId: randomUUID(),
+        rootCauseCategory: 'UNKNOWN',
+        actor: { userId: winnerUser.userId, role: 'SERVICE_ENGINEER' },
+        now: NOW,
+      });
+      const outcome = await svc.submit({ ticketId, seId: se, clientSubmissionId: randomUUID(), rootCauseCategory: 'UNKNOWN', actor: actor(), now: NOW });
+
+      expect(outcome.result).toBe('CONFLICT');
+      expect(outcome.result === 'CONFLICT' && outcome.conflict.winnerSeId).toBe(winnerUser.userId);
+      expect(outcome.result === 'CONFLICT' && outcome.conflict.winnerSeName).toBe('SE Winner ' + tag);
+    } finally {
+      await prisma.troubleshootingSubmission.deleteMany({ where: { seId: winnerUser.userId } });
+      await prisma.seCoverage.deleteMany({ where: { seId: winnerUser.userId } });
+      await prisma.engineerMaster.deleteMany({ where: { engineerId: winnerUser.userId } });
+      await prisma.user.deleteMany({ where: { userId: winnerUser.userId } });
+    }
+  });
 });

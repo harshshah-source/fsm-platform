@@ -67,7 +67,7 @@ export type SubmitOutcome =
       // another SE's submission already won (or auto-recovery closed it). Distinct from a DUPLICATE.
       result: 'CONFLICT';
       status: string;
-      conflict: { winnerSeId: string | null; winnerAt: string | null };
+      conflict: { winnerSeId: string | null; winnerSeName: string | null; winnerAt: string | null };
       shadowUseRecorded: boolean;
     };
 
@@ -277,7 +277,7 @@ export class TroubleshootSubmissionService {
     const winner = await this.prisma.troubleshootingSubmission.findFirst({
       where: { ticketId: input.ticketId, seId: { not: input.seId } },
       orderBy: { submittedAt: 'desc' },
-      select: { seId: true, submittedAt: true },
+      select: { seId: true, submittedAt: true, engineer: { select: { user: { select: { name: true } } } } },
     });
 
     let shadowUseRecorded = false;
@@ -315,7 +315,11 @@ export class TroubleshootSubmissionService {
     return {
       result: 'CONFLICT',
       status,
-      conflict: { winnerSeId: winner?.seId ?? null, winnerAt: winner ? winner.submittedAt.toISOString() : null },
+      conflict: {
+        winnerSeId: winner?.seId ?? null,
+        winnerSeName: winner?.engineer.user.name ?? null,
+        winnerAt: winner ? winner.submittedAt.toISOString() : null,
+      },
       shadowUseRecorded,
     };
   }
