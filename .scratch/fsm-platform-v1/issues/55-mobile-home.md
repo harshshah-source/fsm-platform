@@ -16,11 +16,11 @@ Day Plan / Next Visit / Plant Workload (Issue 11 `/api/schedules/me`), Common-Ki
 
 ## Acceptance criteria
 
-- [ ] Online / last-sync pill reflects snapshot data-as-of
-- [ ] Day Plan / Next Visit / Plant Workload rendered from `/api/schedules/me`
-- [ ] Common-Kit status badge rendered from `/api/me/van-stock` (closes Issue 21 AC#5 UI; supersedes 52)
-- [ ] Open Ticket Pool entry navigates to the pool (M2)
-- [ ] Pre-dispatch (`dispatched=false`) shows the "plan is being prepared" empty state
+- [x] Online / last-sync pill reflects snapshot data-as-of — reinterpreted as client-side telemetry (connectivity state + this screen's own last-successful-fetch timestamp); no backend "snapshot data-as-of" concept applies to a Home-level pill, and none was invented
+- [x] Day Plan / Next Visit / Plant Workload rendered from `/api/schedules/me`
+- [x] ~~Common-Kit status badge rendered from `/api/me/van-stock`~~ — superseded by the 2026-07-28 ratification below: kit badge moved to Inventory (#60), not Home
+- [x] Open Ticket Pool entry navigates to the pool (M2)
+- [x] Pre-dispatch (`dispatched=false`) shows the "plan is being prepared" empty state (PRD:508 copy verbatim)
 
 ## API contract (authority: backend on `main`)
 
@@ -71,6 +71,30 @@ Day Plan / Next Visit / Plant Workload (Issue 11 `/api/schedules/me`), Common-Ki
 - #54, #04, #11, #21, #12
 
 ## Comments
+
+### 2026-08-04 — built, KPI derivation confirmed by the operator
+
+Picked back up after #57/#58/#60 unblocked real data for it. The operator answered the four
+tile-derivation questions this issue's own comment below left open:
+
+- **STARTED** = `workState === 'IN_WORK'`.
+- **COMPLETED** = `status` IN (`CLOSED`, `CLOSED_AUTO_RECOVERY`) — excludes `CLOSED_NON_OPERATIONAL`
+  and INSTALL's `FITTED`/`ACTIVATED`.
+- **VERIFIED** = `CLOSED` **and** `workType === 'TROUBLESHOOT'` — a deliberate subset of COMPLETED
+  (same ticket can count in both tiles), not the mid-flight `VERIFICATION_PENDING` reading. Only
+  TROUBLESHOOT tickets go through the auto-verification pipeline (`OPEN -> SUBMITTED ->
+  VERIFICATION_PENDING -> CLOSED`), so reaching `CLOSED` on that path *is* "passed verification" by
+  construction — no separate verification-run lookup needed.
+- **FAILED** = `status` IN (`FAILED_VERIFICATION`, `FAILED_ACTIVATION`, `ESCALATED`).
+- **Scope** (not asked — a low-risk call, the mockup's own "Daily work status" chart caption):
+  `assigned: true` rows only, i.e. today's day-plan, never the shared pool.
+
+All four tiles derive purely from `GET /api/me/tickets` (already fetched for #56) — no new backend
+endpoint was needed. `computeHomeKpis` (`ca4fc3b`) implements this. `HomeScreen` (`20d1462`): header
+from `session.profile` (already in `AuthProvider` context), Plant Workload cross-references
+`DayPlanView.stops`' ticket ids against the same fetched ticket list to compute a real done/total
+per plant (same COMPLETED definition), Open Ticket Pool count is `!assigned` rows from the same
+fetch. 159 mobile tests green, `tsc`/`eslint` clean.
 
 ### 2026-08-04 — the KPI-tile derivation (STARTED/COMPLETED/VERIFIED/FAILED) is not specified anywhere
 

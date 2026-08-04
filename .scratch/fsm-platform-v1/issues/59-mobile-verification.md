@@ -142,3 +142,18 @@ whether it becomes a real verification outcome or is rendered from the ticket's 
 status). That sub-question is explicitly phrased as needing a decision, not an implementation
 default — Strategic HITL, not mine to resolve under AFK authorization. Continuing to #60, which the
 Stock/Inventory backend surface makes more clearly buildable.
+
+### 2026-08-04 — Escalated-outcome question answered (one of two blockers)
+
+Operator decision: **render from the ticket's own `ESCALATED` status; do not add `ESCALATED` to
+`VerifyOutcome`.** No backend `VerifyOutcome` enum change. Matches the PRD, which lists Escalated
+only as a ticket badge (PRD:412), never as a verification outcome — this reading was already the
+recommended option, now confirmed rather than assumed. Mobile checks `ticket.status === 'ESCALATED'`
+independently and renders an Escalated badge alongside whatever verification badge applies, once
+this screen is otherwise built.
+
+**Still blocked** on the other half: the ratified `checks[]`/`partialDeadline`/`startedAt`/
+`deviceId` shape hasn't landed on the SE route, and 2 of the 5 named checks ("Device mapping
+verified", "Historical mapping checked") have no source in `verification-criteria.ts` today — that
+backend slice + those two checks' concrete definitions still need attention before this issue is
+buildable end-to-end.
