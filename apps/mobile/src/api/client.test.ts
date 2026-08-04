@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import * as Keychain from 'react-native-keychain';
-import type { LoginResponse, MeTicketDetailView, MeTicketsView, SessionView, VerificationView } from '@fsm/shared';
+import type {
+  LoginResponse,
+  MeTicketDetailView,
+  MeTicketsView,
+  SessionView,
+  TroubleshootSubmitRequest,
+  VerificationView,
+} from '@fsm/shared';
 import {
   apiGetMyTickets,
   apiGetTicketDetail,
@@ -9,7 +16,9 @@ import {
   apiMe,
   apiRefresh,
   apiSetSoftState,
+  apiSubmitTroubleshoot,
   SoftStateConflictError,
+  TroubleshootConflictError,
 } from './client';
 
 jest.mock('react-native-keychain', () => ({
@@ -304,6 +313,65 @@ describe('apiSetSoftState', () => {
     await expect(promise.catch((e: SoftStateConflictError) => e)).resolves.toMatchObject({
       from: 'VIEWED',
       to: 'TROUBLESHOOT_STARTED',
+    });
+  });
+});
+
+describe('apiSubmitTroubleshoot', () => {
+  const request: TroubleshootSubmitRequest = {
+    clientSubmissionId: 'sub-1',
+    rootCauseCategory: 'POWER_ISSUE',
+  };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('POSTs the submission to /tickets/:id/troubleshoot', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = { result: 'OK', duplicate: false, submission: {} };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+
+    const result = await apiSubmitTroubleshoot('token', 't-1', request);
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/tickets\/t-1\/troubleshoot$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify(request) });
+  });
+
+  it('throws the server 400 code verbatim (defensive — client validation should prevent both)', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'ROOT_CAUSE_CATEGORY_REQUIRED' }),
+    } as unknown as Response);
+
+    await expect(apiSubmitTroubleshoot('token', 't-1', request)).rejects.toThrow('ROOT_CAUSE_CATEGORY_REQUIRED');
+  });
+
+  it('throws TroubleshootConflictError carrying the full payload on a 409', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        code: 'TICKET_ALREADY_CLOSED',
+        status: 'CLOSED',
+        winnerSeId: 'se-2',
+        winnerAt: '2026-05-11T16:00:00Z',
+        shadowUseRecorded: true,
+      }),
+    } as unknown as Response);
+
+    const promise = apiSubmitTroubleshoot('token', 't-1', request);
+
+    await expect(promise).rejects.toBeInstanceOf(TroubleshootConflictError);
+    await expect(promise.catch((e: TroubleshootConflictError) => e)).resolves.toMatchObject({
+      winnerSeId: 'se-2',
+      shadowUseRecorded: true,
     });
   });
 });

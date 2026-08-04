@@ -8,6 +8,9 @@ import type {
   SetSoftStateRequest,
   SetSoftStateResponse,
   SoftStateConflictBody,
+  TroubleshootConflictBody,
+  TroubleshootSubmitRequest,
+  TroubleshootSubmitResponse,
   VerificationView,
 } from '@fsm/shared';
 import { getDeviceId } from '../device/deviceId';
@@ -21,6 +24,25 @@ export class SoftStateConflictError extends Error {
     this.name = 'SoftStateConflictError';
     this.from = body.from;
     this.to = body.to;
+  }
+}
+
+/** Business 409 (CONTEXT §Business 409 Conflict) — never thrown for an idempotency duplicate,
+ *  which is a 200. #63 (the full-screen result) isn't built; carries the raw payload so a caller
+ *  can render whatever it honestly can. */
+export class TroubleshootConflictError extends Error {
+  readonly status: string;
+  readonly winnerSeId: string | null;
+  readonly winnerAt: string | null;
+  readonly shadowUseRecorded: boolean;
+
+  constructor(body: TroubleshootConflictBody) {
+    super('TICKET_ALREADY_CLOSED');
+    this.name = 'TroubleshootConflictError';
+    this.status = body.status;
+    this.winnerSeId = body.winnerSeId;
+    this.winnerAt = body.winnerAt;
+    this.shadowUseRecorded = body.shadowUseRecorded;
   }
 }
 
@@ -112,6 +134,30 @@ export async function apiGetTicketVerification(accessToken: string, ticketId: st
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as VerificationView;
+}
+
+export async function apiSubmitTroubleshoot(
+  accessToken: string,
+  ticketId: string,
+  body: TroubleshootSubmitRequest,
+): Promise<TroubleshootSubmitResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/tickets/${ticketId}/troubleshoot`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (res.status === 409) {
+    throw new TroubleshootConflictError((await res.json()) as TroubleshootConflictBody);
+  }
+  if (res.status === 400) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as TroubleshootSubmitResponse;
 }
 
 export async function apiSetSoftState(
