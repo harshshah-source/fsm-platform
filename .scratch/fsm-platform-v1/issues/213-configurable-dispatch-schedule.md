@@ -52,12 +52,38 @@ Operator ruling on #198 Q2 (2026-08-04). Not an audit finding — this scope arr
 **Minor, explicitly optional in the ruling** ("why *if required*"): the manual-run body is
 `{ zoneId? }` (`schedules.controller.ts:75`) — no reason field, so "why" is not captured.
 
+## Approved direction (operator, 2026-08-04)
+
+Both gaps approved to fix. The operator gave direction on each; it is binding, so it is recorded here
+rather than left to implementation taste.
+
+**Schedule config.** `system_settings` becomes the **source of truth**. `BUSINESS_SWEEP_DISPATCH_CRON`
+is **demoted to a bootstrap default**, consulted only when no setting row exists — not read on every
+tick, not a parallel source. Two properties matter more than the plumbing:
+1. **A change takes effect without a restart.** Re-register the job when the setting is written — do
+   **not** merely read the value at boot, and do not read-per-tick as a substitute for rescheduling.
+2. **An invalid cron expression is rejected at write time, leaving the previous schedule intact.**
+   Never accepted and then silently failing to fire. A schedule that is quietly dead is worse than one
+   that is wrong, because nothing surfaces it until someone notices there is no day plan.
+3. Every schedule change is logged **with the actor**.
+
+**Overlap guard — fix the root cause, do not add a second check.** Lift the single-in-flight guard off
+`DispatchSchedulerService`'s private field and put it somewhere **both** the scheduled path and the
+manual trigger must pass through. Scope it **per zone**, consistent with the per-zone advisory locks
+already in `DispatchRunService`. When a run is already in flight for that zone the manual trigger
+returns a **clear conflict** — *"dispatch already running for this zone, started HH:MM by X"* — and
+specifically **not**: a queued run, a silent no-op, or a bare 409 with no body. Admin **disables the
+button and shows that message**, rather than letting someone discover the conflict by pressing twice.
+
+**Manual-run reason.** Stays **optional**, but when supplied it is **persisted on the `dispatch_runs`
+ledger row**. The operator's rationale, worth keeping: *"an emergency run with a one-line reason is
+worth a lot when someone reads the audit trail three weeks later."*
+
 ## Scope
 
-**In:** move the dispatch schedule into `system_settings` with `05:00 IST` as the default and an
-OH-only admin settings control; make the guard against concurrent runs cover the manual path as well
-as the cron path, returning a clear response rather than silently queueing or silently skipping;
-optionally capture a reason on a manual run.
+**In:** the three items above — settings-backed schedule with live re-registration and write-time
+validation; one shared per-zone in-flight guard covering both entry paths, with a populated conflict
+response and a disabled admin button; optional reason persisted on the ledger row.
 
 **Out:** the `Asia/Kolkata` timezone pinning itself — [#204](./204-time-semantics-day-boundary-implementation.md)
 owns that, and this issue depends on it. The `BUSINESS_SWEEPS_ENABLED` master switch — it stays an
@@ -68,22 +94,33 @@ it does.
 
 ## Acceptance criteria
 
-- [ ] The daily dispatch time is stored in `system_settings`, defaults to `05:00` `Asia/Kolkata`, and
-      an env var no longer has to be edited to change it
+- [ ] The daily dispatch time lives in `system_settings` as the **source of truth**, defaulting to
+      `05:00` `Asia/Kolkata`; `BUSINESS_SWEEP_DISPATCH_CRON` is consulted **only** when no setting row
+      exists (bootstrap default) and is not a parallel source thereafter
 - [ ] An Operations Head can change it from the admin settings page; other roles cannot
-- [ ] A change takes effect without a redeploy (the scheduler re-reads it, or reschedules on write) —
-      state explicitly which mechanism was chosen and why
-- [ ] An invalid time is rejected at write time with a clear error, not accepted and silently ignored
-      at the next tick
-- [ ] A manual `POST /schedules/dispatch-run` issued while a run is in flight does **not** start a
-      second overlapping run, and the caller gets an explicit "already running" response — not a
-      silent no-op and not a duplicate run
-- [ ] The reverse also holds: a cron tick during a manual run does not start a second run
+- [ ] **A change takes effect without a restart** — the job is **re-registered on write**. A test
+      proves the next fire uses the new time with no process restart; reading the value at boot only,
+      or read-per-tick in place of rescheduling, does not satisfy this
+- [ ] **An invalid cron expression is rejected at write time with a clear error and the previous
+      schedule is left intact and still firing** — never accepted-then-silently-dead
+- [ ] Every schedule change is logged with the actor, the previous value and the new value
+- [ ] **One shared per-zone in-flight guard** sits where both the scheduled path and the manual
+      trigger must pass through it — the scheduler's private `inFlight` field is **removed**, not
+      supplemented by a second check
+- [ ] A manual `POST /schedules/dispatch-run` for a zone with a run in flight returns a conflict whose
+      **body names the start time and the actor** ("dispatch already running for this zone, started
+      HH:MM by X") — not a queued run, not a silent no-op, not a bare 409 with an empty body
+- [ ] The reverse holds: a cron tick for a zone with a manual run in flight does not start a second run
+- [ ] Admin **disables the Run-dispatch button and surfaces that message** while a run is in flight —
+      the conflict is not something a user discovers by pressing twice
+- [ ] A reason supplied on a manual run is **persisted on the `dispatch_runs` ledger row** and visible
+      in the run detail; omitting it is still valid
 - [ ] The configured time appears in [#124](./124-effective-config-snapshot.md)'s run-start config
       snapshot, so a run records the schedule it was generated under
-- [ ] The change of time is audited (who changed it, from what, to what)
-- [ ] Regression test for the concurrency guard across **both** entry paths. **Cheap** — the
-      dispatch-scheduler suite already exists and `#183` established the frozen-clock fixture pattern
+- [ ] **Regression test for the concurrent case specifically** (operator-requested): a scheduled run
+      is in flight, the manual trigger fires, and the test asserts **exactly one run executed** *and*
+      that the caller received the conflict response. **Cheap** — the dispatch-scheduler suite exists
+      and `#183` established the frozen-clock fixture pattern
 
 ## Verification
 

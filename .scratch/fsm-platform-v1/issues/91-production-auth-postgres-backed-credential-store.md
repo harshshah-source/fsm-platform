@@ -561,3 +561,43 @@ zone-id when a concurrent session's own truncate+reseed interleaved with this se
 zone rows observed (timestamp-named) were never created by this issue's code, and both specs went
 green again once rerun without the interleaving. This is the same "DB-state-bleed" flake class the
 task brief already calls out as pre-existing and out of scope to chase.
+
+### 2026-08-04 — D-2 SCOPE RULED: one active session per client class (one handset + one browser)
+
+The 2026-07-28 D-2 ruling above settled *one active device* on entirely handset-framed reasoning —
+"an SE uses one phone with the app at a time", the backup-handset swap, the stolen-device tail. It
+never addressed the **admin web dashboard**, and neither did any other document. The implementation
+went wider than the reasoning: `prisma-refresh-token-store.issue()` (`:47-50`) revokes **every** active
+refresh token for the `userId`, and `deviceId` is stored but never compared. Because the admin client
+sends no `X-Device-Id` (`apps/admin/src/api/client.ts:20-24`) it takes the `randomUUID()` fallback at
+`auth.controller.ts:31`, so **every admin login looked like a new device and silently killed that
+user's handset session** — a policy nobody ratified. Surfaced by the 2026-08-04 cross-surface audit
+(`audit/mobile-contract-sync-audit-2026-08-04.md`, finding A4).
+
+**Operator ruling 2026-08-04 — one active session per client class: one handset + one browser.**
+A second *handset* login still revokes the first, so everything D-2 was chosen for survives intact
+(replacement phones, the stolen-device tail, "log out my other device" staying implicit). What changes
+is that a manager who supervises from the dashboard and carries a phone can hold both — which is the
+normal case for a ZM, and was previously impossible.
+
+Two riders ruled at the same time:
+
+- **A revoked session is told why.** The refresh endpoint stops returning an undifferentiated 401 where
+  `revokedReason` is known, so a client can render *"You signed in on another device"* instead of a
+  generic failure. This matters more than it sounds: mobile currently has no refresh-on-401 at all
+  (#186), so a revoked handset shows the **"Offline"** badge — the user is told the network failed.
+- **A short rotation grace window.** Closes the exposure already documented at `schema.prisma:189-192`:
+  refresh is strictly single-use, so on a lossy field network a dropped *response* permanently burns
+  the SE's session mid-shift. A brief overlap lets the lost response be retried instead.
+
+**Consequences for this issue's own design notes.** The line at `:486-489` — *"every `issue()` call
+revokes whatever was still active for that `userId`… so 'at most one active refresh token per user'
+holds after every call"* — is superseded: the invariant becomes *at most one active refresh token per
+user **per client class***. `refresh-persistence.e2e-spec.ts:68-84,:86-95` encode the old behaviour and
+must be rewritten. `REUSE_DETECTED` (`schema.prisma:206`) still has no writer; the grace window makes
+the distinction between a legitimate in-window retry and an out-of-window replay meaningful, so it
+should be wired at the same time. The not-in-v1 list at `:386-388` (no device-list endpoint, no
+per-device logout, no Profile → Devices screen) is **unchanged** — this ruling is not multi-device.
+
+Implementation: [#202](./202-cross-surface-session-semantics.md). Full options and evidence:
+[#199](./199-decision-one-active-device-cross-surface.md).
