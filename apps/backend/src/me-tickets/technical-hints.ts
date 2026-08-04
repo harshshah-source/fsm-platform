@@ -1,4 +1,7 @@
+import type { RawTelemetry, TechnicalHealth, TechnicalHint, TechnicalHintCode } from '@fsm/shared';
 import { Prisma } from '../generated/prisma/client';
+
+export type { RawTelemetry, TechnicalHealth, TechnicalHint, TechnicalHintCode } from '@fsm/shared';
 
 /**
  * #84 — Technical Hints (derived telemetry signals). Pure derivation over the latest
@@ -8,26 +11,10 @@ import { Prisma } from '../generated/prisma/client';
  * which pass in an already-fetched snapshot row and do nothing with the result but serialize it.
  *
  * Frozen vocabulary (#169 owns freezing this contract further; do not rename without updating there):
- * eight `code`s, one per §641 condition, each mapped 1:1 to its verbatim PRD label.
+ * eight `code`s, one per §641 condition, each mapped 1:1 to its verbatim PRD label. `TechnicalHint`/
+ * `TechnicalHintCode`/`RawTelemetry`/`TechnicalHealth` now live in `@fsm/shared` (#57) — this file
+ * re-exports them so existing local imports keep working.
  */
-export type TechnicalHintCode =
-  | 'NO_MAIN_POWER'
-  | 'NOT_ON_NETWORK'
-  | 'GPS_INVALID'
-  | 'NO_GPS_FIX'
-  | 'LOW_VOLTAGE'
-  | 'WEAK_GSM'
-  | 'IGNITION_OFF'
-  | 'VEHICLE_IN_MOTION';
-
-export interface TechnicalHint {
-  code: TechnicalHintCode;
-  /** Higher number = more severe. See the ranking rationale below — deliberately spans 1-8 with no
-   *  ties, so "the single highest-severity hint" (AC #2) is always well-defined even when every
-   *  condition fires on the same snapshot. */
-  severity: number;
-  label: string;
-}
 
 /**
  * Severity ranking rationale (documented per the issue's own request, since #169 needs it frozen
@@ -117,36 +104,6 @@ export function deriveTechnicalHints(s: HintDerivationInput): TechnicalHint[] {
 export function pickTopHint(hints: TechnicalHint[]): TechnicalHint | null {
   if (hints.length === 0) return null;
   return hints.reduce((best, h) => (h.severity > best.severity ? h : best));
-}
-
-/** The raw telemetry field set the issue's API spec calls out — every `RawDeviceSnapshot` column
- *  except `id`/`runId`/`deviceId` (those three are row plumbing, not device telemetry; `deviceId` is
- *  already on the enclosing ticket/list payload). */
-export interface RawTelemetry {
-  gpsDatetime: string;
-  lat: number | null;
-  lon: number | null;
-  mainsStatus: number | null;
-  mainsVoltage: number | null;
-  gpsValidity: string | null;
-  gpsMode: string | null;
-  ignitionStatus: string | null;
-  speed: number | null;
-  creg: string | null;
-  cgreg: string | null;
-  csq: number | null;
-  ipAddress: string | null;
-  portNo: number | null;
-  simSubscriberName: string | null;
-  unitNo: string | null;
-  deviceType: string | null;
-}
-
-export interface TechnicalHealth {
-  hints: TechnicalHint[];
-  rawTelemetry: RawTelemetry | null;
-  dataAsOf: string | null;
-  available: boolean;
 }
 
 /** The subset of `RawDeviceSnapshot` this module reads — `id`/`runId`/`deviceId` intentionally

@@ -1,85 +1,22 @@
 import { Injectable } from '@nestjs/common';
+import type { ComponentRequestEntry, FailureCycleHistoryEntry, MeTicketDetailView, TechnicalHealth } from '@fsm/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
 import { isTicketReadableBySe } from './se-ticket-access';
-import { buildTechnicalHealth, type TechnicalHealth } from './technical-hints';
+import { buildTechnicalHealth } from './technical-hints';
 import { formatTicketNo, ticketNoAsNumber } from '../ticketing/ticket-no';
 
+export type { ComponentRequestEntry, FailureCycleHistoryEntry, MeTicketDetailView } from '@fsm/shared';
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** One entry in a ticket's Failure-Cycle chain (`FailureCycle.previousFailureCycleId`, walked oldest
- *  toward the ticket's own cycle). Bounded to `MAX_HISTORY_DEPTH` entries — this is the "repeat
- *  failure history" the mobile Ticket Detail screen wants, not the manager Device Detail's full
- *  lifetime list (`device-detail.service.ts`), which is deliberately not phone-payload-bounded. */
-export interface FailureCycleHistoryEntry {
-  cycleId: string;
-  openedAt: string;
-  closedAt: string | null;
-  repeatFailure: boolean;
-}
-
-/**
- * One `ComponentRequest` raised against the ticket. This is the ticket's actual component-request
- * history (what an SE requested and its approve/ship/receive progress) — reusing `ComponentRequest`
- * as-is, no new business logic. It is NOT a catalog-driven "expected components for this device"
- * list: that derivation doesn't exist yet (`hard-filters.ts`'s `expectedComponentsAvailable` is
- * still hardcoded `true`, and no `expected_components` table exists — Issue 21/22, out of scope
- * here). For a ticket with no component requests this is simply `[]`.
- */
-export interface ComponentRequestEntry {
-  requestId: string;
-  componentId: string | null;
-  componentName: string | null;
-  status: string;
-  requestedAt: string;
-}
-
-/**
- * The mobile M3 Ticket Detail read (#161 item 1). See the field-by-field contract in the issue's
- * 2026-08-03 comment; the summary here is the shape only.
- *
- * `companyTier` is stamped on the ticket at creation time (`Ticket.companyTier`) and can diverge
- * from #157's zone-scoped *effective* tier override applied after creation — **by decided design**
- * (Q-B), not a bug. A frozen mobile client renders whatever this field says; do not "fix" the
- * apparent mismatch by joining the live override here.
- *
- * `transporterName` only — transporter phone/number is a column that does not exist yet (#171's
- * gap); this payload leaves contact incomplete rather than inventing a field.
- *
- * `readinessHint` mirrors `recommender.service.ts`'s own `vehicleReadiness: 'UNKNOWN'` hardcode
- * (`hard-filters.ts`'s `VehicleReadiness` union) — there is no per-ticket vehicle-readiness value
- * persisted anywhere to read (the Recommender computes it in-memory per dispatch run and never
- * stores it). Surfacing the field (always `'UNKNOWN'` today) is in scope; fixing the hardcode is a
- * separate systemic gap #161 explicitly defers.
- */
-export interface MeTicketDetailView {
-  ticketId: string;
-  ticketNo: number;
-  ticketNoDisplay: string;
-  deviceId: string;
-  vehicleNo: string | null;
-  plantName: string;
-  companyName: string;
-  companyTier: string;
-  transporterName: string | null;
-  slaBucket: string | null;
-  workType: string;
-  status: string;
-  activeSoftState: string | null;
-  createdAt: string;
-  lastStateChangedAt: string;
-  failureCycleHistory: FailureCycleHistoryEntry[];
-  expectedComponents: ComponentRequestEntry[];
-  componentRequestStatus: string | null;
-  waitingComponentSince: string | null;
-  readinessHint: 'READY' | 'ON_TRIP' | 'STALE' | 'UNKNOWN';
-  /** #84 — derived Technical Hints + raw telemetry, from the device's latest `RawDeviceSnapshot`.
-   *  Purely advisory (see `technical-hints.ts`); `available:false` when the device has no snapshot
-   *  row at all, distinct from an individual raw field being genuinely null. */
-  technicalHealth: TechnicalHealth;
-}
-
 const MAX_FAILURE_HISTORY_DEPTH = 10;
+
+/**
+ * The mobile M3 Ticket Detail read (#161 item 1). `MeTicketDetailView`/`FailureCycleHistoryEntry`/
+ * `ComponentRequestEntry` now live in `@fsm/shared` (#57) — see their doc comments there for the
+ * field-by-field contract (`companyTier` staleness-by-design, `transporterName`-only pending #171,
+ * `readinessHint` always `'UNKNOWN'` pending the Recommender persisting a real value).
+ */
 
 /**
  * #161 item 1 — `GET /api/me/tickets/:id`, the SE ticket-detail read. Covers TROUBLESHOOT, RECOVERY

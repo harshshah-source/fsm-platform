@@ -176,3 +176,155 @@ export const SLA_BANDS: ReadonlyArray<readonly [number, SlaBucket]> = [
   [8, 'EARLY_RISK'], // 8–12h
   [4, 'WARNING'], // 4–8h
 ];
+
+// ---------------------------------------------------------------------------------------------
+// #57 — GET /api/me/tickets/:id (Ticket Detail), GET /api/tickets/:id/verification, POST
+// /api/tickets/:id/soft-state. Mirrors apps/backend/src/me-tickets/me-ticket-detail.service.ts,
+// verification/verification-query.service.ts, soft-state/soft-state.controller.ts.
+// ---------------------------------------------------------------------------------------------
+
+/** One entry in a ticket's Failure-Cycle chain, oldest toward the ticket's own cycle. Bounded (10
+ *  entries) — the mobile Ticket Detail's "repeat failure history", not the manager Device Detail's
+ *  unbounded lifetime list. */
+export interface FailureCycleHistoryEntry {
+  cycleId: string;
+  openedAt: string;
+  closedAt: string | null;
+  repeatFailure: boolean;
+}
+
+/** One `ComponentRequest` raised against the ticket — actual request/approve/ship/receive history,
+ *  not a catalog-driven "expected components" list (that derivation doesn't exist yet). `[]` when
+ *  the ticket has none. */
+export interface ComponentRequestEntry {
+  requestId: string;
+  componentId: string | null;
+  componentName: string | null;
+  status: string;
+  requestedAt: string;
+}
+
+/** The subset of `RawDeviceSnapshot` the Technical Health card renders. */
+export interface RawTelemetry {
+  gpsDatetime: string;
+  lat: number | null;
+  lon: number | null;
+  mainsStatus: number | null;
+  mainsVoltage: number | null;
+  gpsValidity: string | null;
+  gpsMode: string | null;
+  ignitionStatus: string | null;
+  speed: number | null;
+  creg: string | null;
+  cgreg: string | null;
+  csq: number | null;
+  ipAddress: string | null;
+  portNo: number | null;
+  simSubscriberName: string | null;
+  unitNo: string | null;
+  deviceType: string | null;
+}
+
+/** #84 — derived Technical Hints + raw telemetry, from the device's latest `RawDeviceSnapshot`.
+ *  `available:false` when the device has no snapshot row at all, distinct from an individual raw
+ *  field being genuinely null. Purely advisory. */
+export interface TechnicalHealth {
+  hints: TechnicalHint[];
+  rawTelemetry: RawTelemetry | null;
+  dataAsOf: string | null;
+  available: boolean;
+}
+
+/**
+ * `GET /api/me/tickets/:id` (#161 item 1 / #57) — the mobile Ticket Detail read. Covers
+ * TROUBLESHOOT/RECOVERY/INSTALL uniformly. `companyTier` is stamped-at-creation, may diverge from
+ * the live effective tier by design. `transporterName` only — phone is #171's gap.
+ * `readinessHint` is always `'UNKNOWN'` today (no per-ticket value persisted anywhere).
+ */
+export interface MeTicketDetailView {
+  ticketId: string;
+  ticketNo: number;
+  ticketNoDisplay: string;
+  deviceId: string;
+  vehicleNo: string | null;
+  plantName: string;
+  companyName: string;
+  companyTier: string;
+  transporterName: string | null;
+  slaBucket: string | null;
+  workType: string;
+  status: string;
+  activeSoftState: string | null;
+  createdAt: string;
+  lastStateChangedAt: string;
+  failureCycleHistory: FailureCycleHistoryEntry[];
+  expectedComponents: ComponentRequestEntry[];
+  componentRequestStatus: string | null;
+  waitingComponentSince: string | null;
+  readinessHint: 'READY' | 'ON_TRIP' | 'STALE' | 'UNKNOWN';
+  technicalHealth: TechnicalHealth;
+}
+
+/** Auto-verification phase (Decisions §9/§677). */
+export type VerifyPhase = 'PENDING' | 'PHASE_1_PASS' | 'PHASE_2_PASS';
+
+/** Auto-verification terminal outcome. */
+export type VerifyOutcome = 'CLOSED' | 'FAILED_VERIFICATION' | 'PARTIAL_RECOVERY' | 'CLOSED_AUTO_RECOVERY' | 'FAILED_ACTIVATION';
+
+/** What the mobile renders: the final outcome, or a PARTIAL_RECOVERY badge while 1-2 pings are in. */
+export type VerificationBadge = VerifyOutcome | 'PARTIAL_RECOVERY' | null;
+
+/** `GET /api/tickets/:id/verification` — 404 (`NO_VERIFICATION_RUN`) until a run exists, i.e. only
+ *  meaningful once the ticket is `VERIFICATION_PENDING`. Don't call this for a ready-state ticket. */
+export interface VerificationView {
+  ticketId: string;
+  phase: VerifyPhase;
+  pingsReceivedCount: number;
+  outcome: VerifyOutcome | null;
+  fraudFlag: boolean;
+  firstPingDistanceMeters: number | null;
+  badge: VerificationBadge;
+}
+
+/** The VIEWED -> ON_SITE -> TROUBLESHOOT_STARTED chain (Issue 15 / CONTEXT §334-353). */
+export type SoftStateType = 'VIEWED' | 'ON_SITE' | 'TROUBLESHOOT_STARTED';
+
+/** `AUTO_GEOFENCE` when a captured ON_SITE location falls inside the plant's geofence (server-side
+ *  decision, default 200m radius); `MANUAL` otherwise, incl. no location captured at all. */
+export type OnsiteSource = 'AUTO_GEOFENCE' | 'MANUAL';
+
+/** `POST /api/tickets/:id/soft-state` request body. `location` only applies to `target: 'ON_SITE'`
+ *  — omit when capture failed or location is off; the server decides `onsiteSource`, never the
+ *  client. */
+export interface SetSoftStateRequest {
+  target: SoftStateType;
+  location?: { lat: number; lng: number };
+}
+
+/** One soft-state row as the wire serializes it (`soft-state.controller.ts`'s `serialize()`) —
+ *  `softStateId` is a stringified bigint, the three dates are ISO strings (JSON has no `Date`). */
+export interface SoftStateWireView {
+  softStateId: string;
+  ticketId: string;
+  seId: string;
+  type: SoftStateType;
+  onsiteSource: OnsiteSource | null;
+  setAt: string;
+  timeoutAt: string | null;
+  resolvedAt: string | null;
+}
+
+/** `POST /api/tickets/:id/soft-state` 200 response. `result: 'IDEMPOTENT'` on a re-tap of the
+ *  already-current state (not an error). A transition the chain doesn't allow is a 409
+ *  `INVALID_SOFT_STATE_TRANSITION` instead — see `SoftStateConflictBody`. */
+export interface SetSoftStateResponse {
+  result: 'OK' | 'IDEMPOTENT';
+  softState: SoftStateWireView;
+}
+
+/** 409 body for an out-of-order soft-state transition. */
+export interface SoftStateConflictBody {
+  code: 'INVALID_SOFT_STATE_TRANSITION';
+  from: SoftStateType | null;
+  to: SoftStateType;
+}

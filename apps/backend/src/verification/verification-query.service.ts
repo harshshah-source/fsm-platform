@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import type { VerificationBadge, VerificationView } from '@fsm/shared';
 import { Prisma } from '../generated/prisma/client';
 import { type VerifyOutcome, type VerifyPhase } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+
+export type { VerificationBadge, VerificationView } from '@fsm/shared';
 
 /** 24 h escalation window for a PARTIAL_RECOVERY ticket — the countdown anchor on the review page. */
 const PARTIAL_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -59,19 +62,6 @@ function rowTypeFor(outcome: VerifyOutcome | null, fraud: boolean, pings: number
  * ZM fraud-flags list. The PARTIAL_RECOVERY badge is **derived** from `pings_received_count` + `outcome`
  * (1–2 pings while still in flight) — never a stored lifecycle state (CONTEXT §Partial Recovery).
  */
-export type VerificationBadge = VerifyOutcome | 'PARTIAL_RECOVERY' | null;
-
-export interface VerificationView {
-  ticketId: string;
-  phase: VerifyPhase;
-  pingsReceivedCount: number;
-  outcome: VerifyOutcome | null;
-  fraudFlag: boolean;
-  firstPingDistanceMeters: number | null;
-  /** What the mobile renders: the final outcome, or a PARTIAL_RECOVERY badge while 1–2 pings are in. */
-  badge: VerificationBadge;
-}
-
 /** Caller identity for `forTicket`'s row-scoping (#162 — this read was previously unscoped for every role). */
 export interface VerificationReadScope {
   role: string;
