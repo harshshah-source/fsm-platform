@@ -1,5 +1,11 @@
 # HANDOFF — #204 (IST day boundary) partially landed; #213 not started
 
+> ⚠️ **ARCHIVED / CONSUMED 2026-08-04.** Both remaining #204 items below — the leave-window IST
+> interpretation and the admin planner alignment — are built and green, plus the three date renderers
+> the window change turned wrong (finding B7); all six of #204's ACs are ticked. Current state is on
+> [`204`](../../.scratch/fsm-platform-v1/issues/204-time-semantics-day-boundary-implementation.md)
+> §"2026-08-04 (second slice)"; the analytics-day open question and #213 are still open, there.
+
 Created 2026-08-04. Live handoff — **move to `docs/archive/` with a 2-line ARCHIVED banner as soon as
 it is consumed** (per `CLAUDE.md` §Progress & state convention).
 
