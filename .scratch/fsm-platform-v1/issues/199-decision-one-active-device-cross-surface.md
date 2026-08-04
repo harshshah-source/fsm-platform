@@ -1,6 +1,6 @@
 # 199 — DECISION: does one-active-device span surfaces, or bind only handsets?
 
-Status: needs-triage — **decision required before [#202](./202-cross-surface-session-semantics.md) can be built**
+Status: **RULED 2026-08-04** (see the ruling at the foot of this file) — one handset + one browser; distinct revoke code; short rotation grace window. Unblocks [#202](./202-cross-surface-session-semantics.md). Remaining: record the ruling on [#91](./91-production-auth-postgres-backed-credential-store.md) and in `CONTEXT.md`.
 Type: HITL · Decision · Backend + Mobile + Admin
 Parent: [#197](./197-mobile-pilot-readiness-remediation-epic.md) · Filed 2026-08-04
 
@@ -90,3 +90,36 @@ which points investigation at exactly the wrong subsystem.
 ## Size estimate
 
 Decision: S. Implementation (#202): S under Option A (copy changes only), M under Option B.
+
+---
+
+## RULED 2026-08-04 (operator)
+
+**Q1 — Option B: one active session per client class — one handset + one browser.**
+A ZM may supervise from the dashboard while carrying a phone. A *second handset* login still revokes
+the first, preserving D-2's original intent (replacement phones, stolen-device tail). Admin-web logins
+stop killing handset sessions.
+
+Implementation consequences for [#202](./202-cross-surface-session-semantics.md):
+- `prisma-refresh-token-store.issue()` (`:47-50`) must scope its revocation by client class instead of
+  revoking every active token for the `userId`.
+- The admin client must send a stable device id — it currently sends none
+  (`apps/admin/src/api/client.ts:20-24`), so every admin login takes the `randomUUID()` fallback at
+  `auth.controller.ts:31` and is indistinguishable from a new device.
+- `refresh-persistence.e2e-spec.ts:68-84,:86-95` encode the old revoke-all behaviour and must be
+  rewritten to assert the ruled behaviour.
+
+**Q2 — yes: a revoked session gets a distinct error code.** The refresh endpoint stops returning an
+undifferentiated 401 where `revokedReason` is known, so the client can render "You signed in on another
+device" rather than a generic failure. Pairs with [#186](./186-mobile-auth-shell-no-session-persistence.md),
+which owns making mobile show it instead of the "Offline" badge.
+
+**Q3 — yes: a short grace window on the rotated token.** Closes the exposure already documented at
+`schema.prisma:189-192` — on a lossy field network a dropped refresh *response* currently burns the
+session permanently. Window length is an implementation choice for #202; keep it short and record it.
+
+Note for #202: `REUSE_DETECTED` remains a documented `revokedReason` (`schema.prisma:206`) with no
+writer. A grace window makes the distinction between "legitimate retry inside the window" and "replay
+after it" meaningful, so wire the reason at the same time.
+
+[#202](./202-cross-surface-session-semantics.md) is unblocked.

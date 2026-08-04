@@ -1,6 +1,6 @@
 # 201 — Mobile consumes the server's day-plan change signal (and handles rebalance + closure)
 
-Status: ready-for-agent — **blocked by [#200](./200-decision-deferred-vs-removed-presentation.md)**
+Status: ready-for-agent — **UNBLOCKED 2026-08-04**: [#200](./200-decision-deferred-vs-removed-presentation.md) ruled server-authoritative, defer distinguished from remove, and a bulk rebalance gets its own "plan being rebuilt" state. All three conditional ACs below are now live.
 Type: AFK · Mobile
 Parent: [#197](./197-mobile-pilot-readiness-remediation-epic.md) · Filed 2026-08-04
 

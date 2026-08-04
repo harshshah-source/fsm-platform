@@ -1,6 +1,6 @@
 # 204 — Implement the ruled time semantics: day boundary, dispatch clock, leave windows
 
-Status: ready-for-agent — **blocked by [#198](./198-decision-day-boundary-and-dispatch-clock.md)**
+Status: ready-for-agent — **UNBLOCKED 2026-08-04**: [#198](./198-decision-day-boundary-and-dispatch-clock.md) ruled the **IST day (`Asia/Kolkata`)**, dispatch at **05:00 IST** by default with `Asia/Kolkata` as the business timezone, and leave/availability dates as **IST calendar days**. Size is therefore M-L (Option A). The *configurability* half of the dispatch ruling is [#213](./213-configurable-dispatch-schedule.md), not this issue.
 Type: AFK · Backend + Admin
 Parent: [#197](./197-mobile-pilot-readiness-remediation-epic.md) · Filed 2026-08-04
 

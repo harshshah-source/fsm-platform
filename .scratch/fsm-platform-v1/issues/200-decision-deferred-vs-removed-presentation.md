@@ -1,6 +1,6 @@
 # 200 — DECISION: how is a *deferred* ticket shown to the SE, and does "removed" survive a cold start?
 
-Status: needs-triage — **decision required before [#201](./201-mobile-consumes-server-day-plan-signal.md) can be built**
+Status: **RULED 2026-08-04** (see the ruling at the foot of this file) — server-authoritative, defer distinguished, rebalance gets its own state. Unblocks [#201](./201-mobile-consumes-server-day-plan-signal.md).
 Type: HITL · Decision · Mobile
 Parent: [#197](./197-mobile-pilot-readiness-remediation-epic.md) · Filed 2026-08-04
 
@@ -93,3 +93,30 @@ error the same-day update cue exists to prevent.
 ## Size estimate
 
 Decision: S. Implementation (#201): S-M.
+
+---
+
+## RULED 2026-08-04 (operator)
+
+**Q1 — yes, distinguish them.** A deferred ticket reads as returning on its date ("Moved to 14 Aug"),
+not as "Removed". `deferredToDate` is already on the wire (`shared/index.ts:103-114`), so this costs a
+badge variant, not an endpoint.
+
+**Q2 — yes, server-authoritative and restart-durable.** The cue is derived from
+`removedFromPlanAt`/`deferredToDate` on `/api/me/tickets`, not from an in-memory diff. A removal that
+happened while the app was closed is shown on next launch — satisfying `PRD:510`'s intent that the SE
+is *told*, which the current cold-start blind spot defeats.
+
+**Q3 — a bulk rebalance gets its own "plan being rebuilt" state**, distinct from a removal. The two
+are operationally different: nothing returns under a ZM removal, whereas a rebalance means *wait for
+the next dispatch run*. This matches what the backend already says in its own notification body
+(`bulk-unassign.service.ts:358-366`) and why it deliberately leaves the schedule status untouched
+(`:289-295`).
+
+Consequences for [#201](./201-mobile-consumes-server-day-plan-signal.md): the client set-diff in
+`dayPlanCues.ts` is superseded by the server signal (retire it or reduce it to the "newly added" half
+it still uniquely serves), and its stale "the server has no signal" comment at `:12-19` goes with it.
+Recorded on [#66](./66-mobile-day-plan-same-day-update-cues.md), whose Option A decision this
+supersedes on the evidence that arrived after it.
+
+[#201](./201-mobile-consumes-server-day-plan-signal.md) is unblocked.

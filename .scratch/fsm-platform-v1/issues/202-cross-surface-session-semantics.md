@@ -1,6 +1,6 @@
 # 202 — Cross-surface session semantics: stop admin logins from silently killing handset sessions
 
-Status: ready-for-agent — **blocked by [#199](./199-decision-one-active-device-cross-surface.md)**
+Status: ready-for-agent — **UNBLOCKED 2026-08-04**: [#199](./199-decision-one-active-device-cross-surface.md) ruled **Option B** (one handset + one browser), **yes** to a distinct revoked-by-another-session error code, and **yes** to a short rotation grace window. All three conditional ACs below are now live; size is therefore M, not S.
 Type: AFK · Backend + Mobile + Admin
 Parent: [#197](./197-mobile-pilot-readiness-remediation-epic.md) · Filed 2026-08-04
 

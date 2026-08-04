@@ -63,7 +63,8 @@ from testers and burns their trust in the build.
 | 3 | [#186](./186-mobile-auth-shell-no-session-persistence.md) — wrap **every** authenticated call, not just `apiMe` | **existing, scope-completed in place** |
 | 4 | [#201](./201-mobile-consumes-server-day-plan-signal.md) — read #161's `removedFromPlanAt`/`deferredToDate` | new · blocked by [#200](./200-decision-deferred-vs-removed-presentation.md) |
 | 5 | [#202](./202-cross-surface-session-semantics.md) — cross-surface session revocation | new · blocked by [#199](./199-decision-one-active-device-cross-surface.md) |
-| 6 | [#204](./204-time-semantics-day-boundary-implementation.md) — day boundary, cron TZ, leave windows | new · blocked by [#198](./198-decision-day-boundary-and-dispatch-clock.md) |
+| 6 | [#204](./204-time-semantics-day-boundary-implementation.md) — IST day boundary, cron TZ, leave windows | new · **unblocked** (#198 ruled) |
+| 6b | [#213](./213-configurable-dispatch-schedule.md) — operator-configurable dispatch time + a guard covering the manual run path | new · from #198's ruling · depends on #204 |
 
 **P2 — a PRD-specified workflow is dead**
 
@@ -88,17 +89,28 @@ from testers and burns their trust in the build.
 | 13 | [#211](./211-status-truth-doc-hygiene.md) — stale M-series statuses, `CLAUDE.md`, `SYSTEM-STATE` §1 | new |
 | 14 | [#212](./212-admin-repoint-api-v1.md) — repoint admin, retire the unversioned alias | new · closes #169's last AC |
 
-## Decision issues (block the slices above)
+## Decision issues — **ALL THREE RULED 2026-08-04; nothing in this epic is decision-blocked**
 
-These need a human ruling before any code is correct. Options and consequences are laid out in each;
-**none of them is decided here.**
+- [**#198**](./198-decision-day-boundary-and-dispatch-clock.md) — **RULED.** The operating day is the
+  **IST day** (`Asia/Kolkata`, midnight to midnight); the 05:30-IST boundary is retired. Dispatch runs
+  at **05:00 IST** by default with `Asia/Kolkata` as the business timezone — **and must be
+  operator-configurable, not hardcoded**. Leave/availability dates are IST calendar days.
+  → unblocks #204; the configurability half spawned [**#213**](./213-configurable-dispatch-schedule.md).
+- [**#199**](./199-decision-one-active-device-cross-surface.md) — **RULED.** One active session **per
+  client class: one handset + one browser.** A second *handset* login still revokes the first, so D-2's
+  original intent survives; admin logins stop killing handset sessions. Plus **yes** to a distinct
+  error code so a revoked session can say "You signed in on another device", and **yes** to a short
+  rotation grace window for lossy field networks. → unblocks #202 (now M, not S).
+- [**#200**](./200-decision-deferred-vs-removed-presentation.md) — **RULED.** Day-plan changes are
+  **server-authoritative and restart-durable**; a *deferred* ticket shows its return date rather than
+  reading "Removed"; a bulk rebalance gets its own **"plan being rebuilt"** state. → unblocks #201.
 
-- [**#198**](./198-decision-day-boundary-and-dispatch-clock.md) — is the operating day IST- or
-  UTC-boundaried, and when should dispatch run? → blocks #204.
-- [**#199**](./199-decision-one-active-device-cross-surface.md) — does one-active-device span
-  surfaces, or bind only handsets? → blocks #202.
-- [**#200**](./200-decision-deferred-vs-removed-presentation.md) — how is a *deferred* ticket shown
-  to the SE versus a *removed* one, and does "for one session" survive a cold start? → blocks #201.
+The one ruling that expanded scope was #198 Q2. Verification found that four of the operator's five
+dispatch asks **already exist** — the manual "Run Dispatch Now" endpoint, its role gating, its full
+audit trail, and its admin button. Only two things are genuinely missing, and they are #213: the
+schedule is an *environment variable* rather than an operator setting, and the single-in-flight guard
+lives on the scheduler object while the manual trigger bypasses it — so the one path an operator
+reaches for in an emergency is the path with no concurrency guard.
 
 ## In-place corrections made while filing this epic
 

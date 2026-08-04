@@ -1,6 +1,6 @@
 # 198 — DECISION: what is the operating "day", and when does dispatch run?
 
-Status: needs-triage — **decision required before [#204](./204-time-semantics-day-boundary-implementation.md) can be built**
+Status: **RULED 2026-08-04** (see the ruling at the foot of this file) — IST day + 05:00 IST configurable dispatch. Unblocks [#204](./204-time-semantics-day-boundary-implementation.md); spawned [#213](./213-configurable-dispatch-schedule.md). Remaining: record the ruling in `CONTEXT.md`.
 Type: HITL · Decision · Backend + Admin + Mobile
 Parent: [#197](./197-mobile-pilot-readiness-remediation-epic.md) · Filed 2026-08-04
 
@@ -101,3 +101,52 @@ written against the same assumption.
 ## Size estimate
 
 Decision: S (one sitting with the operator). Implementation (#204): M, larger under Option A/C.
+
+---
+
+## RULED 2026-08-04 (operator)
+
+**Q1 — Option A: the operating day is the IST day (`Asia/Kolkata`, midnight to midnight).**
+The 05:30-IST boundary is retired. `utcDayStart` and its ~15 call sites move to an IST-day helper;
+the one-transition-day shift in deferral gates and report cubes is accepted.
+
+**Q2 — 05:00 IST default, but the schedule must NOT be hardcoded.** Operator's words, recorded
+verbatim because the scope is wider than the question asked:
+
+> Choose 05:00 IST as the default daily dispatch time. However, the dispatch schedule should not be
+> hardcoded. Design it so Operations Head/System Admin can configure the daily dispatch time from the
+> application settings (default: 05:00 IST). The scheduler must use Asia/Kolkata as the business
+> timezone. Also provide a "Run Dispatch Now" action with appropriate permissions so authorized users
+> can manually generate the day's plan whenever required (for example, after a master sync, unexpected
+> operational changes, or emergencies). Manual runs should be fully audited (who ran it, when, why if
+> required) and should not conflict with an already running dispatch.
+
+**Q3 — falls out of Q1:** leave and availability calendar dates are IST calendar days. An SE who books
+10 Aug off is unavailable for all of 10 Aug IST, not from 05:30 that morning.
+
+### What Q2 already exists — verified 2026-08-04, do not rebuild
+
+| Ask | State |
+|---|---|
+| "Run Dispatch Now" action | **Exists** — `POST /api/schedules/dispatch-run` (`schedules.controller.ts:70-78`) |
+| "with appropriate permissions" | **Exists** — `@Roles('OPERATIONS_HEAD','CENTRAL_SERVICE_MANAGER')` (`:72`) |
+| "fully audited (who ran it, when)" | **Exists** — `trigger: 'MANUAL'` + `actorUserId`/`actorRole` land on the `dispatch_runs` ledger row and the `DISPATCH_RUN_STARTED`/`FINISHED` audit bracket (`dispatch-run.service.ts:16-20,61,78-86`) |
+| Admin UI for it | **Exists** — zone-scoped "Run dispatch" button (`apps/admin/src/api/bulkUnassign.ts:127`) |
+| Re-run safety | **Exists** — idempotent, per-zone advisory locks (#100) |
+
+### What Q2 genuinely needs building → [#213](./213-configurable-dispatch-schedule.md)
+
+1. **Configurable from application settings.** Today the time is an **environment variable**
+   (`BUSINESS_SWEEP_DISPATCH_CRON`, `dispatch-scheduler.service.ts:22`) — changing it needs a redeploy,
+   not a settings edit. The `system_settings` registry already exists and is described in-schema as
+   "global, Operations-Head-owned configuration", which is the right home.
+2. **A manual run can currently collide with a running one.** The single-in-flight guard is a private
+   field on the *scheduler* (`dispatch-scheduler.service.ts:41,53,57,65`), and the manual HTTP path
+   calls `DispatchRunService.runForActiveZones` **directly** (`schedules.controller.ts:78`), bypassing
+   it. Per-zone advisory locks and idempotency mean the overlap degrades to benign skips rather than
+   corruption — but the operator asked for a guard, and there isn't one across the two paths.
+3. **Timezone pinning** — the `Asia/Kolkata` half is [#204](./204-time-semantics-day-boundary-implementation.md)'s.
+4. **Optional "why" on a manual run** — the body is `{ zoneId? }` only; no reason field. Operator said
+   "why if required", so this is optional, not blocking.
+
+[#204](./204-time-semantics-day-boundary-implementation.md) is unblocked.

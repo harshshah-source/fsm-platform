@@ -197,10 +197,23 @@ spine — **zero** callers each), so three PRD-specified manager workflows are d
 Underneath all four: no native build has ever been produced and the one SE who can log in has no work
 data.
 
-**Decisions (block the slices, deliberately not decided in the filing):**
-[#198](./issues/198-decision-day-boundary-and-dispatch-clock.md) day boundary + dispatch clock ·
-[#199](./issues/199-decision-one-active-device-cross-surface.md) one-active-device cross-surface scope ·
-[#200](./issues/200-decision-deferred-vs-removed-presentation.md) defer-vs-remove SE presentation.
+**Decisions — ALL THREE RULED 2026-08-04, so no slice in this block is decision-blocked:**
+[#198](./issues/198-decision-day-boundary-and-dispatch-clock.md) → the operating day is the **IST day**
+(`Asia/Kolkata`); dispatch at **05:00 IST** default, `Asia/Kolkata` business timezone, **operator-configurable
+not hardcoded**; leave dates are IST calendar days ·
+[#199](./issues/199-decision-one-active-device-cross-surface.md) → **one handset + one browser** (a second
+*handset* login still revokes the first), plus a distinct "signed in on another device" error code and a
+short rotation grace window ·
+[#200](./issues/200-decision-deferred-vs-removed-presentation.md) → day-plan changes are
+**server-authoritative and restart-durable**, defer shows its return date, and a bulk rebalance gets its own
+"plan being rebuilt" state.
+
+The dispatch ruling was wider than the question, so it spawned
+[**#213**](./issues/213-configurable-dispatch-schedule.md) — but **four of the five asks already exist**
+(manual `POST /schedules/dispatch-run`, its OH/CSM role gate, its full MANUAL+actor audit bracket, and its
+admin button). Only two gaps are real: the schedule is an env var rather than a `system_settings` entry, and
+the single-in-flight guard sits on the scheduler while the manual trigger calls the run service directly —
+so the path an operator uses in an emergency is the one with no concurrency guard.
 
 **Slices, in execution order** — P0 can't-test-anything: [#209](./issues/209-mobile-build-pipeline-device-install.md) build pipeline ·
 [#210](./issues/210-dev-dataset-loginable-se-with-work.md) dev dataset. P1 app-misreports-state:
