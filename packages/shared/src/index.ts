@@ -874,3 +874,49 @@ export interface NotificationList {
   items: NotificationListItem[];
   unreadCount: number;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #86 — SE mobile Leave Request (Issue 26's `POST /api/leave-requests` + #163's SE-scoped
+// `GET /api/me/leave-requests`). A rejected request is terminal — the SE revises and submits a new
+// one, there is no edit-in-place or cancel/withdraw.
+// ---------------------------------------------------------------------------------------------
+
+export type LeaveRequestType = 'ON_LEAVE' | 'WEEKLY_OFF';
+
+export const LEAVE_REQUEST_TYPES: readonly LeaveRequestType[] = ['ON_LEAVE', 'WEEKLY_OFF'];
+
+/** Mirrors `LeaveRequestRow` (`leave-request.service.ts`) — already JSON-safe server-side. */
+export interface LeaveRequestRow {
+  id: string;
+  seId: string;
+  seName: string;
+  type: LeaveRequestType;
+  status: string;
+  windowStart: string;
+  windowEnd: string;
+  reason: string | null;
+  decisionReason: string | null;
+  createdAt: string;
+}
+
+/** `GET /api/me/leave-requests` — every status (not just PENDING), so a past rejection's
+ *  `decisionReason` stays visible. */
+export interface MyLeaveRequestsView {
+  items: LeaveRequestRow[];
+  cursor: null;
+}
+
+/** `POST /api/leave-requests` body. `seId` is always the caller's own id for an SE — the server
+ *  403s (`LEAVE_FORBIDDEN`) if it isn't. */
+export interface SubmitLeaveRequestRequest {
+  seId: string;
+  type: LeaveRequestType;
+  windowStart: string;
+  windowEnd: string;
+  reason?: string | null;
+}
+
+export interface SubmitLeaveRequestResponse {
+  result: 'OK';
+  id: string;
+}

@@ -21,6 +21,7 @@ import {
   apiGetDayPlan,
   apiGetMyComponentRequests,
   apiGetMyIntradayOffers,
+  apiGetMyLeaveRequests,
   apiGetMyTickets,
   apiGetMyVouchers,
   apiGetNotifications,
@@ -38,6 +39,7 @@ import {
   apiRecoveryUnableToCollect,
   apiRefresh,
   apiSetSoftState,
+  apiSubmitLeaveRequest,
   apiSubmitTroubleshoot,
   apiUploadMedia,
   ConfirmReceiptConflictError,
@@ -906,5 +908,65 @@ describe('#77 — notifications endpoints', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toMatch(/\/notifications\/read-all$/);
     expect(init).toMatchObject({ method: 'POST' });
+  });
+});
+
+describe('#86 — leave request endpoints', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('apiGetMyLeaveRequests GETs /me/leave-requests with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const view = { items: [], cursor: null };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetMyLeaveRequests('token');
+
+    expect(result).toEqual(view);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/me\/leave-requests$/);
+  });
+
+  it('apiSubmitLeaveRequest POSTs the request body to /leave-requests', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = { result: 'OK', id: 'lr-1' };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+    const body = { seId: 'se-1', type: 'ON_LEAVE' as const, windowStart: '2026-08-10', windowEnd: '2026-08-12' };
+
+    const result = await apiSubmitLeaveRequest('token', body);
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/leave-requests$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify(body) });
+  });
+
+  it('apiSubmitLeaveRequest throws WINDOW_ORDER verbatim on a 400', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'WINDOW_ORDER' }),
+    } as unknown as Response);
+
+    await expect(
+      apiSubmitLeaveRequest('token', { seId: 'se-1', type: 'ON_LEAVE', windowStart: '2026-08-12', windowEnd: '2026-08-10' }),
+    ).rejects.toThrow('WINDOW_ORDER');
+  });
+
+  it('apiSubmitLeaveRequest throws INVALID_LEAVE_TYPE verbatim on a 400', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'INVALID_LEAVE_TYPE' }),
+    } as unknown as Response);
+
+    await expect(
+      apiSubmitLeaveRequest('token', { seId: 'se-1', type: 'ON_LEAVE', windowStart: '2026-08-10', windowEnd: '2026-08-12' }),
+    ).rejects.toThrow('INVALID_LEAVE_TYPE');
   });
 });

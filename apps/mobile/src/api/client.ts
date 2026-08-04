@@ -22,12 +22,15 @@ import type {
   MeTicketsView,
   MeVouchersView,
   MyIntradayOffersView,
+  MyLeaveRequestsView,
   NotificationList,
   RecoveryActionResponse,
   SessionView,
   SetSoftStateRequest,
   SetSoftStateResponse,
   SoftStateConflictBody,
+  SubmitLeaveRequestRequest,
+  SubmitLeaveRequestResponse,
   TroubleshootConflictBody,
   TroubleshootSubmitRequest,
   TroubleshootSubmitResponse,
@@ -464,4 +467,33 @@ export async function apiMarkAllNotificationsRead(accessToken: string): Promise<
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as { updated: number };
+}
+
+export async function apiGetMyLeaveRequests(accessToken: string): Promise<MyLeaveRequestsView> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/me/leave-requests`, { headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as MyLeaveRequestsView;
+}
+
+export async function apiSubmitLeaveRequest(
+  accessToken: string,
+  body: SubmitLeaveRequestRequest,
+): Promise<SubmitLeaveRequestResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/leave-requests`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (res.status === 400) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as SubmitLeaveRequestResponse;
 }
