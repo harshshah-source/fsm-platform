@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import * as Keychain from 'react-native-keychain';
-import type { LoginResponse, SessionView } from '@fsm/shared';
-import { apiLogin, apiMe, apiRefresh } from './client';
+import type { LoginResponse, MeTicketsView, SessionView } from '@fsm/shared';
+import { apiGetMyTickets, apiLogin, apiMe, apiRefresh } from './client';
 
 jest.mock('react-native-keychain', () => ({
   setGenericPassword: jest.fn(),
@@ -148,5 +148,40 @@ describe('apiRefresh', () => {
     installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
 
     await expect(apiRefresh('revoked.refresh.value')).rejects.toThrow('UNAUTHORIZED');
+  });
+});
+
+describe('apiGetMyTickets', () => {
+  const view: MeTicketsView = { items: [], cursor: null };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('GETs /me/tickets with a Bearer token and the standard headers', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetMyTickets('header.payload.sig');
+
+    expect(result).toEqual(view);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/me\/tickets$/);
+    expect(init).toMatchObject({
+      headers: {
+        Authorization: 'Bearer header.payload.sig',
+        'X-Device-Id': 'device-uuid-fixed-for-tests',
+        'X-App-Version': '9.9.9',
+      },
+    });
+  });
+
+  it('throws UNAUTHORIZED when the token is rejected', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
+
+    await expect(apiGetMyTickets('bad-token')).rejects.toThrow('UNAUTHORIZED');
   });
 });

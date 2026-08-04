@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import type { LoginRequest, LoginResponse, SessionView } from '@fsm/shared';
+import type { LoginRequest, LoginResponse, MeTicketsView, SessionView } from '@fsm/shared';
 import { getDeviceId } from '../device/deviceId';
 
 // Expo inlines EXPO_PUBLIC_* at build time. Default targets the host machine's backend from
@@ -55,4 +55,13 @@ export async function apiMe(accessToken: string): Promise<SessionView> {
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as SessionView;
+}
+
+export async function apiGetMyTickets(accessToken: string): Promise<MeTicketsView> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/me/tickets`, { headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as MeTicketsView;
 }
