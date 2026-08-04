@@ -9,6 +9,21 @@ import { getConnectivityState } from '../../api/connectivity';
 jest.mock('../../api/client', () => ({ apiGetMyTickets: jest.fn() }));
 jest.mock('../../auth/tokenStore', () => ({ getAccessToken: jest.fn() }));
 jest.mock('../../api/connectivity', () => ({ getConnectivityState: jest.fn() }));
+// Unit-test the navigation wiring only — TicketDetailScreen's own behavior is covered by its
+// own test file.
+jest.mock('../../tickets/detail/TicketDetailScreen', () => {
+  const { Text } = jest.requireActual('react-native') as typeof import('react-native');
+  return {
+    TicketDetailScreen: ({ ticketId, onBack }: { ticketId: string; onBack: () => void }) => (
+      <>
+        <Text testID="mock-detail-ticket-id">{ticketId}</Text>
+        <Text testID="mock-detail-back" onPress={onBack}>
+          Back
+        </Text>
+      </>
+    ),
+  };
+});
 
 const mockApiGetMyTickets = jest.mocked(apiGetMyTickets);
 const mockGetAccessToken = jest.mocked(getAccessToken);
@@ -162,6 +177,29 @@ describe('TicketsScreen', () => {
 
       expect(screen.getByText('V-VISIT')).toBeTruthy();
       expect(screen.getByText('V-PLAN')).toBeTruthy();
+    });
+  });
+
+  describe('row tap navigation', () => {
+    it('opens TicketDetailScreen for the tapped ticket, and returns to the list on back', async () => {
+      mockGetConnectivityState.mockResolvedValue('online');
+      mockGetAccessToken.mockResolvedValue('token');
+      mockApiGetMyTickets.mockResolvedValue({
+        items: [row({ ticketId: 'urgent-42', workState: 'VISIT_NOW', vehicleNo: 'V-TAP' })],
+        cursor: null,
+      });
+      render(<TicketsScreen />);
+      await waitFor(() => expect(screen.getByText('V-TAP')).toBeTruthy());
+
+      fireEvent.press(screen.getByText('V-TAP'));
+
+      expect(screen.getByText('urgent-42')).toBeTruthy();
+      expect(screen.queryByTestId('screen-tickets')).toBeNull();
+
+      fireEvent.press(screen.getByTestId('mock-detail-back'));
+
+      expect(screen.getByTestId('screen-tickets')).toBeTruthy();
+      expect(screen.getByText('V-TAP')).toBeTruthy();
     });
   });
 });

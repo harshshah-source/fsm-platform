@@ -23,6 +23,9 @@ const PAST_ON_SITE = new Set(['ON_SITE', 'TROUBLESHOOT_STARTED']);
 
 export interface TicketDetailScreenProps {
   ticketId: string;
+  /** No stack navigator wraps the tab shell yet — the caller (TicketsScreen) owns the back
+   *  transition via local state; omit to render without a back affordance. */
+  onBack?: () => void;
 }
 
 /**
@@ -36,7 +39,7 @@ export interface TicketDetailScreenProps {
  * opened and is actively working the troubleshooting form" — that's #58's screen, which doesn't
  * exist yet. This screen only ever advances VIEWED -> ON_SITE.
  */
-export function TicketDetailScreen({ ticketId }: TicketDetailScreenProps) {
+export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps) {
   const [state, setState] = useState<ScreenState>({ status: 'loading' });
   const [conflict, setConflict] = useState<{ from: string | null; to: string } | null>(null);
   const [settingOnSite, setSettingOnSite] = useState(false);
@@ -114,6 +117,11 @@ export function TicketDetailScreen({ ticketId }: TicketDetailScreenProps) {
     return (
       <View testID="ticket-detail-not-found" style={styles.centered}>
         <Text style={styles.emptyText}>This ticket isn&apos;t available.</Text>
+        {onBack ? (
+          <Pressable testID="ticket-detail-back" onPress={onBack} style={styles.backButton}>
+            <Text style={styles.backLabel}>{'< Back'}</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -121,6 +129,11 @@ export function TicketDetailScreen({ ticketId }: TicketDetailScreenProps) {
     return (
       <View testID="ticket-detail-error" style={styles.centered}>
         <Text style={styles.emptyText}>Couldn&apos;t load this ticket. Pull to retry.</Text>
+        {onBack ? (
+          <Pressable testID="ticket-detail-back" onPress={onBack} style={styles.backButton}>
+            <Text style={styles.backLabel}>{'< Back'}</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -132,6 +145,11 @@ export function TicketDetailScreen({ ticketId }: TicketDetailScreenProps) {
 
   return (
     <ScrollView testID="screen-ticket-detail" style={styles.container}>
+      {onBack ? (
+        <Pressable testID="ticket-detail-back" onPress={onBack} style={styles.backButton}>
+          <Text style={styles.backLabel}>{'< Back'}</Text>
+        </Pressable>
+      ) : null}
       <View style={styles.headerRow}>
         <View>
           <Text style={styles.ticketNo}>{detail.ticketNoDisplay}</Text>
@@ -224,6 +242,15 @@ const styles = StyleSheet.create({
   emptyText: {
     ...typeScale.body,
     color: color.inkMuted,
+  },
+  backButton: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+  },
+  backLabel: {
+    ...typeScale.body,
+    fontWeight: '600',
+    color: color.brand600,
   },
   headerRow: {
     flexDirection: 'row',

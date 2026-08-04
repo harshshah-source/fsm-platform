@@ -7,6 +7,7 @@ import { getAccessToken } from '../../auth/tokenStore';
 import { TicketCard } from '../../components/kit/TicketCard';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { formatSlaBucketLabel, slaBucketToStatus, workStateLabel } from '../../tickets/ticketDisplay';
+import { TicketDetailScreen } from '../../tickets/detail/TicketDetailScreen';
 
 interface TicketsState {
   status: 'loading' | 'ready' | 'offline-no-cache';
@@ -41,11 +42,12 @@ function toCardData(row: MeTicketRow) {
 }
 
 /** #56 (M2) — per #172 Decision 3, one merged list grouped by urgency, no assigned/pool visual
- *  split. "Visit Now" = workState VISIT_NOW; "Other Tickets" = PLAN/IN_WORK/VERIFY. Row tap ->
- *  Ticket Detail (M3/#57) is not wired — that screen doesn't exist yet. */
+ *  split. "Visit Now" = workState VISIT_NOW; "Other Tickets" = PLAN/IN_WORK/VERIFY. Row tap opens
+ *  Ticket Detail (M3/#57) via local state, not a stack navigator — none wraps this tab yet. */
 export function TicketsScreen() {
   const [state, setState] = useState<TicketsState>({ status: 'loading', items: [], offline: false });
   const [filter, setFilter] = useState<TicketFilter>('ALL');
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +70,10 @@ export function TicketsScreen() {
       cancelled = true;
     };
   }, []);
+
+  if (selectedTicketId) {
+    return <TicketDetailScreen ticketId={selectedTicketId} onBack={() => setSelectedTicketId(null)} />;
+  }
 
   const visibleItems = filter === 'ALL' ? state.items : state.items.filter((i) => i.workState === filter);
   const visitNow = visibleItems.filter((i) => i.workState === 'VISIT_NOW');
@@ -111,7 +117,9 @@ export function TicketsScreen() {
                 Nothing urgent right now.
               </Text>
             ) : (
-              visitNow.map((row) => <TicketCard key={row.ticketId} ticket={toCardData(row)} />)
+              visitNow.map((row) => (
+                <TicketCard key={row.ticketId} ticket={toCardData(row)} onPress={() => setSelectedTicketId(row.ticketId)} />
+              ))
             )}
           </View>
           <View testID="tickets-other-section" style={styles.section}>
@@ -122,7 +130,9 @@ export function TicketsScreen() {
                 No other tickets on your list.
               </Text>
             ) : (
-              other.map((row) => <TicketCard key={row.ticketId} ticket={toCardData(row)} />)
+              other.map((row) => (
+                <TicketCard key={row.ticketId} ticket={toCardData(row)} onPress={() => setSelectedTicketId(row.ticketId)} />
+              ))
             )}
           </View>
         </ScrollView>

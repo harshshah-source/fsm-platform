@@ -206,4 +206,38 @@ describe('TicketDetailScreen', () => {
       expect(mockGetDetail).toHaveBeenCalledTimes(2);
     });
   });
+
+  it('renders a back button and calls onBack when pressed, given the prop', async () => {
+    mockGetAccessToken.mockResolvedValue('token');
+    mockGetDetail.mockResolvedValue(detail({ activeSoftState: 'ON_SITE' }));
+    const onBack = jest.fn();
+
+    render(<TicketDetailScreen ticketId="t-1" onBack={onBack} />);
+    await waitFor(() => expect(screen.getByTestId('ticket-detail-back')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ticket-detail-back'));
+
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a back button on the not-found state too, so a 404 is never a dead end', async () => {
+    mockGetAccessToken.mockResolvedValue('token');
+    mockGetDetail.mockRejectedValue(new Error('TICKET_NOT_FOUND'));
+    const onBack = jest.fn();
+
+    render(<TicketDetailScreen ticketId="missing" onBack={onBack} />);
+    await waitFor(() => expect(screen.getByTestId('ticket-detail-back')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('ticket-detail-back'));
+
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders no back button when onBack is not given', async () => {
+    mockGetAccessToken.mockResolvedValue('token');
+    mockGetDetail.mockResolvedValue(detail({ activeSoftState: 'ON_SITE' }));
+
+    render(<TicketDetailScreen ticketId="t-1" />);
+
+    await waitFor(() => expect(screen.getByTestId('screen-ticket-detail')).toBeTruthy());
+    expect(screen.queryByTestId('ticket-detail-back')).toBeNull();
+  });
 });
