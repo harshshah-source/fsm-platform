@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import * as Keychain from 'react-native-keychain';
-import type { LoginResponse, MeTicketsView, SessionView } from '@fsm/shared';
-import { apiGetMyTickets, apiLogin, apiMe, apiRefresh } from './client';
+import type { LoginResponse, MeTicketDetailView, MeTicketsView, SessionView, VerificationView } from '@fsm/shared';
+import {
+  apiGetMyTickets,
+  apiGetTicketDetail,
+  apiGetTicketVerification,
+  apiLogin,
+  apiMe,
+  apiRefresh,
+  apiSetSoftState,
+  SoftStateConflictError,
+} from './client';
 
 jest.mock('react-native-keychain', () => ({
   setGenericPassword: jest.fn(),
@@ -183,5 +192,118 @@ describe('apiGetMyTickets', () => {
     installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
 
     await expect(apiGetMyTickets('bad-token')).rejects.toThrow('UNAUTHORIZED');
+  });
+});
+
+describe('apiGetTicketDetail', () => {
+  const detail = { ticketId: 't-1', ticketNoDisplay: 'TCK-00306' } as MeTicketDetailView;
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('GETs /me/tickets/:id with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => detail } as unknown as Response);
+
+    const result = await apiGetTicketDetail('header.payload.sig', 't-1');
+
+    expect(result).toEqual(detail);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/me\/tickets\/t-1$/);
+    expect(init).toMatchObject({ headers: { Authorization: 'Bearer header.payload.sig' } });
+  });
+
+  it('throws TICKET_NOT_FOUND on a 404', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) } as unknown as Response);
+
+    await expect(apiGetTicketDetail('token', 't-1')).rejects.toThrow('TICKET_NOT_FOUND');
+  });
+});
+
+describe('apiGetTicketVerification', () => {
+  const view = { ticketId: 't-1', phase: 'PENDING' } as VerificationView;
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('GETs /tickets/:id/verification with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetTicketVerification('header.payload.sig', 't-1');
+
+    expect(result).toEqual(view);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/tickets\/t-1\/verification$/);
+  });
+
+  it('throws NO_VERIFICATION_RUN on a 404', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) } as unknown as Response);
+
+    await expect(apiGetTicketVerification('token', 't-1')).rejects.toThrow('NO_VERIFICATION_RUN');
+  });
+});
+
+describe('apiSetSoftState', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('POSTs the target (and location, when given) to /tickets/:id/soft-state', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    const response = { result: 'OK', softState: { softStateId: '1', type: 'ON_SITE' } };
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+
+    const result = await apiSetSoftState('header.payload.sig', 't-1', {
+      target: 'ON_SITE',
+      location: { lat: 12.9, lng: 77.6 },
+    });
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/tickets\/t-1\/soft-state$/);
+    expect(init).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ target: 'ON_SITE', location: { lat: 12.9, lng: 77.6 } }),
+    });
+  });
+
+  it('omits location entirely when not captured (Mark ON_SITE fallback) — never sends location:null', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: 'OK', softState: {} }),
+    } as unknown as Response);
+
+    await apiSetSoftState('token', 't-1', { target: 'ON_SITE' });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const sentBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    expect('location' in sentBody).toBe(false);
+  });
+
+  it('throws SoftStateConflictError carrying from/to on a 409', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ code: 'INVALID_SOFT_STATE_TRANSITION', from: 'VIEWED', to: 'TROUBLESHOOT_STARTED' }),
+    } as unknown as Response);
+
+    const promise = apiSetSoftState('token', 't-1', { target: 'TROUBLESHOOT_STARTED' });
+
+    await expect(promise).rejects.toBeInstanceOf(SoftStateConflictError);
+    await expect(promise.catch((e: SoftStateConflictError) => e)).resolves.toMatchObject({
+      from: 'VIEWED',
+      to: 'TROUBLESHOOT_STARTED',
+    });
   });
 });
