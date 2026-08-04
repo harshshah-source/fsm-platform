@@ -93,6 +93,8 @@ import { PlantDeactivationModule } from './plant-deactivation/plant-deactivation
 import { VouchersController } from './vouchers/vouchers.controller';
 import { MeVouchersController } from './vouchers/me-vouchers.controller';
 import { ZonesController } from './zones/zones.controller';
+import { MediaModule } from './media/media.module';
+import { MediaController } from './media/media.controller';
 
 @Module({
   imports: [
@@ -125,6 +127,7 @@ import { ZonesController } from './zones/zones.controller';
     VouchersModule,
     ExportsModule,
     PlantDeactivationModule,
+    MediaModule,
   ],
   controllers: [
     HealthController,
@@ -183,6 +186,7 @@ import { ZonesController } from './zones/zones.controller';
     AuditTrailController,
     VouchersController,
     MeVouchersController,
+    MediaController,
   ],
   providers: [
     AuthGuard,

@@ -253,6 +253,7 @@ model EngineerMaster {
   leaveRequests         LeaveRequest[]
   expenseVouchers       ExpenseVoucher[]
   dispatchTraces        DispatchDecisionTrace[]
+  mediaObjects          MediaObject[]
 
   @@index([zoneId])
   @@index([lastActivityAt])
@@ -1018,6 +1019,55 @@ model ExpenseVoucherItem {
 
   @@index([voucherId])
   @@map("expense_voucher_items")
+}
+
+/// Issue 81, D-12 — the form that produced a captured photo. Drives which `MediaSlot` values are
+/// valid for a given upload.
+enum MediaKind {
+  TROUBLESHOOT
+  VOUCHER
+  INSTALL
+
+  @@map("media_kind")
+}
+
+/// Issue 81, #172 Decision 6 — named photo slots per `MediaKind` (TROUBLESHOOT: BEFORE/AFTER/PART/
+/// PLATE; VOUCHER: RECEIPT/PHOTO/BILL; INSTALL: INSTALL_PHOTO). Carried in the contract from day one
+/// so a flat, slotless `photoRef` array never ships (retrofitting slots later breaks every photo
+/// screen on every already-installed handset — #170 no-OTA).
+enum MediaSlot {
+  BEFORE
+  AFTER
+  PART
+  PLATE
+  RECEIPT
+  PHOTO
+  BILL
+  INSTALL_PHOTO
+
+  @@map("media_slot")
+}
+
+/// Issue 81 (D-12, settled 2026-08-03) — Postgres-backed photo storage for the pilot, fully hidden
+/// behind the opaque `media_id` (`photoRef`) seam: the mobile client sends bytes, gets back an id,
+/// and learns nothing about where the bytes live. Storage location (this table vs. a separate media
+/// instance vs. object storage) is reversible infra; the slot-bearing contract shape is not — see
+/// the enums above. Consumed by Issues 58/61/71's `photoRef` fields; those endpoints keep accepting
+/// an opaque string unchanged.
+model MediaObject {
+  mediaId     String    @id @default(uuid()) @map("media_id") @db.Uuid
+  seId        String    @map("se_id") @db.Uuid
+  kind        MediaKind @map("kind")
+  slot        MediaSlot @map("slot")
+  contentType String    @map("content_type")
+  sizeBytes   Int       @map("size_bytes")
+  bytes       Bytes     @map("bytes")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
+
+  @@index([seId])
+  @@map("media_objects")
 }
 
 /// Three-phase GPS verification phase (schema D14). PENDING → PHASE_1_PASS → PHASE_2_PASS.

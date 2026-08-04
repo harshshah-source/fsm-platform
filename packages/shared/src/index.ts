@@ -547,3 +547,27 @@ export interface DayPlanView {
   dateTo: string | null;
   stops: DayPlanStop[];
 }
+
+// ---------------------------------------------------------------------------------------------
+// #81 — POST /api/media/upload (D-12, #172 Decision 6). The photo-capture seam consumed by
+// #58 (troubleshoot), #61 (vouchers), #71 (install). `photoRef` on those forms is the returned
+// `mediaId`, an opaque string carrying no storage detail.
+// ---------------------------------------------------------------------------------------------
+
+export type MediaKind = 'TROUBLESHOOT' | 'VOUCHER' | 'INSTALL';
+export type MediaSlot = 'BEFORE' | 'AFTER' | 'PART' | 'PLATE' | 'RECEIPT' | 'PHOTO' | 'BILL' | 'INSTALL_PHOTO';
+
+/** The valid slot set per `MediaKind` — the #172 Decision 6 shape. Shared by the backend's upload
+ *  validation and the mobile capture form so both sides read one definition. */
+export const MEDIA_SLOTS_BY_KIND: Record<MediaKind, readonly MediaSlot[]> = {
+  TROUBLESHOOT: ['BEFORE', 'AFTER', 'PART', 'PLATE'],
+  VOUCHER: ['RECEIPT', 'PHOTO', 'BILL'],
+  INSTALL: ['INSTALL_PHOTO'],
+};
+
+/** `POST /api/media/upload` (multipart: `file` + `kind` + `slot` fields) 201 response. */
+export interface UploadMediaResponse {
+  photoRef: string;
+  kind: MediaKind;
+  slot: MediaSlot;
+}
