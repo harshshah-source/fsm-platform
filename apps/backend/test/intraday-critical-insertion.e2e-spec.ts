@@ -264,6 +264,20 @@ describe('Issue 29/30 — intra-day CRITICAL insertion + accept/decline + timeou
     expect(ghost).not.toBeNull();
   });
 
+  it('#77 the ghost-assignment notice names the next SE, never a raw UUID (PRD:547 "[SE Name]")', async () => {
+    const ticketId = await makeCriticalTicket('CRITICAL');
+    await svc.fireForZone(zoneId, BASE);
+    const ins = await latestInsertion(ticketId);
+    await svc.sweepTimeouts(afterDeadline(ins.offeredAt));
+
+    const ghost = await prisma.notification.findFirstOrThrow({
+      where: { recipientUserId: ins.offeredSeId, type: 'INTRADAY_GHOST_ASSIGNMENT', entityId: ticketId },
+    });
+    const nextSe = await prisma.user.findUniqueOrThrow({ where: { userId: sortedSes[1] } });
+    expect(ghost.body).toContain(nextSe.name);
+    expect(ghost.body).not.toContain(sortedSes[1]);
+  });
+
   it('AC#2 activity-ping staleness is NOT a candidate filter — a stale-ping SE is still offered', async () => {
     // Null out the best candidate's last activity ping; it must still receive the offer.
     await prisma.engineerMaster.update({ where: { engineerId: sortedSes[0] }, data: { lastActivityAt: null } });

@@ -491,9 +491,15 @@ export class IntradayInsertionService {
     return { status: 'PENDING_ACCEPTANCE', nextSeId: next };
   }
 
-  /** "Ticket-XXXX was offered to you and routed to [SE] because you didn't respond in time. No action needed." */
+  /** "Ticket-XXXX was offered to you and routed to [SE] because you didn't respond in time. No action needed."
+   *  PRD:547 wants the SE's name, not their id — resolved here rather than shipping the raw UUID a
+   *  field engineer can't act on (same fix class as #63's `winnerSeName`). */
   private async notifyGhostAssignment(prevSeId: string, ticketId: string, nextSeId: string | null, _now: Date): Promise<void> {
-    const routed = nextSeId ? `routed to ${nextSeId}` : 'escalated to your manager';
+    let routed = 'escalated to your manager';
+    if (nextSeId) {
+      const next = await this.prisma.user.findUnique({ where: { userId: nextSeId }, select: { name: true } });
+      routed = `routed to ${next?.name ?? 'another engineer'}`;
+    }
     await this.notifications.notify({
       recipients: [{ userId: prevSeId, role: 'SERVICE_ENGINEER' }],
       type: 'INTRADAY_GHOST_ASSIGNMENT',
