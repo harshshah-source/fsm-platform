@@ -21,11 +21,11 @@ Issue 18 verification status.
 
 ## Acceptance criteria
 
-- [ ] Ticket Detail renders the "ready" state from `/api/tickets/:id`
-- [ ] Ticket Detail renders the "verification-pending" state (from `/api/tickets/:id/verification`)
-- [ ] Soft-state actions (VIEWED / ON_SITE / TROUBLESHOOT_STARTED) post to `/api/tickets/:id/soft-state`; one active state per ticket per SE
-- [ ] ON_SITE sends captured `location` when available; the server decides AUTO_GEOFENCE vs MANUAL
-- [ ] When location is off/unavailable, the SE taps Mark ON_SITE (server records MANUAL); no client geofence math
+- [x] Ticket Detail renders the "ready" state — from `GET /api/me/tickets/:id`, not `/api/tickets/:id` (see the corrected contract note below)
+- [x] Ticket Detail renders the "verification-pending" state (from `/api/tickets/:id/verification`)
+- [x] Soft-state actions post to `/api/tickets/:id/soft-state`; one active state per ticket per SE — **VIEWED (auto) and ON_SITE (button) only; TROUBLESHOOT_STARTED not built here, see 2026-08-04 comment**
+- [x] ON_SITE sends captured `location` when available; the server decides AUTO_GEOFENCE vs MANUAL
+- [x] When location is off/unavailable, the SE taps Mark ON_SITE (server records MANUAL); no client geofence math — implemented as a single button that captures best-effort then always posts
 
 ## API contract (authority: backend on `main`)
 
@@ -64,7 +64,8 @@ Issue 18 verification status.
 
 ## Navigation
 
-- Start Troubleshooting (after TROUBLESHOOT_STARTED) → Troubleshoot form (Issue 58 / M4).
+- Start Troubleshooting (after TROUBLESHOOT_STARTED) → Troubleshoot form (Issue 58 / M4). **Not
+  built** — see 2026-08-04 comment; there is nothing to navigate to yet.
 
 ## Offline behaviour
 
@@ -97,3 +98,35 @@ Issue 18 verification status.
 ## Blocked by
 
 - #54, #07, #15, #18
+
+## Comments
+
+### 2026-08-04 — built, except TROUBLESHOOT_STARTED (not this screen's to set)
+
+`TicketDetailScreen` renders both states from `GET /api/me/tickets/:id` (+ `GET
+/tickets/:id/verification` only when `status === 'VERIFICATION_PENDING'`, since that route 404s
+otherwise). `MeTicketDetailView`/`VerificationView`/soft-state DTOs moved to `@fsm/shared` first
+(same precedent as #56). `vehicleNo` from #56 covers the header identity; priority pill from
+`slaBucket`; Technical Health hints rendered when `technicalHealth.available`. **No Timeline
+section** — `MeTicketDetailView` carries no generic lifecycle-events field, not fabricated from
+`failureCycleHistory` or other unrelated data.
+
+Soft-state: `captureLocation()` wraps `expo-location`, never throws (off/denied/failed all resolve
+to `undefined`), so the ON_SITE button always posts — with a location when capture succeeds,
+without when it doesn't, exactly per the AC. VIEWED auto-posts once on the ready state, but is
+skipped once the SE already holds ON_SITE/TROUBLESHOOT_STARTED — `advance()` treats VIEWED as a
+backward transition past ON_SITE and 409s, so re-posting it there would be a bug, not a no-op. A
+409 on the ON_SITE tap itself shows a banner and refetches.
+
+**Deliberately not built: TROUBLESHOOT_STARTED.** CONTEXT §347 defines it as "SE has opened and is
+actively working the troubleshooting form" — that is Issue 58's screen, which does not exist. This
+screen only ever advances VIEWED → ON_SITE; there is no "Start Troubleshooting" button navigating
+to nowhere. Row-tap navigation from #56's Tickets list into this screen is now wired (local
+component state, no stack navigator — none wraps the tab shell yet).
+
+Found and fixed in passing: `pnpm add expo-location` (no version pin) resolved `57.0.7`, far ahead
+of this SDK 54 project's other `expo-*` packages; `npx expo install expo-location --check` named
+the real expected range, `~19.0.8`. Recorded in memory as a repeatable trap for any future
+`expo-*` add.
+
+113 mobile tests green (up from 66 at #54), `tsc`/`eslint` clean throughout.
