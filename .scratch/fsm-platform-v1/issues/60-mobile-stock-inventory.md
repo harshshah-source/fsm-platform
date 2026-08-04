@@ -17,10 +17,10 @@ a shipped Component Request (PRD §533 Flow 3 step 4) — previously unowned.
 
 ## Acceptance criteria
 
-- [ ] Van-stock list rendered from `/api/me/van-stock`
-- [ ] Common-Kit completeness shown (kit-complete when no van-stock rows)
-- [ ] Component receipt/request status surfaced (Issue 22 link)
-- [ ] SE Confirm Receipt action posts to `/api/component-requests/:id/confirm-receipt` (PRD Flow 3 step 4)
+- [x] Van-stock list rendered from `/api/me/van-stock`
+- [x] Common-Kit completeness shown — rendered from the server's own `commonKit.complete` boolean directly (its real rule is "every active kit item carried at ≥ min_qty, or no kit definition, or no stock records at all" — richer than this bullet's shorthand; not reimplemented client-side)
+- [x] Component receipt/request status surfaced (Issue 22 link) — via #163's `GET /api/me/component-requests`
+- [x] SE Confirm Receipt action posts to `/api/component-requests/:id/confirm-receipt` (PRD Flow 3 step 4)
 
 ## API contract (authority: backend on `main`)
 
@@ -80,3 +80,19 @@ decrement and the CONFLICT-path key-persistence defects.
 Useful detail from the image: the three tiles (`13 AVAILABLE / 3 LOW STOCK / 2 HEALTHY`) are Σ`qty`
 and the row count split by status — so **one per-row status field renders all three**. The
 Kit Complete/Incomplete badge lives here now, not on Home.
+
+### 2026-08-04 — read-only core built; the fuller ratified surface needs #173
+
+`VanStockItem`/`CommonKitStatus`/`ComponentRequestRow`/confirm-receipt DTOs moved to `@fsm/shared`
+first (same precedent as #56-#58). `VanStockItem` carries no status column at all — LOW vs OK is
+derived by cross-referencing `CommonKitStatus.missing` (the server's own "below required minimum"
+signal), verified against this issue's own useful-detail note by reproducing the reference image's
+exact tile numbers (13/3/2) from a fixture shaped like it. A missing component absent from stock
+entirely renders as a real qty:0 LOW row, not fabricated. Confirm Receipt shown only on `SHIPPED`
+requests, refetches on success. 146 mobile tests green, `tsc`/`eslint` clean.
+
+**Not built — needs #173 (confirmed `ready-for-agent`, not started):** the per-row "Request" button
+and the Zone Warehouse row from the 07-28 ratification's fuller surface ("the full Inventory
+surface, not read-only") — both need SE-facing write/read endpoints that don't exist yet
+(`GET /component-requests/by-ticket/:ticketId` is manager-only; no SE-accessible zone-warehouse
+read exists). Scan Serial / Use Part stay deferred behind #101 per the ratification's own text.
