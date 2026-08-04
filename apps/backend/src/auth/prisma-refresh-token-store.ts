@@ -79,17 +79,19 @@ export class PrismaRefreshTokenStore {
     return { userId: row.userId, tokenId: row.id, deviceId: row.deviceId };
   }
 
-  /** Revokes the presented token WITHOUT rotating it — logout. False if unknown or already revoked. */
-  async revoke(token: string, reason: string): Promise<boolean> {
+  /** Revokes the presented token WITHOUT rotating it — logout. `null` if unknown or already revoked;
+   *  otherwise the revoked row's `userId` (#76 — so logout can also clear that user's device push
+   *  token in one place). */
+  async revoke(token: string, reason: string): Promise<{ userId: string } | null> {
     const tokenHash = hashToken(token);
     const row = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
-    if (!row || row.revokedAt !== null) return false;
+    if (!row || row.revokedAt !== null) return null;
 
     await this.prisma.refreshToken.update({
       where: { id: row.id },
       data: { revokedAt: new Date(), revokedReason: reason },
     });
-    return true;
+    return { userId: row.userId };
   }
 
   /** Revokes every currently-active token for a user. Future admin-forced-logout path (no caller yet). */

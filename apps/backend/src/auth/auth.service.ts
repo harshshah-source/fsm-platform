@@ -1,5 +1,6 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Optional, UnauthorizedException } from '@nestjs/common';
 import type { LoginResponse } from '@fsm/shared';
+import { DeviceTokenService } from '../notifications/device-token.service';
 import { PrismaRefreshTokenStore } from './prisma-refresh-token-store';
 import { AuthenticatedUser, PrismaUserStore } from './prisma-user-store';
 import { TokenService } from './token.service';
@@ -10,6 +11,7 @@ export class AuthService {
     private readonly users: PrismaUserStore,
     private readonly tokens: TokenService,
     private readonly refreshTokens: PrismaRefreshTokenStore,
+    @Optional() private readonly deviceTokens?: DeviceTokenService,
   ) {}
 
   async login(email: string, password: string, deviceId: string): Promise<LoginResponse> {
@@ -36,9 +38,12 @@ export class AuthService {
   }
 
   /** Revokes the presented refresh token. Silently no-ops on an unknown/already-revoked token —
-   * logout must not become an oracle for whether a given token was ever valid. */
+   * logout must not become an oracle for whether a given token was ever valid. Also clears the
+   * user's push device token (#76), if one exists — a revoked session must never leave a live
+   * push token behind. */
   async logout(refreshToken: string): Promise<void> {
-    await this.refreshTokens.revoke(refreshToken, 'LOGOUT');
+    const revoked = await this.refreshTokens.revoke(refreshToken, 'LOGOUT');
+    if (revoked) await this.deviceTokens?.clear(revoked.userId);
   }
 
   private async issueTokens(

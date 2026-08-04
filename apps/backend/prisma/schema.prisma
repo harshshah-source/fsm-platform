@@ -145,6 +145,7 @@ model User {
   engineer      EngineerMaster?
   credential    UserCredential?
   refreshTokens RefreshToken[]
+  deviceToken   DeviceToken?
 
   @@index([role])
   @@index([zoneId])
@@ -213,6 +214,25 @@ model RefreshToken {
   /// Serves expired-row cleanup; the in-memory store never reclaimed anything, which was the leak.
   @@index([expiresAt])
   @@map("refresh_tokens")
+}
+
+/// Push device-token registry (Issue 76, D1/D4 settled 2026-08-03). **One row per user**, not per
+/// device (D4) — matches #91's one-active-device policy: a new registration replaces the prior row
+/// rather than accumulating one per handset. `platform` is carried for forward-compat but always
+/// `FCM` today (D1 — Android-only for v1; APNs is an additive value behind the same column when iOS
+/// exists). `deviceId` correlates with `refresh_tokens.device_id` so login/logout can keep the push
+/// token and the auth session consistent in one place; cleared (row deleted) on logout.
+model DeviceToken {
+  userId    String   @id @map("user_id") @db.Uuid
+  token     String
+  platform  String   @default("FCM")
+  deviceId  String   @map("device_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("device_tokens")
 }
 
 /// SE-only profile + Activity-Ping timestamp, kept off `users` to avoid wide nullable manager rows

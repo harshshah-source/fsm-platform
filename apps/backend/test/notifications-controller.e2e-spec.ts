@@ -75,4 +75,110 @@ describe('Issue 03 slice 3 — /api/notifications (e2e)', () => {
   it('requires authentication (401)', async () => {
     await request(app.getHttpServer()).get('/api/notifications').expect(401);
   });
+
+  describe('#76 — POST /api/notifications/device-token', () => {
+    const seId = '22222222-2222-2222-2222-222222222222'; // se.north@fsm.test
+
+    afterEach(async () => {
+      await prisma.deviceToken.deleteMany({ where: { userId: seId } });
+    });
+
+    it('registers a device token for the caller', async () => {
+      const token = await login('se.north@fsm.test');
+      await request(app.getHttpServer())
+        .post('/api/notifications/device-token')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Device-Id', 'device-1')
+        .send({ token: 'fcm-token-abc' })
+        .expect(201);
+
+      const row = await prisma.deviceToken.findUnique({ where: { userId: seId } });
+      expect(row?.token).toBe('fcm-token-abc');
+      expect(row?.deviceId).toBe('device-1');
+      expect(row?.platform).toBe('FCM');
+    });
+
+    it('re-registering replaces the single row (one row per user, D4) rather than accumulating', async () => {
+      const token = await login('se.north@fsm.test');
+      await request(app.getHttpServer())
+        .post('/api/notifications/device-token')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Device-Id', 'device-1')
+        .send({ token: 'fcm-token-old' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post('/api/notifications/device-token')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Device-Id', 'device-2')
+        .send({ token: 'fcm-token-new' })
+        .expect(201);
+
+      const rows = await prisma.deviceToken.findMany({ where: { userId: seId } });
+      expect(rows.length).toBe(1);
+      expect(rows[0].token).toBe('fcm-token-new');
+      expect(rows[0].deviceId).toBe('device-2');
+    });
+
+    it('rejects a missing token with 400 TOKEN_REQUIRED', async () => {
+      const token = await login('se.north@fsm.test');
+      const res = await request(app.getHttpServer())
+        .post('/api/notifications/device-token')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Device-Id', 'device-1')
+        .send({})
+        .expect(400);
+      expect(res.body.code).toBe('TOKEN_REQUIRED');
+    });
+
+    it('rejects a missing X-Device-Id with 400 DEVICE_ID_REQUIRED', async () => {
+      const token = await login('se.north@fsm.test');
+      const res = await request(app.getHttpServer())
+        .post('/api/notifications/device-token')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ token: 'fcm-token-abc' })
+        .expect(400);
+      expect(res.body.code).toBe('DEVICE_ID_REQUIRED');
+    });
+
+    it('forbids a non-SE role (403)', async () => {
+      const token = await login('zm.north@fsm.test');
+      await request(app.getHttpServer())
+        .post('/api/notifications/device-token')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Device-Id', 'device-1')
+        .send({ token: 'fcm-token-abc' })
+        .expect(403);
+    });
+
+    it('requires authentication (401)', async () => {
+      await request(app.getHttpServer())
+        .post('/api/notifications/device-token')
+        .set('X-Device-Id', 'device-1')
+        .send({ token: 'fcm-token-abc' })
+        .expect(401);
+    });
+
+    it('clears the device token on logout', async () => {
+      const loginRes = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .set('X-Device-Id', 'device-1')
+        .send({ email: 'se.north@fsm.test', password: 'correct-password' })
+        .expect(200);
+      const accessToken = loginRes.body.accessToken as string;
+      const refreshToken = loginRes.body.refreshToken as string;
+
+      await request(app.getHttpServer())
+        .post('/api/notifications/device-token')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('X-Device-Id', 'device-1')
+        .send({ token: 'fcm-token-abc' })
+        .expect(201);
+      expect(await prisma.deviceToken.findUnique({ where: { userId: seId } })).not.toBeNull();
+
+      await request(app.getHttpServer()).post('/api/auth/logout').send({ refreshToken }).expect(200);
+
+      expect(await prisma.deviceToken.findUnique({ where: { userId: seId } })).toBeNull();
+    });
+  });
 });
