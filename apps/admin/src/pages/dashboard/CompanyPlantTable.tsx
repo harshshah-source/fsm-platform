@@ -6,6 +6,7 @@ import { DurationBadge, InactiveCountLink, PlantName, StatusPill, TierBadge } fr
 import { Badge } from '../../components/ui';
 import { IconChevronRight, IconTruck } from '../../components/ui/icons';
 import { apiTicketsList, type TicketRow } from '../../api/tickets';
+import type { DeviceStatusFilter } from '../../api/devices';
 import { cn } from '../../lib/cn';
 import { exportTable, type ExportFormat } from '../../lib/exportFile';
 import { formatCount, formatPct } from '../../lib/fleetFormat';
@@ -75,9 +76,19 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
 // from least to most severe. `SLA_BUCKETS` is most-severe-first, so reverse a copy.
 const SLA_BUCKETS_ASC = [...SLA_BUCKETS].reverse();
 
+/**
+ * Which SLA-bucket columns to render for the active device-status scope.
+ *
+ * Under `ACTIVE` every bucket is zero *by definition* — a device with an SLA bucket is inactive — so
+ * the eight columns carry no information and are dropped. That is a different judgement from hiding a
+ * zero *row*: a plant with no inactive devices is a real result (it is the one performing well) and
+ * always stays, sorted to the bottom. A column that cannot be non-zero is not a result.
+ */
+const bucketsFor = (scope: DeviceStatusFilter) => (scope === 'ACTIVE' ? [] : SLA_BUCKETS_ASC);
+
 // S.No. + company + tier + plants + plant + operational + inactive/operational + healthy + warehouse
 // + inactive % + fleet health % + one column per SLA bucket + fleet uptime %.
-const COLSPAN = 12 + SLA_BUCKETS_ASC.length;
+const colspanFor = (bucketCount: number) => 12 + bucketCount;
 
 /** Fleet Uptime % for one plant — one decimal, or a dash when the monthly summary has no value yet
  *  (the report is empty until an OH recompute runs — Issue 135). */
@@ -95,10 +106,10 @@ type SortOrder = '' | 'INACTIVE_DESC' | 'INACTIVE_ASC';
  * directly in the table row. Ordered least→most severe (`SLA_BUCKETS_ASC`); a zero cell reads as a muted
  * dash so the populated bands stand out. Each count cell keeps its `bucket-<B>` test id.
  */
-function BucketHeaderCells({ className }: { className: string }) {
+function BucketHeaderCells({ className, buckets }: { className: string; buckets: SlaBucket[] }) {
   return (
     <>
-      {SLA_BUCKETS_ASC.map((b) => (
+      {buckets.map((b) => (
         <th key={b} className={className} title={BUCKET_LABEL_RANGE[b]}>
           {BUCKET_LABEL[b]}
         </th>
@@ -111,15 +122,17 @@ function BucketCountCells({
   byBucket,
   className,
   scope,
+  buckets,
 }: {
   byBucket: Record<string, number>;
   className: string;
   /** Device Detail query params identifying the entity, e.g. `{ companyId }` or `{ plantId }`. */
   scope: Record<string, string>;
+  buckets: SlaBucket[];
 }) {
   return (
     <>
-      {SLA_BUCKETS_ASC.map((b) => {
+      {buckets.map((b) => {
         const n = byBucket[b] ?? 0;
         // A non-zero count deep-links into the Device Detail list, pre-filtered to exactly those devices:
         // the entity (company/plant) + this SLA bucket + INACTIVE — the same contract as InactiveCountLink.
@@ -159,11 +172,21 @@ function BucketCountCells({
 export function CompanyPlantTable({
   rows,
   plantUptime,
+  statusScope = 'ALL',
 }: {
   rows: CompanyPlantRow[];
   /** Per-plant current-month Fleet Uptime %, keyed by plantId (Issue 135); `—` shown when absent. */
   plantUptime?: Map<string, number>;
+  /**
+   * The active device-status filter when this table is embedded in the zone drill-down. It changes
+   * the DEFAULT ordering (rows with nothing in the filtered population sort last and are dimmed,
+   * never dropped) and drops the SLA columns under `ACTIVE`. `ALL` is the dashboard's behaviour and
+   * leaves everything exactly as it was.
+   */
+  statusScope?: DeviceStatusFilter;
 }) {
+  const buckets = bucketsFor(statusScope);
+  const COLSPAN = colspanFor(buckets.length);
   const [search, setSearch] = useState('');
   const [assignment, setAssignment] = useState<AssignmentFilter>('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('');
@@ -222,14 +245,34 @@ export function CompanyPlantTable({
           })
           .filter((g): g is CompanyGroup => g !== null);
 
-    if (!sortOrder) return filtered;
+    if (!sortOrder) {
+      // No explicit sort. On the dashboard (`ALL`) that means source order, unchanged. Inside the
+      // zone drill-down it means "most of what I am filtered to, first" — and, crucially, entities
+      // with NONE of it sort to the BOTTOM rather than disappearing: a plant with zero inactive
+      // devices is the one performing well, and an operator seeing 8 of 20 plants would otherwise be
+      // unable to tell the healthy 12 from 12 that are simply missing from the data.
+      if (statusScope === 'ALL') return filtered;
+      const weight = (e: FleetCounts) =>
+        statusScope === 'ACTIVE' ? e.healthyOperational : e.inactiveOperational;
+      return filtered
+        .map((g) => ({ ...g, plants: [...g.plants].sort((a, b) => weight(b) - weight(a)) }))
+        .sort((a, b) => weight(b) - weight(a));
+    }
     // Order companies by aggregate inactive count, and each company's plants the same way, so the
     // most (or least) inactive company floats to the top with its worst plants first.
     const dir = sortOrder === 'INACTIVE_DESC' ? -1 : 1;
     return filtered
       .map((g) => ({ ...g, plants: [...g.plants].sort((a, b) => (a.inactiveOperational - b.inactiveOperational) * dir) }))
       .sort((a, b) => (a.inactiveOperational - b.inactiveOperational) * dir);
-  }, [rows, term, sortOrder, deviceMatchPlantIds]);
+  }, [rows, term, sortOrder, deviceMatchPlantIds, statusScope]);
+
+  /** True when this entity contributes nothing to the population the page is currently filtered to. */
+  const isEmptyForScope = (e: FleetCounts) =>
+    statusScope === 'INACTIVE'
+      ? e.inactiveOperational === 0
+      : statusScope === 'ACTIVE'
+        ? e.healthyOperational === 0
+        : false;
 
   const toggleCompany = (companyId: string) => {
     setOpenCompanies((prev) => {
@@ -345,7 +388,14 @@ export function CompanyPlantTable({
           </FilterSelect>
         </TableToolbar>
 
-        <table aria-label="Company/Plant Overview" className="w-full table-fixed border-collapse text-sm">
+        {/* The fixed colgroup's percentages are budgeted to total 100% WITH the eight SLA columns. With
+            them dropped (ACTIVE scope) that budget under-fills and `table-fixed` leaves a dead gutter,
+            so the table falls back to auto layout — same columns, redistributed. */}
+        <table
+          aria-label="Company/Plant Overview"
+          className={cn('w-full border-collapse text-sm', buckets.length > 0 && 'table-fixed')}
+        >
+          {buckets.length > 0 && (
           <colgroup>
             {/* Leading 3.5rem S.No. column (#160) — the percentage columns below are shaved down from
                 their pre-#160 total (100%) to leave it room. */}
@@ -360,11 +410,12 @@ export function CompanyPlantTable({
             <col style={{ width: '7%' }} />
             <col style={{ width: '5%' }} />
             <col style={{ width: '5%' }} />
-            {SLA_BUCKETS_ASC.map((b) => (
+            {buckets.map((b) => (
               <col key={b} style={{ width: '4%' }} />
             ))}
             <col style={{ width: '6%' }} />
           </colgroup>
+          )}
           <thead>
             <tr className="border-b border-chrome-700 bg-chrome-900">
               <th className={cn(th, 'text-right')}>S.No.</th>
@@ -393,7 +444,7 @@ export function CompanyPlantTable({
               <th className={cn(th, thDense, 'text-right')}>
                 <ColumnHeader label="Health %" kpi="fleetHealthPct" stacked />
               </th>
-              <BucketHeaderCells className={thBucket} />
+              <BucketHeaderCells className={thBucket} buckets={buckets} />
               <th className={cn(th, thDense, 'text-right')}>Uptime %</th>
             </tr>
           </thead>
@@ -413,7 +464,13 @@ export function CompanyPlantTable({
                 <Fragment key={co.companyId}>
                   {/* Company aggregate row (collapsed by default). */}
                   <tr
-                    className="cursor-pointer border-b border-line bg-surface-sunken/50 hover:bg-surface-sunken"
+                    // Dimmed, not dropped: this company has nothing in the filtered population, which
+                    // is itself the finding. It keeps its row, its numbers and its drill-down.
+                    className={cn(
+                      'cursor-pointer border-b border-line bg-surface-sunken/50 hover:bg-surface-sunken',
+                      isEmptyForScope(co) && 'opacity-60',
+                    )}
+                    data-testid={isEmptyForScope(co) ? 'company-row-empty-for-scope' : undefined}
                     onClick={() => toggleCompany(co.companyId)}
                   >
                     <td className={cn(td, 'text-right tabular-nums text-ink')}>{index + 1}</td>
@@ -453,7 +510,7 @@ export function CompanyPlantTable({
                     <td data-testid="company-health-pct" className={cn(td, 'text-right tabular-nums font-semibold text-ink')}>
                       {formatPct(co.fleetHealthPct)}
                     </td>
-                    <BucketCountCells byBucket={co.byBucket} className={tdBucket} scope={{ companyId: co.companyId }} />
+                    <BucketCountCells byBucket={co.byBucket} className={tdBucket} scope={{ companyId: co.companyId }} buckets={buckets} />
                     <td className={td} />
                   </tr>
 
@@ -470,6 +527,8 @@ export function CompanyPlantTable({
                             loadingPlant={loadingPlant}
                             devices={devices}
                             onTogglePlant={togglePlant}
+                            buckets={buckets}
+                            isEmptyForScope={isEmptyForScope}
                           />
                         </div>
                       </td>
@@ -499,6 +558,8 @@ function CompanyPlants({
   loadingPlant,
   devices,
   onTogglePlant,
+  buckets,
+  isEmptyForScope,
 }: {
   company: CompanyGroup;
   plantUptime?: Map<string, number>;
@@ -506,6 +567,10 @@ function CompanyPlants({
   loadingPlant: string | null;
   devices: Record<string, TicketRow[]>;
   onTogglePlant: (plantId: string) => void | Promise<void>;
+  /** SLA columns to render — empty under an ACTIVE-only scope, where every band is zero by definition. */
+  buckets: SlaBucket[];
+  /** Marks a plant that contributes nothing to the filtered population: dimmed, kept, sorted last. */
+  isEmptyForScope: (e: FleetCounts) => boolean;
 }) {
   const cellPad = 'px-2 py-1.5';
   const th = `${cellPad} font-bold`;
@@ -513,7 +578,7 @@ function CompanyPlants({
   const tdBucket = 'px-1 py-1.5 text-right text-xs tabular-nums text-ink';
   // The plant sub-table's expansion cell spans S.No. · Plant · Operational · Inactive Operational ·
   // Healthy · Warehouse · Inactive % · Fleet Health % · the SLA-bucket columns · Uptime.
-  const PLANT_COLSPAN = 9 + SLA_BUCKETS_ASC.length;
+  const PLANT_COLSPAN = 9 + buckets.length;
 
   // Own download, restricted to this company's plants — S.No. re-numbers from 1 (AC-20: sub-tables
   // number independently).
@@ -550,7 +615,12 @@ function CompanyPlants({
           onSelectFormat={exportPlants}
         />
       </div>
-      <table aria-label={`Plants for ${company.companyName}`} className="w-full table-fixed border-collapse text-sm">
+      {/* Same fixed-vs-auto rule as the parent table (see there). */}
+      <table
+        aria-label={`Plants for ${company.companyName}`}
+        className={cn('w-full border-collapse text-sm', buckets.length > 0 && 'table-fixed')}
+      >
+        {buckets.length > 0 && (
         <colgroup>
           <col style={{ width: '3.5rem' }} />
           <col style={{ width: '14%' }} />
@@ -560,11 +630,12 @@ function CompanyPlants({
           <col style={{ width: '7%' }} />
           <col style={{ width: '6%' }} />
           <col style={{ width: '7%' }} />
-          {SLA_BUCKETS_ASC.map((b) => (
+          {buckets.map((b) => (
             <col key={b} style={{ width: '4%' }} />
           ))}
           <col style={{ width: '6%' }} />
         </colgroup>
+        )}
         <thead>
           <tr className="border-b border-chrome-700 bg-chrome-900 text-left text-[11px] uppercase tracking-wider text-white">
             <th className={cn(th, 'text-right')}>S.No.</th>
@@ -587,7 +658,7 @@ function CompanyPlants({
             <th className={cn(th, 'text-right')}>
               <ColumnHeader label="Health %" kpi="fleetHealthPct" stacked />
             </th>
-            <BucketHeaderCells className={thBucket} />
+            <BucketHeaderCells className={thBucket} buckets={buckets} />
             <th className={cn(th, 'text-right')}>Uptime %</th>
           </tr>
         </thead>
@@ -604,7 +675,13 @@ function CompanyPlants({
                     void onTogglePlant(p.plantId);
                   }
                 }}
-                className="cursor-pointer border-b border-line/70 last:border-b-0 hover:bg-surface-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50"
+                data-testid={isEmptyForScope(p) ? 'plant-row-empty-for-scope' : undefined}
+                className={cn(
+                  'cursor-pointer border-b border-line/70 last:border-b-0 hover:bg-surface-sunken/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-600/50',
+                  // Kept and still drillable — just visually recessive, because it has nothing in the
+                  // population the page is filtered to. Absence and zero must not look the same.
+                  isEmptyForScope(p) && 'opacity-60',
+                )}
               >
                 <td className={`${cellPad} text-right tabular-nums text-ink`}>{index + 1}</td>
                 <td className={`${cellPad} truncate text-ink`} title={formatPlantDisplayName(p.plantName)}>
@@ -632,7 +709,7 @@ function CompanyPlants({
                 <td data-testid="plant-health-pct" className={`${cellPad} text-right tabular-nums font-semibold text-ink`}>
                   {formatPct(p.fleetHealthPct)}
                 </td>
-                <BucketCountCells byBucket={p.byBucket} className={tdBucket} scope={{ plantId: p.plantId }} />
+                <BucketCountCells byBucket={p.byBucket} className={tdBucket} scope={{ plantId: p.plantId }} buckets={buckets} />
                 <td data-testid="plant-fleet-uptime" className={`${cellPad} text-right tabular-nums text-ink-muted`}>
                   {fmtUptime(plantUptime?.get(p.plantId))}
                 </td>

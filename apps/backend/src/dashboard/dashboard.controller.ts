@@ -11,13 +11,16 @@ import {
   type ActivityTrendReport,
   type CompanyPlantRow,
   type CriticalQueueGroup,
+  type DeviceStatusScope,
   type FleetComposition,
   type FleetDirectory,
   type FleetSummary,
+  type ZoneOperationsSummary,
   type ZoneOverviewRow,
 } from './dashboard.service';
 
 const ACTIVITY_TREND_RANGES: ActivityTrendRange[] = ['1D', '7D', '1M', '1Y', 'MAX'];
+const DEVICE_STATUS_SCOPES: DeviceStatusScope[] = ['ALL', 'INACTIVE', 'ACTIVE'];
 
 /**
  * The `/api/dashboard/*` manager read surface (Issue 06). Scoped to the manager roles; a ZM is
@@ -40,10 +43,29 @@ export class DashboardController {
     @CurrentUser() user: AccessTokenClaims,
     @Query('companyId') companyId?: string,
     @Query('plantId') plantId?: string,
+    @Query('zoneId') zoneId?: string,
   ): Promise<CompanyPlantRow[]> {
     return this.dashboard.companyPlantOverview(
       { role: user.role, zoneId: user.zone_id },
-      { companyId, plantId },
+      { companyId, plantId, zoneId },
+    );
+  }
+
+  /**
+   * How one zone's currently-open work is held — assigned vs not, over how many live batches and SEs.
+   * Backs the `/reports/device` zone drill-down's assignment band; scoped by the same `zoneId` +
+   * `status` the page reads off its query string. A ZM is clamped to their own zone in the service.
+   */
+  @Get('zone-operations')
+  @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
+  zoneOperations(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('zoneId') zoneId?: string,
+    @Query('status') status?: string,
+  ): Promise<ZoneOperationsSummary> {
+    return this.dashboard.zoneOperations(
+      { role: user.role, zoneId: user.zone_id },
+      { zoneId, status: parseStatusScope(status) },
     );
   }
 
@@ -109,6 +131,11 @@ function parseRange(raw: string | undefined): ActivityTrendRange {
     throw new BadRequestException({ code: 'INVALID_RANGE', hint: '1D | 7D | 1M | 1Y | MAX' });
   }
   return raw as ActivityTrendRange;
+}
+
+/** Unknown/absent reads as ALL — the drill-down's own default when the URL carries no `status`. */
+function parseStatusScope(raw: string | undefined): DeviceStatusScope {
+  return DEVICE_STATUS_SCOPES.includes(raw as DeviceStatusScope) ? (raw as DeviceStatusScope) : 'ALL';
 }
 
 function parseOptZoneId(raw: string | undefined): number | null {

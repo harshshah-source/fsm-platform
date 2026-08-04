@@ -687,6 +687,41 @@ KPI's definition / exclusions / source table / refresh trigger / formula, render
 **`docs/kpi-definitions.md`**. The reconciliation identities are enforced over the whole database by
 `apps/backend/test/dashboard-kpi-reconciliation.e2e-spec.ts` (14 tests), not by a fixture.
 
+**#193 zone drill-down enrichment (done, 2026-08-04):** `/reports/device` is no longer only a device
+table. When it is entered with a single numeric `zoneId` — the Zone Performance Scorecard's row
+click-through — `ZoneDrilldownSection` renders above the table: the v2 reference's scope-chip band
+(zone · active status · snapshot stamp, previously never built), a six-card KPI strip, an operational
+composition bar, ranked plants, the SLA spread, and the **reused** `CompanyPlantTable`. Everything is
+scoped by the page's live `zoneId` + `status`; the aggregates load in parallel with the device list and
+neither gates the other. Two rules are deliberate and load-bearing: a **zero row is kept** (sorted
+last, dimmed) because a plant with no inactive devices is a result rather than an absence, while an
+all-zero SLA **column** under an ACTIVE-only scope *is* dropped; and a `zoneId` of `UNZONED` or none
+renders an **explanation instead of numbers**, never a silent fallback to all-zones (see #192 — the
+word names two different device populations across surfaces).
+
+Backend additions are additive and manager-roled: `company-plant-overview` gained a `zoneId` filter
+ANDed with the ZM clamp (a ZM requesting a foreign zone gets `[]`), and a new
+`GET /api/dashboard/zone-operations?zoneId=&status=` serves the one thing nothing served —
+assigned/unassigned open work, live batches, overridden batches and SEs engaged for a zone. It reuses
+the Device Detail list's live-ticket status set and `removed_at IS NULL` batch link (now a named
+constant) so it cannot disagree with that table's per-row assignment column, and filters `status`
+through the same `FLEET_COUNT_COLUMNS` inactive predicate above rather than a second spelling of it.
+The clamp lives in the service because the global `ZoneScopeGuard` inspects `:zoneId` route params and
+the `zone_id` query spelling — not `zoneId` — the same posture `activityTrend` already takes.
+
+**SLA severity ramp (app-wide, same change):** the eight bands are now an ordinal ramp carried by
+**lightness first, hue second**, so severity survives red/green colour blindness. The previous
+eyeballed ramp did not: `EARLY_RISK`/`RISK` sat 0.01 apart in OKLab L (ΔE 2.7 under deuteranopia —
+indistinguishable) and `SEVERE`/`HIGH_CRITICAL` ΔE 7.1 apart *with full colour vision*, while overall
+lightness ran non-monotonically so "darker" did not mean "worse". The replacement is monotone with
+≥0.06 steps, script-validated, and keeps PRD:302's green→red heat coding (semantic heat being the
+sanctioned multi-hue sequential exception, always shipped with a legend). Dark-mode steps are
+**selected against the dark surface**, not flipped — the deep-red end previously fell to 1.27:1 on the
+near-black canvas. Both ramps live in `index.css` as `--sla-*`; `lib/slaBucket.ts` exposes them as
+`BUCKET_COLOR` (theme-aware, for charts) and `BUCKET_HEX` (light literals), and `BUCKET_CLASS` badges
+now draw from the same tokens, so a bucket cannot be one colour in a table and another in the chart
+beside it.
+
 ---
 
 ## 4. DOCS vs CODE RECONCILIATION

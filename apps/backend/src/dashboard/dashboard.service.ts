@@ -224,6 +224,43 @@ const ACTION_REQUIRED_CARDS: ReadonlyArray<Omit<ActionRequiredCard, 'count' | 'a
 /** Days without state progression after which a Recovery Ticket is "stalled" (Issue 37). */
 const RECOVERY_STALL_DAYS = 14;
 
+/**
+ * Ticket statuses that mean "this work is over". The complement is what the Device Detail list calls a
+ * live ticket (`device.service.ts`' `ot` lateral) — restated here as a named constant rather than a
+ * second hand-spelled list, because the drill-down's assignment counts must agree with that table's
+ * per-row assignment column exactly.
+ */
+const CLOSED_TICKET_STATUSES = [
+  'CLOSED',
+  'CLOSED_AUTO_RECOVERY',
+  'CLOSED_NON_OPERATIONAL',
+  'FAILED_VERIFICATION',
+  'FAILED_ACTIVATION',
+  'FAILED_RECOVERY',
+  'RECEIVED_AT_WAREHOUSE',
+] as const;
+
+/** The Device Detail page's device-status filter, as it scopes the zone drill-down's aggregates. */
+export type DeviceStatusScope = 'ALL' | 'INACTIVE' | 'ACTIVE';
+
+/**
+ * How a zone's currently-open work is held (see {@link DashboardService.zoneOperations}).
+ * `assigned + unassigned` need not equal `openTickets` — a ticket in another assignment state (e.g.
+ * mid-transition) is counted in the total and in neither split, and the UI shows the total.
+ */
+export interface ZoneOperationsSummary {
+  /** Live (not closed/failed) tickets in scope. */
+  openTickets: number;
+  assigned: number;
+  unassigned: number;
+  /** Distinct live batches holding those tickets. */
+  liveBatches: number;
+  /** Of those batches, how many a manager has overridden. */
+  overriddenBatches: number;
+  /** Distinct SEs holding at least one of those batches. */
+  engineersEngaged: number;
+}
+
 /** CRITICAL and above, in the SLA severity order (CONTEXT "SLA Bucket"). */
 const CRITICAL_PLUS_BUCKETS = [
   'CRITICAL',
@@ -533,11 +570,18 @@ export class DashboardService {
 
   async companyPlantOverview(
     scope: ZoneScope,
-    filters: { companyId?: string; plantId?: string } = {},
+    filters: { companyId?: string; plantId?: string; zoneId?: string } = {},
   ): Promise<CompanyPlantRow[]> {
     const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
     const conds: Prisma.Sql[] = [];
     if (restrictZone !== null) conds.push(Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}`);
+    // Caller-requested zone (the Device Detail zone drill-down). Additive to — never instead of —
+    // the ZM clamp above: a ZM asking for another zone still gets their own, because both predicates
+    // are ANDed and the pair is unsatisfiable. The global ZoneScopeGuard does not fire here (it reads
+    // `:zoneId` route params and the `zone_id` query spelling), so the clamp must live in the service,
+    // exactly as `activityTrend` does it.
+    if (filters.zoneId && /^\d+$/.test(filters.zoneId))
+      conds.push(Prisma.sql`AND z.zone_id = ${BigInt(filters.zoneId)}`);
     if (filters.companyId && /^\d+$/.test(filters.companyId))
       conds.push(Prisma.sql`AND c.company_id = ${BigInt(filters.companyId)}`);
     if (filters.plantId && /^\d+$/.test(filters.plantId))
@@ -594,6 +638,84 @@ export class DashboardService {
       if (row) row.byBucket[r.slaBucket] = r.count;
     }
     return [...byKey.values()];
+  }
+
+  /**
+   * The operational half of the zone drill-down: how the zone's open work is currently *held* —
+   * assigned vs not, across how many live batches, by how many SEs.
+   *
+   * This exists because nothing served it. `/api/tickets` has no zone filter and caps at 500 rows,
+   * `/dispatch-runs/*` describes a past run rather than the zone's current state, and `/devices`
+   * carries assignment per row but offers no aggregate — so an assignment count could previously only
+   * be obtained by paging the whole zone client-side and summing, which is wrong for a pan-India role.
+   *
+   * `status` scopes this the same way it scopes every other band on the drill-down page, by filtering
+   * the ticket's DEVICE against the shared inactive predicate (`FLEET_COUNT_COLUMNS`' definition, not
+   * a second spelling of it):
+   *   - INACTIVE — open work on devices that are still silent (the ordinary reading)
+   *   - ACTIVE   — open work on devices that have since come back: real, and worth seeing
+   *   - ALL      — every live ticket in the zone
+   *
+   * "Live" means the same not-closed/not-failed status set the Device Detail list already uses, and a
+   * batch link means the same `removed_at IS NULL` row — so this aggregate and that table's per-row
+   * assignment column cannot disagree about what is assigned.
+   */
+  async zoneOperations(
+    scope: ZoneScope,
+    filters: { zoneId?: string; status?: DeviceStatusScope } = {},
+  ): Promise<ZoneOperationsSummary> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+    const conds: Prisma.Sql[] = [];
+    if (restrictZone !== null) conds.push(Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}`);
+    if (filters.zoneId && /^\d+$/.test(filters.zoneId))
+      conds.push(Prisma.sql`AND z.zone_id = ${BigInt(filters.zoneId)}`);
+    // The SAME inactive predicate FLEET_COUNT_COLUMNS uses, so "inactive" means one thing platform-wide.
+    if (filters.status === 'INACTIVE')
+      conds.push(Prisma.sql`AND ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL`);
+    else if (filters.status === 'ACTIVE')
+      conds.push(Prisma.sql`AND ds.is_departed = false AND NOT (ds.is_inactive = true AND ds.sla_bucket IS NOT NULL)`);
+    const extra = conds.length ? Prisma.join(conds, ' ') : Prisma.empty;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        openTickets: number;
+        assigned: number;
+        unassigned: number;
+        liveBatches: number;
+        overriddenBatches: number;
+        engineersEngaged: number;
+      }>
+    >(Prisma.sql`
+      SELECT COUNT(*)::int AS "openTickets",
+             COUNT(*) FILTER (WHERE t.assignment_state = 'FORMALLY_ASSIGNED')::int AS "assigned",
+             COUNT(*) FILTER (WHERE t.assignment_state = 'UNASSIGNED')::int AS "unassigned",
+             COUNT(DISTINCT asg.batch_id)::int AS "liveBatches",
+             COUNT(DISTINCT asg.batch_id) FILTER (WHERE asg.batch_status = 'OVERRIDDEN')::int AS "overriddenBatches",
+             COUNT(DISTINCT asg.se_id)::int AS "engineersEngaged"
+      FROM tickets t
+      JOIN device_states ds ON ds.device_id = t.device_id
+      JOIN plants p ON p.plant_id = t.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      LEFT JOIN LATERAL (
+        SELECT pba.batch_id, pba.status AS batch_status, pba.se_id
+        FROM batch_assignment_tickets bat
+        JOIN plant_batch_assignments pba ON pba.batch_id = bat.batch_id
+        WHERE bat.ticket_id = t.ticket_id AND bat.removed_at IS NULL
+        ORDER BY bat.created_at DESC
+        LIMIT 1
+      ) asg ON true
+      WHERE t.status NOT IN (${Prisma.join([...CLOSED_TICKET_STATUSES])})
+        ${extra} ${EXCLUDE_DEACTIVATED_PLANTS}`);
+
+    const r = rows[0];
+    return {
+      openTickets: r?.openTickets ?? 0,
+      assigned: r?.assigned ?? 0,
+      unassigned: r?.unassigned ?? 0,
+      liveBatches: r?.liveBatches ?? 0,
+      overriddenBatches: r?.overriddenBatches ?? 0,
+      engineersEngaged: r?.engineersEngaged ?? 0,
+    };
   }
 
   async criticalQueue(scope: ZoneScope): Promise<CriticalQueueGroup[]> {

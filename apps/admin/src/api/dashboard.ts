@@ -129,12 +129,40 @@ export const apiFleetSummary = () => get<FleetSummary>('/dashboard/fleet-summary
 
 export const apiFleetDirectory = () => get<FleetDirectory>('/dashboard/fleet-directory');
 
-export const apiCompanyPlantOverview = (params: { companyId?: string; plantId?: string } = {}) => {
+export const apiCompanyPlantOverview = (
+  params: { companyId?: string; plantId?: string; zoneId?: string } = {},
+) => {
   const q = new URLSearchParams();
   if (params.companyId) q.set('companyId', params.companyId);
   if (params.plantId) q.set('plantId', params.plantId);
+  // Zone drill-down. A ZM is clamped server-side regardless of what is passed, so this narrows an
+  // OH/CSM without widening anyone.
+  if (params.zoneId) q.set('zoneId', params.zoneId);
   const qs = q.toString();
   return get<CompanyPlantRow[]>(`/dashboard/company-plant-overview${qs ? `?${qs}` : ''}`);
+};
+
+/** How a zone's currently-open work is held — the zone drill-down's assignment band. */
+export interface ZoneOperationsSummary {
+  openTickets: number;
+  assigned: number;
+  unassigned: number;
+  liveBatches: number;
+  overriddenBatches: number;
+  engineersEngaged: number;
+}
+
+/**
+ * Assignment + batch aggregate for one zone, scoped by the drill-down's own `status` filter
+ * (`INACTIVE` = open work on still-silent devices, `ACTIVE` = open work on recovered ones, `ALL` =
+ * both). A ZM is clamped to their own zone server-side.
+ */
+export const apiZoneOperations = (params: { zoneId?: string; status?: string } = {}) => {
+  const q = new URLSearchParams();
+  if (params.zoneId) q.set('zoneId', params.zoneId);
+  if (params.status) q.set('status', params.status);
+  const qs = q.toString();
+  return get<ZoneOperationsSummary>(`/dashboard/zone-operations${qs ? `?${qs}` : ''}`);
 };
 
 export const apiCriticalQueue = () => get<CriticalQueueGroup[]>('/dashboard/critical-queue');

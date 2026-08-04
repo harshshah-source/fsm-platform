@@ -23,6 +23,7 @@ import { formatInactiveDuration } from '../../lib/inactiveDuration';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 import { BUCKET_LABEL_RANGE, SLA_BUCKETS } from '../../lib/slaBucket';
 import { AssignSePanel } from './AssignSePanel';
+import { ZoneDrilldownSection } from './ZoneDrilldownSection';
 
 /** Assignment-state pill shared by the device list + detail (Issue 122). */
 function AssignmentBadge({ state }: { state: string | null | undefined }) {
@@ -326,6 +327,18 @@ export function DeviceDetailPage() {
           onClose={() => setAssignOpen(false)}
         />
       )}
+
+      {/* Zone drill-down. When the page is entered from the Zone Performance Scorecard (or the zone
+          filter is set by hand), the company → plant picture sits ABOVE the device table, so the page
+          answers "how bad is this zone, where, and who's holding it" without a trip back to the
+          dashboard. It scopes itself to the same live zone + status the table below uses, loads in
+          parallel with the device list, and renders nothing but an explanation when the zone filter
+          is not a single real zone. */}
+      <ZoneDrilldownSection
+        zoneId={zoneId}
+        zoneName={options.zones.find((z) => String(z.zoneId) === zoneId)?.name}
+        status={status}
+      />
 
       {/* Search + every filter now ride in the table card's own toolbar. They used to sit in two
           separate blocks above it (a lone search Field, then a bordered FilterBar), which cost two
