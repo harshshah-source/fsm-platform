@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 import type {
   ConfirmReceiptConflictBody,
   ConfirmReceiptResponse,
+  DayPlanView,
   LoginRequest,
   LoginResponse,
   MeComponentRequestsView,
@@ -231,4 +232,13 @@ export async function apiConfirmReceipt(accessToken: string, requestId: string):
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as ConfirmReceiptResponse;
+}
+
+export async function apiGetDayPlan(accessToken: string): Promise<DayPlanView> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/schedules/me`, { headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as DayPlanView;
 }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import * as Keychain from 'react-native-keychain';
 import type {
+  DayPlanView,
   LoginResponse,
   MeComponentRequestsView,
   MeTicketDetailView,
@@ -12,6 +13,7 @@ import type {
 } from '@fsm/shared';
 import {
   apiConfirmReceipt,
+  apiGetDayPlan,
   apiGetMyComponentRequests,
   apiGetMyTickets,
   apiGetTicketDetail,
@@ -460,5 +462,32 @@ describe('apiConfirmReceipt', () => {
     installFetchMock().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) } as unknown as Response);
 
     await expect(apiConfirmReceipt('token', 'r-1')).rejects.toThrow('COMPONENT_REQUEST_NOT_FOUND');
+  });
+});
+
+describe('apiGetDayPlan', () => {
+  const view: DayPlanView = { dispatched: false, scheduleId: null, dateFrom: null, dateTo: null, stops: [] };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('GETs /schedules/me with a Bearer token', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
+
+    const result = await apiGetDayPlan('token');
+
+    expect(result).toEqual(view);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/schedules\/me$/);
+  });
+
+  it('throws UNAUTHORIZED when the token is rejected', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) } as unknown as Response);
+
+    await expect(apiGetDayPlan('bad-token')).rejects.toThrow('UNAUTHORIZED');
   });
 });
