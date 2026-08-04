@@ -1,6 +1,6 @@
 # 61 — M7: Vouchers (mobile capture)
 
-Status: ready-for-agent
+Status: done except offline drafting (blocked on #17)
 Type: AFK · Mobile
 
 ## What to build
@@ -16,10 +16,10 @@ receipt), submission, and a status list. Drafts are **offline-capable** with a `
 
 ## Acceptance criteria
 
-- [ ] Voucher capture form (amount, category, receipt photo) submits to `/api/vouchers`
-- [ ] Submitted vouchers list with status rendered
-- [ ] Photo capture wired via the component kit
-- [ ] Draft is created locally with a `client_submission_id` and works offline (PRD Flow 9)
+- [x] Voucher capture form (amount, category, receipt photo) submits to `/api/vouchers`
+- [x] Submitted vouchers list with status rendered
+- [x] Photo capture wired via the component kit
+- [ ] Draft is created locally with a `client_submission_id` and works offline (PRD Flow 9) — **not built**, blocked on #17 (offline queue, unbuilt). `clientSubmissionId` is generated per submit attempt so a retry after a network drop is idempotent, but there is no local draft persisted across app restarts.
 
 ## API contract (authority: backend on `main`)
 
@@ -82,3 +82,24 @@ The upload block has **3 named document types** — `Receipt`, `Photo`, `Bill` �
 `photoRef` per item. **#81** owes the slot semantics. The claim-list half of this screen (rollups,
 statuses, rejection reason to act on) is unreadable by an SE today and is owned by **#163**; the
 item DTO also has no `description` field, which the form shows.
+
+### 2026-08-04 — DONE (except offline drafting), now that #81 has landed
+
+`#81` (Media Upload API) shipped first, unblocking the photo AC. Built: `VoucherFormScreen`
+(amount, category via `TilePicker`, one `Receipt` photo via `PhotoCaptureRow` → `expo-image-picker`
+camera capture → `POST /api/media/upload` → `photoRef`), submitting a single-item
+`POST /api/vouchers`; `VouchersScreen` (summary tiles + My Vouchers list, all 7 statuses, `#163`
+item 1's `GET /api/me/vouchers`).
+
+**Single-item, single-photo, not 3 named documents:** #81's own upload endpoint DOES carry the
+3-slot semantics (`RECEIPT`/`PHOTO`/`BILL`) at the *media* level, but `ExpenseVoucherItem.photoRef`
+(Issue 38's already-`done` schema) is one column — there is nowhere to attach a second or third
+photo to the same expense line without a schema change this issue doesn't own. Matches the AC's own
+literal wording ("receipt photo", singular). The mockup's fuller 3-document surface stays a real,
+documented gap (same one #81's 2026-07-28 comment already flagged) pending a schema decision, not
+silently resolved here.
+
+**Not built:** the offline-draft AC (#17, unbuilt) — `clientSubmissionId` is generated fresh per
+submit attempt (idempotent retry after a network drop, since the server dedupes on
+`(se_id, client_submission_id)`), but there is no local draft persisted across app restarts or
+before connectivity returns. 183 mobile tests green, `tsc`/`eslint` clean both apps.
