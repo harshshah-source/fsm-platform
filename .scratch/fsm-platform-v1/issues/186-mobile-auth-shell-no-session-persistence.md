@@ -83,3 +83,62 @@ n/a.
 ## Comments
 
 n/a.
+### 2026-08-04 — SCOPE COMPLETION: AC#2 shipped for `apiMe` only; ~40 endpoints were never wrapped
+
+Found by the cross-surface contract audit (`audit/mobile-contract-sync-audit-2026-08-04.md`, finding
+A1 — the highest-severity item in either 2026-08-04 audit) and confirmed here by duplicate-check:
+**this issue already owns it.** Its own AC#2 reads *"Wrap `apiMe` (and, once other endpoints exist,
+**every authenticated call**) so a 401 triggers one `POST /auth/refresh` attempt … and retries the
+original call on success."* When this landed, `apiMe` was the only authenticated call. It no longer is.
+
+**Verified state 2026-08-04.** `resolveSession` (`AuthProvider.tsx:19-34`) is invoked from exactly two
+places — the rehydrate-on-mount effect (`:48`) and `login` (`:65`). There is no fetch interceptor and
+no 401-retry anywhere else in `apps/mobile`. Every screen added since (#55-#61, #63, #64, #66, #68,
+#71, #77, #85, #86, #87 — roughly 40 client functions in `src/api/client.ts`) instead pulls the raw
+token itself and maps **any** failure to `'offline'`:
+
+```
+const token = await getAccessToken();
+if (!token) throw new Error('UNAUTHORIZED');
+... catch { setState(s => ({ ...s, status: 'offline' })); }
+```
+
+Same shape at `HomeScreen.tsx:46-58`, `TicketsScreen.tsx:79`, `StockScreen.tsx:38,60`,
+`AvailabilityScreen.tsx:41,64,87`, `VouchersScreen.tsx:29`, `LeaveRequestScreen.tsx:32`,
+`NotificationsScreen.tsx:36`, `IntradayOfferScreen.tsx:50,67`, `TicketDetailScreen.tsx:73,125,143,155`,
+plus every form screen.
+
+**Field consequence.** Access-token TTL is **15 minutes** (`token.service.ts:22`; confirmed on a live
+token, `exp − iat` = 900s). Fifteen minutes after login, an SE with the app in the foreground sees
+every screen flip to the **"Offline"** badge with full connectivity — no refresh attempt, no logout,
+no bounce to `LoginScreen`. The session recovers only on a full app restart, because that is the one
+path that re-runs the mount effect. Misreporting an auth expiry as a connectivity failure is the worst
+available copy for a field user, and it is the single most likely source of false bug reports from a
+pilot ("the app keeps going offline" sends investigation to the network, not to auth).
+
+**Compounding, found in the same pass and folded in here (finding N1):** two screens tell the user
+*"Pull to retry"* (`StockScreen.tsx:80`, `TicketDetailScreen.tsx:273`) and **`RefreshControl` appears
+zero times in the entire mobile app** — the instructed gesture does nothing, and switching tabs
+re-runs the same effect with the same dead token. There is genuinely no in-app recovery.
+
+**Port from, do not reinvent:** `apps/admin/src/api/http.ts:27-82` already implements this correctly —
+single-flight refresh (`refreshOnce`, `:27-50`), one retry with the new bearer (`:75`), and
+`clearTokens(); onExpired()` on failure (`:71-73`, `:77-79`). Admin additionally refreshes proactively
+60s before expiry (`apps/admin/src/auth/AuthProvider.tsx:57-69`); mobile should at minimum match the
+reactive half. Note the `url.startsWith(BASE_URL)` gate at `http.ts:67` — the equivalent mobile guard
+must not exclude any client function.
+
+**Added ACs (this issue's scope, not a new issue):**
+- [ ] Every authenticated call in `src/api/client.ts` routes through one wrapper that refreshes once
+      on 401 and retries — adding a new endpoint must not require remembering to opt in
+- [ ] A 401 after refresh fails logs out to `LoginScreen`; a genuine network failure still reads
+      "Offline". The two are distinguishable on screen
+- [ ] `Error(undefined)` is impossible: guard-level 401/403 bodies carry no `code` (verified live —
+      `{"message":"Unauthorized","statusCode":401}`), yet `recoveryPost`/`installPost`/`intradayPost`/
+      `apiSetAvailability` destructure `{code}` from every non-2xx. Parse defensively here; the server
+      half is [#169](./169-se-api-contract-freeze.md) item 1
+- [ ] Either implement pull-to-refresh where the copy promises it, or remove the copy
+- [ ] Regression test: a 401 mid-session triggers refresh-and-retry, not an offline state. **Cheap** —
+      `AuthProvider.test.tsx` already exists
+
+Tracked under [#197](./197-mobile-pilot-readiness-remediation-epic.md) as the top P1 slice.

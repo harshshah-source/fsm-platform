@@ -96,3 +96,27 @@ anything without a `'ticket'` entityType just marks read, per the issue's own do
 during #77, before this issue's own explicit test target existed) always threw a generic
 `UNAUTHORIZED` regardless of the real failure reason — fixed to parse and surface
 `INVALID_NOTIFICATION_ID`/`NOTIFICATION_NOT_FOUND` verbatim, per this issue's own "Tests" section.
+
+### 2026-08-04 — correction: "admin has its own notification surfaces" was an assumption, and it is false
+
+This issue's UI-surfaces line reads *"**Admin:** n/a (admin has its own notification surfaces)"*. The
+cross-surface contract audit (`audit/mobile-contract-sync-audit-2026-08-04.md`, finding D5) checked it:
+**admin has no notification consumer of any kind.**
+
+Verified 2026-08-04: a repo-wide grep for `notification` in `apps/admin/src` returns only comments. The
+TopBar bell is a `<button>` with no `onClick` and no data source (`TopBar.tsx:130-136`); the
+UI-redevelopment notes describe it as *"decorative, no behavior"* (`docs/ui-redevelopment/04-layout.md:51`),
+and FE-02's bell AC was purely visual.
+
+Scale of the gap: 15 distinct notification `type` strings are produced backend-side; exactly **one** is
+consumed anywhere, and that one is mobile's ghost-assignment toast (`SeTabShell.tsx:50`). Every
+manager-recipient notification — `INTRADAY_ESCALATION_REQUIRED`, the `CROSS_ZONE_*` family, and the ZM
+`RECOVERY_UNABLE_TO_COLLECT` added by #76's 2026-08-04 slice — is written to the database and displayed
+nowhere. `PRD:213` and the per-role event matrix at `workflow:1471-1483` specify in-app manager
+notification explicitly, delivered as an Action Required panel plus a header badge (`PRD:99`, `:354`,
+`:384`) — notably **not** as a notification-centre page, which the admin page inventory (`PRD:320-345`)
+does not contain.
+
+Nothing about this issue's own mobile scope changes. Recorded so the "n/a" line is not read as evidence
+that the admin side was checked and found covered. Owned by
+[#206](./206-admin-manager-action-surface.md).

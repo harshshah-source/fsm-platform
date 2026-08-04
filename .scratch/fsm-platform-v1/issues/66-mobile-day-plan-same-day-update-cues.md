@@ -99,3 +99,33 @@ to the top of their urgency section; removed tickets are reconstructed from the 
 cached row. The push delivery AC needed nothing new — Issue 03's spine already carries it.
 
 207 mobile tests green, `tsc`/`eslint` clean both apps.
+
+### 2026-08-04 — the server signal this issue's "Option B" anticipated now exists (and has no reader)
+
+Recorded from the cross-surface contract audit (`audit/mobile-contract-sync-audit-2026-08-04.md`,
+finding D1). **Not a criticism of the Option A decision** — it was correct on the information
+available, and its stated Option B trigger (per-ticket "[ZM Name]" attribution) is still unmet.
+
+What changed: #161 (DONE 2026-08-03) added `removedFromPlanAt` and `deferredToDate` to every
+`/api/me/tickets` row (`me-tickets-query.service.ts:61-68,127-128`; contract at
+`packages/shared/src/index.ts:103-114`). Those fields have **zero production readers** in
+`apps/mobile/src` — only three test fixtures reference them.
+
+Two consequences of the client-diff approach that were not weighed at decision time, because the
+server signal did not exist yet:
+
+1. **Cold start shows nothing.** `dayPlanCues.ts:23-26` returns no cues on the first call after
+   launch, so a removal that happened while the app was closed is invisible — the SE can travel to a
+   plant that left their plan hours earlier. `PRD:510` requires the SE be *told*.
+2. **DEFER and REMOVE are indistinguishable.** The server distinguishes them (`deferredToDate` is set
+   only for a defer; `override.service.ts:23-24,:129-158,:165-210`), but `TicketsScreen.tsx:149,172`
+   render one generic "Removed" badge with no return date.
+
+Also stale: this module's own comment at `dayPlanCues.ts:12-19` still says *"the server has no
+'added/removed since' signal"*.
+
+Whether to switch is a product call, not a mechanical one — filed as
+[#200](./200-decision-deferred-vs-removed-presentation.md) (defer presentation + cold-start
+durability), with implementation at [#201](./201-mobile-consumes-server-day-plan-signal.md). If #200
+rules that session-scoped is correct, the fields stay unread **by decision** and that is recorded here
+so the next reader stops rediscovering it.

@@ -14,7 +14,7 @@ The system-triggered intra-day insertion and SE Acceptance flow. When a new Tick
 - [x] Accept commits the assignment and inserts the Ticket at top of Day Plan badged `CRITICAL INSERTION`
 - [x] WhatsApp Confirmation sent on Accept with ticket/vehicle/plant/component + deeplink; shown as "sent"
 - [x] Decline requires a reason code and triggers reroute
-- [x] Intra-day Queue reflects PENDING_ACCEPTANCE / ACCEPTED / DECLINED status in real time
+- [ ] Intra-day Queue reflects PENDING_ACCEPTANCE / ACCEPTED / DECLINED status in real time — **UN-TICKED 2026-08-04: this was never true. See the correction comment below. Owned by [#206](./206-admin-manager-action-surface.md).**
 
 ## Blocked by
 
@@ -52,3 +52,34 @@ day-plan badge + the notification-shade quick-action chips are mobile surfaces �
 mobile day-plan work (#66/M-series); backend supplies the `IntradayInsertion` record + audit + top-of-plan
 ordering they render from. The admin Intra-day Queue page (FE-13) already exists and consumes
 `/api/intraday-insertions` alongside `/api/intraday-updates`.
+
+### 2026-08-04 — CORRECTION: AC#6 was factually false; the admin queue never bound the insertion columns
+
+Found during the cross-surface contract audit (`audit/mobile-contract-sync-audit-2026-08-04.md`,
+finding D4) and verified against source today.
+
+**What this issue's disposition claimed:** *"The admin Intra-day Queue page (FE-13) already exists and
+consumes `/api/intraday-insertions` alongside `/api/intraday-updates`."*
+
+**What is actually true:** `grep -rn "intraday-insertions|IntradayInsertion" apps/admin/src` returns
+**zero hits**. Admin's only intraday client is `apps/admin/src/api/intradayUpdates.ts:26`, which hits
+`/intraday-updates` — the ZM *manual same-day update* audit read, a different endpoint with a
+different payload. `IntradayQueuePage.tsx:23` still carries FE-13's placeholder comment and `:103`
+hardcodes the acceptance column to the literal string `"No acceptance required"`, while the page's own
+subtitle at `:122` claims "System-triggered CRITICAL insertions appear here too."
+
+**How it happened, recorded so the pattern is visible:** FE-13 shipped `done` with the AC *"29/30
+columns are forward-compatible placeholders"* and an outcome note saying the column was "ready to bind
+when Issue 29/30 land." #29 then landed and ticked its own admin AC on the assumption FE-13 had done
+the binding. Neither issue filed the follow-up, and because both were `done` with the AC ticked, the
+gap was invisible to every subsequent status read. This is a parity-gate violation
+(`CLAUDE.md` §Surfacing rule) that survived because the paperwork said otherwise.
+
+**Scope of the miss:** of the five producible insertion states (`PENDING_ACCEPTANCE`, `ACCEPTED`,
+`DECLINED`, `TIMED_OUT`, `ESCALATION_REQUIRED` — `generated/prisma/enums.ts:66-72`), the admin
+dashboard displays **none**. `ESCALATION_REQUIRED` is the state that exists specifically to demand
+manager action after three failed offers (`PRD:395`), and it currently terminates in silence. Tones
+for all five already sit unused at `badges.tsx:103-107`.
+
+AC#6 un-ticked above. Repair owned by [#206](./206-admin-manager-action-surface.md) — not re-opened
+here, since the backend half of this issue is genuinely done and independently verified.
