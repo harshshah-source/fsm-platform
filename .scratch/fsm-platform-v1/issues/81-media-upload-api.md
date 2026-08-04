@@ -1,7 +1,6 @@
 # 81 — Media Upload API (photo references for mobile capture)
 
-Status: ready-for-agent — D-12 settled 2026-08-03 (see Comments): Postgres-backed for the pilot,
-storage fully hidden behind the `photoRef` seam; multipart upload, not presign
+Status: done
 Type: AFK · Backend
 
 ## Business purpose
@@ -39,10 +38,10 @@ Recommended pattern (S3 presign — aligns with CLAUDE.md; no image bytes throug
 
 ## Acceptance criteria
 
-- [ ] An SE can obtain a `photoRef` for a captured image via the chosen mechanism
-- [ ] The `photoRef` returned is accepted unchanged by `/tickets/:id/troubleshoot`, `/vouchers`, `/install/:id/fitted`
-- [ ] Stored media is retrievable for the admin review surfaces (voucher lightbox, verification, install)
-- [ ] RBAC: SERVICE_ENGINEER may upload; references are scoped so an SE cannot read another SE's unsubmitted media
+- [x] An SE can obtain a `photoRef` for a captured image via the chosen mechanism
+- [x] The `photoRef` returned is accepted unchanged by `/tickets/:id/troubleshoot`, `/vouchers`, `/install/:id/fitted`
+- [x] Stored media is retrievable for the admin review surfaces (voucher lightbox, verification, install)
+- [x] RBAC: SERVICE_ENGINEER may upload; references are scoped so an SE cannot read another SE's unsubmitted media
 
 ## Validation & error codes
 
@@ -156,3 +155,26 @@ ACs. Backend enforces a hard `FILE_TOO_LARGE` cap as the backstop, per the exist
   the written record. Open product question, not an assumed "none":** how long must voucher-proof
   photos be retrievable after PAID, and do they fall under any finance-audit retention rule?
   Owner: product/finance.
+
+### 2026-08-04 — DONE, per D-12
+
+`POST /api/media/upload` (multipart: `file` + `kind` + `slot`) → `{ photoRef, kind, slot }`,
+`MediaObject` (Postgres `media_objects`, `bytes BYTEA`), `MediaKind`/`MediaSlot` enums carrying the
+#172 Decision 6 slot set (TROUBLESHOOT 4 / VOUCHER 3 / INSTALL 1) from day one. `photoRef` is the
+row's `mediaId` — no storage detail in the string. `GET /api/media/:id` scoped to the owning SE plus
+ZM/CSM/OH review roles (403 `MEDIA_FORBIDDEN` otherwise); validation errors
+(`INVALID_KIND`/`INVALID_SLOT`/`INVALID_CONTENT_TYPE`/`FILE_TOO_LARGE`/`FILE_REQUIRED`) all 400 per
+the AC — Nest's `FileInterceptor` converts a multer size-limit breach into its own 413
+`PayloadTooLargeException` before any filter sees a raw `MulterError`, so a route-scoped
+`MulterErrorFilter` normalizes both shapes to the 400 contract without touching the global exception
+filter. 9 new e2e cases (`media-controller.e2e-spec.ts`), including a `photoRef` round-trip through
+`POST /api/vouchers` unchanged and a wrong-SE 403 (same regression shape as #162).
+
+**Not built / deliberately out of scope:** the consuming endpoints
+(`/tickets/:id/troubleshoot`, `/vouchers`, `/install/:id/fitted`) still accept `photoRef` as an
+unvalidated opaque string — this issue does not retrofit server-side slot validation into their
+bodies (e.g. rejecting a `RECEIPT`-slot ref submitted into a `BEFORE` field). That's a larger,
+separate blast radius across three existing controllers and belongs to #58/#61/#71's own build
+slices, which know their form's exact slot requirements. The retention/audit open question above
+is still unresolved (owner: product/finance) — this build stores indefinitely with no deletion
+path, which forecloses nothing about whatever retention rule is eventually set.
