@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { MeTicketDetailView, VerificationView } from '@fsm/shared';
-import { apiGetTicketDetail, apiGetTicketVerification, apiSetSoftState, SoftStateConflictError } from '../../api/client';
+import { apiGetTicketDetail, apiGetTicketVerification, apiRecoveryOnSite, apiSetSoftState, SoftStateConflictError } from '../../api/client';
 import { getAccessToken } from '../../auth/tokenStore';
 import { StatusPill } from '../../components/kit/StatusPill';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { formatSlaBucketLabel, slaBucketToStatus } from '../ticketDisplay';
+import { CollectionFormScreen } from '../recovery/CollectionFormScreen';
+import { formatRecoveryStatusLabel } from '../recovery/recoveryDisplay';
+import { UnableToCollectScreen } from '../recovery/UnableToCollectScreen';
 import { TroubleshootFormScreen } from '../troubleshoot/TroubleshootFormScreen';
 import { VehicleUnavailabilityFormScreen } from '../vehicle-unavailability/VehicleUnavailabilityFormScreen';
 import { VerificationScreen } from '../verification/VerificationScreen';
@@ -49,6 +52,9 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
   const [showTroubleshootForm, setShowTroubleshootForm] = useState(false);
   const [showVerification, setShowVerification] = useState(false);
   const [showVehicleUnavailability, setShowVehicleUnavailability] = useState(false);
+  const [settingRecoveryOnSite, setSettingRecoveryOnSite] = useState(false);
+  const [showCollectionForm, setShowCollectionForm] = useState(false);
+  const [showUnableToCollect, setShowUnableToCollect] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -80,7 +86,7 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
   // never for verification-pending (the ticket is no longer OPEN; `assertInScope` would 404 it) and
   // never once already past ON_SITE (a backward transition, 409s).
   useEffect(() => {
-    if (state.status !== 'ready' || PAST_ON_SITE.has(state.detail.activeSoftState ?? '')) return;
+    if (state.status !== 'ready' || state.detail.workType === 'RECOVERY' || PAST_ON_SITE.has(state.detail.activeSoftState ?? '')) return;
     let cancelled = false;
     void (async () => {
       const token = await getAccessToken();
@@ -113,6 +119,18 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
       }
     } finally {
       setSettingOnSite(false);
+    }
+  }, [ticketId, load]);
+
+  const handleRecoveryOnSite = useCallback(async () => {
+    setSettingRecoveryOnSite(true);
+    try {
+      const token = await getAccessToken();
+      if (!token) throw new Error('UNAUTHORIZED');
+      await apiRecoveryOnSite(token, ticketId);
+      await load();
+    } finally {
+      setSettingRecoveryOnSite(false);
     }
   }, [ticketId, load]);
 
@@ -163,6 +181,33 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
           void load();
         }}
         onCancel={() => setShowVehicleUnavailability(false)}
+      />
+    );
+  }
+
+  if (showCollectionForm && state.status === 'ready') {
+    return (
+      <CollectionFormScreen
+        ticketId={ticketId}
+        expectedDeviceSerial={state.detail.deviceId}
+        onSubmitted={() => {
+          setShowCollectionForm(false);
+          void load();
+        }}
+        onCancel={() => setShowCollectionForm(false)}
+      />
+    );
+  }
+
+  if (showUnableToCollect && state.status === 'ready') {
+    return (
+      <UnableToCollectScreen
+        ticketId={ticketId}
+        onSubmitted={() => {
+          setShowUnableToCollect(false);
+          void load();
+        }}
+        onCancel={() => setShowUnableToCollect(false)}
       />
     );
   }
@@ -227,7 +272,39 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
         </View>
       ) : null}
 
-      {state.status === 'verification-pending' ? (
+      {detail.workType === 'RECOVERY' ? (
+        <View testID="recovery-card" style={styles.card}>
+          <Text style={styles.cardTitle}>Recovery — {formatRecoveryStatusLabel(detail.status)}</Text>
+          {detail.status === 'SCHEDULED' ? (
+            <Pressable
+              testID="recovery-onsite-button"
+              disabled={settingRecoveryOnSite}
+              onPress={() => void handleRecoveryOnSite()}
+              style={[styles.startButton, settingRecoveryOnSite ? styles.startButtonDisabled : null]}
+            >
+              <Text style={styles.startButtonLabel}>{settingRecoveryOnSite ? 'Marking On-Site…' : 'Mark On-Site'}</Text>
+            </Pressable>
+          ) : null}
+          {detail.status === 'ON_SITE' ? (
+            <>
+              <Pressable
+                testID="recovery-collection-form-button"
+                onPress={() => setShowCollectionForm(true)}
+                style={styles.startButton}
+              >
+                <Text style={styles.startButtonLabel}>Collection Form</Text>
+              </Pressable>
+              <Pressable
+                testID="recovery-unable-button"
+                onPress={() => setShowUnableToCollect(true)}
+                style={styles.secondaryButton}
+              >
+                <Text style={styles.secondaryButtonLabel}>Unable to Collect</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+      ) : state.status === 'verification-pending' ? (
         <View testID="verification-pending-card" style={styles.card}>
           <Text style={styles.cardTitle}>Verification pending</Text>
           <Text style={styles.cardSubtitle}>GPS recovery check running.</Text>
@@ -398,6 +475,19 @@ const styles = StyleSheet.create({
     ...typeScale.body,
     fontWeight: '700',
     color: color.onColor,
+  },
+  secondaryButton: {
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: color.brand600,
+    borderRadius: radius.full,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  secondaryButtonLabel: {
+    ...typeScale.body,
+    fontWeight: '700',
+    color: color.brand600,
   },
   conflictBanner: {
     marginHorizontal: spacing.lg,

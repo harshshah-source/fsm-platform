@@ -8,12 +8,15 @@ import type {
   FileVehicleUnavailabilityRequest,
   LoginRequest,
   LoginResponse,
+  MarkRecoveryCollectedRequest,
+  MarkRecoveryUnableToCollectRequest,
   MediaKind,
   MediaSlot,
   MeComponentRequestsView,
   MeTicketDetailView,
   MeTicketsView,
   MeVouchersView,
+  RecoveryActionResponse,
   SessionView,
   SetSoftStateRequest,
   SetSoftStateResponse,
@@ -322,4 +325,42 @@ export async function apiFileVehicleUnavailability(
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as VehicleUnavailabilityResponse;
+}
+
+/** Any non-2xx `/api/recovery/:id/*` response carries `{code}` (`recovery.controller.ts`'s own
+ *  `map()`) regardless of status — 400 (`INVALID_DEVICE_SERIAL`/`CONDITION_NOTES_REQUIRED`/
+ *  `INVALID_REASON`), 403 (`RECOVERY_FORBIDDEN`), 404 (`RECOVERY_NOT_FOUND`), 409
+ *  (`RECOVERY_WRONG_STATE`) — so the client surfaces the server's own code uniformly. */
+async function recoveryPost(accessToken: string, ticketId: string, action: string, body?: object): Promise<RecoveryActionResponse> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' });
+  const res = await fetch(`${BASE_URL}/recovery/${ticketId}/${action}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    const { code } = (await res.json()) as { code: string };
+    throw new Error(code);
+  }
+  return (await res.json()) as RecoveryActionResponse;
+}
+
+export async function apiRecoveryOnSite(accessToken: string, ticketId: string): Promise<RecoveryActionResponse> {
+  return recoveryPost(accessToken, ticketId, 'on-site');
+}
+
+export async function apiRecoveryMarkCollected(
+  accessToken: string,
+  ticketId: string,
+  body: MarkRecoveryCollectedRequest,
+): Promise<RecoveryActionResponse> {
+  return recoveryPost(accessToken, ticketId, 'collected', body);
+}
+
+export async function apiRecoveryUnableToCollect(
+  accessToken: string,
+  ticketId: string,
+  body: MarkRecoveryUnableToCollectRequest,
+): Promise<RecoveryActionResponse> {
+  return recoveryPost(accessToken, ticketId, 'unable-to-collect', body);
 }

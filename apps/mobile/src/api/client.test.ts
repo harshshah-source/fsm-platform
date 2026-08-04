@@ -25,6 +25,9 @@ import {
   apiGetVanStock,
   apiLogin,
   apiMe,
+  apiRecoveryMarkCollected,
+  apiRecoveryOnSite,
+  apiRecoveryUnableToCollect,
   apiRefresh,
   apiSetSoftState,
   apiSubmitTroubleshoot,
@@ -594,5 +597,82 @@ describe('apiGetMyVouchers', () => {
     expect(result).toEqual(view);
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toMatch(/\/me\/vouchers$/);
+  });
+});
+
+describe('#68 — recovery action endpoints', () => {
+  const response = {
+    ticketId: 't-1',
+    status: 'ON_SITE',
+    deviceId: '9800001',
+    assignedSeId: 'se-1',
+    collectedDeviceSerial: null,
+    collectionConditionNotes: null,
+    unableToCollectReason: null,
+    closureType: null,
+    closedAt: null,
+  };
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('apiRecoveryOnSite POSTs to /recovery/:id/on-site with no body fields', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
+
+    const result = await apiRecoveryOnSite('token', 't-1');
+
+    expect(result).toEqual(response);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/recovery\/t-1\/on-site$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({}) });
+  });
+
+  it('apiRecoveryMarkCollected POSTs the serial and condition notes to /recovery/:id/collected', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...response, status: 'COLLECTED' }),
+    } as unknown as Response);
+
+    await apiRecoveryMarkCollected('token', 't-1', { deviceSerial: '9800001', conditionNotes: 'minor scratches' });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/recovery\/t-1\/collected$/);
+    expect(init).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ deviceSerial: '9800001', conditionNotes: 'minor scratches' }),
+    });
+  });
+
+  it('apiRecoveryMarkCollected throws INVALID_DEVICE_SERIAL verbatim on a serial mismatch', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    installFetchMock().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ code: 'INVALID_DEVICE_SERIAL' }),
+    } as unknown as Response);
+
+    await expect(
+      apiRecoveryMarkCollected('token', 't-1', { deviceSerial: 'wrong', conditionNotes: 'ok' }),
+    ).rejects.toThrow('INVALID_DEVICE_SERIAL');
+  });
+
+  it('apiRecoveryUnableToCollect POSTs the reason code to /recovery/:id/unable-to-collect', async () => {
+    keychain.getGenericPassword.mockResolvedValue(false);
+    const fetchMock = installFetchMock();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...response, status: 'ON_SITE', unableToCollectReason: 'DEVICE_MISSING' }),
+    } as unknown as Response);
+
+    await apiRecoveryUnableToCollect('token', 't-1', { reasonCode: 'DEVICE_MISSING' });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toMatch(/\/recovery\/t-1\/unable-to-collect$/);
+    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ reasonCode: 'DEVICE_MISSING' }) });
   });
 });

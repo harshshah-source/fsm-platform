@@ -715,3 +715,43 @@ export interface VehicleUnavailabilityResponse {
   result: 'OK';
   id: string;
 }
+
+// ---------------------------------------------------------------------------------------------
+// #68 — SE mobile Recovery screens (Issue 36's `/api/recovery/:id/{on-site,collected,
+// unable-to-collect}`, SE leg). Serial validation is server-authoritative; the client's own
+// non-empty check is a pre-flight only.
+// ---------------------------------------------------------------------------------------------
+
+export type UnableToCollectReason = 'COMPANY_REFUSED' | 'VEHICLE_UNREACHABLE' | 'DEVICE_MISSING' | 'OTHER';
+
+export const UNABLE_TO_COLLECT_REASONS: readonly UnableToCollectReason[] = [
+  'COMPANY_REFUSED',
+  'VEHICLE_UNREACHABLE',
+  'DEVICE_MISSING',
+  'OTHER',
+];
+
+/** `POST /api/recovery/:id/collected` body. */
+export interface MarkRecoveryCollectedRequest {
+  deviceSerial: string;
+  conditionNotes: string;
+}
+
+/** `POST /api/recovery/:id/unable-to-collect` body. */
+export interface MarkRecoveryUnableToCollectRequest {
+  reasonCode: UnableToCollectReason;
+}
+
+/** JSON-safe (`deviceId` as `string`) shape of the recovery ticket returned by every
+ *  `/api/recovery/:id/*` action — mirrors `RecoveryView` (`recovery.service.ts`). */
+export interface RecoveryActionResponse {
+  ticketId: string;
+  status: string;
+  deviceId: string;
+  assignedSeId: string | null;
+  collectedDeviceSerial: string | null;
+  collectionConditionNotes: string | null;
+  unableToCollectReason: UnableToCollectReason | null;
+  closureType: string | null;
+  closedAt: string | null;
+}

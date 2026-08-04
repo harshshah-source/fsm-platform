@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react-native';
 import type { MeTicketDetailView, VerificationView } from '@fsm/shared';
 import { TicketDetailScreen } from './TicketDetailScreen';
-import { apiGetTicketDetail, apiGetTicketVerification, apiSetSoftState, SoftStateConflictError } from '../../api/client';
+import {
+  apiGetTicketDetail,
+  apiGetTicketVerification,
+  apiRecoveryOnSite,
+  apiSetSoftState,
+  SoftStateConflictError,
+} from '../../api/client';
 import { getAccessToken } from '../../auth/tokenStore';
 import { captureLocation } from './captureLocation';
 
@@ -13,6 +19,7 @@ jest.mock('../../api/client', () => {
     apiGetTicketDetail: jest.fn(),
     apiGetTicketVerification: jest.fn(),
     apiSetSoftState: jest.fn(),
+    apiRecoveryOnSite: jest.fn(),
   };
 });
 jest.mock('../../auth/tokenStore', () => ({ getAccessToken: jest.fn() }));
@@ -49,10 +56,31 @@ jest.mock('../vehicle-unavailability/VehicleUnavailabilityFormScreen', () => {
     ),
   };
 });
+jest.mock('../recovery/CollectionFormScreen', () => {
+  const { Text } = jest.requireActual('react-native') as typeof import('react-native');
+  return {
+    CollectionFormScreen: ({ onSubmitted }: { onSubmitted: () => void }) => (
+      <Text testID="mock-collection-form" onPress={onSubmitted}>
+        Collection Form
+      </Text>
+    ),
+  };
+});
+jest.mock('../recovery/UnableToCollectScreen', () => {
+  const { Text } = jest.requireActual('react-native') as typeof import('react-native');
+  return {
+    UnableToCollectScreen: ({ onSubmitted }: { onSubmitted: () => void }) => (
+      <Text testID="mock-unable-to-collect" onPress={onSubmitted}>
+        Unable To Collect
+      </Text>
+    ),
+  };
+});
 
 const mockGetDetail = jest.mocked(apiGetTicketDetail);
 const mockGetVerification = jest.mocked(apiGetTicketVerification);
 const mockSetSoftState = jest.mocked(apiSetSoftState);
+const mockRecoveryOnSite = jest.mocked(apiRecoveryOnSite);
 const mockGetAccessToken = jest.mocked(getAccessToken);
 const mockCaptureLocation = jest.mocked(captureLocation);
 
@@ -394,6 +422,94 @@ describe('TicketDetailScreen', () => {
 
       await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
       expect(screen.queryByTestId('mock-vu-form')).toBeNull();
+    });
+  });
+
+  describe('#68 — RECOVERY work-type card', () => {
+    it('renders a recovery card with the lifecycle status, and never auto-posts VIEWED (RECOVERY has no soft-state chain)', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'RECOVERY', status: 'SCHEDULED' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+
+      await waitFor(() => expect(screen.getByTestId('recovery-card')).toBeTruthy());
+      expect(screen.getByText(/Scheduled/)).toBeTruthy();
+      expect(mockSetSoftState).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('ready-card')).toBeNull();
+    });
+
+    it('shows Mark On-Site only while SCHEDULED, posts it, and refetches on success', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'RECOVERY', status: 'SCHEDULED' }));
+      mockRecoveryOnSite.mockResolvedValue({
+        ticketId: 't-1', status: 'ON_SITE', deviceId: 'GPS502', assignedSeId: 'se-1',
+        collectedDeviceSerial: null, collectionConditionNotes: null, unableToCollectReason: null,
+        closureType: null, closedAt: null,
+      });
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('recovery-onsite-button')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('recovery-onsite-button'));
+
+      await waitFor(() => expect(mockRecoveryOnSite).toHaveBeenCalledWith('token', 't-1'));
+      await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
+    });
+
+    it('does not show Mark On-Site once past SCHEDULED', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'RECOVERY', status: 'ON_SITE' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+
+      await waitFor(() => expect(screen.getByTestId('recovery-card')).toBeTruthy());
+      expect(screen.queryByTestId('recovery-onsite-button')).toBeNull();
+    });
+
+    it('shows Collection Form and Unable to Collect only while ON_SITE, opening the respective screens and refetching on submit', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'RECOVERY', status: 'ON_SITE' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('recovery-collection-form-button')).toBeTruthy());
+      expect(screen.getByTestId('recovery-unable-button')).toBeTruthy();
+
+      fireEvent.press(screen.getByTestId('recovery-collection-form-button'));
+      expect(screen.getByTestId('mock-collection-form')).toBeTruthy();
+
+      mockGetDetail.mockResolvedValueOnce(detail({ workType: 'RECOVERY', status: 'COLLECTED' }));
+      fireEvent.press(screen.getByTestId('mock-collection-form'));
+
+      await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
+      expect(screen.queryByTestId('mock-collection-form')).toBeNull();
+    });
+
+    it('opens Unable to Collect and refetches on submit', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'RECOVERY', status: 'ON_SITE' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+      await waitFor(() => expect(screen.getByTestId('recovery-unable-button')).toBeTruthy());
+
+      fireEvent.press(screen.getByTestId('recovery-unable-button'));
+      expect(screen.getByTestId('mock-unable-to-collect')).toBeTruthy();
+
+      fireEvent.press(screen.getByTestId('mock-unable-to-collect'));
+
+      await waitFor(() => expect(mockGetDetail).toHaveBeenCalledTimes(2));
+      expect(screen.queryByTestId('mock-unable-to-collect')).toBeNull();
+    });
+
+    it('shows no action buttons once COLLECTED', async () => {
+      mockGetAccessToken.mockResolvedValue('token');
+      mockGetDetail.mockResolvedValue(detail({ workType: 'RECOVERY', status: 'COLLECTED' }));
+
+      render(<TicketDetailScreen ticketId="t-1" />);
+
+      await waitFor(() => expect(screen.getByTestId('recovery-card')).toBeTruthy());
+      expect(screen.queryByTestId('recovery-onsite-button')).toBeNull();
+      expect(screen.queryByTestId('recovery-collection-form-button')).toBeNull();
+      expect(screen.queryByTestId('recovery-unable-button')).toBeNull();
     });
   });
 });

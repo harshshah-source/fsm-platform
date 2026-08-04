@@ -300,6 +300,41 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
     expect(row?.workType).toBe('RECOVERY');
   });
 
+  it('#68 — never includes a RECOVERY ticket directly assigned to a different SE', async () => {
+    const otherSeTag = randomUUID().slice(0, 8);
+    const otherSe = await prisma.user.create({
+      data: { name: 'Other SE ' + otherSeTag, role: 'SERVICE_ENGINEER', phone: 'oth-' + otherSeTag, email: `${otherSeTag}@mt.test`, zoneId },
+    });
+    userIds.push(otherSe.userId);
+    await prisma.engineerMaster.create({ data: { engineerId: otherSe.userId, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+    await prisma.seCoverage.create({ data: { seId: otherSe.userId, plantId, coverageType: 'DEDICATED' } });
+
+    const deviceId = String(9_880_000_000 + (NS % 100_000));
+    deviceIds.push(deviceId);
+    await prisma.device.create({ data: { deviceId } });
+    const ticket = await prisma.ticket.create({
+      data: {
+        workType: 'RECOVERY',
+        status: 'SCHEDULED',
+        assignedSeId: otherSe.userId,
+        deviceId,
+        plantId,
+        companyId,
+        companyTier: 'GOLD',
+        lastStateChangedAt: NOW,
+      },
+    });
+    ticketIds.push(ticket.ticketId);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/me/tickets')
+      .set('Authorization', `Bearer ${seToken()}`)
+      .expect(200);
+
+    const ids = (res.body.items as Array<{ ticketId: string }>).map((i) => i.ticketId);
+    expect(ids).not.toContain(ticket.ticketId);
+  });
+
   it('forbids a non-SE role', async () => {
     const token = await login('zm.north@fsm.test');
     await request(app.getHttpServer()).get('/api/me/tickets').set('Authorization', `Bearer ${token}`).expect(403);
