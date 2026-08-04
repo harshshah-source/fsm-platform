@@ -9,6 +9,7 @@ import {
   type ExecuteResult,
   type PreviewResult,
 } from '../../api/bulkUnassign';
+import { getDispatchInFlight, type DispatchInFlight } from '../../api/dispatchSchedule';
 import { listZones, type ZoneView } from '../../api/org';
 import { DataTable, EmptyState, PageHeader, type Column } from '../../components/data';
 import { Modal } from '../../components/overlay';
@@ -38,6 +39,7 @@ export function BulkUnassignPage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [dispatchBusy, setDispatchBusy] = useState(false);
   const [dispatchResult, setDispatchResult] = useState<DispatchRunSummary | null>(null);
+  const [inFlight, setInFlight] = useState<DispatchInFlight[]>([]);
 
   const loadHistory = useCallback(() => {
     listBulkUnassignHistory()
@@ -45,12 +47,26 @@ export function BulkUnassignPage() {
       .catch(() => setError('Failed to load history'));
   }, []);
 
+  /**
+   * #213 — poll which zones have a run in flight, so the button can disable itself with the reason
+   * shown *before* anyone presses it. Polled rather than fetched once because the run this guards
+   * against is usually the 05:00 cron, which starts without the operator doing anything.
+   */
+  const loadInFlight = useCallback(() => {
+    getDispatchInFlight()
+      .then(setInFlight)
+      .catch(() => setInFlight([])); // a failed probe must not disable a control that may be fine
+  }, []);
+
   useEffect(() => {
     listZones()
       .then(setZones)
       .catch(() => setError('Failed to load zones'));
     loadHistory();
-  }, [loadHistory]);
+    loadInFlight();
+    const poll = setInterval(loadInFlight, 10_000);
+    return () => clearInterval(poll);
+  }, [loadHistory, loadInFlight]);
 
   const zoneOptions = useMemo(() => zones.map((z) => ({ value: String(z.zoneId), label: `${z.name} (#${z.zoneId})` })), [zones]);
   const selectedZoneName = zones.find((z) => String(z.zoneId) === zoneId)?.name ?? null;
@@ -60,14 +76,30 @@ export function BulkUnassignPage() {
     setDispatchBusy(true);
     setError(null);
     try {
-      const res = await runDispatch(scope === 'ZONE' && zoneId != null ? Number(zoneId) : undefined);
-      setDispatchResult(res);
+      const res = await runDispatch(scope === 'ZONE' && zoneId != null ? Number(zoneId) : undefined, reasonCode);
+      // #213 — a run can start between the poll and the click, so the refusal still has to read well
+      // here. Show the server's own sentence rather than a generic failure: it names the zone, when the
+      // holding run started and who started it.
+      if (res.result === 'ALREADY_RUNNING') {
+        setError(res.message);
+        loadInFlight();
+        return;
+      }
+      setDispatchResult(res.summary);
     } catch {
       setError('Dispatch run failed.');
     } finally {
       setDispatchBusy(false);
     }
   };
+
+  /** The operator-facing sentence for the disabled state — same facts as the server's 409. */
+  const inFlightNotice =
+    inFlight.length === 0
+      ? null
+      : `Dispatch already running — ${inFlight
+          .map((f) => `zone ${f.zoneId}, started ${new Date(f.startedAt).toLocaleTimeString()} by ${f.actor}`)
+          .join('; ')}.`;
 
   const historyColumns: Column<BulkUnassignHistoryRow>[] = [
     { key: 'scope', header: 'Scope', render: (r) => (r.scope === 'PAN_INDIA' ? 'Pan-India' : (r.zoneName ?? r.zoneId)) },
@@ -130,10 +162,21 @@ export function BulkUnassignPage() {
           <Button variant="danger" disabled={!canOpen} onClick={() => setPreviewOpen(true)} data-testid="open-unassign">
             Unassign
           </Button>
-          <Button variant="secondary" loading={dispatchBusy} onClick={runDispatchNow} data-testid="run-dispatch">
+          <Button
+            variant="secondary"
+            loading={dispatchBusy}
+            disabled={inFlight.length > 0}
+            onClick={runDispatchNow}
+            data-testid="run-dispatch"
+          >
             Run dispatch
           </Button>
         </div>
+        {inFlightNotice && (
+          <p className="mt-3 text-xs font-medium text-warning" data-testid="dispatch-in-flight-notice">
+            {inFlightNotice}
+          </p>
+        )}
         <p className="mt-3 text-xs text-ink-muted">{REBALANCE_COPY}</p>
         {dispatchResult && (
           <p className="mt-2 text-xs text-ink-subtle" data-testid="dispatch-result">

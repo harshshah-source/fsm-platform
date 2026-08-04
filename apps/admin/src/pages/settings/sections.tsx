@@ -1,4 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import {
+  getDispatchSchedule,
+  putDispatchSchedule,
+  type DispatchSchedule,
+} from '../../api/dispatchSchedule';
 import * as org from '../../api/org';
 import { BUCKET_CLASS, BUCKET_RANGE_LABEL, SLA_BUCKETS } from '../../lib/slaBucket';
 import { cn } from '../../lib/cn';
@@ -668,6 +673,113 @@ export function CommonKitSection() {
           ))}
         </tbody>
       </table>
+    </section>
+  );
+}
+
+/**
+ * #213 — the daily dispatch run's schedule, Operations-Head-owned (CONTEXT.md Decisions §19).
+ *
+ * Two things this deliberately shows that a plain settings row would not: the **timezone** the
+ * expression is interpreted in, and **when the job next fires**. The next-fire line is the operator's
+ * confirmation that the change actually took — the failure this issue exists to prevent is a schedule
+ * that reads as saved while dispatch keeps firing at the old hour, or does not fire at all.
+ *
+ * An invalid expression is rejected server-side with the cron parser's own reason, and the schedule
+ * still in force stays on screen beneath the error, so there is never ambiguity about what is running.
+ */
+export function DispatchScheduleSection() {
+  const [schedule, setSchedule] = useState<DispatchSchedule | null>(null);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    getDispatchSchedule()
+      .then((s) => {
+        if (!live) return;
+        setSchedule(s);
+        setDraft(s.cron);
+      })
+      .catch(() => live && setError('Failed to load the dispatch schedule.'));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const outcome = await putDispatchSchedule(draft.trim());
+      if (outcome.result === 'INVALID') {
+        setError(outcome.reason);
+        return;
+      }
+      setSchedule(outcome.schedule);
+      setSaved(true);
+    } catch {
+      setError('Could not save the dispatch schedule.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="flex max-w-2xl flex-col gap-3">
+      <p className="text-sm text-ink-muted">
+        When the daily Recommender → Day-Plan dispatch run fires. A change takes effect immediately — no
+        restart, no redeploy.
+      </p>
+
+      {error && (
+        <div role="alert" className="rounded-md border border-critical/30 bg-critical-bg px-3 py-2 text-sm text-critical">
+          {error}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="Dispatch schedule (cron)">
+          <input
+            className={inputClass}
+            aria-label="Dispatch schedule (cron)"
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setSaved(false);
+            }}
+          />
+        </Field>
+        <button className={btnClass} type="button" onClick={save} disabled={busy} data-testid="dispatch-schedule-save">
+          {busy ? 'Saving…' : 'Save schedule'}
+        </button>
+      </div>
+
+      {schedule && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-ink-subtle">In force</dt>
+          <dd className="font-mono text-ink-strong" data-testid="dispatch-schedule-current">
+            {schedule.cron}
+          </dd>
+          <dt className="text-ink-subtle">Timezone</dt>
+          <dd className="text-ink-strong" data-testid="dispatch-schedule-timezone">
+            {schedule.timeZone}
+          </dd>
+          <dt className="text-ink-subtle">Next fire</dt>
+          <dd className="text-ink-strong" data-testid="dispatch-schedule-next">
+            {new Date(schedule.nextFireAt).toLocaleString()}
+          </dd>
+        </dl>
+      )}
+
+      {saved && (
+        <p className="text-sm text-success" data-testid="dispatch-schedule-saved">
+          Saved — the next run is scheduled for {new Date(schedule!.nextFireAt).toLocaleString()}.
+        </p>
+      )}
     </section>
   );
 }

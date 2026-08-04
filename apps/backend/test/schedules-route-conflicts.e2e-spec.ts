@@ -6,6 +6,7 @@ import { RoleGuard } from '../src/common/guards/role.guard';
 import { BulkUnassignService } from '../src/scheduling/bulk-unassign.service';
 import { DayPlanQueryService } from '../src/scheduling/day-plan-query.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
+import { DispatchScheduleService } from '../src/scheduling/dispatch-schedule.service';
 import { OverrideService } from '../src/scheduling/override.service';
 import { SchedulesController } from '../src/scheduling/schedules.controller';
 import { ZmScheduleQueryService } from '../src/scheduling/zm-schedule-query.service';
@@ -19,6 +20,7 @@ describe('Schedules route matching (e2e)', () => {
     listZoneEngineers: vi.fn(),
     getScheduleDetail: vi.fn(),
   };
+  const dispatchSchedule = { current: vi.fn(), setCron: vi.fn() };
 
   const authGuard: CanActivate = {
     canActivate(context: ExecutionContext): boolean {
@@ -41,6 +43,7 @@ describe('Schedules route matching (e2e)', () => {
         { provide: ZmScheduleQueryService, useValue: zm },
         { provide: DispatchRunService, useValue: { runForActiveZones: vi.fn() } },
         { provide: BulkUnassignService, useValue: { preview: vi.fn(), execute: vi.fn() } },
+        { provide: DispatchScheduleService, useValue: dispatchSchedule },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -60,6 +63,22 @@ describe('Schedules route matching (e2e)', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  /** #213 — `dispatch-schedule` is a static path on a controller that also has `GET :engineerId`, so it
+   *  is one `ParseUUIDPipe` away from being swallowed by the param route. Same trap `engineers` sits in. */
+  it('routes GET /api/schedules/dispatch-schedule to the schedule handler, not :engineerId', async () => {
+    dispatchSchedule.current.mockResolvedValue({
+      cron: '0 5 * * *',
+      timeZone: 'Asia/Kolkata',
+      nextFireAt: '2026-08-04T23:30:00.000Z',
+    });
+
+    const res = await request(app.getHttpServer()).get('/api/schedules/dispatch-schedule').expect(200);
+
+    expect(res.body.cron).toBe('0 5 * * *');
+    expect(dispatchSchedule.current).toHaveBeenCalledTimes(1);
+    expect(zm.getScheduleDetail).not.toHaveBeenCalled();
   });
 
   it('routes GET /api/schedules/engineers to the static engineers handler', async () => {

@@ -65,6 +65,9 @@ export interface DispatchRunBuildStamp {
 
 export interface DispatchRunDetail extends Omit<DispatchRunListRow, 'zones'> {
   actorUserId: string | null;
+  /** #213 — the operator's optional one-line "why" for a MANUAL run. Null for CRON and for runs that
+   *  predate the field, so the UI must treat its absence as normal rather than as missing data. */
+  reason: string | null;
   /** The config that actually applied — frozen at run start, not today's values. */
   configSnapshot: Record<string, unknown>;
   /** Per-zone cards (a ZM sees only their own). Replaces the list row's numeric `zones` count. */
@@ -307,6 +310,7 @@ export class DispatchTransparencyQueryService {
       actorUserId: run.actorUserId,
       actorRole: run.actorRole,
       actorName: run.actorUserId ? (actorNames.get(run.actorUserId) ?? null) : null,
+      reason: run.reason,
       startedAt: run.startedAt.toISOString(),
       finishedAt: run.finishedAt?.toISOString() ?? null,
       durationMs: run.finishedAt ? run.finishedAt.getTime() - run.startedAt.getTime() : null,

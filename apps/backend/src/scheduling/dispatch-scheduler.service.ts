@@ -1,26 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import type { SchedulerTickOutcome } from './business-sweep-scheduler.service';
+import { BUSINESS_TIMEZONE, DEFAULT_DISPATCH_CRON, DISPATCH_JOB_NAME, bootstrapDispatchCron } from './dispatch-cron';
 import { DispatchRunService } from './dispatch-run.service';
 
-/**
- * The business timezone (CONTEXT.md Decisions §19, ruled 2026-08-04). Every scheduled business job
- * that means a wall-clock hour to an operator must pin this — an unpinned `@Cron` fires in the host
- * process timezone, and no `TZ` is set in any compose/Dockerfile/env in this repo, so "05:00" landed
- * at 10:30 IST on a UTC host: hours *into* the field day the run is meant to precede.
- */
-export const BUSINESS_TIMEZONE = 'Asia/Kolkata';
-
-/**
- * Default cron for the daily Recommender → Day-Plan dispatch run — 05:00 **IST**, before the field day
- * starts (Schedule Cadence: daily). Overridable via `BUSINESS_SWEEP_DISPATCH_CRON`.
- *
- * #213 supersedes the env var as the source of truth: the schedule moves into `system_settings` with
- * this value demoted to the bootstrap default used only when no setting row exists. Note the `@Cron`
- * decorator below evaluates its expression once at class-decoration time, which is precisely why
- * #213 has to re-register the job on write rather than re-read the value per tick.
- */
-export const DEFAULT_DISPATCH_CRON = '0 5 * * *';
+// Re-exported for the callers that predate `dispatch-cron.ts` (#213 moved the definitions there so the
+// settings-backed writer and the scheduler could share them without a cycle).
+export { BUSINESS_TIMEZONE, DEFAULT_DISPATCH_CRON } from './dispatch-cron';
 
 export interface DispatchSchedulerConfig {
   /** Shares the #108 master switch — `BUSINESS_SWEEPS_ENABLED === 'true'`. Default OFF (an ops step). */
@@ -28,11 +14,18 @@ export interface DispatchSchedulerConfig {
   dispatchCron: string;
 }
 
-/** Resolve the master switch + cron in one place; anything but the literal 'true' stays OFF. */
+/**
+ * Resolve the master switch + the **bootstrap** cron; anything but the literal 'true' stays OFF.
+ *
+ * #213 — `dispatchCron` here is no longer what the job runs on. `system_settings.dispatch_cron` is the
+ * source of truth and `DispatchScheduleService` applies it at boot and on every write; this env value
+ * seeds that row the first time and is not read again. The master switch is unchanged and stays an
+ * env-level ops gate (#108's design).
+ */
 export function readDispatchSchedulerConfig(env: NodeJS.ProcessEnv = process.env): DispatchSchedulerConfig {
   return {
     enabled: env.BUSINESS_SWEEPS_ENABLED === 'true',
-    dispatchCron: env.BUSINESS_SWEEP_DISPATCH_CRON?.trim() || DEFAULT_DISPATCH_CRON,
+    dispatchCron: bootstrapDispatchCron(env),
   };
 }
 
@@ -51,7 +44,6 @@ export function readDispatchSchedulerConfig(env: NodeJS.ProcessEnv = process.env
 export class DispatchSchedulerService {
   private readonly logger = new Logger(DispatchSchedulerService.name);
   private readonly config: DispatchSchedulerConfig;
-  private inFlight = false;
 
   constructor(
     private readonly dispatchRun: DispatchRunService,
@@ -60,22 +52,31 @@ export class DispatchSchedulerService {
     this.config = { ...readDispatchSchedulerConfig(), ...config };
   }
 
-  @Cron(readDispatchSchedulerConfig().dispatchCron, { name: 'business-dispatch', timeZone: BUSINESS_TIMEZONE })
+  /**
+   * The decorator registers the job and pins its name + timezone; the **expression here is only the
+   * compile-time default**. `@Cron` evaluates its argument once at class-decoration time, long before a
+   * database is reachable, so the stored schedule cannot be read here — `DispatchScheduleService`
+   * re-points this same job at the configured expression in its `onModuleInit`, and again on every
+   * write (#213). That indirection is the reason the decorator no longer reads the environment: the
+   * env var seeds the setting row once and is not a parallel source afterwards.
+   */
+  @Cron(DEFAULT_DISPATCH_CRON, { name: DISPATCH_JOB_NAME, timeZone: BUSINESS_TIMEZONE })
   async dispatchTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
-    if (this.inFlight) {
-      this.logger.log('dispatch tick skipped — a run is already in flight');
-      return { ran: false, reason: 'RUN_IN_PROGRESS' };
-    }
-    this.inFlight = true;
     try {
-      await this.dispatchRun.runForActiveZones(now);
+      // #213 — the in-flight guard is no longer a private field here. It moved into
+      // `runForActiveZones`, the one path this tick and the manual HTTP trigger share, so neither can
+      // start a run over the other; this tick just reports the refusal it is handed.
+      const outcome = await this.dispatchRun.runForActiveZones(now);
+      if (outcome.result === 'CONFLICT') {
+        const zones = outcome.inFlight.map((f) => f.zoneId).join(', ');
+        this.logger.log(`dispatch tick skipped — a run is already in flight for zone(s) ${zones}`);
+        return { ran: false, reason: 'RUN_IN_PROGRESS' };
+      }
       return { ran: true };
     } catch (e) {
       this.logger.error(`dispatch tick failed: ${e instanceof Error ? e.message : String(e)}`);
       return { ran: false, reason: 'ERROR' };
-    } finally {
-      this.inFlight = false;
     }
   }
 }

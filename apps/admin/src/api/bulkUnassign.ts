@@ -123,5 +123,25 @@ export async function executeBulkUnassign(input: {
 
 export const listBulkUnassignHistory = () => get<BulkUnassignHistoryRow[]>('/schedules/bulk-unassign/history');
 
-export const runDispatch = (zoneId?: number) =>
-  post<DispatchRunSummary>('/schedules/dispatch-run', zoneId != null ? { zoneId } : {});
+/**
+ * The manual dispatch trigger. #213 — a run already in flight for the zone comes back as a 409 whose
+ * body carries the operator-readable reason (which zone, since when, started by whom); read it rather
+ * than throwing a generic failure, so the page can show what the server actually said.
+ */
+export type RunDispatchResult =
+  | { result: 'OK'; summary: DispatchRunSummary }
+  | { result: 'ALREADY_RUNNING'; message: string };
+
+export async function runDispatch(zoneId?: number, reason?: string): Promise<RunDispatchResult> {
+  const res = await fetch(`${BASE_URL}/schedules/dispatch-run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ ...(zoneId != null ? { zoneId } : {}), ...(reason?.trim() ? { reason: reason.trim() } : {}) }),
+  });
+  const body = await res.json();
+  if (res.ok) return { result: 'OK', summary: body as DispatchRunSummary };
+  if (body?.code === 'DISPATCH_ALREADY_RUNNING') {
+    return { result: 'ALREADY_RUNNING', message: String(body.message ?? 'A dispatch run is already in flight.') };
+  }
+  throw new Error(`REQUEST_FAILED_${res.status}`);
+}

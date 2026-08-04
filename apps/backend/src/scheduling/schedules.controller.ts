@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
@@ -23,8 +24,12 @@ import {
   type PreviewResult,
   BulkUnassignService,
 } from './bulk-unassign.service';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { DayPlanQueryService, type DayPlanView } from './day-plan-query.service';
-import { DispatchRunService, type DispatchRunSummary } from './dispatch-run.service';
+import { BUSINESS_TIMEZONE } from './dispatch-cron';
+import { DispatchRunService, type DispatchInFlight, type DispatchRunSummary } from './dispatch-run.service';
+import { DispatchScheduleService, type DispatchScheduleView } from './dispatch-schedule.service';
 import { OverrideService, type AssignOutcome, type PlantAssignSummary } from './override.service';
 import {
   ZmScheduleQueryService,
@@ -44,6 +49,25 @@ interface BulkUnassignRequestBody {
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 
 /**
+ * The refusal an operator reads (#213): *"dispatch already running for this zone, started HH:MM by X"*.
+ * The time is rendered in `Asia/Kolkata` — the zone the person reading it is working in — because a UTC
+ * stamp here would be read as a local one and quietly mislead by 5h30m.
+ */
+function describeDispatchConflict(inFlight: DispatchInFlight[]): string {
+  const at = (iso: string) =>
+    new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZone: BUSINESS_TIMEZONE,
+    }).format(new Date(iso));
+  const one = (f: DispatchInFlight) => `zone ${f.zoneId}, started ${at(f.startedAt)} IST by ${f.actor}`;
+  return inFlight.length === 1
+    ? `dispatch already running for this zone (${one(inFlight[0])})`
+    : `dispatch already running for this zone — ${inFlight.map(one).join('; ')}`;
+}
+
+/**
  * The `/api/schedules/*` surface. `me` (SE) returns the authenticated SE's dispatched Day Plan
  * (Issue 11). The manager-roled monitoring reads (Issue 13a) — the per-SE schedule list and the
  * ordered-stop detail with Recommender reasoning — are zone-scoped for a ZM; CSM / Operations Head
@@ -59,7 +83,38 @@ export class SchedulesController {
     private readonly override: OverrideService,
     private readonly dispatchRun: DispatchRunService,
     private readonly bulkUnassign: BulkUnassignService,
+    private readonly dispatchSchedule: DispatchScheduleService,
   ) {}
+
+  /**
+   * #213 — the daily dispatch schedule, Operations-Head-owned. Declared before `:engineerId` so the
+   * static path is not captured by the param route.
+   *
+   * This lives here rather than on the generic settings registry because writing it is not just storing
+   * a value: the expression is validated with the same parser that will run it, and the live cron job is
+   * re-registered so the change takes effect without a restart. `PUT /api/settings/dispatch_cron` is
+   * refused and points here, so there is exactly one door.
+   */
+  @Get('dispatch-schedule')
+  @Roles('OPERATIONS_HEAD')
+  dispatchScheduleGet(): Promise<DispatchScheduleView> {
+    return this.dispatchSchedule.current();
+  }
+
+  @Put('dispatch-schedule')
+  @Roles('OPERATIONS_HEAD')
+  async dispatchSchedulePut(
+    @CurrentActor() actor: RequestActor,
+    @Body() body: { cron?: unknown } = {},
+  ): Promise<DispatchScheduleView> {
+    const outcome = await this.dispatchSchedule.setCron(body?.cron, actor);
+    // Rejected at write time, with the reason the parser gave — the previous schedule is untouched and
+    // still firing, which is the guarantee that makes this safe to expose to an operator.
+    if (outcome.result === 'INVALID') {
+      throw new BadRequestException({ code: 'INVALID_CRON_EXPRESSION', reason: outcome.reason });
+    }
+    return outcome.schedule;
+  }
 
   /**
    * Issue 113 — manual override for the daily Recommender → Day-Plan dispatch run: force a run now
@@ -70,17 +125,40 @@ export class SchedulesController {
   @Post('dispatch-run')
   @HttpCode(200)
   @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
-  dispatchRunNow(
+  async dispatchRunNow(
     @CurrentUser() user: AccessTokenClaims,
-    @Body() body: { zoneId?: number } = {},
+    @Body() body: { zoneId?: number; reason?: string } = {},
   ): Promise<DispatchRunSummary> {
-    // MANUAL + actor land on the dispatch_runs ledger row and its audit bracket.
-    return this.dispatchRun.runForActiveZones(new Date(), {
+    // MANUAL + actor land on the dispatch_runs ledger row and its audit bracket; #213 adds the
+    // optional operator "why" beside them.
+    const outcome = await this.dispatchRun.runForActiveZones(new Date(), {
       trigger: 'MANUAL',
       actorUserId: user.user_id,
       actorRole: user.role,
       zoneId: body.zoneId != null ? BigInt(body.zoneId) : undefined,
+      reason: typeof body.reason === 'string' ? body.reason : null,
     });
+    // #213 — a populated refusal, not a queued run, a silent no-op, or a bare 409: the operator is told
+    // which zone, when the holding run started (in IST, the zone they work in) and who started it.
+    if (outcome.result === 'CONFLICT') {
+      throw new ConflictException({
+        code: 'DISPATCH_ALREADY_RUNNING',
+        message: describeDispatchConflict(outcome.inFlight),
+        inFlight: outcome.inFlight,
+      });
+    }
+    return outcome.summary;
+  }
+
+  /**
+   * #213 — which zones currently have a run in flight, so admin can disable the Run-dispatch button and
+   * show why *before* anyone presses it, rather than letting them discover the conflict by pressing
+   * twice. Same role gate as the trigger it guards.
+   */
+  @Get('dispatch-run/in-flight')
+  @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
+  dispatchInFlight(): { inFlight: DispatchInFlight[] } {
+    return { inFlight: this.dispatchRun.inFlightZones() };
   }
 
   /**

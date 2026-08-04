@@ -7,6 +7,7 @@ import type { DispatchRunStatus, DispatchRunTrigger } from '../generated/prisma/
 import { PrismaService } from '../prisma/prisma.service';
 import { RecommenderService, type RunSummary } from '../recommender/recommender.service';
 import { BatchAssignmentService, type DispatchSummary } from './batch-assignment.service';
+import { DISPATCH_CRON_SETTING_KEY, bootstrapDispatchCron } from './dispatch-cron';
 
 export interface DispatchRunError {
   zoneId: string;
@@ -23,7 +24,32 @@ export interface DispatchRunOptions {
    * button, zone-scoped). Omitted → every active zone, exactly as before this option existed.
    */
   zoneId?: bigint;
+  /**
+   * #213 — an optional one-line "why" for a MANUAL run, persisted on the ledger row. Optional by
+   * ruling, not by omission: the operator asked for it to stay unobtrusive, because an emergency run
+   * with a reason is worth a lot to whoever reads the audit trail three weeks later.
+   */
+  reason?: string | null;
 }
+
+/** A run currently holding a zone, as reported to whoever was refused (#213). */
+export interface DispatchInFlight {
+  zoneId: string;
+  /** ISO instant the holding run started — the "started HH:MM" the operator is shown. */
+  startedAt: string;
+  trigger: DispatchRunTrigger;
+  /** Who started it: the actor's role, or `SYSTEM` for the cron. */
+  actor: string;
+}
+
+/**
+ * The result of asking for a dispatch run (#213). A discriminated union rather than a bare summary
+ * because a refusal is a first-class answer here: the operator ruling requires a *clear* conflict —
+ * not a queued run, not a silent no-op — so every caller has to acknowledge the possibility.
+ */
+export type DispatchRunOutcome =
+  | { result: 'RAN'; summary: DispatchRunSummary }
+  | { result: 'CONFLICT'; inFlight: DispatchInFlight[] };
 
 export interface DispatchRunSummary {
   /** Active zones processed this run. */
@@ -65,6 +91,17 @@ export interface DispatchRunSummary {
 export class DispatchRunService {
   private readonly logger = new Logger(DispatchRunService.name);
 
+  /**
+   * Zones with a run in flight, keyed by zone id (#213). Per zone, matching the per-zone advisory locks
+   * `BatchAssignmentService` already takes (#100).
+   *
+   * In-process, and deliberately so: this is the guard that gives an operator a **clear answer** when
+   * they press the button twice. The cross-process guarantee is the advisory lock plus idempotency,
+   * which degrade an overlap to benign skips — a second instance would not double-assign, it would
+   * simply not be refused as informatively.
+   */
+  private readonly inFlight = new Map<string, DispatchInFlight>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly recommender: RecommenderService,
@@ -73,18 +110,57 @@ export class DispatchRunService {
     private readonly audit: AuditService = new AuditService(prisma),
   ) {}
 
-  async runForActiveZones(now: Date = new Date(), opts: DispatchRunOptions = {}): Promise<DispatchRunSummary> {
+  async runForActiveZones(now: Date = new Date(), opts: DispatchRunOptions = {}): Promise<DispatchRunOutcome> {
     const trigger: DispatchRunTrigger = opts.trigger ?? 'CRON';
     const actorId = opts.actorUserId ?? 'SYSTEM';
     const actorRole = opts.actorRole ?? 'SYSTEM';
     const day = istDate(now);
     const zoneIds = opts.zoneId != null ? [opts.zoneId] : await this.activeZoneIds();
 
+    // #213 — the single in-flight guard, taken before the ledger row is opened so a refused caller
+    // leaves no trace of a run that never happened. It lives HERE, in the one path both the cron tick
+    // and the manual trigger go through, rather than on the scheduler: the scheduler's private field
+    // guarded only its own tick, and the manual trigger — the path an operator reaches for in an
+    // emergency — called straight past it.
+    const conflicts = zoneIds.map((z) => this.inFlight.get(z.toString())).filter((h): h is DispatchInFlight => !!h);
+    if (conflicts.length > 0) return { result: 'CONFLICT', inFlight: conflicts };
+    const held: DispatchInFlight[] = zoneIds.map((z) => ({
+      zoneId: z.toString(),
+      startedAt: now.toISOString(),
+      trigger,
+      actor: actorRole,
+    }));
+    for (const h of held) this.inFlight.set(h.zoneId, h);
+
+    try {
+      return { result: 'RAN', summary: await this.execute(now, opts, { trigger, actorId, actorRole, day, zoneIds }) };
+    } finally {
+      // Released in a `finally`: a run that throws must not wedge its zones permanently refusing.
+      for (const h of held) this.inFlight.delete(h.zoneId);
+    }
+  }
+
+  /** Every zone currently held by a run, for the admin's pre-emptive disabled state (#213 AC-9). */
+  inFlightZones(): DispatchInFlight[] {
+    return [...this.inFlight.values()];
+  }
+
+  /** The run itself, once {@link runForActiveZones} has taken the guard for every zone in scope. */
+  private async execute(
+    now: Date,
+    opts: DispatchRunOptions,
+    ctx: { trigger: DispatchRunTrigger; actorId: string; actorRole: string; day: Date; zoneIds: bigint[] },
+  ): Promise<DispatchRunSummary> {
+    const { trigger, actorId, actorRole, day, zoneIds } = ctx;
+
     const run = await this.prisma.dispatchRun.create({
       data: {
         trigger,
         actorUserId: opts.actorUserId ?? null,
         actorRole: opts.actorRole ?? null,
+        // Blank-as-absent: an empty box on the admin form means "no reason given", not "the reason is
+        // the empty string" — a stored '' would render as a present-but-useless note.
+        reason: opts.reason?.trim() || null,
         startedAt: now,
         configSnapshot: await this.captureConfigSnapshot(now),
         ...buildStampFields(),
@@ -223,7 +299,9 @@ export class DispatchRunService {
   private async captureConfigSnapshot(now: Date): Promise<Prisma.InputJsonValue> {
     const [rules, settings, engineers, tierOverrides] = await Promise.all([
       this.prisma.priorityRuleConfig.findMany({ where: { active: true }, orderBy: { id: 'asc' } }),
-      this.prisma.systemSetting.findMany({ where: { key: { in: ['plant_cluster_multiplier', 'eligibility_mode'] } } }),
+      this.prisma.systemSetting.findMany({
+        where: { key: { in: ['plant_cluster_multiplier', 'eligibility_mode', DISPATCH_CRON_SETTING_KEY] } },
+      }),
       this.prisma.engineerMaster.findMany({ select: { engineerId: true, dailyCapacity: true, isActive: true } }),
       this.prisma.companyTierOverride.findMany({
         where: { status: 'ACTIVE', expiresAt: { gt: now } },
@@ -239,9 +317,13 @@ export class DispatchRunService {
       ),
       scheduler: {
         businessSweepsEnabled: process.env.BUSINESS_SWEEPS_ENABLED === 'true',
-        // Mirrors DEFAULT_DISPATCH_CRON in dispatch-scheduler.service.ts (not imported — the scheduler
-        // imports this service, and its @Cron decorator evaluates at module load, so a cycle is unsafe).
-        dispatchCron: process.env.BUSINESS_SWEEP_DISPATCH_CRON?.trim() || '0 5 * * *',
+        // #213 — the schedule this run was generated under, read from the settings registry that now
+        // owns it (#124: a configurable time must appear in the run-start snapshot, or history cannot
+        // say which schedule produced a run). Falls back to the bootstrap default only for a run that
+        // somehow precedes the row being seeded.
+        dispatchCron:
+          (settings.find((s) => s.key === DISPATCH_CRON_SETTING_KEY)?.value as string | undefined) ??
+          bootstrapDispatchCron(),
       },
       tierOverrides: tierOverrides.map((o) => ({
         id: o.id.toString(),

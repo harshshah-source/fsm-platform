@@ -7,6 +7,7 @@ import {
   AccessMatrixGrid,
   CommonKitSection,
   CompaniesSection,
+  DispatchScheduleSection,
   PlantsSection,
   ScoringWeightsSection,
   SeCoverageSection,
@@ -32,6 +33,9 @@ const TABS: Tab[] = [
   { id: 'sla', label: 'SLA Rules', render: () => <SlaRulesSection /> },
   { id: 'weights', label: 'Scoring Weights', render: () => <ScoringWeightsSection /> },
   { id: 'kit', label: 'Common Kit', render: () => <CommonKitSection /> },
+  // #213 — the daily dispatch time, moved out of an environment variable into this console. Sits with
+  // the rules tabs rather than the reference-data ones: it is a policy an operator tunes, not a record.
+  { id: 'dispatch', label: 'Dispatch Schedule', render: () => <DispatchScheduleSection /> },
   { id: 'access', label: 'Access', render: () => <AccessMatrixGrid /> },
 ];
 

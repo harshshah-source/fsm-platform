@@ -4,6 +4,7 @@ import { CandidateSelectionService } from '../src/recommender/candidate-selectio
 import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
+import { expectRan } from './dispatch-outcome';
 
 /**
  * #179 Slice 2 — `DispatchRunService.runForActiveZones` gains an optional `zoneId` opt, narrowing
@@ -100,7 +101,7 @@ describe('DispatchRunService.runForActiveZones — optional zoneId (#179 slice 2
   });
 
   it('a zoneId opt narrows the run to that single zone, leaving the other zone untouched', async () => {
-    const summary = await svc.runForActiveZones(NOW, { zoneId: zoneA });
+    const summary = expectRan(await svc.runForActiveZones(NOW, { zoneId: zoneA }));
     runIds.push(BigInt(summary.runId));
 
     expect(summary.zones).toBe(1);
@@ -120,7 +121,7 @@ describe('DispatchRunService.runForActiveZones — optional zoneId (#179 slice 2
   });
 
   it('omitting zoneId still sweeps every active zone (byte-identical to today)', async () => {
-    const summary = await svc.runForActiveZones(NOW);
+    const summary = expectRan(await svc.runForActiveZones(NOW));
     runIds.push(BigInt(summary.runId));
 
     // Both zones' tickets are now dispatched — the omitted-zoneId path is unnarrowed.

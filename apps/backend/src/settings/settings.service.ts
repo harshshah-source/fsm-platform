@@ -47,6 +47,14 @@ export const SETTINGS_DEFAULTS: Record<string, { value: unknown; description: st
   },
 };
 
+/**
+ * Keys the generic `PUT /api/settings/:key` must not write, and the endpoint that owns each. A key
+ * lands here when storing its value is only half the job — see {@link SettingsService.set}.
+ */
+export const SPECIALISED_SETTING_WRITERS: Record<string, string> = {
+  dispatch_cron: 'PUT /api/schedules/dispatch-schedule',
+};
+
 @Injectable()
 export class SettingsService implements OnModuleInit {
   constructor(
@@ -87,6 +95,21 @@ export class SettingsService implements OnModuleInit {
    * audit_logs row commit together (Issue 02 AC#6 — every config mutation is audited).
    */
   async set(
+    key: string,
+    value: unknown,
+    actor: RequestActor,
+  ): Promise<{ key: string; value: unknown } | { result: 'DELEGATED'; key: string; endpoint: string }> {
+    // #213 — some keys have a specialised writer that does more than store a value. `dispatch_cron` is
+    // validated at write time and re-registers the live cron job; writing it through this generic path
+    // would accept an unparseable expression AND leave the job on the old schedule, so the setting
+    // would read as changed while dispatch kept firing at the old hour. Refuse loudly instead.
+    const owner = SPECIALISED_SETTING_WRITERS[key];
+    if (owner) return { result: 'DELEGATED', key, endpoint: owner };
+    return this.setUnchecked(key, value, actor);
+  }
+
+  /** The plain registry write, once {@link set} has established the key has no specialised owner. */
+  private async setUnchecked(
     key: string,
     value: unknown,
     actor: RequestActor,

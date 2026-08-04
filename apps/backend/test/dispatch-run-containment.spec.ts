@@ -4,6 +4,7 @@ import type { PrismaService } from '../src/prisma/prisma.service';
 import type { RecommenderService } from '../src/recommender/recommender.service';
 import type { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
+import { expectRan } from './dispatch-outcome';
 
 /**
  * Issue 113 AC#2 — a single bad zone must not abort the whole run. `runForActiveZones` catches a
@@ -39,7 +40,7 @@ describe('Issue 113 — DispatchRunService per-zone error containment', () => {
       audit as unknown as AuditService,
     );
 
-    const summary = await svc.runForActiveZones(new Date('2026-06-21T05:00:00.000Z'));
+    const summary = expectRan(await svc.runForActiveZones(new Date('2026-06-21T05:00:00.000Z')));
 
     // Zone 2 was still processed after zone 1 threw.
     expect(dispatch.dispatchForZone).toHaveBeenCalledTimes(2);

@@ -757,6 +757,9 @@ model DispatchRun {
   trigger           DispatchRunTrigger
   actorUserId       String?            @map("actor_user_id") @db.Uuid
   actorRole         String?            @map("actor_role")
+  /// #213 -- optional operator note on a MANUAL run ("why"), surfaced in the run detail. Always null
+  /// for a CRON run; nullable for every run that predates the field.
+  reason            String?
   startedAt         DateTime           @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt        DateTime?          @map("finished_at") @db.Timestamptz(6)
   status            DispatchRunStatus  @default(RUNNING)

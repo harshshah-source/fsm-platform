@@ -5,6 +5,7 @@ import { CandidateSelectionService } from '../src/recommender/candidate-selectio
 import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
+import { expectRan } from './dispatch-outcome';
 
 /**
  * Batch-Assignment transparency — the dispatch-run ledger + per-ticket decision trace, observed at
@@ -291,11 +292,13 @@ describe('dispatch transparency — run ledger lifecycle (runForActiveZones)', (
       recommender as unknown as RecommenderService,
       dispatch as unknown as BatchAssignmentService,
     );
-    const summary = await svc.runForActiveZones(NOW, {
-      trigger: 'MANUAL',
-      actorUserId,
-      actorRole: 'OPERATIONS_HEAD',
-    });
+    const summary = expectRan(
+      await svc.runForActiveZones(NOW, {
+        trigger: 'MANUAL',
+        actorUserId,
+        actorRole: 'OPERATIONS_HEAD',
+      }),
+    );
 
     expect(summary.runId).toBeDefined();
     runId = BigInt(summary.runId!);

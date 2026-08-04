@@ -4,6 +4,7 @@ import { CandidateSelectionService } from '../src/recommender/candidate-selectio
 import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
+import { expectRan } from './dispatch-outcome';
 
 /**
  * Issue 113 — the missing middle of the funnel. `DispatchRunService.runForActiveZones` is the
@@ -90,7 +91,7 @@ describe('Issue 113 — DispatchRunService.runForActiveZones', () => {
   });
 
   it('scores + dispatches an OPEN UNASSIGNED ticket to a Day Plan across active zones', async () => {
-    const summary = await svc.runForActiveZones(NOW);
+    const summary = expectRan(await svc.runForActiveZones(NOW));
     expect(summary.tickets).toBeGreaterThanOrEqual(1);
 
     // The ticket in our zone is now on a dispatched Day Plan for the eligible SE.

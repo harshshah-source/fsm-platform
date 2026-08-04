@@ -7,6 +7,7 @@ import { CandidateSelectionService } from '../src/recommender/candidate-selectio
 import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
+import { expectRan } from './dispatch-outcome';
 
 /**
  * #130 L3 — every pipeline run is attributed to the build that produced it: `build_version` +
@@ -55,7 +56,7 @@ describe('#130 L3 — run ledgers stamped with the producing build', () => {
       new RecommenderService(prisma, new CandidateSelectionService(prisma)),
       new BatchAssignmentService(prisma),
     );
-    const summary = await svc.runForActiveZones(new Date());
+    const summary = expectRan(await svc.runForActiveZones(new Date()));
     const row = await prisma.dispatchRun.findUniqueOrThrow({ where: { runId: BigInt(summary.runId) } });
     expect(row.buildVersion).toBe(BigInt(build.version));
     expect(row.buildFingerprint).toBe(build.fingerprint);

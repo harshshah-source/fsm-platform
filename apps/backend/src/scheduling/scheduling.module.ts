@@ -9,6 +9,7 @@ import { BulkUnassignService } from './bulk-unassign.service';
 import { DAY_PLAN_NOTIFIER, SpineDayPlanNotifier } from './day-plan-notifier';
 import { DayPlanQueryService } from './day-plan-query.service';
 import { DispatchRunService } from './dispatch-run.service';
+import { DispatchScheduleService } from './dispatch-schedule.service';
 import { DispatchSchedulerService } from './dispatch-scheduler.service';
 import { DispatchTransparencyQueryService } from './dispatch-transparency-query.service';
 import { OverrideService } from './override.service';
@@ -42,6 +43,10 @@ import { ZmScheduleQueryService } from './zm-schedule-query.service';
       useFactory: (run: DispatchRunService) => new DispatchSchedulerService(run),
       inject: [DispatchRunService],
     },
+    // #213 — owns the registered job's lifecycle: applies the stored schedule at boot and re-points the
+    // live job on every write, so an operator's change takes effect without a restart. DI-resolved (it
+    // needs Prisma + the SchedulerRegistry), unlike the scheduler above whose only config is env.
+    DispatchScheduleService,
     // Issue 147 slice 2 — the work-schedule closing transition, the lifecycle's missing half. Same
     // factory-provided shape and the same reason: its optional `config` param reads the environment.
     {
@@ -54,6 +59,6 @@ import { ZmScheduleQueryService } from './zm-schedule-query.service';
     // Issue 15 AC#7 — the real soft_states-backed conflict source replaces the 13a no-conflict seam.
     { provide: SOFT_STATE_CONFLICT, useClass: PrismaSoftStateConflictPort },
   ],
-  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService],
+  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService],
 })
 export class SchedulingModule {}
