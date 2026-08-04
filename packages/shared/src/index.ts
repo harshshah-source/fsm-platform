@@ -91,6 +91,9 @@ export interface MeTicketRow {
   slaBucket: string | null;
   deviceId: string;
   vehicleId: string | null;
+  /** The vehicle's registration number (`Vehicle.vehicleNo`) — `null` iff `vehicleId` is `null`.
+   *  #56: the mobile Tickets card shows this, not the opaque id. */
+  vehicleNo: string | null;
   activeSoftState: string | null;
   /** Serialized as ISO strings on the wire (backend assigns real `Date` objects; Express's JSON
    *  serializer stringifies them). Typed `Date` here to match the backend's own construction site —

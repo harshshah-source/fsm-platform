@@ -140,6 +140,7 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
     await prisma.dispatchDecisionTrace.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await prisma.vehicle.deleteMany({ where: { plantId } });
     await prisma.deviceState.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
@@ -237,6 +238,36 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
       await prisma.device.deleteMany({ where: { deviceId } });
       await prisma.plant.deleteMany({ where: { plantId: otherPlant } });
     }
+  });
+
+  it('#56 — includes the vehicle registration number when the ticket has a vehicle attached', async () => {
+    const vehicle = await prisma.vehicle.create({
+      data: { vehicleNo: 'GJ05LM' + NS, plantId, companyId },
+    });
+    const ticketId = await makeTicket();
+    await prisma.ticket.update({ where: { ticketId }, data: { vehicleId: vehicle.vehicleId } });
+
+    const res = await request(app.getHttpServer())
+      .get('/api/me/tickets')
+      .set('Authorization', `Bearer ${seToken()}`)
+      .expect(200);
+
+    const items = res.body.items as Array<{ ticketId: string; vehicleNo: string | null }>;
+    const byId = new Map(items.map((i) => [i.ticketId, i]));
+    expect(byId.get(ticketId)?.vehicleNo).toBe('GJ05LM' + NS);
+  });
+
+  it('#56 — vehicleNo is null when the ticket has no vehicle attached', async () => {
+    const ticketId = await makeTicket();
+
+    const res = await request(app.getHttpServer())
+      .get('/api/me/tickets')
+      .set('Authorization', `Bearer ${seToken()}`)
+      .expect(200);
+
+    const items = res.body.items as Array<{ ticketId: string; vehicleNo: string | null }>;
+    const byId = new Map(items.map((i) => [i.ticketId, i]));
+    expect(byId.get(ticketId)?.vehicleNo).toBeNull();
   });
 
   it('forbids a non-SE role', async () => {

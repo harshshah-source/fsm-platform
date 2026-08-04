@@ -85,6 +85,7 @@ export class MeTicketsQueryService {
         plant: { select: { name: true } },
         company: { select: { name: true } },
         device: { select: { state: { select: { slaBucket: true } } } },
+        vehicle: { select: { vehicleNo: true } },
       },
     });
 
@@ -116,6 +117,7 @@ export class MeTicketsQueryService {
         slaBucket: t.device.state?.slaBucket ?? null,
         deviceId: String(t.deviceId),
         vehicleId: t.vehicleId != null ? String(t.vehicleId) : null,
+        vehicleNo: t.vehicle?.vehicleNo ?? null,
         activeSoftState,
         createdAt: t.createdAt,
         lastStateChangedAt: t.lastStateChangedAt,
