@@ -18,7 +18,15 @@ import { DatasetQueryService, type DatasetPage } from './dataset-query.service';
 import { listDatasets, serializeDataset, type SerializedDataset } from './dataset-registry';
 import { OPS_EXPLORER_ROLE_NAMES, OPS_EXPLORER_ROLES } from './ops-explorer-access';
 import { OpsExplorerConfigService, OpsExplorerEnabledGuard } from './ops-explorer-enabled.guard';
-import type { OpsExplorerQueryDto } from './ops-explorer.dto';
+// A VALUE import, deliberately — not `import type`. `@Body() body: OpsExplorerQueryDto` needs
+// TypeScript's `emitDecoratorMetadata` to capture the real class at this call site so Nest's global
+// ValidationPipe can validate against it; an `import type` here erases the class from the compiled
+// output, so Nest falls back to a bogus metatype with zero registered rules — and `forbidNonWhitelisted`
+// then rejects every field a real caller sends (found live: an empty body "worked" because there was
+// nothing to reject; any actual query parameter 400'd as "should not exist" — invisible to supertest/
+// vitest's transform, which apparently doesn't reproduce the erasure, only caught by hitting the real
+// compiled server through a browser).
+import { OpsExplorerQueryDto } from './ops-explorer.dto';
 import { ReconciliationService, type ReconciliationReport } from './reconciliation.service';
 
 /**

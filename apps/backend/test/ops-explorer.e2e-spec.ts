@@ -5,6 +5,7 @@ import { AppModule } from '../src/app.module';
 import { TokenService } from '../src/auth/token.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { OpsExplorerController } from '../src/ops-explorer/ops-explorer.controller';
+import { OpsExplorerQueryDto } from '../src/ops-explorer/ops-explorer.dto';
 
 /**
  * #217 — the Operations Data Explorer's HTTP contract: the two access gates, the developer-mode strip,
@@ -113,6 +114,25 @@ describe('#217 — /api/ops-explorer (e2e)', () => {
         expect(handlerRoles, `${name} must not hard-code its own roles`).toBeUndefined();
       }
     });
+
+    it('reflects the real DTO class on @Body() params, not an erased placeholder', () => {
+      // Regression for a real bug: `import type { OpsExplorerQueryDto } from './ops-explorer.dto'`
+      // in the controller erased the class from the COMPILED build (tsc respects `import type` and
+      // strips it), so `emitDecoratorMetadata` had nothing to point `@Body()` at — Nest's global
+      // ValidationPipe then validated against a bogus metatype with zero registered rules, and
+      // `forbidNonWhitelisted` rejected every real field a caller sent ("property pageSize should
+      // not exist") while an empty body sailed through untouched. Invisible under this suite's own
+      // vitest+SWC transform (apparently doesn't reproduce the erasure) — only surfaced by hitting
+      // the real `tsc`-compiled server through a browser. Import must stay a VALUE import; this
+      // pins the metadata shape so a regression is a red test, not a silent live 400.
+      const proto = OpsExplorerController.prototype;
+      for (const method of ['query', 'export']) {
+        const paramTypes = Reflect.getMetadata('design:paramtypes', proto, method) as unknown[];
+        expect(paramTypes, method).toBeDefined();
+        // (key: string, body: OpsExplorerQueryDto, ...) — body is always index 1.
+        expect(paramTypes[1], `${method} @Body() param type`).toBe(OpsExplorerQueryDto);
+      }
+    });
   });
 
   describe('developer mode is stripped server-side', () => {
@@ -187,6 +207,27 @@ describe('#217 — /api/ops-explorer (e2e)', () => {
       expect(res.body.rows.length).toBeLessThanOrEqual(3);
       expect(res.body.columns.map((c: { key: string }) => c.key)).toContain('deviceId');
       expect(typeof res.body.totalRows).toBe('number');
+    });
+
+    it('accepts every OpsExplorerQueryDto field together in one request', async () => {
+      // Black-box companion to the metadata-reflection regression test above. NOTE: this test alone
+      // did NOT catch the `import type` erasure bug — it passed both before and after the fix, because
+      // this suite's vitest+SWC transform doesn't reproduce tsc's import-type erasure, so the global
+      // ValidationPipe was silently a no-op for this DTO under test the whole time. Kept anyway as the
+      // black-box contract; the metadata-reflection test is what actually guards the compiled build.
+      const res = await request(app.getHttpServer())
+        .post('/api/ops-explorer/datasets/devices/query')
+        .set('Authorization', `Bearer ${ohToken()}`)
+        .send({
+          columns: ['deviceId', 'zoneName'],
+          filters: [{ column: 'isDeparted', operator: 'eq', value: false }],
+          search: 'x',
+          sort: [{ column: 'deviceId', direction: 'asc' }],
+          page: 1,
+          pageSize: 5,
+        })
+        .expect(200);
+      expect(res.body.pageSize).toBe(5);
     });
 
     it('400s an unknown filter column rather than running anything', async () => {
