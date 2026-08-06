@@ -14,6 +14,11 @@ import { formatDateTimeWithYear } from '../../lib/datetime';
  * A failing identity leads with the signed difference and the server's ranked candidate explanations.
  * The difference is signed on purpose: `+12` (the roll-up over-counts) and `-12` (rows missing from the
  * roll-up) have completely different causes, and an absolute value would throw that away.
+ *
+ * A third status, UNAVAILABLE (#217 S3 — the AutoPlant identities on a box without AutoPlant
+ * configured), gets its own neutral treatment: no red, no numbers to compare (there is nothing to
+ * show — that's the point), just the reason. Rendering it like a failure would tell an operator on a
+ * dev box "your data is wrong" for a check that never ran.
  */
 export function ReconciliationPanel() {
   const { data, loading, error, refetch } = useApiResource(
@@ -48,6 +53,8 @@ export function ReconciliationPanel() {
             </Badge>
             <span className="text-xs text-ink-muted">
               {data.identities.filter((i) => i.status === 'PASS').length}/{data.identities.length} passing
+              {data.identities.some((i) => i.status === 'UNAVAILABLE') &&
+                ` · ${data.identities.filter((i) => i.status === 'UNAVAILABLE').length} unavailable`}
             </span>
           </div>
           {data.identities.map((identity) => (
@@ -61,21 +68,28 @@ export function ReconciliationPanel() {
 
 function Identity({ identity }: { identity: ReconciliationIdentity }) {
   const failed = identity.status === 'FAIL';
+  const unavailable = identity.status === 'UNAVAILABLE';
   return (
     <div
       data-testid={`reconciliation-${identity.key}`}
-      className={`rounded-card border p-3 ${failed ? 'border-critical/40 bg-critical-bg/40' : 'border-line bg-surface-sunken/40'}`}
+      className={`rounded-card border p-3 ${
+        failed ? 'border-critical/40 bg-critical-bg/40' : 'border-line bg-surface-sunken/40'
+      }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-semibold text-ink-strong">{identity.name}</span>
-        <Badge tone={failed ? 'critical' : 'success'}>{identity.status}</Badge>
+        <Badge tone={failed ? 'critical' : unavailable ? 'neutral' : 'success'}>{identity.status}</Badge>
       </div>
       <code className="mt-1 block font-mono text-[11px] text-ink-muted">{identity.statement}</code>
 
-      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-        <Side term={identity.left} />
-        <Side term={identity.right} />
-      </div>
+      {unavailable ? (
+        <p className="mt-2 text-xs text-ink-muted">{identity.unavailableReason}</p>
+      ) : (
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <Side term={identity.left} />
+          <Side term={identity.right} />
+        </div>
+      )}
 
       {failed && (
         <div className="mt-2 space-y-1">

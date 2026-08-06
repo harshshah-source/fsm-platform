@@ -215,8 +215,12 @@ export class AutoPlantHealthService {
    * Source-vs-FSM row-count diff per entity (review A6) — the "SUCCESS but mirroring a fraction of
    * the fleet" detector. Degrades to `reconciled: null` + error when counts are unavailable
    * (unconfigured, VPN down): the freshness surfaces above must stay useful regardless.
+   *
+   * **Public** so the Operations Data Explorer's reconciliation panel (#217 S3) can fold these same
+   * counts in as two more identities, without a second AutoPlant COUNT(*) implementation — reused,
+   * not respelled, same as `dashboard.service.ts`'s `FLEET_COUNT_COLUMNS` is for the device identities.
    */
-  private async reconciliationHealth(): Promise<ReconciliationHealth> {
+  async reconciliationHealth(): Promise<ReconciliationHealth> {
     const maxDriftAllowed = readReconMaxDrift();
     if (!this.counts) {
       return {

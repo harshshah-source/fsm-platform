@@ -131,6 +131,17 @@ const reconciliation = {
       difference: 0,
       likelySources: [],
     },
+    {
+      key: 'autoplantPlantsCount',
+      name: 'AutoPlant plants match FSM',
+      statement: 'AutoPlant plants (in scope) = FSM plants (mirrored), within 0 row(s)',
+      status: 'UNAVAILABLE',
+      left: { label: 'AutoPlant plants (source)', value: 0, measuredBy: 'unavailable' },
+      right: { label: 'FSM plants (mirrored)', value: 0, measuredBy: 'unavailable' },
+      difference: 0,
+      likelySources: [],
+      unavailableReason: 'AutoPlant MySQL not configured (env unset)',
+    },
   ],
 };
 
@@ -439,9 +450,20 @@ describe('reconciliation panel (AC-10/AC-11)', () => {
     expect(within(panel).queryByText(/Difference:/)).not.toBeInTheDocument();
   });
 
-  it('summarises the overall verdict', async () => {
+  it('renders an unavailable identity neutrally — no red, no fabricated numbers, just the reason (#217 S3)', async () => {
+    renderPage();
+    const panel = await screen.findByTestId('reconciliation-autoplantPlantsCount');
+    expect(within(panel).getByText('UNAVAILABLE')).toBeInTheDocument();
+    expect(within(panel).getByText('AutoPlant MySQL not configured (env unset)')).toBeInTheDocument();
+    // No comparison grid and no difference line — there is nothing to compare.
+    expect(within(panel).queryByText(/measured by/)).not.toBeInTheDocument();
+    expect(within(panel).queryByText(/Difference:/)).not.toBeInTheDocument();
+    expect(panel.className).not.toContain('critical');
+  });
+
+  it('summarises the overall verdict, including the unavailable count', async () => {
     renderPage();
     expect(await screen.findByText('Mismatch detected')).toBeInTheDocument();
-    expect(screen.getByText('1/2 passing')).toBeInTheDocument();
+    expect(screen.getByText('1/3 passing · 1 unavailable')).toBeInTheDocument();
   });
 });

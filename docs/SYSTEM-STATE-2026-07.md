@@ -773,11 +773,26 @@ caught by a new test after the first pass only *documented* that promise without
 batch-ROW check, not a ticket-count check, because `batch_assignment_tickets.removed_at` reflects
 legitimate ZM overrides and a ticket-level identity would FAIL chronically for correct business reasons.
 
-S3 (AutoPlant-side source-vs-FSM row diff, needs VPN) is the only slice left, by design. Verified
-2026-08-06: backend unit **44** (was 36) + e2e **16** green, the pre-existing
-`dashboard-kpi-reconciliation` **14** still green, admin **94 files / 441 tests** green, both apps
-`tsc --noEmit` clean; a one-off probe spec (written, run, discarded) executed query+export for all 11
-datasets against the live schema.
+**S3 shipped re-scoped**, with the operator's sign-off: not a 12th browsable AutoPlant dataset (the
+original plan), but **reuse of the existing** `AutoPlantHealthService.reconciliationHealth()`
+(`ingestion/autoplant/health.service.ts:219`) — already a live source-vs-FSM row-COUNT diff for plants
+and vehicles behind `/api/integration/health` (review A6/#97 Slice 5). A bulk per-row browsable dataset
+would have duplicated it while risking the **DBA's <100-row-per-query cap** every other AutoPlant read
+in this codebase respects (master sync pages at ≤90 rows/query for the same reason) — a live filterable
+table over that source does not fit that cap. `reconciliationHealth()` was made public and injected by
+having `OpsExplorerModule` **import** `IngestionModule` (not re-`useFactory`'d locally, which would
+have been the exact "silent duplicate singleton" #105 documents elsewhere) — the reconciliation panel
+gained 2 identities (`autoplantPlantsCount`/`autoplantVehiclesCount`, 8 total) and a third
+`IdentityStatus`, `UNAVAILABLE` — distinct from `FAIL`, since "could not be checked" (no VPN, env
+unconfigured) is not the same claim as "checked and disagrees"; `ReconciliationReport.status` never
+flips to FAIL on UNAVAILABLE alone. Verified deterministically: `test/setup-env.ts`'s allowlist (#182)
+deletes every `AUTOPLANT_MYSQL_*` var for the whole e2e suite, so "unconfigured" is the real state of
+every test run, not a mock of one.
+
+Issue #217 is **closed** — S1–S3 done. Final verification 2026-08-06: backend unit **44** + e2e **18**
+(was 16) green, `dashboard-kpi-reconciliation` regression **14** green, the pre-existing
+`autoplant-health`/`integration-health-*` specs (12 tests) unaffected by the visibility change, admin
+**94 files / 442 tests** (was 441) green, both apps `tsc --noEmit` clean.
 
 **SLA severity ramp (app-wide, same change):** the eight bands are now an ordinal ramp carried by
 **lightness first, hue second**, so severity survives red/green colour blindness. The previous

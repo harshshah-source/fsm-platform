@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EXCLUDE_DEACTIVATED_PLANTS, FLEET_COUNT_COLUMNS } from '../dashboard/dashboard.service';
+import { AutoPlantHealthService, readReconMaxDrift } from '../ingestion/autoplant/health.service';
 
 /**
  * KPI reconciliation (#217 AC-10/AC-11).
@@ -22,7 +23,13 @@ import { EXCLUDE_DEACTIVATED_PLANTS, FLEET_COUNT_COLUMNS } from '../dashboard/da
  * dashboard's headline strip depends on.
  */
 
-export type IdentityStatus = 'PASS' | 'FAIL';
+/**
+ * `UNAVAILABLE` is distinct from `FAIL` — it means the identity could not be evaluated at all (most
+ * commonly: AutoPlant is unconfigured in this environment, or the VPN is down), not that the two
+ * sides disagreed. Rendering that as FAIL would tell an operator on a dev box "your data is wrong"
+ * when the true answer is "this check needs the source connection, which isn't available here".
+ */
+export type IdentityStatus = 'PASS' | 'FAIL' | 'UNAVAILABLE';
 
 export interface IdentityTerm {
   label: string;
@@ -43,13 +50,20 @@ export interface ReconciliationIdentity {
   difference: number;
   /** Named, ranked candidate explanations. Populated only on FAIL — a passing identity needs no story. */
   likelySources: string[];
+  /** Populated only on UNAVAILABLE — why this identity could not be evaluated. */
+  unavailableReason?: string;
   /** Developer Mode only: the statements that produced each side. */
   sql?: { left: string; right: string };
 }
 
 export interface ReconciliationReport {
   checkedAt: string;
-  status: IdentityStatus;
+  /**
+   * `PASS` unless something actually disagreed. An UNAVAILABLE identity (AutoPlant unconfigured) does
+   * NOT flip this to FAIL — "we couldn't check" is not the same claim as "we checked and it's wrong",
+   * and conflating them would make every dev/test/CI run report the whole panel as broken.
+   */
+  status: 'PASS' | 'FAIL';
   identities: ReconciliationIdentity[];
   /** Server-side wall time for the whole reconciliation sweep, ms. */
   durationMs: number;
@@ -102,18 +116,26 @@ const RUN_BATCH_ROWS_SQL = Prisma.sql`
 
 @Injectable()
 export class ReconciliationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly autoplantHealth: AutoPlantHealthService,
+  ) {}
 
   async run(developerMode: boolean): Promise<ReconciliationReport> {
     const startedAt = Date.now();
 
-    const [fleetRows, zoneRows, companyRows, bucketRows, ledgerRows, batchRowsCount] = await Promise.all([
+    const [fleetRows, zoneRows, companyRows, bucketRows, ledgerRows, batchRowsCount, autoplant] = await Promise.all([
       this.prisma.$queryRaw<RawCounts[]>(FLEET_SQL),
       this.prisma.$queryRaw<Array<RawCounts & { key: string | null }>>(BY_ZONE_SQL),
       this.prisma.$queryRaw<Array<RawCounts & { key: string | null }>>(BY_COMPANY_SQL),
       this.prisma.$queryRaw<Array<{ key: string; count: number }>>(BY_BUCKET_SQL),
       this.prisma.$queryRaw<Array<{ total: number }>>(RUN_BATCH_LEDGER_SQL),
       this.prisma.$queryRaw<Array<{ total: number }>>(RUN_BATCH_ROWS_SQL),
+      // #217 S3 — reuses AutoPlantHealthService.reconciliationHealth() verbatim (the same COUNT(*)
+      // reads /api/integration/health already shows), rather than a second AutoPlant query path. It
+      // is the DBA <100-row cap that makes a bulk per-row AutoPlant dataset the wrong shape here — see
+      // the issue file — so this stays count-only, exactly like every other AutoPlant read in the app.
+      this.autoplantHealth.reconciliationHealth(),
     ]);
 
     const fleet = fleetRows[0] ?? ZERO;
@@ -229,14 +251,84 @@ export class ReconciliationService {
         ],
         sql: developerMode ? { left: RUN_BATCH_LEDGER_SQL.text, right: RUN_BATCH_ROWS_SQL.text } : undefined,
       }),
+      ...this.autoplantIdentities(autoplant, developerMode),
     ];
 
     return {
       checkedAt: new Date().toISOString(),
-      status: identities.every((i) => i.status === 'PASS') ? 'PASS' : 'FAIL',
+      // UNAVAILABLE does not flip this to FAIL — see the ReconciliationReport.status docstring.
+      status: identities.every((i) => i.status !== 'FAIL') ? 'PASS' : 'FAIL',
       identities,
       durationMs: Date.now() - startedAt,
     };
+  }
+
+  /**
+   * Identities 7–8 (#217 S3) — AutoPlant source-vs-FSM row counts, entirely from
+   * `AutoPlantHealthService.reconciliationHealth()`. When AutoPlant is unconfigured (every dev/test/CI
+   * box, and any deployment that hasn't opted in) both come back UNAVAILABLE with the service's own
+   * `error` string, rather than a fabricated PASS/FAIL over data that was never read.
+   */
+  private autoplantIdentities(
+    health: Awaited<ReturnType<AutoPlantHealthService['reconciliationHealth']>>,
+    developerMode: boolean,
+  ): ReconciliationIdentity[] {
+    const specs: Array<{ key: string; name: string; entity: 'plants' | 'vehicles'; table: string }> = [
+      { key: 'autoplantPlantsCount', name: 'AutoPlant plants match FSM', entity: 'plants', table: 'plants' },
+      { key: 'autoplantVehiclesCount', name: 'AutoPlant vehicles match FSM', entity: 'vehicles', table: 'vehicles' },
+    ];
+
+    return specs.map(({ key, name, entity, table }) => {
+      const statement = `AutoPlant ${entity} (in scope) = FSM ${table} (mirrored), within ${readReconMaxDrift()} row(s)`;
+      const row = health.entities.find((e) => e.entity === entity);
+
+      if (!row) {
+        return {
+          key,
+          name,
+          statement,
+          status: 'UNAVAILABLE',
+          left: { label: `AutoPlant ${entity} (source)`, value: 0, measuredBy: 'unavailable' },
+          right: { label: `FSM ${table} (mirrored)`, value: 0, measuredBy: 'unavailable' },
+          difference: 0,
+          likelySources: [],
+          unavailableReason:
+            health.error ?? 'AutoPlant source counts unavailable in this environment.',
+        };
+      }
+
+      const withinTolerance = Math.abs(row.drift) <= health.maxDriftAllowed;
+      return {
+        key,
+        name,
+        statement,
+        status: withinTolerance ? 'PASS' : 'FAIL',
+        left: {
+          label: `AutoPlant ${entity} (source)`,
+          value: row.sourceCount,
+          measuredBy: `live COUNT(*) over AutoPlant, the SAME scope filter the master sync reads with (Issue 97 Slice 5)`,
+        },
+        right: {
+          label: `FSM ${table} (mirrored)`,
+          value: row.fsmCount,
+          measuredBy: `COUNT(*) over ${table}`,
+        },
+        difference: row.drift,
+        likelySources: withinTolerance
+          ? []
+          : [
+              'The zone-mapping backlog (SYSTEM-STATE §5) — a plant the crosswalk cannot yet place is still counted source-side but may be excluded from a downstream FSM read, depending on which one this is.',
+              'A master sync is running concurrently with this check — the two counts are read at slightly different instants, not in one transaction.',
+              'The master sync\'s own scope filter (ACTIVE plants) drifted from what this identity assumes — check master-sync.service.ts against master-mapping.ts\'s MasterSyncScope.',
+            ],
+        sql: developerMode
+          ? {
+              left: `AutoPlantMasterSource.count${entity === 'plants' ? 'Plants' : 'VehicleMasters'}() — reuses the master sync's own filter fragments, never a second spelling`,
+              right: `SELECT COUNT(*) FROM ${table}`,
+            }
+          : undefined,
+      };
+    });
   }
 
   /** Compare the two sides and attach the story only when there is one to tell. */

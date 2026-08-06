@@ -117,15 +117,23 @@ export interface ExplorerPage {
   };
 }
 
+/**
+ * `UNAVAILABLE` (#217 S3) is distinct from `FAIL` — it means the identity could not be evaluated
+ * (typically: AutoPlant is unconfigured in this environment), not that the two sides disagreed.
+ */
+export type IdentityStatus = 'PASS' | 'FAIL' | 'UNAVAILABLE';
+
 export interface ReconciliationIdentity {
   key: string;
   name: string;
   statement: string;
-  status: 'PASS' | 'FAIL';
+  status: IdentityStatus;
   left: { label: string; value: number; measuredBy: string };
   right: { label: string; value: number; measuredBy: string };
   difference: number;
   likelySources: string[];
+  /** Populated only on UNAVAILABLE. */
+  unavailableReason?: string;
   sql?: { left: string; right: string };
 }
 

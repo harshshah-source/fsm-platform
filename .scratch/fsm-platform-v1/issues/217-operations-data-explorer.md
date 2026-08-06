@@ -1,6 +1,6 @@
 # 217 — Operations Data Explorer: one read-only surface that traces any number back to its rows
 
-Status: ready-for-agent — Slices 1–2 done (engine + 11 datasets + reconciliation); S3 (AutoPlant source-vs-FSM diff) open
+Status: done — S1–S3 complete (engine + 11 datasets + 8-identity reconciliation, including AutoPlant)
 Type: AFK · Backend + Admin
 Filed: 2026-08-06
 Origin: operator request — "a single source of truth for the FSM platform … for debugging,
@@ -127,14 +127,48 @@ from the JSON, so the browser never receives them.
 |---|---|---|
 | S1 | Config + access seam + guard; registry + query engine; `devices` dataset; reconciliation; controller + streamed export; admin page with Developer Mode | done |
 | S2 | Datasets: `zones`, `companies`, `plants`, `vehicles` (FSM + AutoPlant master data), `engineers`, `tickets`, `batches`, `dispatchRuns`, `recommendations`, `auditLogs` (operational state, dispatch, audit trail) — 10 datasets in one slice, all registry entries over the S1 engine, no new routes/pages | done |
-| S3 | AutoPlant-side read (source-vs-FSM row diff over the MySQL reader) — needs VPN, so it is the last slice and degrades cleanly when the source is unconfigured | not started |
+| S3 | AutoPlant source-vs-FSM reconciliation — 2 new identities (`autoplantPlantsCount`, `autoplantVehiclesCount`) reusing `AutoPlantHealthService.reconciliationHealth()` | done — **re-scoped from the original plan** (see notes) |
 
 **Not built, deliberately, and not missed:** `failure_cycles`, `se_coverage`/`engineer_territory_coverage`,
 `snapshot_runs`/`master_sync_runs` as their own datasets. `failure_cycles` state is already visible
 through `tickets` for every practical debugging question (a ticket's parent cycle mirrors its state);
-splitting it out doubles a join for no new information until a concrete need names one. Coverage/
-ingestion-ledger datasets are natural S3-adjacent additions once the AutoPlant slice's MySQL reader
-seam exists to pair them against.
+splitting it out doubles a join for no new information until a concrete need names one.
+
+### S3 notes — re-scoped from "browse AutoPlant rows" to "reuse AutoPlant's existing reconciliation"
+
+The issue originally scoped S3 as "AutoPlant-side read (source-vs-FSM row diff over the MySQL reader)"
+— i.e. a 12th browsable dataset, bulk-reading live AutoPlant rows the way `devices`/`tickets`/etc. read
+Postgres. Building it turned up a better-fitting design and the original plan was dropped in favour of
+it, with the operator's sign-off:
+
+- **`AutoPlantHealthService.reconciliationHealth()` (`ingestion/autoplant/health.service.ts:219`)
+  already does exactly this comparison** — a live source-vs-FSM row-COUNT diff for plants and
+  vehicles, behind `/api/integration/health`, built for review A6/Issue 97 Slice 5. A "browse every
+  AutoPlant row" dataset would have duplicated it while also risking the **DBA-imposed <100-row cap
+  per AutoPlant query** that every other AutoPlant read in this codebase respects (master sync pages
+  at ≤90 rows/query for exactly this reason) — a live per-row bulk pull for a filterable UI table is
+  not a shape that fits that constraint.
+- Made the method public (was `private`) and injected it into `ReconciliationService` via
+  `OpsExplorerModule` importing `IngestionModule` — **not** a local re-`useFactory`'d instance, which
+  would have created the exact "silent duplicate singleton" #105 already documents in
+  `recommender.module.ts`/`engineers.module.ts`. Importing the owning module and using its exported
+  provider is the fix #105 itself prescribes.
+- Added a third `IdentityStatus`, `UNAVAILABLE`, distinct from `FAIL` — an identity that could not be
+  evaluated (no VPN, unconfigured env) is not the same claim as "checked and disagrees", and treating
+  the two the same would report every dev/test/CI box as broken. `ReconciliationReport.status` only
+  flips to FAIL on an actual FAIL, never on UNAVAILABLE alone. The FE renders UNAVAILABLE neutrally (no
+  red, no fabricated comparison — just the reason), matching `KpiInfo`/`ColumnSource`'s existing
+  info-affordance conventions rather than inventing a new visual language.
+- Verified deterministically: `test/setup-env.ts`'s allowlist (#182) deletes every `AUTOPLANT_MYSQL_*`
+  var for the whole e2e suite, so "AutoPlant unconfigured" is the *real*, reproducible state of every
+  test run, not a mock of one — the e2e spec asserts on that directly rather than stubbing anything.
+- No 12th dataset, no new page, no new route. The reconciliation panel — which the user asked to
+  "continue validating... as each dataset is added" — gained the two new identities and nothing else
+  changed shape.
+- Verified: backend unit 44 + e2e **18** (was 16) green, `dashboard-kpi-reconciliation` regression 14
+  green, the pre-existing `autoplant-health`/`integration-health-*` specs (12 tests) unaffected by the
+  `private`→public visibility change, admin **94 files / 442 tests** (was 441) green, both apps
+  `tsc --noEmit` clean.
 
 ### S2 notes
 

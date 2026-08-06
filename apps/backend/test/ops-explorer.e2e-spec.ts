@@ -255,13 +255,53 @@ describe('#217 — /api/ops-explorer (e2e)', () => {
         'operationalPartition',
         'bucketRollup',
         'dispatchBatchLedger',
+        'autoplantPlantsCount',
+        'autoplantVehiclesCount',
       ]);
       for (const identity of res.body.identities) {
         expect(identity.difference).toBe(identity.left.value - identity.right.value);
+        if (identity.status === 'UNAVAILABLE') {
+          // The two AutoPlant identities (#217 S3) — no VPN in this environment, so they never claim
+          // a PASS or FAIL over data that was never read.
+          expect(identity.unavailableReason).toBeTruthy();
+          expect(identity.likelySources).toEqual([]);
+          continue;
+        }
         expect(identity.status).toBe(identity.difference === 0 ? 'PASS' : 'FAIL');
         if (identity.status === 'PASS') expect(identity.likelySources).toEqual([]);
         else expect(identity.likelySources.length).toBeGreaterThan(0);
       }
+    });
+
+    it('AutoPlant identities are UNAVAILABLE — not a fabricated PASS/FAIL — when the source is unconfigured (#217 S3)', async () => {
+      // #182: the e2e suite deletes every AUTOPLANT_MYSQL_* var and never re-sets it, so this is the
+      // real, deterministic state of every dev/test/CI run — not a mock of one.
+      expect(process.env.AUTOPLANT_MYSQL_HOST).toBeUndefined();
+      enable(true);
+      const res = await request(app.getHttpServer())
+        .get('/api/ops-explorer/reconciliation')
+        .set('Authorization', `Bearer ${ohToken()}`)
+        .expect(200);
+
+      const byKey = Object.fromEntries(res.body.identities.map((i: { key: string }) => [i.key, i]));
+      for (const key of ['autoplantPlantsCount', 'autoplantVehiclesCount']) {
+        expect(byKey[key].status, key).toBe('UNAVAILABLE');
+        expect(byKey[key].unavailableReason, key).toMatch(/AutoPlant/i);
+        expect(byKey[key].sql, `${key} sql in dev mode`).toBeUndefined();
+      }
+    });
+
+    it('UNAVAILABLE never flips the overall report to FAIL by itself', async () => {
+      enable(false);
+      const res = await request(app.getHttpServer())
+        .get('/api/ops-explorer/reconciliation')
+        .set('Authorization', `Bearer ${ohToken()}`)
+        .expect(200);
+      const nonAutoplant = res.body.identities.filter(
+        (i: { key: string }) => i.key !== 'autoplantPlantsCount' && i.key !== 'autoplantVehiclesCount',
+      );
+      const expectedOverall = nonAutoplant.every((i: { status: string }) => i.status !== 'FAIL') ? 'PASS' : 'FAIL';
+      expect(res.body.status).toBe(expectedOverall);
     });
 
     it('the three single-query partition identities always hold — they are structural', async () => {
