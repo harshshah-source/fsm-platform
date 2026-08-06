@@ -180,6 +180,53 @@ describe('Company/Plant Overview (Issue 06 AC#3 / Issue 122)', () => {
     expect(screen.getByLabelText(/assignment state/i)).toBeInTheDocument();
   });
 
+  it('searches within the Plants sub-table, independently of the parent search', async () => {
+    // Every level of the drill-down carries its own search: the parent's narrows the whole tree,
+    // this one narrows the panel an operator already has open, without collapsing it.
+    stubTickets('5005');
+    renderTable([
+      companyPlantRow({ companyId: '10', companyName: 'Acme Logistics', plantId: '7', plantName: 'Yard-1', operational: 25 }),
+      companyPlantRow({ companyId: '10', companyName: 'Acme Logistics', plantId: '8', plantName: 'Dock-2', operational: 5 }),
+    ]);
+
+    const overview = within(screen.getByRole('table', { name: /company\/plant overview/i }));
+    await userEvent.click(overview.getByText('Acme Logistics'));
+    const plants = within(screen.getByRole('table', { name: /plants for acme logistics/i }));
+    expect(plants.getByText('Yard-1')).toBeInTheDocument();
+    expect(plants.getByText('Dock-2')).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText(/search plants of acme logistics/i), 'dock');
+    expect(plants.getByText('Dock-2')).toBeInTheDocument();
+    expect(plants.queryByText('Yard-1')).not.toBeInTheDocument();
+    // The sub-table re-numbers what survives, so S.No. still reads 1..n rather than leaving a gap.
+    expect(plants.getByText('Dock-2').closest('tr')!.querySelector('td')).toHaveTextContent('1');
+  });
+
+  it('searches the Open device tickets sub-sub-table across every column it shows', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input.toString();
+        const body = url.includes('/tickets')
+          ? [
+              { ticketId: 't1', deviceId: '5005', vehicleNo: 'MH12AB1111', slaBucket: 'CRITICAL', status: 'OPEN', plantId: '7' },
+              { ticketId: 't2', deviceId: '6006', vehicleNo: 'GJ01ZZ9999', slaBucket: 'WARNING', status: 'OPEN', plantId: '7' },
+            ]
+          : [];
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+    renderTable(rows);
+    await openDeviceTickets();
+    expect(await screen.findByText('5005')).toBeInTheDocument();
+    expect(screen.getByText('6006')).toBeInTheDocument();
+
+    // A vehicle number is not the device id, so this only works if the search spans the row's columns.
+    await userEvent.type(screen.getByLabelText(/search open device tickets/i), 'gj01');
+    expect(screen.getByText('6006')).toBeInTheDocument();
+    expect(screen.queryByText('5005')).not.toBeInTheDocument();
+  });
+
   it('resolves a device id search to its plant via the universal ticket search (bug fix)', async () => {
     // `CompanyPlantRow` carries no device/vehicle identity — searching "9988" can't match by
     // company/plant name or id. The placeholder promises device/vehicle search anyway, so it must

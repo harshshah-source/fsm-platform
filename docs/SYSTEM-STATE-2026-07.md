@@ -715,6 +715,70 @@ through the same `FLEET_COUNT_COLUMNS` inactive predicate above rather than a se
 The clamp lives in the service because the global `ZoneScopeGuard` inspects `:zoneId` route params and
 the `zone_id` query spelling — not `zoneId` — the same posture `activityTrend` already takes.
 
+**#217 Operations Data Explorer, Slice 1 (done, 2026-08-06):** a new OH-only, **read-only** surface —
+route `/ops-explorer`, module `apps/backend/src/ops-explorer/` — whose purpose is to walk any rendered
+number back to the rows that produced it, for debugging/reconciliation/audit rather than reporting.
+
+Gated **twice**: `@Roles` from the single constant `OPS_EXPLORER_ROLES` (`ops-explorer-access.ts`) and
+the `OPS_EXPLORER_ENABLED` env flag, which **defaults off in every environment** and makes every route
+return **404, not 403** — a disabled diagnostic tool should not confirm its own existence. No sixth RBAC
+role was added: CONTEXT.md:28 is explicit that no Admin persona exists, and the one-constant allow-list
+is what makes a future `PLATFORM_DEVELOPER` a one-line append instead of a redesign. A second flag,
+`OPS_EXPLORER_DEVELOPER_MODE` (on outside production), adds the lineage layer — source column, SQL
+expression, formula, endpoint, per-query timings, bound parameters, raw response — **stripped
+server-side** in `serializeDataset`, so with it off those fields are absent from the payload rather than
+hidden in the client. The guard reads both flags **per request** (unlike the cron schedulers, which
+resolve once at decorator evaluation), so an operator can turn the tool on mid-incident without a bounce.
+
+The engine is a **dataset registry** (`dataset-registry.ts`) plus a pure builder (`dataset-query.ts`):
+a dataset declares its FROM/JOIN and its columns with full provenance, and a new dataset is a registry
+entry — no new controller, service or route. The injection boundary is the registry lookup: a request
+names a column by `key`, the builder resolves it or 400s `UNKNOWN_COLUMN`, and the SQL emitted is the
+code-authored fragment from the registry while every value is bound. LIKE metacharacters are escaped,
+`eq`/`neq` against null route to `IS [NOT] NULL`, `neq` is `IS DISTINCT FROM`, and an empty `in` list
+becomes an explicit `FALSE`. The builder is DB-free and carries 36 unit tests, deliberately: #156
+established the e2e suite is not a reliable green/red signal, and these are the properties that must not
+regress. Export is **server-side and streamed** — #160's `TableDownloadButton` DOM read is right for an
+operational table but structurally cannot export past the rendered page, and this is the app's only
+server-paged table.
+
+Reconciliation (`reconciliation.service.ts`) evaluates five identities over the whole database — zone
+roll-up and company roll-up against the KPI strip, plus the three structural partitions — reporting both
+sides, **how each side was measured**, the signed difference, and ranked candidate causes on failure. It
+**imports** `FLEET_COUNT_COLUMNS` and `EXCLUDE_DEACTIVATED_PLANTS` from `dashboard.service.ts` (both
+newly exported for this) rather than restating the predicates: a checker written from a second spelling
+only verifies that the second spelling agrees with itself, which is the defect class #176 closed.
+
+Slice 1 shipped the `devices` dataset. **Slice 2 (same day) grew it to 11 datasets** —
+`zones`/`companies`/`plants`/`vehicles` (FSM + AutoPlant master data), `engineers`, `tickets`,
+`batches`, `dispatchRuns`, `recommendations`, `auditLogs` (operational state, dispatch, audit trail) —
+purely as registry entries over the unchanged S1 engine: zero new routes/controllers/pages. Each
+drilldown targets an **existing** route (`/schedules/:engineerId`, `/tickets/:ticketId`,
+`/batches/:batchId`, `/dispatch-runs/:runId`, `/reports/device?{zoneId,companyId,plantId}=`), confirmed
+by reading each target page's actual param contract; `auditLogs` gets no drilldown (`entityType` varies
+row to row with no single safe target).
+
+**S2 found and fixed a real S1 defect**: `devices.plantName`'s drilldown needed the plant's numeric id
+but the column *displays* `plants.name`, so `:value` was silently substituted with the wrong thing;
+`devices.deviceId`'s drilldown target read no `deviceId` param at all. Fixed with
+`DatasetColumn.drilldown.valueSql` — an optional companion SQL expression projected as a hidden
+`__dd_<key>` row field, so a column can display one value and link on another without a second visible
+column. `serializeDataset` strips it in both modes (a raw-SQL field, not a Developer Mode field) —
+caught by a new test after the first pass only *documented* that promise without enforcing it.
+`deviceId`'s broken link was removed rather than left pointing nowhere; `zoneName`/`companyName` on
+`devices` gained real drilldowns as a result.
+
+**Reconciliation gained a 6th identity, `dispatchBatchLedger`**
+(`Σ dispatch_runs.batches = COUNT(plant_batch_assignments) WHERE run_id IS NOT NULL`) — deliberately a
+batch-ROW check, not a ticket-count check, because `batch_assignment_tickets.removed_at` reflects
+legitimate ZM overrides and a ticket-level identity would FAIL chronically for correct business reasons.
+
+S3 (AutoPlant-side source-vs-FSM row diff, needs VPN) is the only slice left, by design. Verified
+2026-08-06: backend unit **44** (was 36) + e2e **16** green, the pre-existing
+`dashboard-kpi-reconciliation` **14** still green, admin **94 files / 441 tests** green, both apps
+`tsc --noEmit` clean; a one-off probe spec (written, run, discarded) executed query+export for all 11
+datasets against the live schema.
+
 **SLA severity ramp (app-wide, same change):** the eight bands are now an ordinal ramp carried by
 **lightness first, hue second**, so severity survives red/green colour blindness. The previous
 eyeballed ramp did not: `EARLY_RISK`/`RISK` sat 0.01 apart in OKLab L (ΔE 2.7 under deuteranopia —

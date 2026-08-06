@@ -580,15 +580,27 @@ function CompanyPlants({
   // Healthy · Warehouse · Inactive % · Fleet Health % · the SLA-bucket columns · Uptime.
   const PLANT_COLSPAN = 9 + buckets.length;
 
+  // The sub-table owns its own search, scoped to this company's plants only — the parent's search
+  // narrows the whole tree, this one narrows the panel an operator already has open. Matches the
+  // plant's display name or its id, the two identities visible in the row.
+  const [plantSearch, setPlantSearch] = useState('');
+  const plants = useMemo(() => {
+    const q = plantSearch.trim().toLowerCase();
+    if (!q) return company.plants;
+    return company.plants.filter(
+      (p) => formatPlantDisplayName(p.plantName).toLowerCase().includes(q) || p.plantId.toLowerCase().includes(q),
+    );
+  }, [company.plants, plantSearch]);
+
   // Own download, restricted to this company's plants — S.No. re-numbers from 1 (AC-20: sub-tables
-  // number independently).
+  // number independently) and the export follows the search, so it matches what is on screen.
   const exportPlants = (format: ExportFormat) => {
     const headers = [
       'S.No.', 'Plant', 'Operational devices', 'Inactive operational', 'Healthy devices',
       'Warehouse devices', 'Inactive %', 'Fleet Health %', 'Fleet Uptime %',
       ...SLA_BUCKETS_ASC.map((b) => BUCKET_LABEL[b]),
     ];
-    const body = company.plants.map((p, i) => [
+    const body = plants.map((p, i) => [
       i + 1,
       formatPlantDisplayName(p.plantName),
       p.operationalDevices,
@@ -605,15 +617,25 @@ function CompanyPlants({
 
   return (
     <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
-      <div className="flex items-center justify-between gap-2 border-b border-line bg-surface-raised px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface-raised px-3 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
           Plants — {company.companyName}
         </span>
-        <TableDownloadButton
-          ariaLabel={`Plants for ${company.companyName}`}
-          disabled={company.plants.length === 0}
-          onSelectFormat={exportPlants}
-        />
+        <span className="inline-flex flex-wrap items-center gap-1.5">
+          <SearchInput
+            aria-label={`Search plants of ${company.companyName}`}
+            placeholder="Plant name or ID…"
+            value={plantSearch}
+            onChange={(e) => setPlantSearch(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            className="h-8 w-44 text-xs"
+          />
+          <TableDownloadButton
+            ariaLabel={`Plants for ${company.companyName}`}
+            disabled={plants.length === 0}
+            onSelectFormat={exportPlants}
+          />
+        </span>
       </div>
       {/* Same fixed-vs-auto rule as the parent table (see there). */}
       <table
@@ -663,7 +685,14 @@ function CompanyPlants({
           </tr>
         </thead>
         <tbody>
-          {company.plants.map((p, index) => (
+          {plants.length === 0 && (
+            <tr>
+              <td colSpan={PLANT_COLSPAN} className="p-0">
+                <EmptyState icon={<IconTruck />} message="No plants match this search." />
+              </td>
+            </tr>
+          )}
+          {plants.map((p, index) => (
             <Fragment key={p.plantId}>
               <tr
                 onClick={() => onTogglePlant(p.plantId)}
@@ -766,6 +795,7 @@ function OpenDeviceTickets({
   operationalDevices: number | null | undefined;
 }) {
   const navigate = useNavigate();
+  const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<TicketAssignmentFilter>('');
   const [sort, setSort] = useState<TicketSort>('SLA_DESC');
 
@@ -783,15 +813,36 @@ function OpenDeviceTickets({
     { key: 'unassigned', label: 'Unassigned', value: unassignedCount },
   ];
 
+  // Search runs over the already-loaded ticket set (no extra fetch) and matches every identity the
+  // row actually shows — device, vehicle, zone, company, plant, transporter, SE, batch, SLA band,
+  // status — so whatever an operator can read in the panel is also what they can type.
+  const matchesSearch = (t: TicketRow, q: string): boolean =>
+    [
+      t.deviceId,
+      t.vehicleNo,
+      t.zoneName,
+      t.companyName,
+      t.plantName ? formatPlantDisplayName(t.plantName) : null,
+      t.transporterName,
+      t.assignedSeName,
+      t.assignmentState === 'FORMALLY_ASSIGNED' ? 'assigned' : 'unassigned',
+      t.batchId ? `batch #${t.batchId}` : null,
+      t.slaBucket ? BUCKET_LABEL[t.slaBucket as SlaBucket] ?? t.slaBucket : null,
+      t.status,
+    ].some((f) => typeof f === 'string' && f.toLowerCase().includes(q));
+
   const view = useMemo(() => {
-    const list = filter ? tickets.filter((t) => t.assignmentState === filter) : [...tickets];
+    const q = search.trim().toLowerCase();
+    const list = tickets.filter(
+      (t) => (!filter || t.assignmentState === filter) && (!q || matchesSearch(t, q)),
+    );
     list.sort((a, b) => {
       if (sort === 'DEVICE') return a.deviceId.localeCompare(b.deviceId);
       const d = bucketSeverityRank(a.slaBucket) - bucketSeverityRank(b.slaBucket);
       return sort === 'SLA_ASC' ? -d : d;
     });
     return list;
-  }, [tickets, filter, sort]);
+  }, [tickets, filter, sort, search]);
 
   const exportTickets = (format: ExportFormat) => {
     const headers = [
@@ -829,6 +880,14 @@ function OpenDeviceTickets({
           </span>
           {!loading && tickets.length > 0 && (
             <span className="inline-flex flex-wrap items-center gap-1.5">
+              <SearchInput
+                aria-label={`Search open device tickets — ${plantLabel}`}
+                placeholder="Device, vehicle, SE, batch…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="h-8 w-48 text-xs"
+              />
               <FilterSelect
                 aria-label="Filter tickets by assignment"
                 value={filter}
@@ -885,7 +944,7 @@ function OpenDeviceTickets({
       ) : tickets.length === 0 ? (
         <EmptyState icon={<IconTruck />} message="No open device tickets at this plant." />
       ) : view.length === 0 ? (
-        <EmptyState icon={<IconTruck />} message="No tickets match this filter." />
+        <EmptyState icon={<IconTruck />} message="No tickets match this search or filter." />
       ) : (
         <table className="w-full border-collapse text-sm">
           <thead>

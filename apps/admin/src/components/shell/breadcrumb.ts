@@ -79,7 +79,11 @@ const DETAIL_CRUMBS: DetailCrumbEntry[] = [
 export function resolveBreadcrumb(pathname: string, role: string): Crumb[] {
   if (pathname === '/') return [{ label: 'Dashboard' }];
 
-  const navItems = buildNav(role).flatMap((group) => group.items);
+  // Feature-flagged nav entries are always included when resolving a LABEL. The flag decides whether a
+  // link is offered; it has no bearing on naming a page the user has already reached (they may have
+  // typed the URL, or the flag may have flipped mid-session). Without this, `/ops-explorer` falls
+  // through to the generic "Console" crumb.
+  const navItems = buildNav(role, { opsExplorer: true }).flatMap((group) => group.items);
 
   for (const entry of DETAIL_CRUMBS) {
     const match = entry.pattern.exec(pathname);

@@ -31,6 +31,7 @@ import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { ExportsPage } from './pages/exports/ExportsPage';
+import { OpsExplorerPage } from './pages/ops-explorer/OpsExplorerPage';
 import { BulkUnassignPage } from './pages/admin/BulkUnassignPage';
 import { PlantDeactivationsPage } from './pages/admin/PlantDeactivationsPage';
 import { PlantZonesPage } from './pages/admin/PlantZonesPage';
@@ -259,6 +260,18 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['OPERATIONS_HEAD']}>
                 <ExportsPage />
+              </RoleRoute>
+            }
+          />
+          {/* Operations Data Explorer — Operations Head only, AND behind the backend's
+              OPS_EXPLORER_ENABLED flag (#217). The RoleRoute is the role half; the flag half cannot
+              live here because it is server state, so the page itself resolves it and renders an
+              explanation when the feature is off. Both gates are enforced on every endpoint. */}
+          <Route
+            path="/ops-explorer"
+            element={
+              <RoleRoute roles={['OPERATIONS_HEAD']}>
+                <OpsExplorerPage />
               </RoleRoute>
             }
           />

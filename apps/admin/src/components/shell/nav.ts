@@ -12,6 +12,7 @@ import {
   IconPackage,
   IconRoute,
   IconRotate,
+  IconSearch,
   IconSettings,
   IconShare,
   IconShield,
@@ -32,12 +33,22 @@ export interface NavGroup {
 }
 
 /**
+ * Server-resolved feature flags that change what the nav contains. Kept as an explicit parameter rather
+ * than read from a context inside `buildNav`, so the function stays pure and directly unit-testable —
+ * the existing nav tests call it with a role and nothing else, and all of them still do.
+ */
+export interface NavFeatures {
+  /** `OPS_EXPLORER_ENABLED` on the backend (#217). Off ⇒ the link must not render at all. */
+  opsExplorer?: boolean;
+}
+
+/**
  * Role-scoped, grouped navigation (the `RoleNav` concern). Mirrors the reference sidebar grouping and
  * the existing route map + RoleRoute gates — every link targets a route that already exists. Warehouse
  * Managers get the scoped Warehouse nav (reference `05`); managers get Operations + Components; only the
  * Operations Head sees the Admin group.
  */
-export function buildNav(role: string): NavGroup[] {
+export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
   const isManager =
     role === 'ZONAL_MANAGER' || role === 'CENTRAL_SERVICE_MANAGER' || role === 'OPERATIONS_HEAD';
   const isOpsHead = role === 'OPERATIONS_HEAD';
@@ -111,9 +122,15 @@ export function buildNav(role: string): NavGroup[] {
   }
 
   if (isOpsHead) {
+    // #217 — the explorer link appears only when the backend reports the feature enabled. Role alone is
+    // not enough: with the flag off every one of its endpoints 404s, so a link would be a dead end.
+    const opsExplorer: NavLink[] = features.opsExplorer
+      ? [{ label: 'Data Explorer', to: '/ops-explorer', icon: IconSearch }]
+      : [];
     groups.push({
       heading: 'Admin',
       items: [
+        ...opsExplorer,
         { label: 'Coverage', to: '/coverage', icon: IconMapPin },
         { label: 'CSM Backup Share', to: '/reports/csm-approval-share', icon: IconShare },
         { label: 'Bulk Unassign', to: '/bulk-unassign', icon: IconShuffle },

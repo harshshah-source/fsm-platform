@@ -89,6 +89,8 @@ import { VerificationModule } from './verification/verification.module';
 import { VerificationController } from './verification/verification.controller';
 import { VouchersModule } from './vouchers/vouchers.module';
 import { ExportsModule } from './exports/exports.module';
+import { OpsExplorerModule } from './ops-explorer/ops-explorer.module';
+import { OpsExplorerController } from './ops-explorer/ops-explorer.controller';
 import { PlantDeactivationModule } from './plant-deactivation/plant-deactivation.module';
 import { VouchersController } from './vouchers/vouchers.controller';
 import { MeVouchersController } from './vouchers/me-vouchers.controller';
@@ -126,6 +128,7 @@ import { MediaController } from './media/media.controller';
     NotificationsModule,
     VouchersModule,
     ExportsModule,
+    OpsExplorerModule,
     PlantDeactivationModule,
     MediaModule,
   ],
@@ -187,6 +190,9 @@ import { MediaController } from './media/media.controller';
     VouchersController,
     MeVouchersController,
     MediaController,
+    // #217 — read-only, OH-only, and behind OPS_EXPLORER_ENABLED (its guard 404s when the flag is off),
+    // so registering it here costs nothing in a deployment that has not opted in.
+    OpsExplorerController,
   ],
   providers: [
     AuthGuard,

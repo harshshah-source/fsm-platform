@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 /** Devices on a deactivated plant (Issue 119) drop out of every dashboard count + SLA bucket; they are
  *  surfaced instead on the OH "Plant Deactivations" list. Self-contained predicate — appended to any
  *  aggregation joined to `plants p`. */
-const EXCLUDE_DEACTIVATED_PLANTS = Prisma.sql`AND p.plant_id NOT IN (SELECT plant_id FROM plant_deactivations WHERE reactivated_at IS NULL)`;
+export const EXCLUDE_DEACTIVATED_PLANTS = Prisma.sql`AND p.plant_id NOT IN (SELECT plant_id FROM plant_deactivations WHERE reactivated_at IS NULL)`;
 
 /**
  * The ONE aggregate projection every fleet count on the dashboard is derived from — zone rows,
@@ -28,8 +28,14 @@ const EXCLUDE_DEACTIVATED_PLANTS = Prisma.sql`AND p.plant_id NOT IN (SELECT plan
  * the pre-fix numerator, so this change moves denominators only and never restates what "inactive"
  * means. It also keeps `byBucket` summing to exactly `inactiveOperational`, since both read the same
  * bucketed rows.
+ *
+ * **Exported for the Operations Data Explorer's reconciliation panel (#217).** That panel asserts the
+ * identities in the paragraph above over the whole live database. It must import this fragment rather
+ * than restate the predicates: a checker written from a second spelling only verifies that the second
+ * spelling agrees with itself, which is precisely the failure mode #176 closed. Nothing outside
+ * `dashboard/` and `ops-explorer/` should need it.
  */
-const FLEET_COUNT_COLUMNS = Prisma.sql`
+export const FLEET_COUNT_COLUMNS = Prisma.sql`
   COUNT(*)::int AS "mirroredDevices",
   COUNT(*) FILTER (WHERE ds.is_departed = false)::int AS "operationalDevices",
   COUNT(*) FILTER (WHERE ds.is_departed = true)::int AS "warehouseDevices",

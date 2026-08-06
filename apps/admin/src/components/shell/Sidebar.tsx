@@ -6,6 +6,7 @@ import { IconClose, IconMenu } from '../ui/icons';
 import { BrandLogo } from './BrandLogo';
 import { useSidebar } from './SidebarContext';
 import { buildNav } from './nav';
+import { useOpsExplorerMeta } from '../../pages/ops-explorer/useOpsExplorerMeta';
 
 /**
  * Role-grouped primary navigation (reference chrome) with a production collapsible behaviour:
@@ -21,7 +22,11 @@ import { buildNav } from './nav';
 export function Sidebar({ role }: { role: string }) {
   const { pathname } = useLocation();
   const { collapsed, toggleCollapsed, mobileOpen, closeMobile } = useSidebar();
-  const groups = buildNav(role);
+  // #217 — the Data Explorer link exists only if the backend says the feature is on. Asked only for
+  // Operations Head (the hook short-circuits otherwise) and cached at module scope, so this is one
+  // request per session, not one per navigation.
+  const opsExplorer = useOpsExplorerMeta(role === 'OPERATIONS_HEAD');
+  const groups = buildNav(role, { opsExplorer: opsExplorer.state === 'ready' });
   const isActive = (to: string) => (to === '/' ? pathname === '/' : pathname.startsWith(to));
 
   // Collapsed-rail label tooltip. Rendered via a body portal so it escapes the rail's overflow clip and
