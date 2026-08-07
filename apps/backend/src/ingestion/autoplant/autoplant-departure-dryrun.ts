@@ -1,5 +1,11 @@
 import 'dotenv/config';
+import { writeFileSync } from 'node:fs';
 import { DeviceDepartureService } from '../../device-departure/device-departure.service';
+import {
+  buildStandDownRows,
+  readStandDownPathArg,
+  toStandDownCsv,
+} from '../../device-departure/stand-down-export';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AutoPlantMasterSource } from './autoplant-master-source';
 import { AutoPlantMysqlClient, readAutoPlantMysqlConfig } from './autoplant-mysql.client';
@@ -24,8 +30,32 @@ import { AutoPlantMysqlClient, readAutoPlantMysqlConfig } from './autoplant-mysq
  *    bounds the inferred ABSENT_FROM_READ path exactly as production does.
  *  - `widgetsSchema` is deliberately omitted: the departure logic needs only mst_vehicle columns, so
  *    the dry-run has no dependency on ap_widgets (device_type/imsi enrichment is irrelevant here).
+ *
+ * **#218c — optional stand-down export.**
+ *
+ *   npm run autoplant:departure-dryrun -- --export-standdown <path.csv>
+ *
+ * Off by default; the tool's behaviour is otherwise byte-identical. When given, it writes the
+ * live-batch stand-down list (FIX-PLAN §7.5) to a LOCAL FILE — still no database write anywhere. It
+ * is folded in here rather than shipped as its own command for one reason: the export needs the
+ * departure plan, the plan needs the full ~26k-row source read, and that read is capped at 90 rows
+ * per query by the AutoPlant DBA. Running it twice would cost a second full read AND risk the two
+ * disagreeing, since the fleet churns ~150 vehicles/day. Deriving both from ONE read also pins the
+ * absence cohort **exactly** — at Gate 3 it could only be estimated at ~300.
  */
+
 async function main(): Promise<void> {
+  // Parsed before anything expensive: a mistyped flag must not surface after a ~26k-row source read.
+  let standDownPath: string | null;
+  try {
+    standDownPath = readStandDownPathArg(process.argv.slice(2));
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(err instanceof Error ? err.message : err);
+    process.exitCode = 1;
+    return;
+  }
+
   const cfg = readAutoPlantMysqlConfig();
   if (!cfg) {
     // eslint-disable-next-line no-console
@@ -141,8 +171,35 @@ async function main(): Promise<void> {
     // eslint-disable-next-line no-console
     console.table([...byPlant.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([plant, n]) => ({ plant, devices: n })));
 
+    // 5. #218c — optional live-batch stand-down export, from THIS read's plan.
+    if (standDownPath !== null) {
+      const standDown = await buildStandDownRows(prisma, plan.map((r) => r.deviceId));
+      writeFileSync(standDownPath, `${toStandDownCsv(standDown)}\n`, 'utf8');
+      const byReason = new Map<string, number>();
+      const reasonByDevice = new Map(plan.map((r) => [r.deviceId, r.reason]));
+      for (const row of standDown) {
+        const reason = reasonByDevice.get(row.deviceId) ?? 'UNKNOWN';
+        byReason.set(reason, (byReason.get(reason) ?? 0) + 1);
+      }
+      // eslint-disable-next-line no-console
+      console.log(
+        `\n📄 STAND-DOWN LIST — ${standDown.length} live-batch ticket(s) on visits dispatch should stand ` +
+          `down → ${standDownPath}`,
+      );
+      // Both cohorts come from the same read, so this count is EXACT — no estimate for the absence side.
+      // eslint-disable-next-line no-console
+      console.table([...byReason.entries()].sort((a, b) => b[1] - a[1]).map(([reason, n]) => ({ departureReason: reason, liveTickets: n })));
+      // eslint-disable-next-line no-console
+      console.log(
+        `   (of ${result.cancelledTickets} tickets the window would close in total — the rest are backlog ` +
+          `with no live batch assignment, so no visit is standing on them.)`,
+      );
+    }
+
     // eslint-disable-next-line no-console
-    console.log('\n✅ DRY RUN ONLY — nothing was written. Review the counts above and approve before the live pass.');
+    console.log(
+      `\n✅ DRY RUN ONLY — nothing was written to any database.${standDownPath !== null ? ' The only write was the local CSV above.' : ''} Review the counts above and approve before the live pass.`,
+    );
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('❌ dry-run failed:', err instanceof Error ? err.message : err);

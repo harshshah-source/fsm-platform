@@ -1,0 +1,313 @@
+entity_level,entity,metric,value
+plant,ARASMETA,total,1309
+plant,ARASMETA,distinct_vehicle,1309
+plant,ARASMETA,distinct_device,1309
+plant,ARASMETA,deployed,356
+plant,ARASMETA,undeployed,953
+plant,ARASMETA,active,659
+plant,ARASMETA,inactive,637
+plant,ARASMETA,ndd,13
+plant,ARASMETA,ds_online,577
+plant,ARASMETA,ds_not_reachable,475
+plant,ARASMETA,ds_epf,244
+plant,ARASMETA,ds_ndd,13
+plant,ARASMETA,issue_cs,353
+plant,ARASMETA,issue_se,2
+plant,ARASMETA,issue_ndd,1
+plant,ARASMETA,dep_active,330
+plant,ARASMETA,dep_inactive,25
+plant,ARASMETA,bkt_< 1 Day,659
+plant,ARASMETA,bkt_(01-02) Days,10
+plant,ARASMETA,bkt_(03-07) Days,37
+plant,ARASMETA,bkt_(08-15) Days,29
+plant,ARASMETA,bkt_(16-30) Days,87
+plant,ARASMETA,bkt_> 30 Days,474
+plant,ARASMETA,bkt_NDD,13
+plant,BIHAR,total,1071
+plant,BIHAR,distinct_vehicle,1071
+plant,BIHAR,distinct_device,1071
+plant,BIHAR,deployed,176
+plant,BIHAR,undeployed,895
+plant,BIHAR,active,358
+plant,BIHAR,inactive,701
+plant,BIHAR,ndd,12
+plant,BIHAR,ds_online,302
+plant,BIHAR,ds_not_reachable,631
+plant,BIHAR,ds_epf,126
+plant,BIHAR,ds_ndd,12
+plant,BIHAR,issue_cs,175
+plant,BIHAR,issue_se,1
+plant,BIHAR,issue_ndd,0
+plant,BIHAR,dep_active,163
+plant,BIHAR,dep_inactive,13
+plant,BIHAR,bkt_< 1 Day,358
+plant,BIHAR,bkt_(01-02) Days,13
+plant,BIHAR,bkt_(03-07) Days,14
+plant,BIHAR,bkt_(08-15) Days,17
+plant,BIHAR,bkt_(16-30) Days,56
+plant,BIHAR,bkt_> 30 Days,601
+plant,BIHAR,bkt_NDD,12
+plant,CHITTOR,total,4075
+plant,CHITTOR,distinct_vehicle,4075
+plant,CHITTOR,distinct_device,4075
+plant,CHITTOR,deployed,1272
+plant,CHITTOR,undeployed,2803
+plant,CHITTOR,active,2391
+plant,CHITTOR,inactive,1665
+plant,CHITTOR,ndd,19
+plant,CHITTOR,ds_online,2124
+plant,CHITTOR,ds_not_reachable,1423
+plant,CHITTOR,ds_epf,509
+plant,CHITTOR,ds_ndd,19
+plant,CHITTOR,issue_cs,1268
+plant,CHITTOR,issue_se,4
+plant,CHITTOR,issue_ndd,0
+plant,CHITTOR,dep_active,1209
+plant,CHITTOR,dep_inactive,63
+plant,CHITTOR,bkt_< 1 Day,2391
+plant,CHITTOR,bkt_(01-02) Days,55
+plant,CHITTOR,bkt_(03-07) Days,73
+plant,CHITTOR,bkt_(08-15) Days,50
+plant,CHITTOR,bkt_(16-30) Days,110
+plant,CHITTOR,bkt_> 30 Days,1377
+plant,CHITTOR,bkt_NDD,19
+plant,HARYANA,total,1017
+plant,HARYANA,distinct_vehicle,1017
+plant,HARYANA,distinct_device,1017
+plant,HARYANA,deployed,400
+plant,HARYANA,undeployed,617
+plant,HARYANA,active,475
+plant,HARYANA,inactive,532
+plant,HARYANA,ndd,10
+plant,HARYANA,ds_online,411
+plant,HARYANA,ds_not_reachable,328
+plant,HARYANA,ds_epf,268
+plant,HARYANA,ds_ndd,10
+plant,HARYANA,issue_cs,395
+plant,HARYANA,issue_se,3
+plant,HARYANA,issue_ndd,2
+plant,HARYANA,dep_active,339
+plant,HARYANA,dep_inactive,59
+plant,HARYANA,bkt_< 1 Day,475
+plant,HARYANA,bkt_(01-02) Days,15
+plant,HARYANA,bkt_(03-07) Days,38
+plant,HARYANA,bkt_(08-15) Days,36
+plant,HARYANA,bkt_(16-30) Days,29
+plant,HARYANA,bkt_> 30 Days,414
+plant,HARYANA,bkt_NDD,10
+plant,JOJOBERA,total,1133
+plant,JOJOBERA,distinct_vehicle,1133
+plant,JOJOBERA,distinct_device,1133
+plant,JOJOBERA,deployed,732
+plant,JOJOBERA,undeployed,401
+plant,JOJOBERA,active,777
+plant,JOJOBERA,inactive,354
+plant,JOJOBERA,ndd,2
+plant,JOJOBERA,ds_online,713
+plant,JOJOBERA,ds_not_reachable,378
+plant,JOJOBERA,ds_epf,40
+plant,JOJOBERA,ds_ndd,2
+plant,JOJOBERA,issue_cs,721
+plant,JOJOBERA,issue_se,11
+plant,JOJOBERA,issue_ndd,0
+plant,JOJOBERA,dep_active,680
+plant,JOJOBERA,dep_inactive,52
+plant,JOJOBERA,bkt_< 1 Day,777
+plant,JOJOBERA,bkt_(01-02) Days,23
+plant,JOJOBERA,bkt_(03-07) Days,34
+plant,JOJOBERA,bkt_(08-15) Days,23
+plant,JOJOBERA,bkt_(16-30) Days,35
+plant,JOJOBERA,bkt_> 30 Days,239
+plant,JOJOBERA,bkt_NDD,2
+plant,MEJIA,total,421
+plant,MEJIA,distinct_vehicle,421
+plant,MEJIA,distinct_device,421
+plant,MEJIA,deployed,326
+plant,MEJIA,undeployed,95
+plant,MEJIA,active,338
+plant,MEJIA,inactive,83
+plant,MEJIA,ndd,0
+plant,MEJIA,ds_online,313
+plant,MEJIA,ds_not_reachable,95
+plant,MEJIA,ds_epf,13
+plant,MEJIA,ds_ndd,0
+plant,MEJIA,issue_cs,326
+plant,MEJIA,issue_se,0
+plant,MEJIA,issue_ndd,0
+plant,MEJIA,dep_active,308
+plant,MEJIA,dep_inactive,18
+plant,MEJIA,bkt_< 1 Day,338
+plant,MEJIA,bkt_(01-02) Days,9
+plant,MEJIA,bkt_(03-07) Days,7
+plant,MEJIA,bkt_(08-15) Days,4
+plant,MEJIA,bkt_(16-30) Days,7
+plant,MEJIA,bkt_> 30 Days,56
+plant,MEJIA,bkt_NDD,0
+plant,NIMBOL,total,5100
+plant,NIMBOL,distinct_vehicle,5100
+plant,NIMBOL,distinct_device,5100
+plant,NIMBOL,deployed,1258
+plant,NIMBOL,undeployed,3842
+plant,NIMBOL,active,2778
+plant,NIMBOL,inactive,2241
+plant,NIMBOL,ndd,81
+plant,NIMBOL,ds_online,2474
+plant,NIMBOL,ds_not_reachable,2014
+plant,NIMBOL,ds_epf,531
+plant,NIMBOL,ds_ndd,81
+plant,NIMBOL,issue_cs,1193
+plant,NIMBOL,issue_se,56
+plant,NIMBOL,issue_ndd,9
+plant,NIMBOL,dep_active,1146
+plant,NIMBOL,dep_inactive,103
+plant,NIMBOL,bkt_< 1 Day,2778
+plant,NIMBOL,bkt_(01-02) Days,53
+plant,NIMBOL,bkt_(03-07) Days,83
+plant,NIMBOL,bkt_(08-15) Days,67
+plant,NIMBOL,bkt_(16-30) Days,200
+plant,NIMBOL,bkt_> 30 Days,1838
+plant,NIMBOL,bkt_NDD,81
+plant,ODISHA,total,1268
+plant,ODISHA,distinct_vehicle,1268
+plant,ODISHA,distinct_device,1268
+plant,ODISHA,deployed,217
+plant,ODISHA,undeployed,1051
+plant,ODISHA,active,474
+plant,ODISHA,inactive,748
+plant,ODISHA,ndd,46
+plant,ODISHA,ds_online,415
+plant,ODISHA,ds_not_reachable,667
+plant,ODISHA,ds_epf,140
+plant,ODISHA,ds_ndd,46
+plant,ODISHA,issue_cs,211
+plant,ODISHA,issue_se,5
+plant,ODISHA,issue_ndd,1
+plant,ODISHA,dep_active,201
+plant,ODISHA,dep_inactive,15
+plant,ODISHA,bkt_< 1 Day,474
+plant,ODISHA,bkt_(01-02) Days,13
+plant,ODISHA,bkt_(03-07) Days,27
+plant,ODISHA,bkt_(08-15) Days,18
+plant,ODISHA,bkt_(16-30) Days,51
+plant,ODISHA,bkt_> 30 Days,639
+plant,ODISHA,bkt_NDD,46
+plant,OTHERS,total,170
+plant,OTHERS,distinct_vehicle,170
+plant,OTHERS,distinct_device,170
+plant,OTHERS,deployed,130
+plant,OTHERS,undeployed,40
+plant,OTHERS,active,137
+plant,OTHERS,inactive,19
+plant,OTHERS,ndd,14
+plant,OTHERS,ds_online,130
+plant,OTHERS,ds_not_reachable,6
+plant,OTHERS,ds_epf,20
+plant,OTHERS,ds_ndd,14
+plant,OTHERS,issue_cs,116
+plant,OTHERS,issue_se,3
+plant,OTHERS,issue_ndd,11
+plant,OTHERS,dep_active,105
+plant,OTHERS,dep_inactive,14
+plant,OTHERS,bkt_< 1 Day,137
+plant,OTHERS,bkt_(01-02) Days,2
+plant,OTHERS,bkt_(03-07) Days,13
+plant,OTHERS,bkt_(08-15) Days,3
+plant,OTHERS,bkt_(16-30) Days,1
+plant,OTHERS,bkt_> 30 Days,0
+plant,OTHERS,bkt_NDD,14
+plant,PANAGARH,total,1015
+plant,PANAGARH,distinct_vehicle,1015
+plant,PANAGARH,distinct_device,1015
+plant,PANAGARH,deployed,506
+plant,PANAGARH,undeployed,509
+plant,PANAGARH,active,628
+plant,PANAGARH,inactive,384
+plant,PANAGARH,ndd,3
+plant,PANAGARH,ds_online,585
+plant,PANAGARH,ds_not_reachable,380
+plant,PANAGARH,ds_epf,47
+plant,PANAGARH,ds_ndd,3
+plant,PANAGARH,issue_cs,503
+plant,PANAGARH,issue_se,3
+plant,PANAGARH,issue_ndd,0
+plant,PANAGARH,dep_active,486
+plant,PANAGARH,dep_inactive,20
+plant,PANAGARH,bkt_< 1 Day,628
+plant,PANAGARH,bkt_(01-02) Days,13
+plant,PANAGARH,bkt_(03-07) Days,22
+plant,PANAGARH,bkt_(08-15) Days,13
+plant,PANAGARH,bkt_(16-30) Days,36
+plant,PANAGARH,bkt_> 30 Days,300
+plant,PANAGARH,bkt_NDD,3
+plant,RISDA,total,7685
+plant,RISDA,distinct_vehicle,7685
+plant,RISDA,distinct_device,7685
+plant,RISDA,deployed,1823
+plant,RISDA,undeployed,5862
+plant,RISDA,active,3742
+plant,RISDA,inactive,3806
+plant,RISDA,ndd,137
+plant,RISDA,ds_online,3230
+plant,RISDA,ds_not_reachable,3088
+plant,RISDA,ds_epf,1230
+plant,RISDA,ds_ndd,137
+plant,RISDA,issue_cs,1800
+plant,RISDA,issue_se,17
+plant,RISDA,issue_ndd,6
+plant,RISDA,dep_active,1629
+plant,RISDA,dep_inactive,188
+plant,RISDA,bkt_< 1 Day,3742
+plant,RISDA,bkt_(01-02) Days,117
+plant,RISDA,bkt_(03-07) Days,248
+plant,RISDA,bkt_(08-15) Days,159
+plant,RISDA,bkt_(16-30) Days,384
+plant,RISDA,bkt_> 30 Days,2898
+plant,RISDA,bkt_NDD,137
+plant,SONADIH,total,950
+plant,SONADIH,distinct_vehicle,950
+plant,SONADIH,distinct_device,950
+plant,SONADIH,deployed,454
+plant,SONADIH,undeployed,496
+plant,SONADIH,active,672
+plant,SONADIH,inactive,272
+plant,SONADIH,ndd,6
+plant,SONADIH,ds_online,598
+plant,SONADIH,ds_not_reachable,277
+plant,SONADIH,ds_epf,69
+plant,SONADIH,ds_ndd,6
+plant,SONADIH,issue_cs,446
+plant,SONADIH,issue_se,6
+plant,SONADIH,issue_ndd,2
+plant,SONADIH,dep_active,425
+plant,SONADIH,dep_inactive,27
+plant,SONADIH,bkt_< 1 Day,672
+plant,SONADIH,bkt_(01-02) Days,18
+plant,SONADIH,bkt_(03-07) Days,15
+plant,SONADIH,bkt_(08-15) Days,10
+plant,SONADIH,bkt_(16-30) Days,41
+plant,SONADIH,bkt_> 30 Days,188
+plant,SONADIH,bkt_NDD,6
+company,NUVISTA,total,25214
+company,NUVISTA,distinct_vehicle,25214
+company,NUVISTA,distinct_device,25214
+company,NUVISTA,deployed,7650
+company,NUVISTA,undeployed,17564
+company,NUVISTA,active,13429
+company,NUVISTA,inactive,11442
+company,NUVISTA,ndd,343
+company,NUVISTA,ds_online,11872
+company,NUVISTA,ds_not_reachable,9762
+company,NUVISTA,ds_epf,3237
+company,NUVISTA,ds_ndd,343
+company,NUVISTA,issue_cs,7507
+company,NUVISTA,issue_se,111
+company,NUVISTA,issue_ndd,32
+company,NUVISTA,dep_active,7021
+company,NUVISTA,dep_inactive,597
+company,NUVISTA,bkt_< 1 Day,13429
+company,NUVISTA,bkt_(01-02) Days,341
+company,NUVISTA,bkt_(03-07) Days,611
+company,NUVISTA,bkt_(08-15) Days,429
+company,NUVISTA,bkt_(16-30) Days,1037
+company,NUVISTA,bkt_> 30 Days,9024
+company,NUVISTA,bkt_NDD,343

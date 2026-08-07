@@ -1,6 +1,11 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import type { DeviceDepartureService } from '../../device-departure/device-departure.service';
-import type { PlantEligibleFloatingSeService } from '../../org/plant-eligible-floating-se.service';
+// NOT `import type` (#218). These two are injected by CLASS, so the import must survive compilation:
+// a type-only import is erased, `design:paramtypes` degrades to `Object`, Nest cannot resolve the
+// parameter, and `@Optional()` turns that into a silent `undefined` rather than a boot failure — which
+// is exactly how the lifecycle pass ran dead for 27 syncs. Same defect class as f813b39 (#217).
+// Neither module imports this one, so the value import introduces no cycle (verified 2026-08-07).
+import { DeviceDepartureService } from '../../device-departure/device-departure.service';
+import { PlantEligibleFloatingSeService } from '../../org/plant-eligible-floating-se.service';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MasterSyncRunService, type EntityStat, type MasterSyncOutcome } from './master-sync-run.service';
@@ -114,16 +119,30 @@ export class MasterSyncService {
     @Optional() @Inject(MASTER_SYNC_COMPANY_DEFAULTS) private readonly companyDefaults: CompanyDefaults = {},
     /**
      * Device deployment lifecycle (Issue 128). Optional because the lifecycle pass is only meaningful
-     * against a source read that covers ALL deployment statuses — omitted, the sync mirrors exactly as
-     * before and marks no departures (never a silent half-application).
+     * against a source read that covers ALL deployment statuses, and because the CLI runner
+     * (`autoplant-sync.ts`) constructs this service by hand with fewer arguments.
+     *
+     * **`@Inject` is load-bearing, not decoration (#218).** The declared type is a union
+     * (`T | null`), which TypeScript always erases to `Object` in `design:paramtypes` — so without an
+     * explicit token Nest has nothing to resolve by, and `@Optional()` turns that into a silent
+     * `undefined`. Measured: this pass ran dead for 27 consecutive syncs. Dropping the `import type`
+     * on its own does NOT fix it (verified by test); the token is what does, and the value import is
+     * what makes the token reference a real class rather than `undefined`. Both are required.
      */
-    @Optional() private readonly departures: DeviceDepartureService | null = null,
+    @Optional() @Inject(DeviceDepartureService) private readonly departures: DeviceDepartureService | null = null,
     /**
      * Floating-SE eligibility MV (Issue 138 slice 2). Optional because master-sync must run in contexts
      * that don't wire the org module (tests, minimal boots); omitted, the sync mirrors exactly as before
      * and the MV is left to the periodic backstop (slice 3) / the next run.
+     *
+     * Carried the same erasure defect as `departures` above and was dead just as long (#218). It
+     * produced no symptom only because that backstop — `PlantEligibilityRefreshScheduler`, which is
+     * `useFactory`-provided with an explicit `inject:` array and so was never affected — kept the MV
+     * fresh. Same `@Inject` requirement, same reason.
      */
-    @Optional() private readonly floatingEligibility: PlantEligibleFloatingSeService | null = null,
+    @Optional()
+    @Inject(PlantEligibleFloatingSeService)
+    private readonly floatingEligibility: PlantEligibleFloatingSeService | null = null,
   ) {}
 
   async sync(options: MasterSyncOptions = {}): Promise<MasterSyncResult> {
@@ -365,7 +384,16 @@ export class MasterSyncService {
    * already committed; the periodic backstop (slice 3) or the next run heals a missed refresh.
    */
   private async refreshFloatingEligibility(runId: bigint): Promise<void> {
-    if (!this.floatingEligibility) return;
+    if (!this.floatingEligibility) {
+      // #218 §4 layer 2 — never skip silently again. `@Optional()` is load-bearing (the CLI runner
+      // constructs this service without the collaborator), so an unresolved dependency stays
+      // *reachable*; this is the line that names it instead of returning into a fortnight of silence.
+      this.logger.warn(
+        `Master sync ${runId}: floating-eligibility MV refresh SKIPPED — PlantEligibleFloatingSeService ` +
+          `did not resolve. Expected on the CLI path; on the Nest path it means the injection is broken (#218).`,
+      );
+      return;
+    }
     try {
       await this.floatingEligibility.refresh();
     } catch (e) {
@@ -394,7 +422,16 @@ export class MasterSyncService {
     stats: Record<string, EntityStat>,
     options: MasterSyncOptions,
   ): Promise<void> {
-    if (!this.departures) return;
+    if (!this.departures) {
+      // #218 §4 layer 2 — the exact return that hid the defect for 27 consecutive SUCCESS syncs.
+      // See the note in `refreshFloatingEligibility` for why the guard stays non-fatal.
+      this.logger.warn(
+        `Master sync ${runId}: deployment-lifecycle pass SKIPPED — DeviceDepartureService did not ` +
+          `resolve, so no departure or restore was evaluated. Expected on the CLI path; on the Nest ` +
+          `path it means the injection is broken (#218).`,
+      );
+      return;
+    }
     const observed = new Map<string, string | null>();
     for (const v of vehicleMasters) {
       const deviceId = String(v.device_id ?? '').trim();

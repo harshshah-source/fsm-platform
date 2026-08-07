@@ -99,11 +99,47 @@ export interface ReconciliationHealth {
   error?: string;
 }
 
+/**
+ * #218 — deployment-lifecycle self-consistency. Deliberately NOT folded into
+ * {@link ReconciliationHealth}: that surface compares AutoPlant against FSM and returns
+ * `entities: []` the moment the source is unconfigured or the VPN is down. This check is derived
+ * entirely inside Postgres, so it must stay readable exactly when the source is unreachable — the
+ * same reasoning that keeps the freshness paths VPN-free.
+ */
+export interface LifecycleHealth {
+  /**
+   * Devices whose last-observed source status (`vehicles.status`) and derived lifecycle flag
+   * (`device_states.is_departed`) contradict each other. Both are written from the same master-sync
+   * read, so **the correct value is 0** and any non-zero is a defect by construction — not a
+   * tolerance to tune.
+   *
+   * Devices with an open `ABSENT_FROM_READ` departure are excluded: their row is gone from
+   * `mst_vehicle`, so the mirror is frozen at its last-observed value *by design* and cannot agree.
+   * They are counted separately as {@link missingFromSource} rather than hidden.
+   */
+  drift: number;
+  /** Departed because their source row vanished. Mirror knowingly stale — excluded from `drift`. */
+  missingFromSource: number;
+  /**
+   * Consecutive most-recent SUCCESS master syncs that recorded neither a departure nor a restore.
+   * The fleet churns ~150 vehicles/day, so a sustained run of zeroes means the lifecycle pass is not
+   * executing — the exact signal that sat unread in `entity_stats.departures` for 33 runs (#218).
+   */
+  quietRuns: number;
+  /** `quietRuns` exceeds {@link quietRunsThreshold}. */
+  quietRunsAlert: boolean;
+  quietRunsThreshold: number;
+  /** `drift === 0 && !quietRunsAlert` — the whole check in one flag, for the banner. */
+  healthy: boolean;
+}
+
 export interface IntegrationHealth {
   source: IntegrationSourceHealth;
   masterSync: FreshnessHealth;
   snapshot: FreshnessHealth;
   reconciliation: ReconciliationHealth;
+  /** #218 — lifecycle self-consistency; needs no VPN, so it survives a source outage. */
+  lifecycle: LifecycleHealth;
   /** #130 — current build high-water mark, for stale-run comparison in the UI. */
   runtimeLock: RuntimeLockHealth;
   /** #130 L5 — last-N recompute ledger rows (counts + build + swing), newest first. */
@@ -119,6 +155,19 @@ export interface IntegrationHealth {
 export function readReconMaxDrift(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.INGESTION_RECON_MAX_DRIFT);
   return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 0;
+}
+
+/**
+ * How many consecutive quiet SUCCESS syncs are tolerated before {@link LifecycleHealth.quietRunsAlert}
+ * fires, env-overridable via `INGESTION_LIFECYCLE_QUIET_RUNS`. Default 3: the masters sync runs daily,
+ * so three quiet runs is roughly a day of a churning fleet reporting no movement at all — enough to
+ * clear an ordinary quiet day, far short of the 27 that went unnoticed. Unlike
+ * {@link readReconMaxDrift} this is a *patience* knob, never a tolerance on `drift`, which has no
+ * acceptable non-zero value.
+ */
+export function readLifecycleQuietRuns(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.INGESTION_LIFECYCLE_QUIET_RUNS);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 3;
 }
 
 /**
@@ -147,6 +196,7 @@ export class AutoPlantHealthService {
       masterSync: await this.masterSyncHealth(now, lockVersion),
       snapshot: await this.snapshotHealth(now, lockVersion),
       reconciliation: await this.reconciliationHealth(),
+      lifecycle: await this.lifecycleHealth(),
       runtimeLock: lock,
       recomputes: await this.recomputeHistory(lockVersion),
       checkedAt: now,
@@ -259,6 +309,67 @@ export class AutoPlantHealthService {
         error: e instanceof Error ? e.message : String(e),
       };
     }
+  }
+
+  /**
+   * #218 — the lifecycle contradiction check. `vehicles.status` (verbatim last-observed source
+   * status) and `device_states.is_departed` (derived from the `device_departures` ledger) are both
+   * written from the same master-sync read, so they cannot legitimately disagree. When the lifecycle
+   * pass stops running they drift apart silently: every dashboard identity still balances, because
+   * both the operational and warehouse counts move together — only a comparison BETWEEN the two
+   * sources of truth catches it.
+   *
+   * `quietRuns` covers the same failure from the other side: the pass reporting that it did nothing,
+   * run after run, which is what `entity_stats.departures` recorded 33 times while nothing read it.
+   *
+   * Raw SQL for the same reason `runtimeLock` uses it — `<>` over two boolean expressions and the
+   * `entity_stats` JSON path have no Prisma-query equivalent. Constant statements, no interpolation.
+   *
+   * **Public** for the same reason {@link reconciliationHealth} is: the Operations Data Explorer
+   * folds this in as another identity without a second implementation of the predicate — reused, not
+   * respelled, so the two surfaces cannot drift apart and report different answers.
+   */
+  async lifecycleHealth(): Promise<LifecycleHealth> {
+    const quietRunsThreshold = readLifecycleQuietRuns();
+
+    const [counts] = await this.prisma.$queryRawUnsafe<Array<{ drift: number; missingFromSource: number }>>(
+      `SELECT
+         (SELECT COUNT(*) FROM device_states ds
+            JOIN vehicles v ON v.vehicle_id = ds.vehicle_id
+           WHERE (v.status IN ('DEPLOYED', 'ACTIVE')) <> (ds.is_departed = false)
+             AND NOT EXISTS (SELECT 1 FROM device_departures dd
+                              WHERE dd.device_id = ds.device_id
+                                AND dd.restored_at IS NULL
+                                AND dd.reason = 'ABSENT_FROM_READ'))::int AS "drift",
+         (SELECT COUNT(*) FROM device_departures
+           WHERE restored_at IS NULL AND reason = 'ABSENT_FROM_READ')::int AS "missingFromSource"`,
+    );
+
+    // Runs newer than the most recent one that actually moved a device either way. No such run ⇒
+    // every SUCCESS run has been quiet, which is the state this check exists to catch.
+    const [quiet] = await this.prisma.$queryRawUnsafe<Array<{ quietRuns: number }>>(
+      `WITH recent AS (
+         SELECT entity_stats, ROW_NUMBER() OVER (ORDER BY run_id DESC) AS rn
+           FROM master_sync_runs WHERE status = 'SUCCESS')
+       SELECT COUNT(*)::int AS "quietRuns" FROM recent
+        WHERE rn < COALESCE(
+                (SELECT MIN(rn) FROM recent
+                  WHERE COALESCE((entity_stats -> 'departures' ->> 'inserted')::int, 0) <> 0
+                     OR COALESCE((entity_stats -> 'departures' ->> 'updated')::int, 0) <> 0),
+                (SELECT COUNT(*) + 1 FROM recent))`,
+    );
+
+    const drift = counts?.drift ?? 0;
+    const quietRuns = quiet?.quietRuns ?? 0;
+    const quietRunsAlert = quietRuns > quietRunsThreshold;
+    return {
+      drift,
+      missingFromSource: counts?.missingFromSource ?? 0,
+      quietRuns,
+      quietRunsAlert,
+      quietRunsThreshold,
+      healthy: drift === 0 && !quietRunsAlert,
+    };
   }
 
   private async sourceHealth(): Promise<IntegrationSourceHealth> {

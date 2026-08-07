@@ -794,6 +794,23 @@ Issue #217 is **closed** — S1–S3 done. Final verification 2026-08-06: backen
 `autoplant-health`/`integration-health-*` specs (12 tests) unaffected by the visibility change, admin
 **94 files / 442 tests** (was 441) green, both apps `tsc --noEmit` clean.
 
+**Post-close follow-up (2026-08-06, operator ask on the `plants` dataset):** 7 new registry columns, no
+engine change. `companyNames` (scalar `STRING_AGG` over `vehicles ⋈ company_master` at the plant, since a
+plant has no direct company FK — company only reaches a plant transitively through its vehicles) is both
+displayed and added to `searchColumns`, giving "filter plants by company name" for free through the
+existing `contains`/`eq` filter UI. `vehicleCount`/`deviceCount` are scalar-subquery counts (`vehicles`/
+`device_states` at `plant_id`) — deliberately subqueries, not a join, so the dataset's one-row-per-plant
+grain can't fan out. `deployedVehicleCount`/`undeployedVehicleCount` split on `vehicles.status`, reusing
+`OPERATIONAL_DEPLOYMENT_STATUSES` from `master-mapping.ts` (the same allow-list `isOperationalStatus`
+uses) rather than a second hardcoded list, so "deployed" can't drift between the master sync and the
+Explorer. `activeDeviceCount`/`inactiveDeviceCount` mirror `FLEET_COUNT_COLUMNS.healthyOperational` /
+`.inactiveOperational`'s predicates (`is_departed = false` and `is_inactive`) — same population definition
+as the dashboard, not a restatement. Verified against real dev data (not just the empty test fixture):
+`RCP-9211` returns 2,457 vehicles / 2,475 devices / 1,400 deployed / 1,057 undeployed / 1,508 active / 253
+inactive, and a `companyNames contains "Nuvista"` filter correctly narrows 930 plants to 23. Backend unit
++ e2e suites (64 tests) still green; rebuilt and restarted against the session's isolated dev backend
+(`:3011`) for live verification.
+
 **SLA severity ramp (app-wide, same change):** the eight bands are now an ordinal ramp carried by
 **lightness first, hue second**, so severity survives red/green colour blindness. The previous
 eyeballed ramp did not: `EARLY_RISK`/`RISK` sat 0.01 apart in OKLab L (ΔE 2.7 under deuteranopia —
@@ -1090,6 +1107,37 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 > departed tally is surfaced separately → #129). Reversible (restore path + tickets closed-with-reason,
 > not deleted); idempotent (a re-run dry-run found 0 new departures). Dashboards shrinking to the true
 > operational fleet is the honest, correct outcome.
+
+**Superseded 2026-08-07 — the mechanism above is correct but has not been executing.** The backfill
+described was applied by *manual CLI* runs (64 and 80). On the Nest-wired path — the scheduler and the
+"Run Ingestion Now" API — `MasterSyncService`'s lifecycle pass has never run: `master-sync.service.ts`
+imports `DeviceDepartureService` with `import type`, TypeScript erases it, `design:paramtypes` emits
+`Object`, and `@Optional()` turns the unresolvable dependency into a silent `undefined` so the pass
+returns before doing anything. Runs 81–113 recorded `{inserted: 0, updated: 0}` for 27 consecutive
+successful syncs, with no error and a green CI.
+
+Measured 2026-08-07 against production AutoPlant: **4,028 missed departures + 1,130 missed restores =
+5,134 contradicting devices**, and **1,050 devices silent >24 h that cannot raise a ticket** because
+`is_departed` gates ticket creation. A further 1,131 devices are departed with their source row
+hard-deleted from `mst_vehicle`, so their `vehicles.status` mirror is frozen and can never agree —
+excluded from the drift figure by design, surfaced separately (see #220).
+
+**Detection landed first, deliberately** ([#218](../.scratch/fsm-platform-v1/issues/218-lifecycle-drift-detection.md)
+slice a): `AutoPlantHealthService.lifecycleHealth()` reports `drift` (correct value 0),
+`missingFromSource`, and `quietRuns` — consecutive syncs that moved nothing, the signal that sat unread
+in `entity_stats.departures`. It is a top-level field on `/api/integration/health` rather than part of
+`reconciliation`, because it is derived entirely in Postgres and must stay readable when AutoPlant is
+unreachable; Ops Explorer folds the same call in as a 9th identity rather than respelling it. Baseline
+at ship time: `drift 5134 · missingFromSource 1131 · quietRuns 27 · healthy false`.
+
+**The fix (218b) has landed; the catch-up window (218c) has NOT run — no production data has been
+written.** The two are independent: 218b restores the wiring (value imports **plus** explicit
+`@Inject()` tokens — the union parameter type erases to `Object` regardless of import style, so
+neither alone suffices), which changes *future* syncs only and applies no catch-up. The dev-DB reading
+after 218b is byte-identical to the baseline above, confirming exactly that. A sync that skips the
+lifecycle pass now also logs a warning naming the unresolved collaborator, so the silent-skip failure
+mode cannot recur unobserved. The backlog itself is cleared only by 218c, which is operator-gated and
+unapproved; `npm run autoplant:window-preflight` is its programmatic precondition check.
 
 ### 6.2 Env flags (all master switches default OFF; cron strings read once at boot)
 

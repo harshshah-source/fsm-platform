@@ -29,8 +29,10 @@ import { PrismaService } from '../prisma/prisma.service';
  * active departure and resumes automatically — no manual step, nothing destroyed.
  */
 
-/** Terminal ticket statuses — everything else is "open" work a departure cancels (mirrors #119). */
-const TERMINAL_TICKET_STATUSES: $Enums.TicketStatus[] = [
+/** Terminal ticket statuses — everything else is "open" work a departure cancels (mirrors #119).
+ * Exported for #218c's stand-down export, which must select the SAME ticket set this pass closes:
+ * respelling the predicate there is how the two would silently drift apart. */
+export const TERMINAL_TICKET_STATUSES: $Enums.TicketStatus[] = [
   'CLOSED',
   'CLOSED_AUTO_RECOVERY',
   'CLOSED_NON_OPERATIONAL',

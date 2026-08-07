@@ -296,6 +296,9 @@ describe('#217 — /api/ops-explorer (e2e)', () => {
         'operationalPartition',
         'bucketRollup',
         'dispatchBatchLedger',
+        // #218a — FSM-internal, so it sits before the two AutoPlant identities and, unlike them,
+        // is always evaluable (never UNAVAILABLE) because it needs no source connection.
+        'lifecycleConsistency',
         'autoplantPlantsCount',
         'autoplantVehiclesCount',
       ]);

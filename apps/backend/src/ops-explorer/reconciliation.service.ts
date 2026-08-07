@@ -124,19 +124,24 @@ export class ReconciliationService {
   async run(developerMode: boolean): Promise<ReconciliationReport> {
     const startedAt = Date.now();
 
-    const [fleetRows, zoneRows, companyRows, bucketRows, ledgerRows, batchRowsCount, autoplant] = await Promise.all([
-      this.prisma.$queryRaw<RawCounts[]>(FLEET_SQL),
-      this.prisma.$queryRaw<Array<RawCounts & { key: string | null }>>(BY_ZONE_SQL),
-      this.prisma.$queryRaw<Array<RawCounts & { key: string | null }>>(BY_COMPANY_SQL),
-      this.prisma.$queryRaw<Array<{ key: string; count: number }>>(BY_BUCKET_SQL),
-      this.prisma.$queryRaw<Array<{ total: number }>>(RUN_BATCH_LEDGER_SQL),
-      this.prisma.$queryRaw<Array<{ total: number }>>(RUN_BATCH_ROWS_SQL),
-      // #217 S3 — reuses AutoPlantHealthService.reconciliationHealth() verbatim (the same COUNT(*)
-      // reads /api/integration/health already shows), rather than a second AutoPlant query path. It
-      // is the DBA <100-row cap that makes a bulk per-row AutoPlant dataset the wrong shape here — see
-      // the issue file — so this stays count-only, exactly like every other AutoPlant read in the app.
-      this.autoplantHealth.reconciliationHealth(),
-    ]);
+    const [fleetRows, zoneRows, companyRows, bucketRows, ledgerRows, batchRowsCount, autoplant, lifecycle] =
+      await Promise.all([
+        this.prisma.$queryRaw<RawCounts[]>(FLEET_SQL),
+        this.prisma.$queryRaw<Array<RawCounts & { key: string | null }>>(BY_ZONE_SQL),
+        this.prisma.$queryRaw<Array<RawCounts & { key: string | null }>>(BY_COMPANY_SQL),
+        this.prisma.$queryRaw<Array<{ key: string; count: number }>>(BY_BUCKET_SQL),
+        this.prisma.$queryRaw<Array<{ total: number }>>(RUN_BATCH_LEDGER_SQL),
+        this.prisma.$queryRaw<Array<{ total: number }>>(RUN_BATCH_ROWS_SQL),
+        // #217 S3 — reuses AutoPlantHealthService.reconciliationHealth() verbatim (the same COUNT(*)
+        // reads /api/integration/health already shows), rather than a second AutoPlant query path. It
+        // is the DBA <100-row cap that makes a bulk per-row AutoPlant dataset the wrong shape here — see
+        // the issue file — so this stays count-only, exactly like every other AutoPlant read in the app.
+        this.autoplantHealth.reconciliationHealth(),
+        // #218 — same posture as the line above: the health service owns the predicate, this panel
+        // folds the result in. Unlike identities 7–8 this one needs no AutoPlant read, so it stays
+        // evaluable (never UNAVAILABLE) even with the source down.
+        this.autoplantHealth.lifecycleHealth(),
+      ]);
 
     const fleet = fleetRows[0] ?? ZERO;
     const sum = (rows: RawCounts[], field: keyof RawCounts) => rows.reduce((a, r) => a + (r[field] ?? 0), 0);
@@ -250,6 +255,34 @@ export class ReconciliationService {
           'Direct data manipulation (a manual DB fix, a seed script) that touched one table without the other.',
         ],
         sql: developerMode ? { left: RUN_BATCH_LEDGER_SQL.text, right: RUN_BATCH_ROWS_SQL.text } : undefined,
+      }),
+      this.identity({
+        key: 'lifecycleConsistency',
+        name: 'Source status agrees with the departure ledger',
+        statement: 'COUNT(device_states WHERE (vehicles.status is operational) <> (NOT is_departed)) = 0',
+        left: {
+          label: 'Devices contradicting themselves',
+          value: lifecycle.drift,
+          measuredBy:
+            `per-row XOR of vehicles.status against device_states.is_departed, excluding ${lifecycle.missingFromSource} ` +
+            'device(s) with an open ABSENT_FROM_READ departure — their source row is gone, so the mirror is frozen by design',
+        },
+        right: {
+          label: 'Expected',
+          value: 0,
+          measuredBy:
+            'a constant: both columns are written from the same master-sync read, so any disagreement is a defect rather than a tolerance to tune',
+        },
+        likelySources: [
+          'The lifecycle pass is not running. `MasterSyncService.reconcileDepartures` returns early when its DeviceDepartureService is not injected, leaving entity_stats.departures at {0,0,0} with no error — check `lifecycle.quietRuns` on /api/integration/health, which counts consecutive SUCCESS syncs that moved nothing.',
+          'The absence guard is tripping every run: above the max-absence ratio the whole absence pass is abandoned, so genuine departures are never recorded and the drift climbs silently.',
+          'A device whose source row vanished AFTER it was departed for an observed status — it carries reason SOURCE_STATUS, so it is not excluded here, but its mirror can never refresh either.',
+          'Direct data manipulation that set device_states.is_departed without an accompanying device_departures row (or vice versa) — the two are kept in step only by DeviceStateService.recompute.',
+        ],
+        // Both sides come from one aggregate in AutoPlantHealthService; there is no second statement.
+        sql: developerMode
+          ? { left: 'AutoPlantHealthService.lifecycleHealth() — see health.service.ts', right: 'constant 0' }
+          : undefined,
       }),
       ...this.autoplantIdentities(autoplant, developerMode),
     ];
