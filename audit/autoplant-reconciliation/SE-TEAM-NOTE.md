@@ -1,7 +1,8 @@
 # Draft note to the SE team — #218c deployment-lifecycle catch-up window
 
-**Status:** DRAFT for the operator to send. Not sent. Timing line is a placeholder until the window is
-scheduled.
+**Status:** DRAFT for the operator to send. Not sent. **Recommended window: Monday 2026-08-10, ~04:00
+IST** (see the operator notes below for why) — the note body below is filled in with that date, but
+nothing is scheduled until the operator approves an actual date and time.
 
 **Why this note exists:** no field coordination is needed — SE ticketing is not in real operational
 use, and nothing in this window notifies anybody (verified programmatically, see below). But the
@@ -13,9 +14,9 @@ them about even though there is nothing for them to do.
 
 ## The note
 
-> **Subject: Heads-up — bulk ticket closure on the FSM dev database, [DATE], ~05:00 IST**
+> **Subject: Heads-up — bulk ticket closure on the FSM dev database, 2026-08-10, ~04:00 IST**
 >
-> We are running a one-off data catch-up on the FSM database on **[DATE], early morning IST (before
+> We are running a one-off data catch-up on the FSM database on **2026-08-10, early morning IST (before
 > Shift A at 06:00)**. It changes a large number of ticket rows in a single transaction. Nothing is
 > required from you — this is a heads-up so the numbers don't surprise you.
 >
@@ -45,7 +46,7 @@ them about even though there is nothing for them to do.
 > ticket_events.to_state    = 'CLOSED'
 > ```
 >
-> So `WHERE closure_type = 'DEVICE_UNDEPLOYED_CLOSE' AND closed_at >= '[DATE]'` isolates the whole set
+> So `WHERE closure_type = 'DEVICE_UNDEPLOYED_CLOSE' AND closed_at >= '2026-08-10'` isolates the whole set
 > if you need to exclude it from a query, a fixture, or a screenshot.
 >
 > **Things worth knowing:**
@@ -62,7 +63,7 @@ them about even though there is nothing for them to do.
 > - **If you have local fixtures or seeded tickets** that assume a device is deployed, they may need
 >   refreshing afterwards.
 >
-> If any of this lands badly for something you have in flight, tell us before **[DATE]** and we will
+> If any of this lands badly for something you have in flight, tell us before **2026-08-10** and we will
 > move the window.
 
 ---
@@ -90,19 +91,39 @@ them about even though there is nothing for them to do.
    good; the SOURCE_STATUS side moved by −66 because this is a fresh read a few hours later and the
    fleet churns ~150 vehicles/day.
 
-**The window's headline figures are stable across two independent reads**, which is the more useful
-signal for the operator:
+**The window's headline figures are now stable across three independent reads spanning a full day**,
+which is the more useful signal for the operator than any single number:
 
-| | Gate 3 (~06:00 IST) | Export read (~14:05 IST) |
-|---|---:|---:|
-| Total departures | 5,240 | 5,238 |
-| · UNDEPLOYED | 3,889 | 3,886 |
-| · MISSING_FROM_SOURCE | 1,305 | 1,306 |
-| · MAINTENANCE | 46 | 46 |
-| Tickets force-closed | 4,383 | 4,382 |
+| | Gate 3 (~06:00 IST) | Export read (~14:05 IST) | Step-2 read (~14:56 IST) |
+|---|---:|---:|---:|
+| Total departures | 5,240 | 5,238 | 5,230 |
+| · UNDEPLOYED | 3,889 | 3,886 | 3,878 |
+| · MISSING_FROM_SOURCE | 1,305 | 1,306 | 1,306 |
+| · MAINTENANCE | 46 | 46 | 46 |
+| Tickets force-closed | 4,383 | 4,382 | 4,374 |
+| Restores | 1,144 | — | 1,149 |
 
 The note quotes the Gate-3 figures throughout, since those are the ones on record in the issue; the
-±1–2 drift between reads is fleet churn, not instability.
+drift between reads (≤0.3%) is fleet churn (~150 vehicles/day), not instability. The actual counts used
+at execution time will come from the final dry-run run immediately before the write, per §7.5 step 3 —
+these three are agreement checks, not the number that governs the run.
 
-**Before sending, confirm the date** — the note commits to a window time and asks for objections by
-it, so it needs to go out with enough lead time to be actionable.
+**Why Monday 2026-08-10, ~04:00 IST, not tomorrow morning:**
+
+1. **A cron collision, found while preparing this note, that the original plan didn't account for.**
+   The dispatch scheduler fires **daily at 05:00 IST** (`DEFAULT_DISPATCH_CRON`, explicit
+   `Asia/Kolkata` timezone) and writes to the same `tickets`/`plant_batch_assignments` tables the
+   catch-up touches. Running at 04:00 IST leaves a full hour of buffer before it — the transaction
+   itself is measured at well under 2 minutes (see the watch-list below), so there is no realistic way
+   for the two to overlap.
+2. **The SE note needs real lead time.** It commits to "tell us before [date] and we'll move the
+   window" — sending it today for a tomorrow-morning run gives well under 24 hours to react, which
+   makes that promise hollow. 2026-08-10 gives ~2.5 days if the note goes out today.
+3. **A weekday morning has more people around** if something needs a human. 2026-08-08/09 are the
+   Saturday/Sunday immediately following; nothing about the fix is time-critical enough to justify
+   trading staffing for two fewer days of the existing drift.
+
+**Faster alternative, if the operator would rather not wait through the weekend:** Saturday
+2026-08-08, ~04:00 IST is mechanically ready today — the only cost is the compressed SE-note lead time
+and lighter weekend coverage. Given SE ticketing is not in real operational use, that's a real option,
+not a technical constraint; it's the operator's call.
