@@ -36,3 +36,9 @@ package-lock.json
 .DS_Store
 Thumbs.db
 apps/backend/src/generated/
+
+# #218c — the live-batch stand-down export (`--export-standdown` on the departure dry-run) regenerates
+# on every read-only rehearsal and holds real production ticket/device/vehicle rows. Deliberately never
+# staged; ignored explicitly so a future `git add -A` cannot sweep it in. The rest of
+# `audit/autoplant-reconciliation/` (reports, plans, the Excel benchmark) is tracked on purpose.
+audit/autoplant-reconciliation/standdown-live-batches.csv
