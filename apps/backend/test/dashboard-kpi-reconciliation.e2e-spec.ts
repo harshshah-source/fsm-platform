@@ -252,7 +252,10 @@ describe('Dashboard KPI reconciliation — one operational population at every l
       get<FleetDirectory>('/api/dashboard/fleet-directory', ohToken),
       get<FleetSummary>('/api/dashboard/fleet-summary', ohToken),
     ]);
-    for (const rows of [dir.companies, dir.plants]) {
+    // Widened to the common base: the two arrays differ in their identity fields, so without this the
+    // union defeats `sum`'s inference and every call in the loop errors. Only the counts are read here.
+    const both: FleetCounts[][] = [dir.companies, dir.plants];
+    for (const rows of both) {
       expect(sum(rows, (r) => r.operationalDevices)).toBe(fleet.operationalDevices);
       expect(sum(rows, (r) => r.warehouseDevices)).toBe(fleet.warehouseDevices);
       expect(sum(rows, (r) => r.inactiveOperational)).toBe(fleet.inactiveOperational);
