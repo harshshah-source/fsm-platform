@@ -72,6 +72,59 @@ Day Plan / Next Visit / Plant Workload (Issue 11 `/api/schedules/me`), Common-Ki
 
 ## Comments
 
+### 2026-08-05 (later) — header modernized; product wordmark added
+
+Operator ask, separate from the reference image: "modernize" the header block and add the product's
+own name ("Autoplant System") to it — the image has no wordmark to match, so this is new ground, not
+a parity gap.
+
+- **`BrandMark`** (`src/components/kit/BrandMark.tsx`) renders "autoplant Systems" / "Field Management
+  System" — text, casing and the two-line lockup pattern copied exactly from
+  `apps/admin/src/components/shell/BrandLogo.tsx` so the mobile app and the admin dashboard read as
+  one product rather than two unrelated tools, not a second, drifting wordmark.
+- Avatar-initials circle beside the name (`initialsOf` — "Rahul" → `RA`).
+- Two soft translucent circular washes behind the header content for depth, clipped to the block's
+  own rounded corners. Plain `View`s, not `expo-linear-gradient` — that ships native code and would
+  force the #209 Android rebuild for an effect two circles already achieve.
+- A small status dot on the Online/Offline chip. `theme/tokens.ts` has no semantic pair meant to read
+  on the dark brand-red header yet, so the two dot colors are scoped locally to this file with a
+  comment, not promoted to a token on this one usage.
+
+Verified on-device (`se-z5-15@mock.fsm`), not only in jest. Mobile 49 suites / 334 tests, `tsc` +
+eslint clean.
+
+### 2026-08-05 — Home reworked to the reference image; the deferred chart is now built
+
+Operator ask ("elements are missing like graphs and all"). The 2026-08-04 build shipped the tiles,
+Next Visit, Plant Workload and the pool entry but rendered them as a plain list-and-bar screen; this
+pass takes the layout to `docs/ui/mobile/home-dashboard.png` and adds the one thing #172 decision 1
+had explicitly deferred:
+
+- **Assigned vs Completed chart** — built on the new `GET /api/me/work-history` (#175's series half,
+  now closed there). `WorkHistoryChart`: 7 bars, `completed/assigned` above, date axis below,
+  two-series legend. The read is wrapped so a failure degrades to an empty chart rather than pushing
+  the whole screen into its offline state, which would hide a day plan the SE can actually work.
+- **Branded header block** — name + `homePlant · zone`, notifications bell, and the two status chips
+  (`Online` / `Network status`, `Just now` / `Last sync`). The pill from the original AC is now the
+  image's two-chip form; the source is unchanged (client-side telemetry, see below).
+- **Next Visit subline** — `N inactive · N urgent · N in work`, urgent being CRITICAL-and-above.
+- **Plant Workload cards** — percentage ring, meter, work/pending legend, `n/m` ratio, section count.
+  `plantSummary.ts` derives the subline and the cards from **one** pass, so Next Visit and the
+  workload card can never disagree about the same plant.
+
+Charts are plain `View`s, not `react-native-svg`: that package ships native code, so pulling it in
+invalidates the installed debug APK and forces the #209 Android rebuild for shapes a stacked rounded
+view already draws. Re-reading the reference also settled that the workload **ring is a static badge
+rather than a gauge** — it is drawn identically on the image's 50% and 0% cards, and the horizontal
+bar beneath it is what actually moves.
+
+**Not built, both already owned elsewhere:** the `ID - ANV1012` employee code (the superseding
+2026-08-03 ruling below — unchanged) and the `Scan` FAB, which is the QR scanner tracked as **#20**
+and recorded in `SYSTEM-STATE-2026-07.md` §4.4.3; it needs `expo-camera`, a native module, so it is a
+build-pipeline item and not a screen change.
+
+Verified on the handset over `adb reverse` as `se-z5-15@mock.fsm`, not only in jest.
+
 ### 2026-08-04 — built, KPI derivation confirmed by the operator
 
 Picked back up after #57/#58/#60 unblocked real data for it. The operator answered the four

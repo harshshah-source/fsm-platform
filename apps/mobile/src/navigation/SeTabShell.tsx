@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
 import type { IntradayInsertionOffer, NotificationListItem } from '@fsm/shared';
 import { apiGetMyIntradayOffers, apiGetNotifications, apiMarkNotificationRead } from '../api/client';
 import { getAccessToken } from '../auth/tokenStore';
 import { IntradayOfferScreen } from '../intraday/IntradayOfferScreen';
-import { color, radius, spacing, typeScale } from '../theme/tokens';
+import { color, spacing, typeScale } from '../theme/tokens';
 import { HomeScreen } from './screens/HomeScreen';
 import { TicketsScreen } from './screens/TicketsScreen';
 import { StockScreen } from './screens/StockScreen';
@@ -14,6 +14,23 @@ import { VouchersScreen } from './screens/VouchersScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 
 const Tab = createBottomTabNavigator();
+
+/**
+ * `@react-navigation/bottom-tabs` renders its own `MissingIcon` placeholder — a plain bordered box
+ * — whenever a tab has no `tabBarIcon`, which none of these five did. That placeholder was showing
+ * on every tab, on every screen, for the whole life of this app so far; this map is the fix, not a
+ * cosmetic add-on. Outline glyph inactive, filled glyph active — Ionicons ships as a font asset via
+ * `@expo/vector-icons` (already a resolved dependency, no native module to add) so this needs no
+ * rebuild. Vouchers uses "receipt" rather than the reference image's bell glyph: a bell already
+ * means notifications elsewhere in this app (the Home header), and a voucher genuinely is a receipt.
+ */
+const TAB_ICONS: Record<string, { outline: keyof typeof Ionicons.glyphMap; filled: keyof typeof Ionicons.glyphMap }> = {
+  Home: { outline: 'home-outline', filled: 'home' },
+  Tickets: { outline: 'list-outline', filled: 'list' },
+  Stock: { outline: 'cube-outline', filled: 'cube' },
+  Vouchers: { outline: 'receipt-outline', filled: 'receipt' },
+  Profile: { outline: 'person-outline', filled: 'person' },
+};
 
 /**
  * The SE mobile shell (#54) — bottom-tab navigation over the five role-visible tabs
@@ -86,8 +103,14 @@ export function SeTabShell() {
     return <IntradayOfferScreen offer={offer} onResolved={handleOfferResolved} />;
   }
 
+  // No `NavigationContainer` here. `expo-router` owns the single root container (`app/_layout.tsx`
+  // renders `<Slot />`), and this shell mounts *inside* that tree — a second container throws
+  // "Looks like you have nested a 'NavigationContainer' inside another" and the app dies on the
+  // ErrorBoundary right after an SE logs in. The tab navigator nests under the root container fine;
+  // only the container itself must be unique. Tests must supply their own container (see
+  // `SeTabShell.test.tsx`), because in production the app root is what provides it.
   return (
-    <NavigationContainer>
+    <Fragment>
       {ghostNotification ? (
         <View testID="ghost-assignment-toast" style={styles.toast}>
           <Text style={styles.toastText}>{ghostNotification.body}</Text>
@@ -97,11 +120,15 @@ export function SeTabShell() {
         </View>
       ) : null}
       <Tab.Navigator
-        screenOptions={{
+        screenOptions={({ route }) => ({
           headerShown: false,
           tabBarActiveTintColor: color.brand600,
           tabBarInactiveTintColor: color.inkMuted,
-        }}
+          tabBarIcon: ({ focused, color: tintColor, size }) => {
+            const icons = TAB_ICONS[route.name];
+            return <Ionicons name={focused ? icons.filled : icons.outline} size={size} color={tintColor} />;
+          },
+        })}
       >
         <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarButtonTestID: 'tab-Home' }} />
         <Tab.Screen name="Tickets" options={{ tabBarButtonTestID: 'tab-Tickets' }}>
@@ -111,7 +138,7 @@ export function SeTabShell() {
         <Tab.Screen name="Vouchers" component={VouchersScreen} options={{ tabBarButtonTestID: 'tab-Vouchers' }} />
         <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarButtonTestID: 'tab-Profile' }} />
       </Tab.Navigator>
-    </NavigationContainer>
+    </Fragment>
   );
 }
 

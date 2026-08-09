@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 
 /**
@@ -24,7 +25,13 @@ export function PhotoCaptureRow({ slots, onCapture }: PhotoCaptureRowProps) {
       {slots.map((slot) => (
         <Pressable key={slot.key} onPress={() => onCapture(slot.key)} style={styles.slot}>
           <View style={[styles.box, slot.photoRef ? styles.boxFilled : null]}>
-            {slot.photoRef ? <View testID={`slot-${slot.key}-filled`} style={styles.filledDot} /> : null}
+            {slot.photoRef ? (
+              <View testID={`slot-${slot.key}-filled`}>
+                <Ionicons name="checkmark-circle" size={26} color={color.success} />
+              </View>
+            ) : (
+              <Ionicons name="camera-outline" size={24} color={color.inkMuted} />
+            )}
           </View>
           <Text style={styles.label}>{slot.label}</Text>
         </Pressable>
@@ -57,12 +64,6 @@ const styles = StyleSheet.create({
     borderStyle: 'solid',
     borderColor: color.success,
     backgroundColor: color.successBg,
-  },
-  filledDot: {
-    width: 10,
-    height: 10,
-    borderRadius: radius.full,
-    backgroundColor: color.success,
   },
   label: {
     ...typeScale.cellSecondary,

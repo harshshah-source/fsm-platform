@@ -61,6 +61,22 @@ export const radius = {
   full: 9999,
 } as const;
 
+/**
+ * Shared soft elevation for cards that should lift off the app background instead of relying on a
+ * flat 1px border alone. One definition so every card in the app reads at the same depth — spread
+ * this onto a component's own `StyleSheet.create` object (`{ ...shadow.card, ... }`); both platforms
+ * are covered (`elevation` for Android, `shadow*` for iOS).
+ */
+export const shadow = {
+  card: {
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+  },
+} as const;
+
 export const typeScale = {
   display: { fontSize: 28, fontWeight: '700', lineHeight: 32 },
   pageTitle: { fontSize: 22, fontWeight: '700', lineHeight: 28 },

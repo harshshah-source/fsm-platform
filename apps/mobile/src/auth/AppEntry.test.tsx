@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { render, screen, waitFor } from '@testing-library/react-native';
 import type { SessionView } from '@fsm/shared';
+import { NavigationContainer } from '@react-navigation/native';
 import { AppEntry } from './AppEntry';
 import { useAuth } from './AuthProvider';
 
@@ -48,9 +49,11 @@ describe('AppEntry', () => {
     expect(screen.queryByTestId('email-input')).toBeNull();
   });
 
+  // The tab shell no longer carries its own `NavigationContainer` — expo-router's root layout owns
+  // the single container in production, so this is the test standing in for the app root.
   it('renders the SE tab shell when authenticated as SERVICE_ENGINEER', async () => {
     setAuth({ user_id: 'se-1', role: 'SERVICE_ENGINEER', zone_id: 1, acted_as_role: null });
-    render(<AppEntry />);
+    render(<AppEntry />, { wrapper: NavigationContainer });
 
     await waitFor(() => expect(screen.getByTestId('screen-home')).toBeTruthy());
     expect(screen.getByTestId('tab-Tickets')).toBeTruthy();

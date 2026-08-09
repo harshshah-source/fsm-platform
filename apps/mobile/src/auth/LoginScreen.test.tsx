@@ -42,4 +42,26 @@ describe('LoginScreen', () => {
 
     await waitFor(() => expect(screen.getByText('Invalid email or password')).toBeTruthy());
   });
+
+  it('shows the product wordmark', () => {
+    render(<LoginScreen />);
+    expect(screen.getByText('autoplant Systems')).toBeTruthy();
+  });
+
+  it('masks the password by default and reveals it via the eye toggle', () => {
+    render(<LoginScreen />);
+
+    const passwordInput = screen.getByTestId('password-input');
+    expect(passwordInput.props.secureTextEntry).toBe(true);
+    expect(screen.getByTestId('password-visibility-toggle').props.accessibilityLabel).toBe('Show password');
+
+    fireEvent.press(screen.getByTestId('password-visibility-toggle'));
+
+    expect(passwordInput.props.secureTextEntry).toBe(false);
+    expect(screen.getByTestId('password-visibility-toggle').props.accessibilityLabel).toBe('Hide password');
+
+    fireEvent.press(screen.getByTestId('password-visibility-toggle'));
+
+    expect(passwordInput.props.secureTextEntry).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { color, radius, spacing, typeScale, type SemanticStatus } from '../../theme/tokens';
+import { color, radius, shadow, spacing, typeScale, type SemanticStatus } from '../../theme/tokens';
 
 const TILE_COLOR: Record<SemanticStatus, string> = {
   info: color.info,
@@ -35,9 +35,15 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.sm,
     alignItems: 'flex-start',
+    ...shadow.card,
+    // A tinted shadow rather than the shared token's neutral black: on a bold flat-color tile a
+    // plain gray shadow reads as dirt at the edges, a color-matched one reads as depth.
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
   },
   value: {
     ...typeScale.display,
+    fontWeight: '800',
     color: color.onColor,
   },
   label: {

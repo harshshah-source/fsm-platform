@@ -21,6 +21,7 @@ import type {
   MeTicketDetailView,
   MeTicketsView,
   MeVouchersView,
+  MeWorkHistoryView,
   MyAvailabilityView,
   MyIntradayOffersView,
   MyLeaveRequestsView,
@@ -152,6 +153,17 @@ export async function apiGetMyTickets(accessToken: string): Promise<MeTicketsVie
     throw new Error('UNAUTHORIZED');
   }
   return (await res.json()) as MeTicketsView;
+}
+
+/** #175 — the Home "Assigned vs Completed" series. Dense: `days` always has `days.length` entries,
+ *  zero-filled for days the SE had no schedule, so the chart never reconstructs a calendar itself. */
+export async function apiGetWorkHistory(accessToken: string, days = 7): Promise<MeWorkHistoryView> {
+  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
+  const res = await fetch(`${BASE_URL}/me/work-history?days=${days}`, { headers });
+  if (!res.ok) {
+    throw new Error('UNAUTHORIZED');
+  }
+  return (await res.json()) as MeWorkHistoryView;
 }
 
 export async function apiGetTicketDetail(accessToken: string, ticketId: string): Promise<MeTicketDetailView> {

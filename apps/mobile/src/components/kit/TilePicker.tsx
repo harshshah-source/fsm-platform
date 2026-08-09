@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { color, radius, spacing, typeScale } from '../../theme/tokens';
+import { color, radius, shadow, spacing, typeScale } from '../../theme/tokens';
 
 export interface TilePickerOption<T extends string> {
   value: T;
@@ -53,10 +53,15 @@ const styles = StyleSheet.create({
     backgroundColor: color.surfaceCard,
     paddingVertical: spacing.md,
     alignItems: 'center',
+    ...shadow.card,
   },
   tileSelected: {
     backgroundColor: color.brand600,
     borderColor: color.brand600,
+    // A selected tile pops rather than just changing color — reads as "chosen", not just "different".
+    shadowColor: color.brand600,
+    shadowOpacity: 0.35,
+    elevation: 4,
   },
   label: {
     ...typeScale.body,

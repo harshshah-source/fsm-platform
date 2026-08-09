@@ -22,11 +22,12 @@ const styles = StyleSheet.create({
   pill: {
     alignSelf: 'flex-start',
     borderRadius: radius.full,
-    paddingVertical: spacing.xs / 2,
-    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs / 2 + 1,
+    paddingHorizontal: spacing.sm + 2,
   },
   label: {
     ...typeScale.cellSecondary,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.1,
   },
 });

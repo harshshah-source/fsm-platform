@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import type { IntradayInsertionOffer, NotificationListItem } from '@fsm/shared';
+import { NavigationContainer } from '@react-navigation/native';
 import { SeTabShell } from './SeTabShell';
 import { apiGetMyIntradayOffers, apiGetNotifications, apiMarkNotificationRead } from '../api/client';
 import { getAccessToken } from '../auth/tokenStore';
@@ -89,7 +90,7 @@ describe('SeTabShell', () => {
   });
 
   it('boots to the Home tab and registers all five nav entries', async () => {
-    render(<SeTabShell />);
+    render(<SeTabShell />, { wrapper: NavigationContainer });
 
     await waitFor(() => expect(screen.getByTestId('tab-Home')).toBeTruthy());
     expect(screen.getByTestId('tab-Tickets')).toBeTruthy();
@@ -101,7 +102,7 @@ describe('SeTabShell', () => {
   });
 
   it('switches screens when a different tab is pressed', async () => {
-    render(<SeTabShell />);
+    render(<SeTabShell />, { wrapper: NavigationContainer });
 
     await waitFor(() => expect(screen.getByTestId('tab-Tickets')).toBeTruthy());
     fireEvent.press(screen.getByTestId('tab-Tickets'));
@@ -116,7 +117,7 @@ describe('SeTabShell', () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetMyIntradayOffers.mockResolvedValue({ items: [offer()], cursor: null });
 
-      render(<SeTabShell />);
+      render(<SeTabShell />, { wrapper: NavigationContainer });
 
       await waitFor(() => expect(screen.getByTestId('mock-intraday-offer')).toBeTruthy());
       expect(screen.queryByTestId('tab-Home')).toBeNull();
@@ -126,7 +127,7 @@ describe('SeTabShell', () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetMyIntradayOffers.mockResolvedValue({ items: [offer()], cursor: null });
 
-      render(<SeTabShell />);
+      render(<SeTabShell />, { wrapper: NavigationContainer });
       await waitFor(() => expect(screen.getByTestId('mock-intraday-offer')).toBeTruthy());
 
       fireEvent.press(screen.getByTestId('mock-intraday-offer'));
@@ -138,7 +139,7 @@ describe('SeTabShell', () => {
     it('does not gate the tabs when there is no pending offer', async () => {
       mockGetAccessToken.mockResolvedValue('token');
 
-      render(<SeTabShell />);
+      render(<SeTabShell />, { wrapper: NavigationContainer });
 
       await waitFor(() => expect(screen.getByTestId('tab-Home')).toBeTruthy());
       expect(screen.queryByTestId('mock-intraday-offer')).toBeNull();
@@ -148,7 +149,7 @@ describe('SeTabShell', () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetNotifications.mockResolvedValue({ items: [ghostNotification()], unreadCount: 1 });
 
-      render(<SeTabShell />);
+      render(<SeTabShell />, { wrapper: NavigationContainer });
 
       await waitFor(() => expect(screen.getByTestId('ghost-assignment-toast')).toBeTruthy());
       expect(screen.getByText(ghostNotification().body as string)).toBeTruthy();
@@ -162,7 +163,7 @@ describe('SeTabShell', () => {
     it('shows no toast when there is no unread ghost-assignment notification', async () => {
       mockGetAccessToken.mockResolvedValue('token');
 
-      render(<SeTabShell />);
+      render(<SeTabShell />, { wrapper: NavigationContainer });
 
       await waitFor(() => expect(screen.getByTestId('tab-Home')).toBeTruthy());
       expect(screen.queryByTestId('ghost-assignment-toast')).toBeNull();

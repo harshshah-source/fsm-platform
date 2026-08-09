@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { color, radius, spacing, typeScale, type SemanticStatus } from '../../theme/tokens';
+import { color, radius, shadow, spacing, typeScale, type SemanticStatus } from '../../theme/tokens';
 import { StatusPill } from './StatusPill';
 
 export interface TicketCardData {
@@ -29,7 +29,7 @@ export interface TicketCardProps {
 export function TicketCard({ ticket, onPress, onCall, onWhatsApp, badge }: TicketCardProps) {
   const showContactRow = Boolean(onCall || onWhatsApp);
   return (
-    <Pressable onPress={onPress} style={styles.card}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}>
       <View style={styles.headerRow}>
         <Text style={styles.vehicleNo}>{ticket.vehicleNo}</Text>
         <Text style={styles.transporter}>{ticket.transporterName}</Text>
@@ -72,6 +72,12 @@ const styles = StyleSheet.create({
     borderColor: color.line,
     padding: spacing.lg,
     gap: spacing.xs,
+    ...shadow.card,
+  },
+  // Tactile press feedback on an otherwise static-looking card — a tap visibly registers before
+  // navigation happens, rather than the screen just changing with no acknowledgement.
+  cardPressed: {
+    opacity: 0.85,
   },
   headerRow: {
     flexDirection: 'row',
