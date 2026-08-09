@@ -1,4 +1,5 @@
 import { Prisma } from '../generated/prisma/client';
+import { OPERATIONAL_DEPLOYMENT_STATUSES } from '../ingestion/autoplant/master-mapping';
 
 /**
  * The Operations Data Explorer dataset registry (#217 AC-6).
@@ -806,6 +807,12 @@ const COMPANIES: DatasetDefinition = {
   ],
 };
 
+// Code-authored IN-list literal, built once from the same allow-list `master-mapping.ts` uses to decide
+// what counts as "in the operational fleet" (`isOperationalStatus`) — so "deployed" here can never drift
+// from what the master sync itself treats as deployed. Baked at module load from a constant array, never
+// from request input, so it stays inside the "every SQL fragment is code-authored" invariant.
+const OPERATIONAL_STATUS_SQL_LIST = OPERATIONAL_DEPLOYMENT_STATUSES.map((s) => `'${s}'`).join(', ');
+
 const PLANTS: DatasetDefinition = {
   key: 'plants',
   name: 'Plants',
@@ -814,7 +821,7 @@ const PLANTS: DatasetDefinition = {
   from: `plants p
     LEFT JOIN zones z ON z.zone_id = p.zone_id
     LEFT JOIN districts d ON d.district_id = p.district_id`,
-  searchColumns: ['name', 'sourceZoneName', 'plantState'],
+  searchColumns: ['name', 'sourceZoneName', 'plantState', 'companyNames'],
   defaultSort: { column: 'name', direction: 'asc' },
   columns: [
     {
@@ -935,6 +942,159 @@ const PLANTS: DatasetDefinition = {
         refreshTrigger: 'Daily master sync.',
         excludes: ['FSM-owned deactivation (#119) — that is plant_deactivations, a separate side table not joined here'],
         developer: { column: 'plants.status', expression: 'p.status' },
+      },
+    },
+    {
+      key: 'companyNames',
+      label: 'Companies',
+      type: 'string',
+      sql: `(SELECT STRING_AGG(DISTINCT c2.name, ', ' ORDER BY c2.name) FROM vehicles v2 JOIN company_master c2 ON c2.company_id = v2.company_id WHERE v2.plant_id = p.plant_id)`,
+      filterable: true,
+      sortable: true,
+      defaultVisible: true,
+      lineage: {
+        definition:
+          'The company (or companies) whose vehicles are stationed at this plant, comma-joined. Most plants belong to exactly one company, but nothing in the schema enforces that — a plant with vehicles from more than one company shows all of them here.',
+        system: 'DERIVED',
+        table: 'vehicles ⋈ company_master (aggregated per plant)',
+        refreshTrigger: 'Recomputed on every read from the daily-synced vehicle/company mirror; not itself stored.',
+        excludes: ['A plant with zero vehicles — the aggregate is NULL, not an empty string'],
+        developer: {
+          column: null,
+          expression: `(SELECT STRING_AGG(DISTINCT c2.name, ', ' ORDER BY c2.name) FROM vehicles v2 JOIN company_master c2 ON c2.company_id = v2.company_id WHERE v2.plant_id = p.plant_id)`,
+          formula: "STRING_AGG(DISTINCT company_master.name) over every vehicle at this plant_id",
+        },
+      },
+    },
+    {
+      key: 'vehicleCount',
+      label: 'Vehicles',
+      type: 'number',
+      sql: '(SELECT COUNT(*) FROM vehicles v2 WHERE v2.plant_id = p.plant_id)',
+      filterable: true,
+      sortable: true,
+      defaultVisible: true,
+      lineage: {
+        definition: 'How many vehicles FSM mirrors at this plant, any deployment status.',
+        system: 'DERIVED',
+        table: 'vehicles (aggregated per plant)',
+        refreshTrigger: 'Recomputed on every read from the daily master sync.',
+        developer: {
+          column: null,
+          expression: '(SELECT COUNT(*) FROM vehicles v2 WHERE v2.plant_id = p.plant_id)',
+          formula: 'COUNT(*) over every vehicles row at this plant_id',
+        },
+      },
+    },
+    {
+      key: 'deviceCount',
+      label: 'Devices',
+      type: 'number',
+      sql: '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id)',
+      filterable: true,
+      sortable: true,
+      defaultVisible: true,
+      lineage: {
+        definition: 'How many devices FSM mirrors at this plant — operational and warehoused together.',
+        system: 'DERIVED',
+        table: 'device_states (aggregated per plant)',
+        refreshTrigger: '30-minute device-state recompute.',
+        excludes: [DEPARTED_NOTE, 'Not split by deployed/undeployed or active/inactive — see those columns for the breakdown'],
+        developer: {
+          column: null,
+          expression: '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id)',
+          formula: 'COUNT(*) over every device_states row at this plant_id',
+        },
+      },
+    },
+    {
+      key: 'deployedVehicleCount',
+      label: 'Deployed vehicles',
+      type: 'number',
+      sql: `(SELECT COUNT(*) FROM vehicles v2 WHERE v2.plant_id = p.plant_id AND v2.status IN (${OPERATIONAL_STATUS_SQL_LIST}))`,
+      filterable: true,
+      sortable: true,
+      defaultVisible: false,
+      lineage: {
+        definition: 'Vehicles at this plant whose AutoPlant deployment status is ACTIVE or DEPLOYED — the operational fleet.',
+        system: 'DERIVED',
+        table: 'vehicles (aggregated per plant)',
+        refreshTrigger: 'Recomputed on every read from the daily master sync.',
+        excludes: ['MAINTENANCE and dirty composite statuses (e.g. "DEPLOYED/UNDEPLOYED") — neither deployed nor undeployed here'],
+        developer: {
+          column: null,
+          expression: `(SELECT COUNT(*) FROM vehicles v2 WHERE v2.plant_id = p.plant_id AND v2.status IN (${OPERATIONAL_STATUS_SQL_LIST}))`,
+          formula: 'COUNT(*) over vehicles at this plant_id with status IN OPERATIONAL_DEPLOYMENT_STATUSES (master-mapping.ts)',
+          ownedBy: 'Same allow-list as isOperationalStatus (master-mapping.ts)',
+        },
+      },
+    },
+    {
+      key: 'undeployedVehicleCount',
+      label: 'Undeployed vehicles',
+      type: 'number',
+      sql: `(SELECT COUNT(*) FROM vehicles v2 WHERE v2.plant_id = p.plant_id AND v2.status = 'UNDEPLOYED')`,
+      filterable: true,
+      sortable: true,
+      defaultVisible: false,
+      lineage: {
+        definition: 'Vehicles at this plant whose AutoPlant deployment status is UNDEPLOYED.',
+        system: 'DERIVED',
+        table: 'vehicles (aggregated per plant)',
+        refreshTrigger: 'Recomputed on every read from the daily master sync.',
+        excludes: ['MAINTENANCE and dirty composite statuses — neither deployed nor undeployed here'],
+        developer: {
+          column: null,
+          expression: `(SELECT COUNT(*) FROM vehicles v2 WHERE v2.plant_id = p.plant_id AND v2.status = 'UNDEPLOYED')`,
+          formula: "COUNT(*) over vehicles at this plant_id with status = 'UNDEPLOYED'",
+        },
+      },
+    },
+    {
+      key: 'activeDeviceCount',
+      label: 'Active devices',
+      type: 'number',
+      sql: '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.is_inactive = false)',
+      filterable: true,
+      sortable: true,
+      defaultVisible: false,
+      lineage: {
+        definition: 'Devices at this plant that are neither warehoused nor inactive — pinging within the inactivity threshold.',
+        system: 'DERIVED',
+        table: 'device_states (aggregated per plant)',
+        refreshTrigger: '30-minute device-state recompute.',
+        excludes: [DEPARTED_NOTE],
+        developer: {
+          column: null,
+          expression:
+            '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.is_inactive = false)',
+          formula: 'COUNT(*) over device_states at this plant_id with is_departed = false AND is_inactive = false',
+          ownedBy: 'Same predicate as FLEET_COUNT_COLUMNS.healthyOperational (dashboard.service.ts)',
+        },
+      },
+    },
+    {
+      key: 'inactiveDeviceCount',
+      label: 'Inactive devices',
+      type: 'number',
+      sql: "(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.is_inactive = true AND ds2.sla_bucket IS NOT NULL)",
+      filterable: true,
+      sortable: true,
+      defaultVisible: false,
+      lineage: {
+        definition: 'Devices at this plant that have been silent past the inactivity threshold — not warehoused, not healthy.',
+        system: 'DERIVED',
+        table: 'device_states (aggregated per plant)',
+        refreshTrigger: '30-minute device-state recompute.',
+        excludes: [DEPARTED_NOTE],
+        developer: {
+          column: null,
+          expression:
+            "(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.is_inactive = true AND ds2.sla_bucket IS NOT NULL)",
+          formula:
+            'COUNT(*) over device_states at this plant_id with is_departed = false AND is_inactive = true AND sla_bucket IS NOT NULL',
+          ownedBy: 'Same predicate as FLEET_COUNT_COLUMNS.inactiveOperational (dashboard.service.ts)',
+        },
       },
     },
     {
