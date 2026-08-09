@@ -241,10 +241,18 @@ export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCoun
     // SAME paged queries, so the DBA's <100-rows/query cap and the query count are both unchanged.
     // Verified 2026-07-17: all 15,674 DEPLOYED vehicles match a widgets row (100% join coverage).
     //
-    // Only STATIC device identity is taken from widgets here. `TRIP_CREATION_DATETIME` is deliberately
-    // NOT read on this path: it is current-trip state (18.4% of the DEPLOYED fleet changes it per day),
-    // so it rides the 30-min snapshot tick onto `device_states` instead — a daily sync would leave it
-    // ~2,600 vehicles/day stale. Keep the lifecycle split; do not "tidy" it back together.
+    // Only STATIC, fitment-grain attributes are taken from widgets here — device identity
+    // (DEVICE_TYPE / IMSI_NO) plus the three commissioning columns (FIRST_INSTALLED_DATE_TIME /
+    // FIRST_INSTALLED_BY / INSTALLATION_REMARK) that feed the append-only `device_commissioning` fact.
+    // The commissioning three are read from WIDGETS, not from `mst_vehicle`'s lowercase equivalents,
+    // because widgets is the anchor: 99.99% populated vs 51,137/51,142 (feasibility §2.2). They move
+    // only on a re-map — which is precisely what the append-only table exists to capture, since
+    // `tb_vehiclemaster` REWRITES them in place and destroys the previous fitment record at source.
+    //
+    // `TRIP_CREATION_DATETIME` is deliberately NOT read on this path: it is current-trip state (18.4%
+    // of the DEPLOYED fleet changes it per day), so it rides the 30-min snapshot tick onto
+    // `device_states` instead — a daily sync would leave it ~2,600 vehicles/day stale. Keep the
+    // lifecycle split; do not "tidy" it back together.
     //
     // No enrichment when `widgetsSchema` is unset (unit tests stubbing `query`): both columns read NULL,
     // exactly as before. When it IS set, a widgets outage fails the run rather than degrading it — that
@@ -256,7 +264,13 @@ export class AutoPlantMasterSource implements MasterSyncSource, MasterSourceCoun
         'v.vehicle_no AS vehicle_no, v.device_id AS device_id, v.plant_id AS plant_id, ' +
         'p.company_id AS company_id, v.transporter_id AS transporter_id, ' +
         'v.deployment_status AS deployment_status, ' +
-        (enrich ? 'w.DEVICE_TYPE AS device_type, w.IMSI_NO AS imsi_no' : 'NULL AS device_type, NULL AS imsi_no'),
+        (enrich
+          ? 'w.DEVICE_TYPE AS device_type, w.IMSI_NO AS imsi_no, ' +
+            'w.FIRST_INSTALLED_DATE_TIME AS first_installed_date_time, ' +
+            'w.FIRST_INSTALLED_BY AS first_installed_by, ' +
+            'w.INSTALLATION_REMARK AS installation_remark'
+          : 'NULL AS device_type, NULL AS imsi_no, ' +
+            'NULL AS first_installed_date_time, NULL AS first_installed_by, NULL AS installation_remark'),
       from:
         `${this.table('mst_vehicle')} v LEFT JOIN ` +
         `(SELECT plant_id, MIN(company_id) AS company_id FROM ${this.table('mst_plant')} GROUP BY plant_id) p ` +

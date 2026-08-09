@@ -15,6 +15,8 @@
  * `dealType`. A re-sync can therefore never clobber an Ops-Head decision.
  */
 
+import { normalizeGpsTimestamp, TRUE_SOURCE_UTC_OFFSET_MIN } from '../normalize';
+
 /** An idempotent upsert keyed on a source id: match `where`, insert `create`, or refresh `update`. */
 export interface UpsertPlan<TWhere, TCreate, TUpdate> {
   where: TWhere;
@@ -99,6 +101,34 @@ export interface VehicleMasterMasterRow {
   imsi_no: string | null;
   /** ACTIVE / DEPLOYED / UNDEPLOYED — mirrored verbatim onto `vehicles.status`. */
   deployment_status: string | null;
+  /**
+   * `ap_widgets.tb_vehiclemaster.FIRST_INSTALLED_DATE_TIME` — when this device was first fitted to
+   * THIS vehicle (99.99% populated; `mst_vehicle.first_installed_dt` agrees but is only 51,137/51,142,
+   * so widgets is the anchor — feasibility §2.2/§2.4). A naive MySQL DATETIME arriving as a raw
+   * wall-clock string, because the pool sets `dateStrings: true` — the timezone decision stays here,
+   * not in the driver.
+   *
+   * **REWRITTEN IN PLACE on a re-map** — 10,565 devices (12.96%) have already had this moved, 1,757 by
+   * more than a year. That is the entire reason `device_commissioning` is an append-only table: a
+   * measure that reads only the current source row is measuring a silently-mutating population.
+   *
+   * Optional, matching `VehicleMasterRow.TRIP_CREATION_DATETIME`: unit tests that stub `query` (and any
+   * caller that selects only the original master columns) supply neither, and a missing fitment date
+   * must degrade to "no fact worth recording", never break the mirror.
+   */
+  first_installed_date_time?: string | null;
+  /**
+   * `FIRST_INSTALLED_BY` — a login string, NOT a person. There is no user master behind it, ~13% of
+   * 2026 installs carry 'NA', and machine accounts (`INTEGRATION_SERVICE`, `*_IMPADMIN`) are mixed in
+   * with per-technician logins. Mirrored verbatim as attribution evidence, never as an identity.
+   */
+  first_installed_by?: string | null;
+  /**
+   * `INSTALLATION_REMARK` (68.4% populated) — the cohort filter that actually matters: 'New
+   * Installation' vs 'Re-Mapping' is what separates a genuine commissioning from a fitment transfer,
+   * and a survival curve computed without it is answering a different question (feasibility §1.5/§2.4).
+   */
+  installation_remark?: string | null;
 }
 
 // ── Scoping predicate — anchored on the AUTHORITATIVE mst_plant, not mst_company ──
@@ -291,6 +321,84 @@ export function mapVehicle(
     where: { vehicleNo: row.vehicle_no.trim() },
     create: { vehicleNo: row.vehicle_no.trim(), ...mirrored },
     update: mirrored,
+  };
+}
+
+// ── Commissioning fact (feasibility §7.3) ─────────────────────────────────────────────────────────
+
+/** One append-only `device_commissioning` row, ready for `createMany` — see {@link mapCommissioning}. */
+export interface CommissioningFact {
+  deviceId: string;
+  vehicleId: bigint | null;
+  installedAt: Date | null;
+  installedAtOffsetMin: number | null;
+  installedBy: string | null;
+  installationRemark: string | null;
+  plantId: bigint | null;
+  companyId: bigint | null;
+}
+
+/**
+ * The earliest instant a `FIRST_INSTALLED_DATE_TIME` may plausibly carry. MySQL's zero-date sentinel
+ * (`0000-00-00 00:00:00`) satisfies the naive-timestamp grammar, so a pure regex parse would happily
+ * turn it into a year-0 instant and freeze it into an append-only table. Anything before 2000 here is
+ * a sentinel, not a fitment (AutoPlant's own fleet starts 2023 — feasibility §5.2).
+ */
+const MIN_PLAUSIBLE_INSTALL_MS = Date.UTC(2000, 0, 1);
+
+/**
+ * Parse `FIRST_INSTALLED_DATE_TIME` to a true instant at {@link TRUE_SOURCE_UTC_OFFSET_MIN}, or null.
+ *
+ * **Offset 0, not `AUTOPLANT_UTC_OFFSET_MIN`.** This is the load-bearing decision on this path and it
+ * was measured, not assumed: `FIRST_INSTALLED_DATE_TIME` was compared against `device_installation_date`
+ * (a TIMESTAMP, so true UTC on read) in the same row — 17,985 devices at exactly 0 minutes' difference,
+ * ZERO at ±330, with no step across 2025→2026. A value written into an append-only table under #222's
+ * wrong constant would carry the 5.5 h error permanently, because nothing ever revisits it.
+ *
+ * NON-throwing, like `parseTripCreation` and for the same reason: this is enrichment riding a mirror
+ * sync, so an unparseable or sentinel date must degrade to null rather than fail the run carrying it.
+ */
+export function parseInstalledAt(v: string | null | undefined): Date | null {
+  if (isBlank(v)) return null;
+  let parsed: Date;
+  try {
+    parsed = normalizeGpsTimestamp(v!.trim(), TRUE_SOURCE_UTC_OFFSET_MIN);
+  } catch {
+    return null;
+  }
+  return parsed.getTime() < MIN_PLAUSIBLE_INSTALL_MS ? null : parsed;
+}
+
+/**
+ * Build the append-only commissioning fact for one vehicle-master row, or null when the row carries no
+ * fitted device (there is nothing to commission).
+ *
+ * Everything except `deviceId` is nullable BY DESIGN — the table has no FKs and no NOT NULLs beyond the
+ * key, so an unmapped fitment or a device the mirror has not caught up on (#227) still records. The
+ * unique index is `NULLS NOT DISTINCT`, so those nulls collapse to one row rather than re-inserting on
+ * every sync.
+ *
+ * `installationRemark` is deliberately NOT part of the fitment identity — see the model doc. A
+ * remark-only change does not append, and the stored remark stays as first observed.
+ */
+export function mapCommissioning(
+  row: VehicleMasterMasterRow,
+  fks: { vehicleId: bigint | null; plantId: bigint | null; companyId: bigint | null },
+): CommissioningFact | null {
+  const deviceId = cleanStr(row.device_id);
+  if (deviceId == null) return null;
+  const installedAt = parseInstalledAt(row.first_installed_date_time);
+  return {
+    deviceId,
+    vehicleId: fks.vehicleId,
+    installedAt,
+    // Record the offset only when there is a timestamp it describes — a bare `0` beside a null
+    // `installedAt` would claim a convention was applied to nothing.
+    installedAtOffsetMin: installedAt == null ? null : TRUE_SOURCE_UTC_OFFSET_MIN,
+    installedBy: cleanStr(row.first_installed_by),
+    installationRemark: cleanStr(row.installation_remark),
+    plantId: fks.plantId,
+    companyId: fks.companyId,
   };
 }
 

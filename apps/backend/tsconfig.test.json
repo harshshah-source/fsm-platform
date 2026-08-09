@@ -1,0 +1,21 @@
+{
+  // Typechecks the SPEC files, which `tsconfig.json` deliberately cannot: its `rootDir`/`outDir` pair
+  // describes the build, so `include` is `src/**` and `test/**` is invisible to `pnpm typecheck`.
+  //
+  // That gap is not cosmetic. Vitest transpiles with SWC, which strips types WITHOUT checking them, so
+  // a spec referencing a field that does not exist compiles, runs, silently drops the field, and fails
+  // on an assertion — pointing at the wrong cause. This exact failure cost a session on the
+  // commissioning slice: the fixtures set `first_installed_date_time` months before
+  // `VehicleMasterMasterRow` had it, and nothing anywhere complained.
+  //
+  // `noEmit` + no `rootDir`, so this checks only — it never participates in the build.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "rootDir": ".",
+    "outDir": null
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

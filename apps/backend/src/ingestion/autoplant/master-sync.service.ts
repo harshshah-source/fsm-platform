@@ -11,6 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { MasterSyncRunService, type EntityStat, type MasterSyncOutcome } from './master-sync-run.service';
 import {
   isOperationalStatus,
+  mapCommissioning,
   mapCompany,
   mapDevice,
   mapPlant,
@@ -18,6 +19,7 @@ import {
   mapVehicle,
   plantInScope,
   toBigIntOrNull,
+  type CommissioningFact,
   type CompanyDefaults,
   type MasterSyncScope,
   type MstCompanyRow,
@@ -87,6 +89,15 @@ const chunk = <T>(arr: readonly T[], size: number): T[][] => {
  * totals, and writing tens of thousands of reject rows per sync would cost more than it informs.
  */
 const REJECT_CAP_PER_RUN = 5000;
+
+/**
+ * Rows per `device_commissioning` `createMany` statement. Lower than {@link UPSERT_BATCH_SIZE} for a
+ * hard reason, not taste: `createMany` binds every column of every row as a parameter in ONE statement,
+ * and Postgres caps a statement at 65,535 bind parameters. At 9 columns per fact the ceiling is ~7,281
+ * rows, and the mirrored fleet is ~21k — a single unbatched call would fail outright once the fleet grew
+ * past it, which on a best-effort writer means silently losing every fact instead of one.
+ */
+const COMMISSIONING_BATCH_SIZE = 1000;
 
 /**
  * Master synchroniser (blueprint §5) — upserts `company_master` / `transporters` / `plants` /
@@ -159,6 +170,10 @@ export class MasterSyncService {
       devices: emptyStat(),
       // Issue 128 lifecycle counters: `inserted` = departures opened, `updated` = restores.
       departures: emptyStat(),
+      // Commissioning facts: `inserted` = new fitment identities appended, `skipped` = fitments already
+      // recorded (the steady-state daily number, and the proof append-only-ness is holding). `updated`
+      // is structurally always 0 — this table has no update path.
+      commissioning: emptyStat(),
     };
 
     // Itemised skip accounting (review A5): every skip site splits its counter per reason and
@@ -356,7 +371,12 @@ export class MasterSyncService {
         existingDevices.has(pl.where.deviceId) ? stats.devices.updated++ : stats.devices.inserted++;
       });
 
-      // 6. Deployment lifecycle (Issue 128) — mark departures / restores from the SAME read the mirror
+      // 6. Commissioning facts (feasibility §7.3) — append one row per newly-seen (device, vehicle,
+      //    installed_at). Runs on the mirrored device set, from the same read, and is inert by
+      //    construction: it is the last thing that can fail without consequence.
+      await this.appendCommissioning(runId, vehicleMasters, devicePlans, vehicleIdByNo, plantIdBySource, companyIdBySource, stats);
+
+      // 7. Deployment lifecycle (Issue 128) — mark departures / restores from the SAME read the mirror
       //    was built from. Runs last: the mirror is already truthful, so this only opens/closes the
       //    FSM-owned side rows and cancels the open work of devices that left the fleet.
       await this.reconcileDepartures(runId, vehicleMasters, plantIdBySource, stats, options);
@@ -364,7 +384,7 @@ export class MasterSyncService {
       await flushRejects();
       await this.runService.finishRun(runId, { status: 'SUCCESS', entityStats: stats });
       this.logger.log(`Master sync ${runId} SUCCESS ${JSON.stringify(stats)}`);
-      // 7. Floating-SE eligibility MV (Issue 138 slice 2) — plants/districts (its geometry inputs) just
+      // 8. Floating-SE eligibility MV (Issue 138 slice 2) — plants/districts (its geometry inputs) just
       //    changed, so a stale MV would give the Recommender wrong floating coverage for new/relocated
       //    plants. Refreshed AFTER the mirror committed; best-effort like the departure pass.
       await this.refreshFloatingEligibility(runId);
@@ -399,6 +419,102 @@ export class MasterSyncService {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.logger.error(`Master sync ${runId}: floating-eligibility MV refresh failed (mirror committed): ${message}`);
+    }
+  }
+
+  /**
+   * Append this run's commissioning facts (feasibility §7.3) — one `device_commissioning` row per
+   * (device, vehicle, installed_at) the source has not already recorded.
+   *
+   * **Why a table and not columns on `devices`.** `tb_vehiclemaster` REWRITES fitment in place: a
+   * re-map destroys the previous `FIRST_INSTALLED_DATE_TIME`/`FIRST_INSTALLED_BY` at source (measured:
+   * 10,565 devices moved, 1,757 by more than a year). Anything reading only the current source row is
+   * measuring a silently-mutating population, so the fact has to be captured as it is observed.
+   *
+   * **Append-only is structural, not conventional.** The unique index IS the fitment identity and the
+   * write is `createMany({ skipDuplicates: true })` → `INSERT … ON CONFLICT DO NOTHING`, the same idiom
+   * `raw_device_snapshots` uses for re-processed chunks. There is no UPDATE path to regress into: a
+   * re-map changes `vehicleId`, which is a NEW identity, so it appends and the prior row is untouched.
+   * The index is `NULLS NOT DISTINCT` (Prisma cannot express it — see the migration and the model doc),
+   * without which every null `installed_at`/`vehicle_id` row would re-insert on EVERY daily sync.
+   *
+   * **INERT — this is the load-bearing property.** The whole body is inside one try/catch that logs and
+   * swallows, exactly like `flushRejects`. Two things make that guarantee real rather than hopeful:
+   *  1. It runs OUTSIDE any transaction. The only `$transaction` on this path is `batchUpsert`, which
+   *     has already committed by the time this is called, so a rejection here cannot poison an open
+   *     transaction or roll back the mirror.
+   *  2. It is called AFTER every mirror write, so there is no later step whose inputs it could corrupt.
+   * A lost run of facts costs at most one day of `observed_at` precision — the next sync re-derives the
+   * same fitments from the source, because the source rows are still there.
+   *
+   * **Scope: the devices this run actually mirrored.** Since Issue 128 the read returns every
+   * deployment status (~48.5k rows) while FSM only mirrors the operational fleet (~21k). Writing facts
+   * for the ~27k never-mirrored rows would make this table describe a different population than every
+   * other FSM surface, which is the exact failure the insert-scope pin exists to prevent. The table
+   * still carries no FKs (so a fact survives a device the mirror later loses, #227) — that is about
+   * durability, not about widening what gets written here.
+   */
+  private async appendCommissioning(
+    runId: bigint,
+    vehicleMasters: VehicleMasterMasterRow[],
+    devicePlans: { where: { deviceId: string } }[],
+    vehicleIdByNo: Map<string, bigint>,
+    plantIdBySource: Map<string, bigint>,
+    companyIdBySource: Map<string, bigint>,
+    stats: Record<string, EntityStat>,
+  ): Promise<void> {
+    try {
+      const mirrored = new Set(devicePlans.map((p) => p.where.deviceId));
+      const facts: CommissioningFact[] = [];
+      for (const v of vehicleMasters) {
+        const deviceId = String(v.device_id ?? '').trim();
+        if (deviceId === '' || !mirrored.has(deviceId)) continue;
+        const fact = mapCommissioning(v, {
+          vehicleId: vehicleIdByNo.get(v.vehicle_no.trim()) ?? null,
+          plantId: plantIdBySource.get(String(toBigIntOrNull(v.plant_id))) ?? null,
+          companyId: companyIdBySource.get(String(toBigIntOrNull(v.company_id))) ?? null,
+        });
+        if (fact) facts.push(fact);
+      }
+      if (facts.length === 0) return;
+
+      // Snapshot `first_reported_at` as it stands NOW — the commissioning fact records what was known
+      // when the fitment was observed, so a later first ping does not retro-fill an older row. Loaded in
+      // ONE query over the (fleet-bounded) table rather than an `IN (…)` over ~21k device ids, for the
+      // same reason `existingKeys` does: it avoids the Postgres bind-parameter ceiling and is a single
+      // scan. Devices that have never reported are simply absent → null, which is precisely the
+      // population this table exists to surface (#223).
+      const firstReportedByDevice = new Map<string, Date>();
+      for (const s of await this.prisma.deviceState.findMany({
+        where: { firstReportedAt: { not: null } },
+        select: { deviceId: true, firstReportedAt: true },
+      })) {
+        if (s.firstReportedAt) firstReportedByDevice.set(s.deviceId, s.firstReportedAt);
+      }
+
+      let inserted = 0;
+      for (const group of chunk(facts, COMMISSIONING_BATCH_SIZE)) {
+        const { count } = await this.prisma.deviceCommissioning.createMany({
+          data: group.map((f) => ({
+            ...f,
+            firstReportedAt: firstReportedByDevice.get(f.deviceId) ?? null,
+            runId,
+          })),
+          skipDuplicates: true,
+        });
+        inserted += count;
+      }
+      stats.commissioning.inserted = inserted;
+      // Everything not inserted was already recorded — the steady-state daily number once the backfill
+      // settles, and the observable evidence that the NULLS NOT DISTINCT index is doing its job.
+      stats.commissioning.skipped = facts.length - inserted;
+      stats.commissioning.observed = facts.length;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      stats.commissioning.skippedByReason = { APPEND_FAILED: 1 };
+      this.logger.error(
+        `Master sync ${runId}: commissioning append failed (mirror is committed, nothing rolled back): ${message}`,
+      );
     }
   }
 

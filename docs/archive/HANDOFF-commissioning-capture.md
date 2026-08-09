@@ -1,3 +1,8 @@
+> **ARCHIVED 2026-08-09 — consumed.** All three gaps below are closed: the writer exists
+> (`MasterSyncService.appendCommissioning`), `first_reported_at` has coverage, and the migration is
+> committed, so nothing here is current. Point-in-time history; do not update. Current state lives in
+> `docs/SYSTEM-STATE-2026-07.md` §2.2 and the 2026-08-09 INDEX session-log rows.
+
 # HANDOFF — commissioning capture (`first_reported_at` + `device_commissioning`)
 
 **Live handoff. Opened 2026-08-09.** Uncommitted working-tree state a next session must recover.

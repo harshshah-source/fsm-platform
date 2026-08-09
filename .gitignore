@@ -42,3 +42,14 @@ apps/backend/src/generated/
 # staged; ignored explicitly so a future `git add -A` cannot sweep it in. The rest of
 # `audit/autoplant-reconciliation/` (reports, plans, the Excel benchmark) is tracked on purpose.
 audit/autoplant-reconciliation/standdown-live-batches.csv
+
+# The installer-quality analysis. Deliberately never staged, for the same reason as the stand-down
+# export above: it is real data about named parties, and here the naming IS the harm. The headline
+# finding — `PRATIK PAWAR`, 79 installs / 97.5% never-online — is NOT a person doing bad work; it is
+# a single 2h27m bulk-provisioning session across four states, a third-party vendor feed that was
+# never physically connected. SUMMARY.md says so explicitly, but the directory name, the filenames
+# and a `git log -S` six months from now do not, and a named account sitting in history next to a
+# 97.5% failure rate reads as an accusation to everyone who never opens the file. The CSVs also
+# carry real plant, transporter and vehicle rows. The analysis is kept on disk and shared directly,
+# out of band. Do not re-add it because `git status` looks untidy.
+audit/installer-quality-2026-08/

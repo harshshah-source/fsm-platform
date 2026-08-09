@@ -67,14 +67,14 @@ Section order is the resume order for future sessions.
 > `device_commissioning` fact table, §5 opens with the #222/#223/#226/#227/#228 callout, and §6.1's
 > #218 block is amended to separate *landed* from *exercised*.
 >
-> **What is in flight and is deliberately NOT committed** — the commissioning capture. Its migration
-> (`20260809120000`) **has been applied to the dev DB while its file is untracked**, which is the same
-> shape #144 had to clean up once before and is recorded here rather than left to be discovered. It
-> was applied because not applying it was worse: the ingestion code writes `first_reported_at`, so the
-> next snapshot ingest would have thrown on a missing column, and a first-ever ping is observable
-> exactly once. The half that is missing is the **writer** — `device_commissioning` has none, and its
-> 220-line e2e spec is red by construction. Full state, and what it takes to finish:
-> `.scratch/fsm-platform-v1/HANDOFF-commissioning-capture.md`.
+> **2026-08-09 (later the same day) — the commissioning capture is FINISHED and COMMITTED.** The
+> paragraph that stood here described it as parked with its migration applied-but-untracked; that state
+> is gone. The writer exists (`MasterSyncService.appendCommissioning`), the migration file is tracked,
+> and `git status` and `_prisma_migrations` agree again — the #144-shaped divergence is closed rather
+> than carried. `HANDOFF-commissioning-capture.md` was consumed and is archived at
+> `docs/archive/HANDOFF-commissioning-capture.md`. Both specs are green and, unlike before, are
+> **typechecked**: `tsconfig.test.json` now covers `test/**`, which is what made the original fixture
+> errors visible at all. See §2.2 for the two schema objects.
 >
 > **A five-minute status ledger across both recent sessions** — what is shipped vs committed-not-
 > applied vs written-not-committed vs designed vs idea, the dependency graph, the decided/outstanding
@@ -256,8 +256,8 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 | `vehicles` | Fitment anchor → plant/company/transporter | `vehicle_no` unique; `status` mirrors AutoPlant deployment; transporter FK wired in migration `20260703120000` after nulling dangling values |
 | `transporters` | AutoPlant `mst_transporter` mirror | `sourceTransporterId` unique; written by master sync |
 | `raw_device_snapshots` | One row per ping — highest-volume table | **RANGE-partitioned daily** by `gps_datetime` (rebuilt in `20260706130000` — the original `20260619153000` declared PARTITION BY but only had a DEFAULT partition); PK `(id, gps_datetime)`; unique `(device_id, gps_datetime)` + `ON CONFLICT DO NOTHING` ⇒ idempotent chunk re-runs |
-| `device_states` | Derived hot row per device: inactivity hours, `sla_bucket` (stored), eligibility, denormalised vehicle/plant/company, `trip_creation_datetime`, `first_reported_at` | CHECK `inactivity_hours >= 0`; recomputed set-based by `DeviceStateService`; **18,528 rows in dev DB** (INDEX.md:132). `trip_creation_datetime` (2026-07-17) is maintained at INGEST by `SnapshotIngestionService`, like `latest_gps_datetime` — it is live trip state (18.4%/day churn), not master data; see §3b. **`first_reported_at` + `first_reported_offset_min` (2026-08-09, migration `20260809120000`)**: the first GPS ping ever seen for a device, write-once via `COALESCE` in the same ingest upsert. Nothing else in FSM retains it — `latest_gps_datetime` is overwritten every tick and `raw_device_snapshots` drops partitions after 7 days — so it is observable exactly once, as it happens. Written at **true UTC (offset 0), NOT the live `AUTOPLANT_UTC_OFFSET_MIN = 330`**, because a write-once column frozen under #222's wrong constant would carry the 5.5 h error permanently; until #222 lands it may therefore read *later* than `latest_gps_datetime` on the same row, which is expected and self-heals. **No test covers it** — see §5 |
-| `device_commissioning` | Append-only fitment fact — one row per (device, vehicle, `installed_at`), carrying `installed_by`, `installation_remark`, denormalised plant/company, and the `first_reported_at` snapshot | **Migration `20260809120000` APPLIED to the dev DB; the migration file and model are UNCOMMITTED, and there is NO WRITER — the table exists and nothing fills it.** It is a table rather than columns on `devices` because `tb_vehiclemaster` rewrites fitment in place (measured: 10,565 devices have had `first_installed_dt` moved, 1,757 by more than a year), so anything reading only the live source row measures a silently-mutating population. Append-only is structural: the unique key IS the fitment identity and the writer is `INSERT … ON CONFLICT DO NOTHING`. **The unique index needs `NULLS NOT DISTINCT`, which Prisma 7.8 cannot express** — `prisma migrate dev` will offer a replacement without it, and accepting that silently breaks append-only-ness (`installed_at` is null on ~13% of source rows; `NULL <> NULL` re-inserts every one on every daily sync). Verified present in the DB via `pg_index.indnullsnotdistinct`. Full state: `.scratch/fsm-platform-v1/HANDOFF-commissioning-capture.md` |
+| `device_states` | Derived hot row per device: inactivity hours, `sla_bucket` (stored), eligibility, denormalised vehicle/plant/company, `trip_creation_datetime`, `first_reported_at` | CHECK `inactivity_hours >= 0`; recomputed set-based by `DeviceStateService`; **18,528 rows in dev DB** (INDEX.md:132). `trip_creation_datetime` (2026-07-17) is maintained at INGEST by `SnapshotIngestionService`, like `latest_gps_datetime` — it is live trip state (18.4%/day churn), not master data; see §3b. **`first_reported_at` + `first_reported_offset_min` (2026-08-09, migration `20260809120000`)**: the first GPS ping ever seen for a device, write-once via `COALESCE` in the same ingest upsert. Nothing else in FSM retains it — `latest_gps_datetime` is overwritten every tick and `raw_device_snapshots` drops partitions after 7 days — so it is observable exactly once, as it happens. Written at **true UTC (offset 0), NOT the live `AUTOPLANT_UTC_OFFSET_MIN = 330`**, because a write-once column frozen under #222's wrong constant would carry the 5.5 h error permanently; until #222 lands it may therefore read *later* than `latest_gps_datetime` on the same row, which is expected and self-heals. **Covered since 2026-08-09** by `snapshot-first-reported-dualwrite.e2e-spec.ts` (7 tests): write-once against both a later AND an earlier ping (COALESCE, not LEAST — a LEAST would pin every device to its pre-#222 value forever), chunk-**min** not chunk-max, offset 0 recorded, and a null corrected timestamp leaving the column unset rather than freezing a `+330` value. Its last test asserts the 5.5 h inversion *deliberately* and should be **deleted when #222 lands** |
+| `device_commissioning` | Append-only fitment fact — one row per (device, vehicle, `installed_at`), carrying `installed_by`, `installation_remark`, denormalised plant/company, and the `first_reported_at` snapshot | **Migration `20260809120000` applied AND tracked; written by `MasterSyncService.appendCommissioning` since 2026-08-09.** The writer is best-effort — `createMany({ skipDuplicates: true })` inside one try/catch, running *after* every mirror write and outside any `$transaction`, so a fitment-write failure can neither fail the sync nor roll back the mirror; the run records `entity_stats.commissioning` (`inserted` / `skipped` = already-recorded fitments / `observed`) and `skippedByReason.APPEND_FAILED` when it does fail. Scoped to the devices the run actually **mirrored**, not the whole widened read — writing the ~27k never-mirrored rows would make this table describe a different population than every other FSM surface. It is a table rather than columns on `devices` because `tb_vehiclemaster` rewrites fitment in place (measured: 10,565 devices have had `first_installed_dt` moved, 1,757 by more than a year), so anything reading only the live source row measures a silently-mutating population. Append-only is structural: the unique key IS the fitment identity and the writer is `INSERT … ON CONFLICT DO NOTHING`. **The unique index needs `NULLS NOT DISTINCT`, which Prisma 7.8 cannot express** — `prisma migrate dev` will offer a replacement without it, and accepting that silently breaks append-only-ness (`installed_at` is null on ~13% of source rows; `NULL <> NULL` re-inserts every one on every daily sync). Verified present in the DB via `pg_index.indnullsnotdistinct`. Full state: `.scratch/fsm-platform-v1/HANDOFF-commissioning-capture.md` |
 | `snapshot_runs` / `snapshot_run_chunks` | Ingestion run ledger + per-chunk retry; drives data-as-of banner | partial unique `snapshot_runs_one_in_flight (status) WHERE 'RUNNING'` |
 | `master_sync_runs` / `master_sync_rejects` | Master-sync ledger + itemised skip accounting (#97 Slice 4) | reject rows capped per run, best-effort writes |
 | `pgi_history` | SAP Post-Goods-Issue events feeding the `pgi` eligibility gate | **NO production writer** — read-only in `device-state.service.ts:64`; SAP feed external/deferred, rows must be seeded (schema:1830-1832). This emptiness is blocker B7 |
@@ -1009,10 +1009,17 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 > a **tautology** (`reconciliation.service.ts:213` says so out loud) that stayed green over 913
 > misclassified devices, and #222's skew guard rejects only the **future**. Compounded by a suite that
 > tests the system against its own beliefs — `autoplant-mapping.spec.ts:131` **asserts the wrong
-> constant**, pinning it. Same class, still live: **`first_reported_at` shipped with zero test
-> coverage**, and `apps/backend/tsconfig.json` includes only `src/**`, so `test/` is **never
-> typechecked** and SWC does not typecheck either — spec-file type errors are invisible to every check
-> this repo runs.
+> constant**, pinning it.
+>
+> **Two of those closed on 2026-08-09.** `first_reported_at` no longer ships with zero coverage
+> (`snapshot-first-reported-dualwrite.e2e-spec.ts`, 7 tests). And the typecheck blind spot has a
+> lever: `apps/backend/tsconfig.test.json` covers `src/**` + `test/**`, so spec-file type errors are
+> visible for the first time. **It is not yet clean and is not yet wired into `pnpm typecheck`** —
+> the first run surfaced **97 pre-existing errors across ~20 spec files** (bigint/string id
+> confusion, `Partial<>` spreads against required fields, enum literals). None are caused by the
+> commissioning slice, and none are fixed here; `pnpm typecheck` still covers `src/**` only. Making
+> `tsconfig.test.json` clean and making it the default is unowned work — see the INDEX entry.
+> `autoplant-mapping.spec.ts:131` still asserts the wrong constant; #222 owns it.
 
 1. **Auth is a dev scaffold** (#91 + #98 + #110). In-memory users/refresh tokens (restart = mass
    logout, DB users can't log in), hardcoded fallback JWT secret (`token.service.ts:18`), zero rate

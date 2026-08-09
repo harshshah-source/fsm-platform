@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { TRUE_SOURCE_UTC_OFFSET_MIN } from './normalize';
 import type { SourceSnapshotRow } from './source-reader';
 
 export interface IngestChunkResult {
@@ -91,9 +92,18 @@ export class SnapshotIngestionService {
   ): Promise<{ deviceStatesUpserted: number; unknownDevices: number }> {
     const maxByDevice = new Map<string, Date>();
     const tripByDevice = new Map<string, Date>();
+    // Earliest ping in the chunk, in TRUE UTC — the candidate for the write-once `first_reported_at`.
+    // Min, not max: if a chunk ever carries several pings for one device, the earliest is the one that
+    // "first reported". Sourced from `gpsDatetimeUtc`, never `gpsDatetime` — see the COALESCE below.
+    const firstByDevice = new Map<string, Date>();
     for (const r of rows) {
       const cur = maxByDevice.get(r.deviceId);
       if (!cur || r.gpsDatetime > cur) maxByDevice.set(r.deviceId, r.gpsDatetime);
+      const utc = r.gpsDatetimeUtc ?? null;
+      if (utc) {
+        const curFirst = firstByDevice.get(r.deviceId);
+        if (!curFirst || utc < curFirst) firstByDevice.set(r.deviceId, utc);
+      }
       // Trip creation dedupes to the chunk-max independently of the ping watermark: trips are only ever
       // created forward, so the newest stamp is the current trip. A null (no trip yet) never displaces a
       // known one — same "never regress" rule the ping watermark follows.
@@ -108,18 +118,36 @@ export class SnapshotIngestionService {
     const timestamps = deviceIds.map((d) => maxByDevice.get(d)!);
     const tripCreations = deviceIds.map((d) => tripByDevice.get(d) ?? null);
 
+    // `first_reported_at` is the chunk-min in TRUE UTC — see `firstReports` above for why it is not
+    // `u.latest_gps`. It rides the same statement as `trip_creation_datetime`: no second write.
+    const firstReports = deviceIds.map((d) => firstByDevice.get(d) ?? null);
+    const offsets = deviceIds.map((d) => (firstByDevice.get(d) ? TRUE_SOURCE_UTC_OFFSET_MIN : null));
+
     // `trip_creation_datetime` rides this existing statement — no second write, no extra round trip.
     // GREATEST ignores NULLs in Postgres, so a chunk that carries no trip stamp for a device leaves the
     // stored one intact rather than clearing it (a vehicle between trips must not lose its last trip).
+    //
+    // `first_reported_at` is COALESCE, not GREATEST/LEAST: it is write-once by contract. Once non-null
+    // it is never revisited, which is the whole point — it is the only record FSM will ever hold of
+    // when a device first reported. LEAST would be wrong in a specific way worth naming: after #222
+    // flips the constant, correct values are 5.5h LATER than the poisoned ones, so LEAST would pin
+    // every device to its pre-fix value forever. COALESCE + writing at offset 0 avoids that entirely.
     const deviceStatesUpserted = await this.prisma.$executeRaw(Prisma.sql`
-      INSERT INTO device_states (device_id, latest_gps_datetime, trip_creation_datetime, computed_at)
-      SELECT u.device_id, u.latest_gps, u.trip_created, ${now}
-        FROM unnest(${deviceIds}::text[], ${timestamps}::timestamptz[], ${tripCreations}::timestamptz[])
-          AS u(device_id, latest_gps, trip_created)
+      INSERT INTO device_states (
+        device_id, latest_gps_datetime, trip_creation_datetime,
+        first_reported_at, first_reported_offset_min, computed_at)
+      SELECT u.device_id, u.latest_gps, u.trip_created, u.first_reported, u.first_offset, ${now}
+        FROM unnest(
+               ${deviceIds}::text[], ${timestamps}::timestamptz[], ${tripCreations}::timestamptz[],
+               ${firstReports}::timestamptz[], ${offsets}::smallint[])
+          AS u(device_id, latest_gps, trip_created, first_reported, first_offset)
         JOIN devices d ON d.device_id = u.device_id
       ON CONFLICT (device_id) DO UPDATE
         SET latest_gps_datetime = GREATEST(device_states.latest_gps_datetime, EXCLUDED.latest_gps_datetime),
             trip_creation_datetime = GREATEST(device_states.trip_creation_datetime, EXCLUDED.trip_creation_datetime),
+            first_reported_at = COALESCE(device_states.first_reported_at, EXCLUDED.first_reported_at),
+            first_reported_offset_min =
+              COALESCE(device_states.first_reported_offset_min, EXCLUDED.first_reported_offset_min),
             computed_at = EXCLUDED.computed_at`);
 
     const unknownDevices = deviceIds.length - deviceStatesUpserted;

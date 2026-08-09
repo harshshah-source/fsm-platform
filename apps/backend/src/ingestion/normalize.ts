@@ -18,6 +18,21 @@ export type RawSourceRow = Omit<SourceSnapshotRow, 'gpsDatetime'> & {
   sourceUtcOffsetMinutes: number;
 };
 
+/**
+ * The offset used for `gpsDatetimeUtc`, deliberately NOT `sourceUtcOffsetMinutes`.
+ *
+ * AutoPlant writes UTC into its naive DATETIME columns — measured twice by different methods: 95
+ * snapshot runs flat in the 5.52–5.65 h band (#222), and `FIRST_INSTALLED_DATE_TIME` agreeing to the
+ * minute with a TIMESTAMP column in the same row across 17,985 devices (2026-08-09). So the true
+ * instant is the wall clock read as UTC, and `sourceUtcOffsetMinutes` still carries #222's live +330.
+ *
+ * `gpsDatetime` keeps taking the (wrong) configured offset so this change alters no existing
+ * behaviour; only the write-once `first_reported_at` consumes the corrected value, because a column
+ * that is frozen on first write can never be corrected later. Remove this once #222 lands and the two
+ * converge.
+ */
+export const TRUE_SOURCE_UTC_OFFSET_MIN = 0;
+
 const NAIVE_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?$/;
 
 /** Convert a source-local naive wall-clock + its UTC offset to a UTC instant. */
@@ -38,5 +53,8 @@ export function normalizeSourceRow(raw: RawSourceRow): SourceSnapshotRow {
   return {
     ...telemetry,
     gpsDatetime: normalizeGpsTimestamp(gpsWallClock, sourceUtcOffsetMinutes),
+    // Same wall clock, corrected offset — see TRUE_SOURCE_UTC_OFFSET_MIN. Identical to `gpsDatetime`
+    // once #222 sets the constant to 0.
+    gpsDatetimeUtc: normalizeGpsTimestamp(gpsWallClock, TRUE_SOURCE_UTC_OFFSET_MIN),
   };
 }

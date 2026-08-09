@@ -21,6 +21,18 @@ export interface SourceSnapshotRow {
   deviceId: string;
   gpsDatetime: Date;
   /**
+   * The SAME ping as `gpsDatetime`, normalized with the CORRECTED source offset
+   * ({@link TRUE_SOURCE_UTC_OFFSET_MIN}) rather than the configured one. While #222 is open these
+   * differ by 5.5 h; afterwards they are identical and this field can go.
+   *
+   * It exists solely for `device_states.first_reported_at`, which is write-once: a COALESCE column
+   * frozen under the wrong constant would carry the error permanently, since nothing ever revisits
+   * it. Optional because non-AutoPlant readers (e.g. `InMemorySourceReader` fixtures) may not supply
+   * it — a null simply leaves `first_reported_at` unset for that chunk rather than writing a value
+   * in an unknown convention.
+   */
+  gpsDatetimeUtc?: Date | null;
+  /**
    * When the vehicle's CURRENT trip was created (`tb_vehiclemaster.TRIP_CREATION_DATETIME`), as a true
    * UTC instant. Rides the telemetry path because it is live trip state, not master data — it tracks
    * `active_trip_id` and 18.4% of the DEPLOYED fleet changes it daily (measured 2026-07-17). Null when

@@ -2043,6 +2043,61 @@ model MasterSyncReject {
   @@map("master_sync_rejects")
 }
 
+/// Append-only commissioning fact — one row per (device, vehicle, installedAt), written by the master
+/// sync when a fitment is first seen or when `installedAt` / the vehicle changes. It exists as a TABLE
+/// rather than columns on `Device` because `tb_vehiclemaster` REWRITES fitment in place: a re-map
+/// destroys the previous commissioning record at source (measured: 10,565 devices have had
+/// `first_installed_dt` moved, 1,757 by more than a year), so any measure reading only the current
+/// source row is measuring a silently-mutating population.
+///
+/// Immutability is structural, not conventional: the unique key IS the fitment identity and the writer
+/// is `INSERT … ON CONFLICT DO NOTHING` (the `raw_device_snapshots` idiom). There is no update path.
+/// A re-mapping changes `vehicleId`, which is a new identity, so it appends and leaves the prior row
+/// untouched. NOTE the accepted trade-off: `installationRemark` is deliberately NOT in the key, so a
+/// remark-only change does not append — including it would fragment fitment identity.
+///
+/// No relations by design, matching {@link MasterSyncReject}: a commissioning fact must record even for
+/// a device the mirror has not caught up on (#227), and an FK violation raised inside the sync is
+/// exactly the failure this best-effort write must never cause.
+model DeviceCommissioning {
+  commissioningId      BigInt    @id @default(autoincrement()) @map("commissioning_id")
+  deviceId             String    @map("device_id")
+  vehicleId            BigInt?   @map("vehicle_id")
+  /// AutoPlant `tb_vehiclemaster.FIRST_INSTALLED_DATE_TIME`, in TRUE UTC. A naive MySQL DATETIME, so
+  /// its type proves nothing — the convention was MEASURED against `device_installation_date` (a
+  /// TIMESTAMP in the same row): 17,985 devices at exactly 0 minutes' difference, zero at ±330.
+  installedAt          DateTime? @map("installed_at") @db.Timestamptz(6)
+  installedAtOffsetMin Int?      @map("installed_at_offset_min") @db.SmallInt
+  /// A login string (`FIRST_INSTALLED_BY`), NOT a person: there is no user master behind it, ~13% of
+  /// 2026 installs carry 'NA', and machine accounts (`INTEGRATION_SERVICE`, `*_IMPADMIN`) are mixed in.
+  installedBy          String?   @map("installed_by")
+  installationRemark   String?   @map("installation_remark")
+  plantId              BigInt?   @map("plant_id")
+  companyId            BigInt?   @map("company_id")
+  /// Snapshot of `DeviceState.firstReportedAt` when this fitment was observed. Null when the device
+  /// had not reported yet — which is the population this table exists to surface.
+  firstReportedAt      DateTime? @map("first_reported_at") @db.Timestamptz(6)
+  observedAt           DateTime  @default(now()) @map("observed_at") @db.Timestamptz(6)
+  /// The `MasterSyncRun` that wrote this fact. Deliberately not a relation (see the note above).
+  runId                BigInt?   @map("run_id")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// ⚠ KNOWN SCHEMA/DATABASE DIVERGENCE — DO NOT "FIX" BY REGENERATING.
+  /// The real index is `UNIQUE … NULLS NOT DISTINCT` (see the migration). Prisma 7.8.0 has no syntax
+  /// for that modifier — `nullsNotDistinct:` is rejected as "No such argument" — so this declaration
+  /// is necessarily weaker than the database. Consequence: `prisma migrate dev` sees drift and will
+  /// offer a migration that recreates the index WITHOUT the clause. Accepting it silently breaks
+  /// append-only-ness: `installedAt` is null for ~13% of rows and `vehicleId` for unmapped fitments,
+  /// and under NULLS DISTINCT every one of those re-inserts on EVERY daily sync (NULL <> NULL) —
+  /// unbounded duplication on a cron, with nothing failing. Because a comment is exactly the kind of
+  /// one-directional guard #228 is about, this is also asserted against `pg_index.indnullsnotdistinct`
+  /// in the commissioning e2e, so a regenerated index fails a test rather than corrupting data.
+  @@unique([deviceId, vehicleId, installedAt], map: "device_commissioning_device_id_vehicle_id_installed_at_key")
+  @@index([deviceId, observedAt(sort: Desc)])
+  @@index([installedAt(sort: Desc)])
+  @@map("device_commissioning")
+}
+
 /// Derived current device state, one row per device (upsert) — the queue/dashboard hot table
 /// (schema D5). `slaBucket` is a STORED derived field for fast queue filtering, recomputed by
 /// DeviceStateService; denormalised vehicle/plant/company/transporter avoid joins on the hot path.
@@ -2071,6 +2126,18 @@ model DeviceState {
   plantId             BigInt?    @map("plant_id")
   companyId           BigInt?    @map("company_id")
   transporterId       BigInt?    @map("transporter_id")
+  /// First GPS ping EVER observed for this device — the commissioning anchor. Write-once: set by a
+  /// COALESCE in `SnapshotIngestionService`'s upsert and never updated, because nothing else in FSM
+  /// retains it (`latestGpsDatetime` is overwritten every tick, `raw_device_snapshots` is retained).
+  /// Written in TRUE UTC (offset 0), NOT at `AUTOPLANT_UTC_OFFSET_MIN` — a write-once column frozen
+  /// under #222's wrong constant would carry the 5.5h error permanently, so this is written in the
+  /// convention #222 will adopt and needs no correction pass. Until #222 lands it may therefore read
+  /// LATER than `latestGpsDatetime` on the same row; that is expected and self-heals.
+  firstReportedAt     DateTime?  @map("first_reported_at") @db.Timestamptz(6)
+  /// The source UTC offset applied when `firstReportedAt` was frozen (expected 0). Recorded per row
+  /// because `AUTOPLANT_SOURCE_UTC_OFFSET_MIN` overrides the constant at runtime — the value in
+  /// source is not evidence of what a given row received.
+  firstReportedOffsetMin Int?    @map("first_reported_offset_min") @db.SmallInt
   computedAt          DateTime   @map("computed_at") @db.Timestamptz(6)
 
   device Device @relation(fields: [deviceId], references: [deviceId])
