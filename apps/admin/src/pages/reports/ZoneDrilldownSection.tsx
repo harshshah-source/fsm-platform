@@ -442,6 +442,9 @@ const STATUS_CHIP: Record<DeviceStatusFilter, string> = {
   ALL: 'All device statuses',
   INACTIVE: 'Inactive devices only',
   ACTIVE: 'Active devices only',
+  // #223 — "never reported" rather than "no GPS data": the distinction the whole issue is about is
+  // that this is a fact about the device, not a gap in the data.
+  NEVER_REPORTED: 'Never-reported devices only',
 };
 
 /** Small scope pill — mirrors the v2 reference's `WEST ZONE · DATA AS OF … · ZONAL MANAGER` band. */

@@ -78,9 +78,12 @@ describe('Zone drill-down — company-plant-overview zoneId + zone-operations', 
 
     for (const id of [inactiveDeviceId, activeDeviceId]) await prisma.device.create({ data: { deviceId: id } });
     // Inactive: silent past the threshold, so SLA-bucketed — the shared inactive predicate.
+    // #223 — both devices carry a `latestGpsDatetime`: the status filters now distinguish three
+    // states, and a device with no timestamp is NEVER_REPORTED rather than INACTIVE or ACTIVE.
     await prisma.deviceState.create({
       data: {
         deviceId: inactiveDeviceId, plantId, companyId,
+        latestGpsDatetime: new Date('2026-08-06T04:00:00.000Z'),
         isInactive: true, slaBucket: 'CRITICAL', inactivityHours: 30, computedAt: new Date(),
       },
     });
@@ -88,6 +91,7 @@ describe('Zone drill-down — company-plant-overview zoneId + zone-operations', 
     await prisma.deviceState.create({
       data: {
         deviceId: activeDeviceId, plantId, companyId,
+        latestGpsDatetime: new Date('2026-08-07T09:58:34.000Z'),
         isInactive: false, slaBucket: null, inactivityHours: 1, computedAt: new Date(),
       },
     });

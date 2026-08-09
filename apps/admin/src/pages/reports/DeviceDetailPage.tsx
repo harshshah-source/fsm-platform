@@ -69,7 +69,9 @@ export function DeviceDetailPage() {
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<DeviceSort>('LONGEST_INACTIVE');
   const [status, setStatus] = useState<DeviceStatusFilter>(
-    initialStatus === 'INACTIVE' || initialStatus === 'ACTIVE' ? initialStatus : 'ALL',
+    initialStatus === 'INACTIVE' || initialStatus === 'ACTIVE' || initialStatus === 'NEVER_REPORTED'
+      ? initialStatus
+      : 'ALL',
   );
   const [bucket, setBucket] = useState(searchParams.get('bucket') ?? '');
   const [zoneId, setZoneId] = useState(searchParams.get('zoneId') ?? ''); // '' = all; 'UNZONED' or a numeric id string
@@ -382,6 +384,9 @@ export function DeviceDetailPage() {
                 <option value="ALL">All statuses</option>
                 <option value="INACTIVE">Inactive only</option>
                 <option value="ACTIVE">Active only</option>
+                {/* #223 — "Active only" no longer returns devices that have never reported; this is
+                    where those 913 devices are now reachable. */}
+                <option value="NEVER_REPORTED">Never reported</option>
               </FilterSelect>
               <FilterSelect aria-label="SLA bucket" value={bucket} onChange={(e) => setBucket(e.target.value)}>
                 <option value="">All SLA buckets</option>

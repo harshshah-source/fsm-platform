@@ -39,6 +39,8 @@ describe('Issue 06 slice 2 — /api/dashboard/company-plant-overview', () => {
         inactivityHours: bucket !== null ? 30 : 1,
         slaBucket: bucket as never,
         eligibleForUptime: true,
+        // #223 — without this the device is NEVER-REPORTED, so it lands in neither healthy nor inactive.
+        latestGpsDatetime: new Date('2026-08-07T09:58:34.000Z'),
         plantId,
         companyId,
         computedAt: new Date(),

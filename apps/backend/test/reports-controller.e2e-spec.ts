@@ -37,7 +37,19 @@ describe('Issue 39 slice 3 — /api/reports/fleet-uptime (e2e)', () => {
     companyId = (await prisma.company.create({ data: { name: 'Co-rep-' + stamp, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-rep-' + stamp, zoneId: zone1 } })).plantId;
     await prisma.device.create({ data: { deviceId: DEV, deviceType: 'GPS-X' } });
-    await prisma.deviceState.create({ data: { deviceId: DEV, eligibleForUptime: true, plantId, companyId, computedAt: new Date() } });
+    // #223 P3 — `latestGpsDatetime` is now part of uptime eligibility: a device that has NEVER reported
+    // is excluded from the Fleet Uptime denominator rather than scored 100% for a month it spent dark.
+    // This fixture's device reported and then had a closed failure cycle, so it must carry a timestamp.
+    await prisma.deviceState.create({
+      data: {
+        deviceId: DEV,
+        eligibleForUptime: true,
+        latestGpsDatetime: new Date(Date.UTC(2026, 4, 12)),
+        plantId,
+        companyId,
+        computedAt: new Date(),
+      },
+    });
     cycleId = randomUUID();
     await prisma.failureCycle.create({
       data: { cycleId, deviceId: DEV, state: 'VERIFIED', openedAt: new Date(Date.UTC(2026, 4, 10)), closedAt: new Date(Date.UTC(2026, 4, 12)) },

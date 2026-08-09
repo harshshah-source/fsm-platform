@@ -38,7 +38,22 @@ interface ZoneCountRow {
 /**
  * Soft Inactive Count signal (Issue 40, CONTEXT §5). The intraday operational counterpart to the
  * monthly Fleet Uptime %: per zone, the count of **Eligible Devices** (`eligible_for_uptime`, the same
- * gate as Fleet Uptime) currently silent >24h (`is_inactive`). `recompute` snapshots every zone into
+ * gate as Fleet Uptime) currently silent >24h (`is_inactive`).
+ *
+ * **#223 — this surface is fixed by the state layer, not here, and that is deliberate.**
+ * `cross-analysis.md` §2.3 listed it as surface 5: all 913 never-reported devices sat in the
+ * `eligible` DENOMINATOR while never entering the `is_inactive` numerator, so the zone's inactive rate
+ * was depressed by devices that had never worked at all. The fix is `DeviceStateService.recompute`
+ * ageing a never-reported device from its install date, which puts it in the numerator too — the
+ * predicates below need no change and must not get one. Adding a `latest_gps_datetime IS NOT NULL`
+ * clause here would be actively wrong: this is a WORKLOAD signal driving the recommender's
+ * deficit/preventive switch, and an NDD device past its grace window is real work for a real SE.
+ *
+ * What remains, knowingly: a device inside the 24 h install grace window (and the 6 source-orphans of
+ * #227, which have no install date anywhere) stays denominator-only. That is correct — a tracker fitted
+ * this morning is not yet a fault — and the population is small enough to name rather than engineer for.
+ *
+ * `recompute` snapshots every zone into
  * `soft_inactive_count_history` twice daily (morning/afternoon); `modeForZone` is the live count-driven
  * switch the Recommender reads — DEFICIT when the count exceeds `thresholdPct × eligible`, else
  * PREVENTIVE. The threshold is configurable (CONTEXT default 2%). On-demand (no scheduler), same posture

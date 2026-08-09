@@ -120,6 +120,14 @@ export interface DatasetDefinition {
 const DEPARTED_NOTE =
   'A departed device (an open device_departures row) is in a warehouse, not broken: it is excluded from is_inactive, sla_bucket and eligible_for_uptime by DeviceStateService, so it is neither healthy nor inactive.';
 
+/**
+ * #223 — the third state, spelled out wherever a healthy/inactive count is shown, because the whole
+ * defect was that this population had no name and was therefore absorbed into whichever count was
+ * defined by negation.
+ */
+const NEVER_REPORTED_NOTE =
+  'A never-reported device (latest_gps_datetime IS NULL) has never sent a single GPS fix and is counted separately (#223) — it is neither healthy nor silent-since-reporting. Before #223 it was counted as healthy by construction, because healthy was the negation of inactive and a device with no timestamp can never be inactive.';
+
 const DEVICES: DatasetDefinition = {
   key: 'devices',
   name: 'Devices & device state',
@@ -1054,22 +1062,49 @@ const PLANTS: DatasetDefinition = {
       key: 'activeDeviceCount',
       label: 'Active devices',
       type: 'number',
-      sql: '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.is_inactive = false)',
+      // #223 — `is_inactive = false` is NOT equivalent to healthy. It only looked equivalent because
+      // `is_inactive` implies a non-null SLA bucket; both spellings silently counted every device that
+      // had never reported, because such a device cannot be inactive. The `latest_gps_datetime IS NOT
+      // NULL` clause is what makes this column mean what its label says.
+      sql: '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.latest_gps_datetime IS NOT NULL AND ds2.is_inactive = false)',
       filterable: true,
       sortable: true,
       defaultVisible: false,
       lineage: {
-        definition: 'Devices at this plant that are neither warehoused nor inactive — pinging within the inactivity threshold.',
+        definition: 'Devices at this plant that have reported at least once and are pinging within the inactivity threshold — neither warehoused, nor inactive, nor never-reported.',
         system: 'DERIVED',
         table: 'device_states (aggregated per plant)',
         refreshTrigger: '30-minute device-state recompute.',
-        excludes: [DEPARTED_NOTE],
+        excludes: [DEPARTED_NOTE, NEVER_REPORTED_NOTE],
         developer: {
           column: null,
           expression:
-            '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.is_inactive = false)',
-          formula: 'COUNT(*) over device_states at this plant_id with is_departed = false AND is_inactive = false',
+            '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.latest_gps_datetime IS NOT NULL AND ds2.is_inactive = false)',
+          formula: 'COUNT(*) over device_states at this plant_id with is_departed = false AND latest_gps_datetime IS NOT NULL AND is_inactive = false',
           ownedBy: 'Same predicate as FLEET_COUNT_COLUMNS.healthyOperational (dashboard.service.ts)',
+        },
+      },
+    },
+    {
+      key: 'neverReportedDeviceCount',
+      label: 'Never-reported devices',
+      type: 'number',
+      sql: '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.latest_gps_datetime IS NULL)',
+      filterable: true,
+      sortable: true,
+      defaultVisible: false,
+      lineage: {
+        definition: 'Devices fitted at this plant that have never sent a single GPS fix (#223). The third state: not healthy, not inactive-from-silence — never alive. Concentrated, not diffuse: two companies hold 753 of the 913 fleet-wide.',
+        system: 'DERIVED',
+        table: 'device_states (aggregated per plant)',
+        refreshTrigger: 'Maintained at ingest (SnapshotIngestionService), not by the recompute — the column is null until a first ping arrives.',
+        excludes: [DEPARTED_NOTE],
+        developer: {
+          column: 'device_states.latest_gps_datetime',
+          expression:
+            '(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.latest_gps_datetime IS NULL)',
+          formula: 'COUNT(*) over device_states at this plant_id with is_departed = false AND latest_gps_datetime IS NULL',
+          ownedBy: 'Same predicate as FLEET_COUNT_COLUMNS.neverReported (dashboard.service.ts)',
         },
       },
     },
@@ -1077,22 +1112,25 @@ const PLANTS: DatasetDefinition = {
       key: 'inactiveDeviceCount',
       label: 'Inactive devices',
       type: 'number',
-      sql: "(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.is_inactive = true AND ds2.sla_bucket IS NOT NULL)",
+      // #223 — narrowed to devices that have reported, so a never-reported device aged past its
+      // install-date grace window (which IS is_inactive, and DOES carry a bucket) is counted once, in
+      // `neverReportedDeviceCount`, rather than in both columns.
+      sql: "(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.latest_gps_datetime IS NOT NULL AND ds2.is_inactive = true AND ds2.sla_bucket IS NOT NULL)",
       filterable: true,
       sortable: true,
       defaultVisible: false,
       lineage: {
-        definition: 'Devices at this plant that have been silent past the inactivity threshold — not warehoused, not healthy.',
+        definition: 'Devices at this plant that reported at least once and have since been silent past the inactivity threshold — not warehoused, not healthy, not never-reported.',
         system: 'DERIVED',
         table: 'device_states (aggregated per plant)',
         refreshTrigger: '30-minute device-state recompute.',
-        excludes: [DEPARTED_NOTE],
+        excludes: [DEPARTED_NOTE, NEVER_REPORTED_NOTE],
         developer: {
           column: null,
           expression:
-            "(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.is_inactive = true AND ds2.sla_bucket IS NOT NULL)",
+            "(SELECT COUNT(*) FROM device_states ds2 WHERE ds2.plant_id = p.plant_id AND ds2.is_departed = false AND ds2.latest_gps_datetime IS NOT NULL AND ds2.is_inactive = true AND ds2.sla_bucket IS NOT NULL)",
           formula:
-            'COUNT(*) over device_states at this plant_id with is_departed = false AND is_inactive = true AND sla_bucket IS NOT NULL',
+            'COUNT(*) over device_states at this plant_id with is_departed = false AND latest_gps_datetime IS NOT NULL AND is_inactive = true AND sla_bucket IS NOT NULL',
           ownedBy: 'Same predicate as FLEET_COUNT_COLUMNS.inactiveOperational (dashboard.service.ts)',
         },
       },

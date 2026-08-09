@@ -73,6 +73,18 @@ export function ZoneOverviewTable({ rows }: { rows: ZoneOverviewRow[] }) {
       ),
     },
     {
+      // #223 — the third state, beside Healthy and Inactive so the column totals visibly add up to
+      // Operational. Without it the row reads as if two numbers should sum to a third, and does not.
+      key: 'neverReported',
+      header: <ColumnHeader label="Never Reported" kpi="neverReported" />,
+      align: 'right',
+      render: (r) => (
+        <span data-testid="zone-never-reported" className="tabular-nums text-ink">
+          {formatCount(r.neverReported)}
+        </span>
+      ),
+    },
+    {
       key: 'warehouse',
       header: <ColumnHeader label="Warehouse" kpi="warehouseDevices" />,
       align: 'right',

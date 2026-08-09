@@ -293,7 +293,11 @@ describe('#217 — /api/ops-explorer (e2e)', () => {
         'zoneRollup',
         'companyRollup',
         'mirroredPartition',
+        // #223 — `operationalPartition` is now the THREE-way split (healthy + inactive +
+        // neverReported), and `reportingPartition` carries the structural two-way check that used to
+        // masquerade as the empirical one. The order is the order they are asserted in.
         'operationalPartition',
+        'reportingPartition',
         'bucketRollup',
         'dispatchBatchLedger',
         // #218a — FSM-internal, so it sits before the two AutoPlant identities and, unlike them,

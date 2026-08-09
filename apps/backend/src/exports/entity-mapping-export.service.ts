@@ -34,6 +34,12 @@ export const ENTITY_MAPPING_HEADERS = [
   'sla_bucket',
   'eligible_for_uptime',
   'open_ticket_count',
+  // #223 — stated, not left to be inferred from a blank cell. This export was surface 6 of the six in
+  // `cross-analysis.md` §2.3: it emitted `eligible_for_uptime = true` with an empty
+  // `latest_gps_datetime` for all 913 never-reported devices, and every reader had to know that the
+  // blank meant "has never reported once" rather than "column not populated for this row". Appended
+  // last rather than beside the GPS column so existing column-index consumers are unaffected.
+  'never_reported',
 ] as const;
 
 interface ExportRow {
@@ -52,6 +58,8 @@ interface ExportRow {
   slaBucket: string | null;
   eligibleForUptime: boolean;
   openTicketCount: number;
+  /** #223 — the device has never sent a single GPS fix. Derived from `latest_gps_datetime IS NULL`. */
+  neverReported: boolean;
 }
 
 @Injectable()
@@ -109,7 +117,8 @@ export class EntityMappingExportService {
              ds.eligible_for_uptime AS "eligibleForUptime",
              (SELECT COUNT(*) FROM tickets tk
                 WHERE tk.device_id = ds.device_id
-                  AND tk.status NOT IN (${Prisma.join(CLOSED_TICKET_STATUSES)}))::int AS "openTicketCount"
+                  AND tk.status NOT IN (${Prisma.join(CLOSED_TICKET_STATUSES)}))::int AS "openTicketCount",
+             (ds.latest_gps_datetime IS NULL) AS "neverReported"
       FROM device_states ds
       JOIN devices d ON d.device_id = ds.device_id
       LEFT JOIN vehicles v ON v.vehicle_id = ds.vehicle_id
@@ -149,6 +158,7 @@ function toCsvLine(r: ExportRow): string {
       r.slaBucket,
       r.eligibleForUptime,
       r.openTicketCount,
+      r.neverReported,
     ]
       .map(esc)
       .join(',') + '\n'

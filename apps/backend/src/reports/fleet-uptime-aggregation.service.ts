@@ -48,8 +48,22 @@ export class FleetUptimeAggregationService {
     const windowEnd = now.getTime() < monthEnd.getTime() ? now : monthEnd;
     const windowSeconds = Math.max(0, Math.floor((windowEnd.getTime() - monthStart.getTime()) / 1000));
 
+    // #223 P3 — a device that has NEVER reported is excluded from the uptime denominator, not scored
+    // 0%. This was the worst of the six surfaces in `cross-analysis.md` §2.3 and both original reports
+    // missed it: uptime is failure-cycle overlap, a failure cycle is opened from inactivity, and
+    // inactivity requires a timestamp — so a device that never reported contributed a full month of
+    // ZERO downtime and scored 100%. The single most broken device in the fleet was the healthiest.
+    // For Vasavadatta (545 NDD devices) that is not a marginal distortion.
+    //
+    // **The exclusion is applied HERE and deliberately NOT by clearing `eligible_for_uptime`**, which
+    // is what "exclude from Fleet Uptime" most obviously suggests. That flag is also the ticket-creation
+    // gate (`ticket-creation.service.ts` requires `eligibleForUptime: true`), so clearing it would
+    // silently cancel operator decision P1 — the 892 confirmed-NDD devices would never be ticketed,
+    // which is the entire point of #223. Two decided requirements pull in opposite directions through
+    // one shared flag; the uptime side is the one that can move without breaking the other.
     const devices = await this.prisma.$queryRaw<DeviceRow[]>(Prisma.sql`
-      SELECT ds.device_id AS "deviceId", ds.eligible_for_uptime AS "eligible",
+      SELECT ds.device_id AS "deviceId",
+             (ds.eligible_for_uptime AND ds.latest_gps_datetime IS NOT NULL) AS "eligible",
              ds.plant_id AS "plantId", ds.company_id AS "companyId", z.zone_id AS "zoneId"
       FROM device_states ds
       LEFT JOIN plants p ON p.plant_id = ds.plant_id

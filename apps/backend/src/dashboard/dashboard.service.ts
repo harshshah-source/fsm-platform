@@ -20,14 +20,14 @@ export const EXCLUDE_DEACTIVATED_PLANTS = Prisma.sql`AND p.plant_id NOT IN (SELE
  * denominator. Deriving every level from one expression makes that class of drift unrepresentable:
  * a population change edits one fragment and moves every layer together.
  *
- * The five counts partition the scope exactly:
- *   mirrored = operational + warehouse
- *   operational = healthy + inactive        (complementary predicates over the same non-departed set)
+ * The counts partition the scope exactly:
+ *   mirrored    = operational + warehouse
+ *   operational = healthy + inactive + neverReported          (#223 — see the three predicates below)
+ *   reporting   = healthy + inactive
  *
- * `inactive` keeps the historical predicate `is_inactive AND sla_bucket IS NOT NULL` — identical to
- * the pre-fix numerator, so this change moves denominators only and never restates what "inactive"
- * means. It also keeps `byBucket` summing to exactly `inactiveOperational`, since both read the same
- * bucketed rows.
+ * `inactive` keeps the historical predicate `is_inactive AND sla_bucket IS NOT NULL`, narrowed by
+ * #223's "has reported" clause — so `byBucket` still sums to exactly `inactiveOperational`, since both
+ * read the same bucketed rows.
  *
  * **Exported for the Operations Data Explorer's reconciliation panel (#217).** That panel asserts the
  * identities in the paragraph above over the whole live database. It must import this fragment rather
@@ -35,12 +35,60 @@ export const EXCLUDE_DEACTIVATED_PLANTS = Prisma.sql`AND p.plant_id NOT IN (SELE
  * spelling agrees with itself, which is precisely the failure mode #176 closed. Nothing outside
  * `dashboard/` and `ops-explorer/` should need it.
  */
+
+/**
+ * Operational AND has sent at least one GPS fix — the population every fleet rate is taken over (#223).
+ *
+ * `latest_gps_datetime IS NULL` used to be invisible to every predicate on this page, and that is the
+ * whole of defect #223: `healthy` was defined as the *negation* of `inactive`, `is_inactive` requires a
+ * timestamp to compare against (`device-state.service.ts` guards it with `hours IS NOT NULL`), so a
+ * device that had never reported could not be inactive and was therefore swept into healthy. 913
+ * devices fleet-wide — 892 of them confirmed at the source as fitted, deployed, and never having sent
+ * a single fix — were counted as the healthiest thing in the fleet. Absence of evidence read as
+ * evidence of health.
+ */
+export const REPORTING_OPERATIONAL = Prisma.sql`ds.is_departed = false AND ds.latest_gps_datetime IS NOT NULL`;
+
+/**
+ * Operational, has reported, and is currently silent past the inactivity threshold.
+ *
+ * The "has reported" clause is load-bearing and is NOT redundant with `sla_bucket IS NOT NULL`. Under
+ * #223 an NDD device that has been fitted longer than the grace window IS `is_inactive` and DOES carry
+ * an SLA bucket — that is P1 (a fitted tracker that has never reported is a fault, ticketed like any
+ * other silent device). Without this clause such a device would be counted in both `inactiveOperational`
+ * and `neverReported`, and the identity would overshoot `operationalDevices`.
+ */
+export const INACTIVE_OPERATIONAL = Prisma.sql`${REPORTING_OPERATIONAL} AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL`;
+
+/** Operational, has reported, and is not currently silent. "Reporting normally" — at last literally. */
+export const HEALTHY_OPERATIONAL = Prisma.sql`${REPORTING_OPERATIONAL} AND NOT (ds.is_inactive = true AND ds.sla_bucket IS NOT NULL)`;
+
+/**
+ * The third state (#223): operational and no GPS fix has ever arrived.
+ *
+ * Deliberately derived from `latest_gps_datetime` at read time rather than stored as a
+ * `device_states.never_reported` column, which is what the issue's design proposed. A stored boolean
+ * would be a pure function of another column on the same row — but the two are maintained by
+ * DIFFERENT writers: `latest_gps_datetime` is advanced at INGEST (`SnapshotIngestionService`, every
+ * 30 min) while a derived flag would be written by `DeviceStateService.recompute`. Between an ingest
+ * that brings a device to life and the next recompute, the stored flag would still say "never
+ * reported" for a device that just did. Derived, it cannot be wrong; stored, it is wrong for up to one
+ * recompute interval — on exactly the transition that matters most.
+ *
+ * Note this counts a never-reported device regardless of the grace window. The window governs whether
+ * such a device is *inactive* (and therefore ticketed), not whether it has reported: "has never sent a
+ * fix" is a fact about the device, not a judgement about it, and the partition has to be exhaustive.
+ */
+export const NEVER_REPORTED_OPERATIONAL = Prisma.sql`ds.is_departed = false AND ds.latest_gps_datetime IS NULL`;
+
 export const FLEET_COUNT_COLUMNS = Prisma.sql`
   COUNT(*)::int AS "mirroredDevices",
   COUNT(*) FILTER (WHERE ds.is_departed = false)::int AS "operationalDevices",
   COUNT(*) FILTER (WHERE ds.is_departed = true)::int AS "warehouseDevices",
-  COUNT(*) FILTER (WHERE ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL)::int AS "inactiveOperational",
-  COUNT(*) FILTER (WHERE ds.is_departed = false AND NOT (ds.is_inactive = true AND ds.sla_bucket IS NOT NULL))::int AS "healthyOperational"`;
+  COUNT(*) FILTER (WHERE ${REPORTING_OPERATIONAL})::int AS "reportingOperational",
+  COUNT(*) FILTER (WHERE ${INACTIVE_OPERATIONAL})::int AS "inactiveOperational",
+  COUNT(*) FILTER (WHERE ${HEALTHY_OPERATIONAL})::int AS "healthyOperational",
+  COUNT(*) FILTER (WHERE ${NEVER_REPORTED_OPERATIONAL})::int AS "neverReported"`;
 
 /**
  * The device counts for one entity (a zone, a company, a plant, or the whole scope), over the single
@@ -54,13 +102,26 @@ export interface FleetCounts {
   operationalDevices: number;
   /** Removed from field operations (an open `device_departures` row) — in a warehouse, not broken. */
   warehouseDevices: number;
-  /** Operational devices currently inactive (silent ≥ the inactivity threshold, so SLA-bucketed). */
+  /**
+   * Operational devices that have sent at least one GPS fix — `operationalDevices − neverReported`,
+   * and the denominator of both rates below (#223 P3). Named rather than left implicit because "the
+   * denominator" is precisely what the two-state model got wrong.
+   */
+  reportingOperational: number;
+  /** Reporting devices currently inactive (silent ≥ the inactivity threshold, so SLA-bucketed). */
   inactiveOperational: number;
-  /** Operational devices that are NOT inactive. `healthyOperational + inactiveOperational = operationalDevices`. */
+  /** Reporting devices that are NOT inactive. `healthy + inactive = reportingOperational`. */
   healthyOperational: number;
-  /** `inactiveOperational / operationalDevices × 100`, 1dp; null when the entity has no operational devices. */
+  /**
+   * Operational devices that have never sent a single GPS fix (#223) — the third state, reported
+   * beside Fleet Health rather than inside it (operator decision P4, 2026-08-09).
+   *
+   * `healthyOperational + inactiveOperational + neverReported = operationalDevices`.
+   */
+  neverReported: number;
+  /** `inactiveOperational / reportingOperational × 100`, 1dp; null when nothing has reported. */
   inactivePct: number | null;
-  /** `healthyOperational / operationalDevices × 100`, 1dp; null when the entity has no operational devices. */
+  /** `healthyOperational / reportingOperational × 100`, 1dp; null when nothing has reported. */
   fleetHealthPct: number | null;
 }
 
@@ -68,14 +129,21 @@ export interface FleetCounts {
 type RawFleetCounts = Omit<FleetCounts, 'inactivePct' | 'fleetHealthPct'>;
 
 /**
- * Derive the two rates from the counts. Both are percentages of the OPERATIONAL fleet — a warehouse
- * device is neither healthy nor inactive, so it belongs in neither the numerator nor the denominator.
- * Null (rendered "—") rather than 0 when there is nothing to divide by, so an entity with no
- * operational devices never reads as "0% healthy".
+ * Derive the two rates from the counts. Both are percentages of the **reporting** fleet — a warehouse
+ * device is neither healthy nor inactive, and (since #223) neither is a device that has never reported.
+ * Null (rendered "—") rather than 0 when there is nothing to divide by, so an entity with no reporting
+ * devices never reads as "0% healthy".
+ *
+ * **The denominator is `reportingOperational`, not `operationalDevices` — operator decision P3
+ * (2026-08-09).** The alternative on the table was scoring never-reported devices as 0% uptime and
+ * leaving them in the denominator. Both are defensible; the operator's reasoning for excluding them was
+ * that it *"keeps the KPI measuring what it claims: reliability of devices that have reported"*, with
+ * the never-reported count sitting beside the KPI instead of being blended into it. Pan-India this moves
+ * Fleet Health from a fictional 82.96% to a measured 84.84% once #222 lands with it.
  */
 function withRates(counts: RawFleetCounts): FleetCounts {
-  const op = counts.operationalDevices;
-  const pct = (n: number) => (op > 0 ? Math.round((n / op) * 1000) / 10 : null);
+  const reporting = counts.reportingOperational;
+  const pct = (n: number) => (reporting > 0 ? Math.round((n / reporting) * 1000) / 10 : null);
   return { ...counts, inactivePct: pct(counts.inactiveOperational), fleetHealthPct: pct(counts.healthyOperational) };
 }
 
@@ -182,7 +250,11 @@ export interface FleetDirectory {
  *     − notMirrored              → mirroredTotal    (never mirrored: non-operational + never known)
  *     − onDeactivatedPlants      → mirroredDevices  (plant deactivated, Issue 119)
  *     → operationalDevices + warehouseDevices
- *     operationalDevices → healthyOperational + inactiveOperational
+ *     operationalDevices → healthyOperational + inactiveOperational + neverReported   ← THREE, not two
+ *
+ * The last step gained its third branch in #223. Rendered as a two-way split it no longer sums: 913
+ * devices fleet-wide have never sent a GPS fix, and they were previously absorbed into `healthy` by
+ * the negation rather than being shown as their own loss.
  *
  * `catalogDevices` / `notMirrored` are pan-India by nature and are null for a zone-scoped caller (a
  * ZM), whose funnel starts at "Mirrored into FSM" instead.
@@ -246,8 +318,13 @@ const CLOSED_TICKET_STATUSES = [
   'RECEIVED_AT_WAREHOUSE',
 ] as const;
 
-/** The Device Detail page's device-status filter, as it scopes the zone drill-down's aggregates. */
-export type DeviceStatusScope = 'ALL' | 'INACTIVE' | 'ACTIVE';
+/**
+ * The Device Detail page's device-status filter, as it scopes the zone drill-down's aggregates.
+ *
+ * `NEVER_REPORTED` added by #223 (operator decision P4 — the third state is reported separately, not
+ * folded into a widened "not reporting" figure). `ACTIVE` no longer includes never-reported devices.
+ */
+export type DeviceStatusScope = 'ALL' | 'INACTIVE' | 'ACTIVE' | 'NEVER_REPORTED';
 
 /**
  * How a zone's currently-open work is held (see {@link DashboardService.zoneOperations}).
@@ -355,15 +432,18 @@ export class DashboardService {
       GROUP BY z.zone_id, z.name
       ORDER BY z.zone_id`);
 
-    // The per-bucket split of the SAME inactive population the counts query measures (identical
-    // predicate + identical scope), so `Σ byBucket == inactiveOperational` for every row.
+    // The per-bucket split of the SAME inactive population the counts query measures (the IMPORTED
+    // predicate, not a second spelling of it), so `Σ byBucket == inactiveOperational` for every row.
+    // #223 matters here specifically: an NDD device aged from its install date buckets like any other,
+    // and 602 of the 907 are >1 year old, so every one would land in the open-ended top band. That band
+    // holds 1,456 devices today — adding 602 is +41%, and the genuine 7-day backlog becomes unreadable.
     const grouped = await this.prisma.$queryRaw<GroupedRow[]>(Prisma.sql`
       SELECT z.zone_id::text AS "zoneId", z.name AS "zoneName",
              ds.sla_bucket::text AS "slaBucket", COUNT(*)::int AS "count"
       FROM device_states ds
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
-      WHERE ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL
+      WHERE ${INACTIVE_OPERATIONAL}
         ${zoneFilter} ${EXCLUDE_DEACTIVATED_PLANTS}
       GROUP BY z.zone_id, z.name, ds.sla_bucket`);
 
@@ -422,8 +502,10 @@ export class DashboardService {
         mirroredDevices: raw.mirroredDevices ?? 0,
         operationalDevices: raw.operationalDevices ?? 0,
         warehouseDevices: raw.warehouseDevices ?? 0,
+        reportingOperational: raw.reportingOperational ?? 0,
         inactiveOperational: raw.inactiveOperational ?? 0,
         healthyOperational: raw.healthyOperational ?? 0,
+        neverReported: raw.neverReported ?? 0,
       }),
       catalogDevices: sync.observed,
       lastMasterSyncAt: sync.finishedAt,
@@ -458,8 +540,10 @@ export class DashboardService {
       mirroredDevices: live?.mirroredDevices ?? 0,
       operationalDevices: live?.operationalDevices ?? 0,
       warehouseDevices: live?.warehouseDevices ?? 0,
+      reportingOperational: live?.reportingOperational ?? 0,
       inactiveOperational: live?.inactiveOperational ?? 0,
       healthyOperational: live?.healthyOperational ?? 0,
+      neverReported: live?.neverReported ?? 0,
     });
     const mirroredTotal = all?.mirroredTotal ?? 0;
     const [sync, snapshotAt] = await Promise.all([this.latestMasterSync(), this.latestSnapshotAt()]);
@@ -612,7 +696,7 @@ export class DashboardService {
       GROUP BY c.company_id, c.name, c.company_tier, z.zone_id, p.plant_id, p.name
       ORDER BY c.company_tier, c.name, p.name`);
 
-    // The per-bucket split of the same inactive population, identical predicate + scope.
+    // The per-bucket split of the same inactive population, imported predicate + identical scope.
     const grouped = await this.prisma.$queryRaw<CompanyPlantGroupedRow[]>(Prisma.sql`
       SELECT c.company_id::text AS "companyId", c.name AS "companyName",
              c.company_tier::text AS "companyTier", z.zone_id::text AS "zoneId",
@@ -622,7 +706,7 @@ export class DashboardService {
       JOIN plants p ON p.plant_id = ds.plant_id
       JOIN zones z ON z.zone_id = p.zone_id
       JOIN company_master c ON c.company_id = ds.company_id
-      WHERE ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL
+      WHERE ${INACTIVE_OPERATIONAL}
         ${extra} ${EXCLUDE_DEACTIVATED_PLANTS}
       GROUP BY c.company_id, c.name, c.company_tier, z.zone_id, p.plant_id, p.name, ds.sla_bucket`);
 
@@ -675,11 +759,13 @@ export class DashboardService {
     if (restrictZone !== null) conds.push(Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}`);
     if (filters.zoneId && /^\d+$/.test(filters.zoneId))
       conds.push(Prisma.sql`AND z.zone_id = ${BigInt(filters.zoneId)}`);
-    // The SAME inactive predicate FLEET_COUNT_COLUMNS uses, so "inactive" means one thing platform-wide.
-    if (filters.status === 'INACTIVE')
-      conds.push(Prisma.sql`AND ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL`);
-    else if (filters.status === 'ACTIVE')
-      conds.push(Prisma.sql`AND ds.is_departed = false AND NOT (ds.is_inactive = true AND ds.sla_bucket IS NOT NULL)`);
+    // The SAME predicates FLEET_COUNT_COLUMNS uses, imported rather than respelled, so "inactive" and
+    // "active" mean one thing platform-wide (#176) — and, since #223, so that `ACTIVE` stops returning
+    // devices that have never reported. This filter was surface 2 of the six in `cross-analysis.md`
+    // §2.3: all 913 NDD devices were returned under the healthy/active filter.
+    if (filters.status === 'INACTIVE') conds.push(Prisma.sql`AND ${INACTIVE_OPERATIONAL}`);
+    else if (filters.status === 'ACTIVE') conds.push(Prisma.sql`AND ${HEALTHY_OPERATIONAL}`);
+    else if (filters.status === 'NEVER_REPORTED') conds.push(Prisma.sql`AND ${NEVER_REPORTED_OPERATIONAL}`);
     const extra = conds.length ? Prisma.join(conds, ' ') : Prisma.empty;
 
     const rows = await this.prisma.$queryRaw<

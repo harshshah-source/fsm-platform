@@ -53,8 +53,13 @@ export interface DeviceListPage {
   total: number;
 }
 
-/** Device-status filter — the whole population, only-down, or only-live devices. */
-export type DeviceStatusFilter = 'ALL' | 'INACTIVE' | 'ACTIVE';
+/**
+ * Device-status filter — the whole population, only-down, only-live, or never-reported devices.
+ *
+ * `NEVER_REPORTED` added by #223: a fitted tracker that has never sent a GPS fix is its own state, not
+ * a flavour of "live". It used to be returned under `ACTIVE`.
+ */
+export type DeviceStatusFilter = 'ALL' | 'INACTIVE' | 'ACTIVE' | 'NEVER_REPORTED';
 
 /** How the list is ordered. `LONGEST_INACTIVE` (longest-pending first) is the default. */
 export type DeviceSort = 'LONGEST_INACTIVE' | 'NEWEST_ACTIVITY' | 'SLA_SEVERITY' | 'DEVICE_ID' | 'PRIORITY';
@@ -300,8 +305,16 @@ export class DeviceService {
         Prisma.sql`AND (CAST(ds.device_id AS TEXT) ILIKE ${q} OR v.vehicle_no ILIKE ${q} OR p.name ILIKE ${q} OR c.name ILIKE ${q})`,
       );
     }
+    // #223 — `ACTIVE` requires the device to have actually reported. It previously meant only
+    // `is_inactive = false`, and `is_inactive` cannot be true without a timestamp to compare against,
+    // so all 913 never-reported devices were returned under the ACTIVE filter (cross-analysis §2.3,
+    // surface 3). `NEVER_REPORTED` is the third value; `INACTIVE` is unchanged, because an NDD device
+    // aged past its install-date grace window genuinely IS inactive and genuinely does need working.
     if (opts.status === 'INACTIVE') conds.push(Prisma.sql`AND ds.is_inactive = true`);
-    else if (opts.status === 'ACTIVE') conds.push(Prisma.sql`AND ds.is_inactive = false`);
+    else if (opts.status === 'ACTIVE')
+      conds.push(Prisma.sql`AND ds.is_inactive = false AND ds.latest_gps_datetime IS NOT NULL`);
+    else if (opts.status === 'NEVER_REPORTED')
+      conds.push(Prisma.sql`AND ds.latest_gps_datetime IS NULL`);
 
     if (opts.bucket && SLA_BUCKET_VALUES.includes(opts.bucket)) {
       conds.push(Prisma.sql`AND ds.sla_bucket = ${opts.bucket}::sla_bucket`);

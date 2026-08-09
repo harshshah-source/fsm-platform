@@ -20,7 +20,7 @@ import {
 } from './dashboard.service';
 
 const ACTIVITY_TREND_RANGES: ActivityTrendRange[] = ['1D', '7D', '1M', '1Y', 'MAX'];
-const DEVICE_STATUS_SCOPES: DeviceStatusScope[] = ['ALL', 'INACTIVE', 'ACTIVE'];
+const DEVICE_STATUS_SCOPES: DeviceStatusScope[] = ['ALL', 'INACTIVE', 'ACTIVE', 'NEVER_REPORTED'];
 
 /**
  * The `/api/dashboard/*` manager read surface (Issue 06). Scoped to the manager roles; a ZM is

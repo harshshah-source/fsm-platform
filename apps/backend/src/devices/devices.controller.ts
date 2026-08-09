@@ -27,7 +27,7 @@ import {
 
 const DEAL_TYPES: readonly DealType[] = ['RECURRING', 'ONE_TIME'];
 const SORTS: readonly DeviceSort[] = ['LONGEST_INACTIVE', 'NEWEST_ACTIVITY', 'SLA_SEVERITY', 'DEVICE_ID', 'PRIORITY'];
-const STATUS_FILTERS: readonly DeviceStatusFilter[] = ['ALL', 'INACTIVE', 'ACTIVE'];
+const STATUS_FILTERS: readonly DeviceStatusFilter[] = ['ALL', 'INACTIVE', 'ACTIVE', 'NEVER_REPORTED'];
 const READ_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 
 /**

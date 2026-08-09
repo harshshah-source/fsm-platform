@@ -53,8 +53,19 @@ describe('Issue 39 slice 1 — FleetUptimeAggregationService.computeMonth', () =
     const deviceId = String(devSeq++);
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
+    // #223 P3 — uptime eligibility is now `eligible_for_uptime AND latest_gps_datetime IS NOT NULL`.
+    // A device that has NEVER reported is excluded from the denominator rather than scored 100% for a
+    // month it spent dark, which was the worst of the six surfaces the NDD defect reached. Every device
+    // this fixture builds is meant to have reported, so it has to say so.
     await prisma.deviceState.create({
-      data: { deviceId, eligibleForUptime: eligible, plantId, companyId, computedAt: NOW },
+      data: {
+        deviceId,
+        eligibleForUptime: eligible,
+        latestGpsDatetime: NOW,
+        plantId,
+        companyId,
+        computedAt: NOW,
+      },
     });
     return deviceId;
   };

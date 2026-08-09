@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { EXCLUDE_DEACTIVATED_PLANTS, FLEET_COUNT_COLUMNS } from '../dashboard/dashboard.service';
+import {
+  EXCLUDE_DEACTIVATED_PLANTS,
+  FLEET_COUNT_COLUMNS,
+  INACTIVE_OPERATIONAL,
+} from '../dashboard/dashboard.service';
 import { AutoPlantHealthService, readReconMaxDrift } from '../ingestion/autoplant/health.service';
 
 /**
@@ -73,16 +77,20 @@ interface RawCounts {
   mirroredDevices: number;
   operationalDevices: number;
   warehouseDevices: number;
+  reportingOperational: number;
   inactiveOperational: number;
   healthyOperational: number;
+  neverReported: number;
 }
 
 const ZERO: RawCounts = {
   mirroredDevices: 0,
   operationalDevices: 0,
   warehouseDevices: 0,
+  reportingOperational: 0,
   inactiveOperational: 0,
   healthyOperational: 0,
+  neverReported: 0,
 };
 
 /** The scope every identity is stated over: mirrored device state on a live (non-deactivated) plant. */
@@ -96,7 +104,7 @@ const BY_ZONE_SQL = Prisma.sql`SELECT p.zone_id::text AS "key", ${FLEET_COUNT_CO
 const BY_COMPANY_SQL = Prisma.sql`SELECT ds.company_id::text AS "key", ${FLEET_COUNT_COLUMNS} ${SCOPE} GROUP BY ds.company_id`;
 const BY_BUCKET_SQL = Prisma.sql`
   SELECT ds.sla_bucket::text AS "key", COUNT(*)::int AS "count"
-  ${SCOPE} AND ds.is_departed = false AND ds.is_inactive = true AND ds.sla_bucket IS NOT NULL
+  ${SCOPE} AND ${INACTIVE_OPERATIONAL}
   GROUP BY ds.sla_bucket`;
 
 /**
@@ -201,16 +209,42 @@ export class ReconciliationService {
       }),
       this.identity({
         key: 'operationalPartition',
-        name: 'Healthy + inactive partitions the operational fleet',
-        statement: 'healthyOperational + inactiveOperational = operationalDevices',
+        name: 'Healthy + inactive + never-reported partitions the operational fleet',
+        statement: 'healthyOperational + inactiveOperational + neverReported = operationalDevices',
         left: {
-          label: 'Healthy + inactive',
-          value: fleet.healthyOperational + fleet.inactiveOperational,
-          measuredBy: 'complementary FILTER clauses over the non-departed set',
+          label: 'Healthy + inactive + never-reported',
+          value: fleet.healthyOperational + fleet.inactiveOperational + fleet.neverReported,
+          measuredBy: 'three FILTER clauses over the non-departed set, split on latest_gps_datetime',
         },
         right: { label: 'Operational', value: fleet.operationalDevices, measuredBy: 'is_departed = false' },
         likelySources: [
-          'The two predicates are literal complements within one SQL fragment, so a mismatch here is not a data problem — it means FLEET_COUNT_COLUMNS itself has been edited such that healthy is no longer NOT(inactive).',
+          'An NDD device counted in BOTH inactiveOperational and neverReported: under #223 a never-reported device past its install-date grace window IS is_inactive and DOES carry an SLA bucket, so if the inactive predicate loses its `latest_gps_datetime IS NOT NULL` clause the left side overshoots.',
+          'healthy and inactive narrowed to reporting devices while a third consumer still reads the old NOT(inactive) spelling.',
+        ],
+        // #223/#228 — this identity used to read `healthy + inactive = operational` and its own
+        // likelySources said out loud that it could not fail on data: the two predicates were literal
+        // complements, so the check was a TAUTOLOGY. It stayed green for a month over 913 devices that
+        // had never reported and were being counted as healthy — the exact shape #228 was filed about.
+        // The three-way split is falsifiable: `neverReported` is measured independently of the other
+        // two rather than being their complement, so the sum can genuinely disagree.
+        sql: developerMode ? { left: FLEET_SQL.text, right: FLEET_SQL.text } : undefined,
+      }),
+      this.identity({
+        key: 'reportingPartition',
+        name: 'Reporting devices are exactly those with a GPS timestamp',
+        statement: 'healthyOperational + inactiveOperational = reportingOperational',
+        left: {
+          label: 'Healthy + inactive',
+          value: fleet.healthyOperational + fleet.inactiveOperational,
+          measuredBy: 'complementary FILTER clauses over the reporting set',
+        },
+        right: {
+          label: 'Reporting operational',
+          value: fleet.reportingOperational,
+          measuredBy: 'is_departed = false AND latest_gps_datetime IS NOT NULL',
+        },
+        likelySources: [
+          'This pair IS complementary within one fragment, so a mismatch means FLEET_COUNT_COLUMNS has been edited such that healthy is no longer NOT(inactive) over the same reporting base. It is recorded as a structural check, not an empirical one — cf. the operationalPartition identity above, which is the empirical half.',
         ],
         sql: developerMode ? { left: FLEET_SQL.text, right: FLEET_SQL.text } : undefined,
       }),

@@ -30,6 +30,10 @@ interface FleetCounts {
   warehouseDevices: number;
   inactiveOperational: number;
   healthyOperational: number;
+  /** #223 — operational devices that have never sent a single GPS fix. The third state. */
+  neverReported: number;
+  /** #223 P3 — `operationalDevices − neverReported`; the denominator both rates are taken over. */
+  reportingOperational: number;
   inactivePct: number | null;
   fleetHealthPct: number | null;
 }
@@ -58,7 +62,11 @@ describe('Dashboard KPI reconciliation — one operational population at every l
   // A second plant with NO inactive devices at all — it must still appear in both tables, or its
   // operational devices silently drop out of the column totals (the vanishing-row bug).
   const healthyOnlyIds = [9_071_010n, 9_071_011n].map(String);
-  const allIds = [...inactiveIds, ...healthyIds, ...departedIds, ...healthyOnlyIds];
+  // #223 — never-reported devices: fitted, non-departed, and no GPS fix has ever arrived. Before this
+  // issue they were counted HEALTHY by construction, because `healthy` was the negation of `inactive`
+  // and a device with no timestamp can never be inactive. They are the third state.
+  const neverReportedIds = [9_071_012n, 9_071_013n].map(String);
+  const allIds = [...inactiveIds, ...healthyIds, ...departedIds, ...healthyOnlyIds, ...neverReportedIds];
 
   const login = async (email: string): Promise<string> => {
     const res = await request(app.getHttpServer())
@@ -79,7 +87,11 @@ describe('Dashboard KPI reconciliation — one operational population at every l
    * `DeviceStateService.recompute` derives from the side table. Departed rows carry `isInactive:false`
    * and a null bucket because recompute forces both (`is_inactive = NOT departed AND …`).
    */
-  const seedState = (deviceId: string, at: bigint, opts: { bucket?: string | null; departed?: boolean }) =>
+  const seedState = (
+    deviceId: string,
+    at: bigint,
+    opts: { bucket?: string | null; departed?: boolean; neverReported?: boolean },
+  ) =>
     prisma.deviceState.create({
       data: {
         deviceId,
@@ -88,6 +100,11 @@ describe('Dashboard KPI reconciliation — one operational population at every l
         slaBucket: (opts.departed ? null : (opts.bucket ?? null)) as never,
         isDeparted: opts.departed ?? false,
         eligibleForUptime: !opts.departed,
+        // #223 — the load-bearing field, and the reason this fixture had to change. It was never set
+        // here, so EVERY seeded device was silently never-reported; the counts still balanced only
+        // because the old predicates never looked at it. A fixture that cannot distinguish "has
+        // reported" from "has not" cannot test a three-state model.
+        latestGpsDatetime: opts.neverReported ? null : new Date('2026-08-07T09:58:34.000Z'),
         plantId: at,
         companyId,
         computedAt: new Date(),
@@ -117,6 +134,7 @@ describe('Dashboard KPI reconciliation — one operational population at every l
     for (const id of healthyIds) await seedState(id, plantId, { bucket: null });
     for (const id of departedIds) await seedState(id, plantId, { departed: true });
     for (const id of healthyOnlyIds) await seedState(id, healthyOnlyPlantId, { bucket: null });
+    for (const id of neverReportedIds) await seedState(id, plantId, { bucket: null, neverReported: true });
 
     ohToken = await login('ops.head@fsm.test');
   });
@@ -136,21 +154,44 @@ describe('Dashboard KPI reconciliation — one operational population at every l
     const rows = await get<ZoneRow[]>('/api/dashboard/zone-overview', ohToken);
     const row = rows.find((r) => r.zoneId === zoneId.toString());
     expect(row).toBeDefined();
-    // 5 operational at the mixed plant + 2 at the healthy-only plant; the 4 departed are warehouse.
-    expect(row!.operationalDevices).toBe(7);
+    // 5 reporting + 2 never-reported at the mixed plant, + 2 at the healthy-only plant; 4 departed.
+    expect(row!.operationalDevices).toBe(9);
     expect(row!.warehouseDevices).toBe(4);
-    expect(row!.mirroredDevices).toBe(11);
+    expect(row!.mirroredDevices).toBe(13);
     expect(row!.inactiveOperational).toBe(2);
     expect(row!.healthyOperational).toBe(5);
+    expect(row!.neverReported).toBe(2);
+    expect(row!.reportingOperational).toBe(7);
   });
 
-  it('derives the rates against the operational denominator, not the mirrored one', async () => {
+  /**
+   * #223 — the identity this issue exists to change. `healthy + inactive = operational` was engineered
+   * as a guarantee ("counted directly rather than subtracted … so the identity holds by construction"),
+   * and that engineering is exactly what made the third state unrepresentable: a device with no GPS
+   * timestamp cannot be inactive, so the negation swept it into healthy. Absence of evidence read as
+   * evidence of health, for 913 devices fleet-wide.
+   */
+  it('partitions operational three ways: healthy + inactive + neverReported (#223)', async () => {
     const rows = await get<ZoneRow[]>('/api/dashboard/zone-overview', ohToken);
     const row = rows.find((r) => r.zoneId === zoneId.toString())!;
-    // 2/7 = 28.6%, NOT 2/11 = 18.2% — the pre-fix denominator would have produced the latter.
+    expect(row.healthyOperational + row.inactiveOperational + row.neverReported).toBe(
+      row.operationalDevices,
+    );
+    // …and the three states are mutually exclusive: a never-reported device is in neither of the others.
+    expect(row.healthyOperational).toBe(5);
+    expect(row.inactiveOperational).toBe(2);
+  });
+
+  it('derives the rates over devices that have REPORTED, not all operational devices (#223 P3)', async () => {
+    const rows = await get<ZoneRow[]>('/api/dashboard/zone-overview', ohToken);
+    const row = rows.find((r) => r.zoneId === zoneId.toString())!;
+    // 2/7 and 5/7 — the 2 never-reported devices are excluded from the denominator, NOT scored 0%.
+    // Operator (P3): excluding "keeps the KPI measuring what it claims: reliability of devices that
+    // have reported." Scoring them as healthy — the pre-#223 behaviour — would have read 7/9 = 77.8%.
     expect(row.inactivePct).toBeCloseTo(28.6, 1);
     expect(row.fleetHealthPct).toBeCloseTo(71.4, 1);
     expect(row.inactivePct! + row.fleetHealthPct!).toBeCloseTo(100, 1);
+    expect(row.fleetHealthPct).not.toBeCloseTo(77.8, 1);
   });
 
   it('keeps an entity with zero inactive devices in both tables (it still owns operational devices)', async () => {
@@ -172,10 +213,11 @@ describe('Dashboard KPI reconciliation — one operational population at every l
   it('company-plant-overview reports the same operational population as the zone row', async () => {
     const rows = await get<CompanyPlantRow[]>('/api/dashboard/company-plant-overview', ohToken);
     const row = rows.find((r) => r.plantId === plantId.toString())!;
-    expect(row.operationalDevices).toBe(5);
+    expect(row.operationalDevices).toBe(7);
     expect(row.warehouseDevices).toBe(4);
     expect(row.inactiveOperational).toBe(2);
     expect(row.healthyOperational).toBe(3);
+    expect(row.neverReported).toBe(2);
   });
 
   // ---- 2. Whole-database identities: the guard that actually bites ------------------------------
@@ -190,6 +232,7 @@ describe('Dashboard KPI reconciliation — one operational population at every l
     expect(sum(zones, (z) => z.warehouseDevices)).toBe(fleet.warehouseDevices);
     expect(sum(zones, (z) => z.healthyOperational)).toBe(fleet.healthyOperational);
     expect(sum(zones, (z) => z.mirroredDevices)).toBe(fleet.mirroredDevices);
+    expect(sum(zones, (z) => z.neverReported)).toBe(fleet.neverReported);
   });
 
   it('Σ company×plant == Σ zone == fleet-summary (the Part 5 hierarchy)', async () => {
@@ -214,11 +257,22 @@ describe('Dashboard KPI reconciliation — one operational population at every l
       expect(sum(rows, (r) => r.warehouseDevices)).toBe(fleet.warehouseDevices);
       expect(sum(rows, (r) => r.inactiveOperational)).toBe(fleet.inactiveOperational);
       expect(sum(rows, (r) => r.healthyOperational)).toBe(fleet.healthyOperational);
+      expect(sum(rows, (r) => r.neverReported)).toBe(fleet.neverReported);
     }
     expect(dir.companies.length).toBe(fleet.companies);
   });
 
-  it('healthy + inactive == operational, and operational + warehouse == mirrored, at every level', async () => {
+  /**
+   * #223 — the whole-database form of the new identity, at every aggregation level. This replaces
+   * `healthy + inactive == operational`, which was true by construction and therefore green over 913
+   * misclassified devices (#228: a tautology occupying the slot where a real check belonged).
+   *
+   * The three-way split is NOT a tautology: `healthy` and `inactive` are both narrowed to devices with
+   * a non-null `latest_gps_datetime`, and `neverReported` counts the complement independently, so the
+   * sum can genuinely fail — e.g. if one predicate is narrowed and another is not, or if an NDD device
+   * that has aged past its install-date threshold is counted in both `inactive` and `neverReported`.
+   */
+  it('healthy + inactive + neverReported == operational, at every level (#223)', async () => {
     const [zones, cps, fleet, dir] = await Promise.all([
       get<ZoneRow[]>('/api/dashboard/zone-overview', ohToken),
       get<CompanyPlantRow[]>('/api/dashboard/company-plant-overview', ohToken),
@@ -227,9 +281,20 @@ describe('Dashboard KPI reconciliation — one operational population at every l
     ]);
     const rows: FleetCounts[] = [fleet, ...zones, ...cps, ...dir.companies, ...dir.plants];
     for (const r of rows) {
-      expect(r.healthyOperational + r.inactiveOperational).toBe(r.operationalDevices);
+      expect(r.healthyOperational + r.inactiveOperational + r.neverReported).toBe(r.operationalDevices);
+      expect(r.healthyOperational + r.inactiveOperational).toBe(r.reportingOperational);
       expect(r.operationalDevices + r.warehouseDevices).toBe(r.mirroredDevices);
     }
+  });
+
+  it('never counts a device as both inactive and never-reported (#223 — the double-count trap)', async () => {
+    // An NDD device past its install-date grace window IS `is_inactive` (that is P1: a fitted tracker
+    // that has never reported is a fault, and it must be ticketed like any other silent device). If
+    // `inactiveOperational` were not also narrowed to devices that have reported, such a device would
+    // land in both counts and the identity above would overshoot `operationalDevices`.
+    const fleet = await get<FleetSummary>('/api/dashboard/fleet-summary', ohToken);
+    expect(fleet.reportingOperational).toBe(fleet.operationalDevices - fleet.neverReported);
+    expect(fleet.neverReported).toBeGreaterThanOrEqual(2); // at minimum this fixture's two
   });
 
   it('Σ byBucket == inactiveOperational on every zone and company×plant row', async () => {
@@ -252,7 +317,10 @@ describe('Dashboard KPI reconciliation — one operational population at every l
     // Step by step, each drop accounted for.
     expect(comp.mirroredTotal - comp.onDeactivatedPlants).toBe(comp.mirroredDevices);
     expect(comp.mirroredDevices).toBe(comp.operationalDevices + comp.warehouseDevices);
-    expect(comp.operationalDevices).toBe(comp.healthyOperational + comp.inactiveOperational);
+    // #223 — the funnel's last step is a THREE-way split; with only two branches it does not sum.
+    expect(comp.operationalDevices).toBe(
+      comp.healthyOperational + comp.inactiveOperational + comp.neverReported,
+    );
     // …and the funnel's operational tail is the same population the KPI strip reports.
     expect(comp.operationalDevices).toBe(fleet.operationalDevices);
     expect(comp.warehouseDevices).toBe(fleet.warehouseDevices);

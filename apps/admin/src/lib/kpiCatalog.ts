@@ -86,7 +86,7 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     key: 'operationalDevices',
     name: 'Operational Devices',
     family: 'operational',
-    definition: 'Devices currently deployed in the field and tracked by FSM. The denominator for every rate on this dashboard.',
+    definition: 'Devices currently deployed in the field and tracked by FSM. No longer the denominator for the dashboard rates — since #223 that is Reporting Operational Devices (this figure minus Never-Reported).',
     counts: 'Mirrored devices whose deployment is live — no open device_departures row.',
     excludes: [
       'Warehouse / departed devices (removed from field operations)',
@@ -96,7 +96,7 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     refresh: 'Master sync detects departures/restores; the device-state recompute mirrors them to is_departed.',
     formula: 'COUNT(device_states WHERE is_departed = false)',
     reconciles:
-      'Σ company = Σ zone = this figure. Also equals Healthy + Inactive Operational.',
+      'Σ company = Σ zone = this figure. Also equals Healthy + Inactive Operational + Never-Reported.',
   },
 
   warehouseDevices: {
@@ -120,17 +120,18 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     key: 'inactiveOperational',
     name: 'Inactive Operational Devices',
     family: 'operational',
-    definition: 'Operational devices that have gone silent for longer than the inactivity threshold and are therefore in an SLA band.',
-    counts: 'Operational devices with an SLA bucket assigned (silent ≥ the configured inactivity threshold, canonically 24h).',
+    definition: 'Devices that have reported at least once and have since gone silent for longer than the inactivity threshold, and are therefore in an SLA band.',
+    counts: 'Reporting operational devices with an SLA bucket assigned (silent ≥ the configured inactivity threshold, canonically 24h).',
     excludes: [
       'Warehouse devices — a departed device is never counted inactive',
       'Devices inside the 0–4h ACTIVE band (no SLA bucket)',
+      'Never-reported devices — they are counted once, under Never-Reported, even when their install-date age puts them past the threshold',
       ...EXCLUDED_EVERYWHERE,
     ],
-    source: 'device_states.is_inactive + sla_bucket',
+    source: 'device_states.is_inactive + sla_bucket + latest_gps_datetime',
     refresh: 'Recomputed on the 30-minute telemetry tick — ages advance with wall-clock time, not only on new pings.',
     formula:
-      'COUNT(device_states WHERE is_departed = false AND is_inactive = true AND sla_bucket IS NOT NULL)',
+      'COUNT(device_states WHERE is_departed = false AND latest_gps_datetime IS NOT NULL AND is_inactive = true AND sla_bucket IS NOT NULL)',
     reconciles: 'Σ company = Σ zone = this figure. Also equals the sum of the per-SLA-bucket columns.',
   },
 
@@ -138,45 +139,90 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     key: 'healthyOperational',
     name: 'Healthy Operational Devices',
     family: 'operational',
-    definition: 'Operational devices reporting normally — deployed, tracked, and not inactive.',
-    counts: 'Operational devices with no SLA bucket (inside the ACTIVE band).',
-    excludes: ['Warehouse devices', 'Inactive operational devices', ...EXCLUDED_EVERYWHERE],
+    definition: 'Operational devices reporting normally — deployed, tracked, has reported at least once, and not inactive.',
+    counts: 'Reporting operational devices with no SLA bucket (inside the ACTIVE band).',
+    excludes: [
+      'Warehouse devices',
+      'Inactive operational devices',
+      'Never-reported devices — until 2026-08-09 these were counted HERE, by construction (#223)',
+      ...EXCLUDED_EVERYWHERE,
+    ],
     source: 'device_states',
     refresh: 'Same 30-minute recompute as Inactive Operational Devices.',
     formula:
-      'COUNT(device_states WHERE is_departed = false AND NOT (is_inactive = true AND sla_bucket IS NOT NULL))',
-    reconciles: 'Healthy + Inactive Operational = Operational Devices, exactly, at every level.',
+      'COUNT(device_states WHERE is_departed = false AND latest_gps_datetime IS NOT NULL AND NOT (is_inactive = true AND sla_bucket IS NOT NULL))',
+    reconciles:
+      'Healthy + Inactive Operational + Never-Reported = Operational Devices, exactly, at every level.',
+  },
+
+  neverReported: {
+    key: 'neverReported',
+    name: 'Never-Reported Devices',
+    family: 'operational',
+    definition:
+      'Operational devices that have never sent a single GPS fix since being fitted. The third fleet state — not healthy, not silent-since-reporting, never alive.',
+    counts:
+      'Operational devices with no latest_gps_datetime at all. Fleet-wide this is 913 devices, 753 of them at two companies; 892 were confirmed at the AutoPlant source as fitted, deployed, and never having reported.',
+    excludes: [
+      'Warehouse devices',
+      'Devices that reported once and later went silent — those are Inactive Operational',
+      ...EXCLUDED_EVERYWHERE,
+    ],
+    source: 'device_states.latest_gps_datetime IS NULL',
+    refresh:
+      'Maintained at ingest, not by the recompute — the column is null until a first ping arrives, so a device leaves this count the moment it reports.',
+    formula: 'COUNT(device_states WHERE is_departed = false AND latest_gps_datetime IS NULL)',
+    reconciles:
+      'Healthy + Inactive Operational + Never-Reported = Operational Devices. Shown beside Fleet Health rather than inside it, so an installation-quality failure is not read as a device failure.',
+  },
+
+  reportingOperational: {
+    key: 'reportingOperational',
+    name: 'Reporting Operational Devices',
+    family: 'operational',
+    definition:
+      'Operational devices that have reported at least once. The denominator for Fleet Health % and Inactive %.',
+    counts: 'Operational Devices minus Never-Reported Devices.',
+    excludes: ['Warehouse devices', 'Never-reported devices', ...EXCLUDED_EVERYWHERE],
+    source: 'device_states',
+    refresh: 'Same 30-minute recompute; the never-reported side moves at ingest.',
+    formula:
+      'COUNT(device_states WHERE is_departed = false AND latest_gps_datetime IS NOT NULL)',
+    reconciles: 'Healthy + Inactive Operational = this figure.',
   },
 
   fleetHealthPct: {
     key: 'fleetHealthPct',
     name: 'Fleet Health %',
     family: 'derived',
-    definition: 'The share of the operational fleet reporting normally.',
-    counts: 'Healthy Operational Devices as a percentage of Operational Devices.',
+    definition: 'The share of the REPORTING fleet reporting normally.',
+    counts: 'Healthy Operational Devices as a percentage of Reporting Operational Devices.',
     excludes: [
       'Warehouse devices are in neither the numerator nor the denominator',
-      'Shown as "—" rather than 0% when the entity has no operational devices',
+      'Never-reported devices are in neither, since 2026-08-09 (#223) — they are excluded rather than scored 0%, so this KPI measures the reliability of devices that have actually reported. The never-reported count is shown beside it.',
+      'Shown as "—" rather than 0% when the entity has nothing that has reported',
     ],
     source: 'Derived from device_states counts',
     refresh: 'Moves with the underlying counts (30-minute recompute).',
-    formula: 'Healthy Operational Devices ÷ Operational Devices × 100',
-    reconciles: 'Fleet Health % + Inactive % = 100% for every row.',
+    formula: 'Healthy Operational Devices ÷ Reporting Operational Devices × 100',
+    reconciles:
+      'Fleet Health % + Inactive % = 100% for every row. Expect a one-off step change on the day #222+#223 landed: 82.96% → 84.84% pan-India.',
   },
 
   inactivePct: {
     key: 'inactivePct',
     name: 'Inactive %',
     family: 'derived',
-    definition: 'The share of the operational fleet currently inactive.',
-    counts: 'Inactive Operational Devices as a percentage of Operational Devices.',
+    definition: 'The share of the REPORTING fleet currently inactive.',
+    counts: 'Inactive Operational Devices as a percentage of Reporting Operational Devices.',
     excludes: [
       'Warehouse devices are in neither the numerator nor the denominator — including them understated this rate on every zone before 2026-07-29',
-      'Shown as "—" rather than 0% when the entity has no operational devices',
+      'Never-reported devices are in neither, since 2026-08-09 (#223)',
+      'Shown as "—" rather than 0% when the entity has nothing that has reported',
     ],
     source: 'Derived from device_states counts',
     refresh: 'Moves with the underlying counts (30-minute recompute).',
-    formula: 'Inactive Operational Devices ÷ Operational Devices × 100',
+    formula: 'Inactive Operational Devices ÷ Reporting Operational Devices × 100',
     reconciles: 'Inactive % + Fleet Health % = 100% for every row.',
   },
 

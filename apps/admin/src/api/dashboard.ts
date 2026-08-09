@@ -16,21 +16,33 @@ async function get<T>(path: string): Promise<T> {
 /**
  * The device counts for one entity, over a SINGLE operational population (mirrors the backend
  * `FleetCounts`). Every `inactive / total` on the dashboard reads `inactiveOperational /
- * operationalDevices` — never `mirroredDevices`, which includes warehouse stock and so silently
- * understated every inactivity rate before 2026-07-29.
+ * reportingOperational` — never `mirroredDevices`, which includes warehouse stock and so silently
+ * understated every inactivity rate before 2026-07-29, and (since #223) never `operationalDevices`,
+ * which includes devices that have never reported at all.
  */
 export interface FleetCounts {
   /** Operational + warehouse. What FSM mirrors for this entity — NOT the AutoPlant catalog. */
   mirroredDevices: number;
-  /** Deployed and tracked (`is_departed = false`) — the denominator for every rate. */
+  /** Deployed and tracked (`is_departed = false`). `= healthy + inactive + neverReported`. */
   operationalDevices: number;
   /** Removed from field operations. Reconciles separately; never in a rate. */
   warehouseDevices: number;
-  /** Operational devices currently inactive. Equals the sum of the per-SLA-bucket columns. */
+  /** Operational devices that have reported at least once — the denominator for every rate (#223). */
+  reportingOperational: number;
+  /** Reporting devices currently inactive. Equals the sum of the per-SLA-bucket columns. */
   inactiveOperational: number;
-  /** `healthyOperational + inactiveOperational === operationalDevices`, at every level. */
+  /** `healthyOperational + inactiveOperational === reportingOperational`, at every level. */
   healthyOperational: number;
-  /** Percentage of the OPERATIONAL fleet; null when the entity has no operational devices. */
+  /**
+   * Operational devices that have never sent a single GPS fix (#223) — the third fleet state.
+   *
+   * Before 2026-08-09 these were counted as `healthyOperational`, because healthy was defined as the
+   * negation of inactive and a device with no timestamp can never be inactive. Shown beside Fleet
+   * Health rather than inside it (operator decision P4): "never worked" is an installation failure
+   * with a different owner from "stopped working".
+   */
+  neverReported: number;
+  /** Percentage of the REPORTING fleet; null when the entity has nothing that has reported. */
   inactivePct: number | null;
   fleetHealthPct: number | null;
 }

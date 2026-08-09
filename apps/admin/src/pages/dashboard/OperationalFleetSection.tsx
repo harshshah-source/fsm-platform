@@ -4,12 +4,18 @@ import { MetricStrip, type Metric } from '../../components/data';
 import { formatCount, formatPct, formatStamp } from '../../lib/fleetFormat';
 
 /**
- * The Operational Fleet KPI section — the six numbers that describe the fleet FSM actually tracks,
- * all over ONE population and all reconciling exactly with the Zone and Company tables below.
+ * The Operational Fleet KPI section — the numbers that describe the fleet FSM actually tracks, all
+ * over ONE population and all reconciling exactly with the Zone and Company tables below.
  *
- *   Operational = Healthy + Inactive          (the split)
- *   Operational + Warehouse = Mirrored        (warehouse reconciles separately, never inside a rate)
- *   Fleet Health % + Inactive % = 100%        (both against the operational denominator)
+ *   Operational = Healthy + Inactive + Never Reported   (the split — THREE states since #223)
+ *   Operational + Warehouse = Mirrored                  (warehouse reconciles separately, never in a rate)
+ *   Fleet Health % + Inactive % = 100%                  (both against the REPORTING denominator)
+ *
+ * **Never Reported is a card here rather than a fifth tile in the hero above** — operator decision P4
+ * asked for the never-reported count to be its own figure, and this strip is where the fleet's counts
+ * already live and already add up on sight. Putting it in the hero would have meant redesigning the
+ * 4-tile layout the authoritative reference (`docs/ui/desktop/v2-reference/04-dashboard-operations-head.png`)
+ * fixes, to show a number that belongs with its siblings rather than with Fleet Uptime and Auto-Dispatch.
  *
  * Deliberately separate from the KPI hero above it, which mixes families: the hero carries Fleet
  * Uptime (a monthly report), Critical Devices (a band of the inactive count) and the AutoPlant Catalog
@@ -46,6 +52,17 @@ export function OperationalFleetSection({ fleet }: { fleet: FleetSummary | null 
         testId: 'kpi-inactive-operational',
       },
       {
+        // #223 — the third state. `critical` rather than `warning`: a tracker that has never reported
+        // once is a worse condition than one that reported and went quiet, and 66% of them have been
+        // fitted for over a year. It reads next to Inactive so the two are compared, not conflated.
+        label: 'Never Reported',
+        value: v(fleet?.neverReported),
+        hint: 'no GPS fix, ever',
+        tone: 'critical',
+        kpi: 'neverReported',
+        testId: 'kpi-never-reported',
+      },
+      {
         label: 'Warehouse Devices',
         value: v(fleet?.warehouseDevices),
         hint: 'removed from field ops',
@@ -56,7 +73,7 @@ export function OperationalFleetSection({ fleet }: { fleet: FleetSummary | null 
       {
         label: 'Fleet Health %',
         value: p(fleet?.fleetHealthPct),
-        hint: 'healthy ÷ operational',
+        hint: 'healthy ÷ reporting',
         tone: 'success',
         kpi: 'fleetHealthPct',
         testId: 'kpi-fleet-health-pct',
@@ -64,7 +81,7 @@ export function OperationalFleetSection({ fleet }: { fleet: FleetSummary | null 
       {
         label: 'Inactive %',
         value: p(fleet?.inactivePct),
-        hint: 'inactive ÷ operational',
+        hint: 'inactive ÷ reporting',
         tone: 'critical',
         kpi: 'inactivePct',
         testId: 'kpi-inactive-pct',
@@ -84,10 +101,15 @@ export function OperationalFleetSection({ fleet }: { fleet: FleetSummary | null 
           Last snapshot: <span className="tabular-nums text-ink">{formatStamp(fleet?.lastSnapshotAt)}</span>
         </p>
       </div>
-      <MetricStrip metrics={metrics} cols={6} className="mb-0" />
+      {/* 4-up: seven cards across six columns would leave one orphaned on its own row at every
+          breakpoint. Two rows of four (the last slot empty) keeps the counts on the top row and the
+          two rates below them, which is also how they are read. */}
+      <MetricStrip metrics={metrics} cols={4} className="mb-0" />
       <p className="mt-2 text-xs text-ink-muted">
-        Operational = Healthy + Inactive. Warehouse devices sit outside every rate above and reconcile
-        separately. These six figures are the column totals of the Zone and Company tables below.
+        Operational = Healthy + Inactive + Never Reported. Both rates are taken over devices that have
+        reported at least once, so a tracker that has never sent a fix is counted beside Fleet Health
+        rather than inside it. Warehouse devices sit outside every rate and reconcile separately. These
+        figures are the column totals of the Zone and Company tables below.
       </p>
     </section>
   );

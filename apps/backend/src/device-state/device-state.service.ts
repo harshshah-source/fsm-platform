@@ -66,6 +66,32 @@ export class DeviceStateService {
     // 2. Derive every field from latest_gps_datetime (maintained at ingest) + reference data, in one
     //    pass. The `derived` CTE computes clamped inactivity hours once; the SLA-bucket CASE is projected
     //    from SLA_BANDS so it stays in lockstep with classifySlaBucket.
+    //
+    //    #223 — `hours` gained a SECOND source. A device that has never reported has no last ping to
+    //    measure from, and the original `dr.hours IS NOT NULL` guard below was written knowing that:
+    //    whoever wrote it decided (correctly, locally) that "never heard from it" is not "it went
+    //    silent". The failure was that the guard was never followed through to the consumers — the
+    //    device, having been excluded from `inactive`, was swept into `healthy` by the negation, and
+    //    913 fitted-and-dead trackers were counted as the healthiest devices in the fleet.
+    //
+    //    So a never-reported device is now aged from its INSTALL date instead
+    //    (`device_commissioning.installed_at`, MIN per device). Operator decision P1 (2026-08-07): *"a
+    //    tracker that is fitted and has never reported is a fault, not a pipeline state … a vehicle
+    //    running untracked since the day it was fitted is exactly the thing this platform exists to
+    //    catch."* Measuring from install rather than adding a new SLA band is deliberate: it is
+    //    semantically honest ("this device has been broken for 602 days"), the existing SLA_BANDS work
+    //    unchanged because the top band is open-ended, and it needs no enum migration.
+    //
+    //    MIN, not MAX: the question a never-reported device answers is "how long has it been broken",
+    //    and it has produced nothing under ANY fitment, so the honest anchor is the first time it was
+    //    fitted. MAX would restart the clock on every re-map — and `tb_vehiclemaster` rewrites fitment
+    //    in place (10,565 devices have had `first_installed_dt` moved, 1,757 by more than a year), so
+    //    MAX would let a device that has never worked look freshly commissioned indefinitely.
+    //
+    //    The grace window falls out of the existing `hours >= threshold` comparison for free —
+    //    operator decision P2: 24 h, reusing `inactivity_threshold_hours`, no new setting. A device
+    //    with neither a ping nor an install date keeps `hours = NULL` and stays out entirely (the 6
+    //    source-orphans of #227); that case is unchanged and still unrepresentable, deliberately.
     const bucketCase = Prisma.raw(slaBucketCaseSql('dr.hours'));
     // A departed device (Issue 128) is NOT broken — it is in a warehouse. It must therefore leave the
     // operational derivations entirely rather than age through the SLA bands: no inactivity, no bucket,
@@ -94,13 +120,23 @@ export class DeviceStateService {
     // (rollback-and-throw, not log-and-alert; L5's canary below warns on softer swings elsewhere).
     const upserted = await this.prisma.$transaction(async (tx) => {
       const count = await tx.$executeRaw(Prisma.sql`
-        WITH derived AS (
+        WITH install AS (
+          SELECT device_id, MIN(installed_at) AS installed_at
+            FROM device_commissioning
+           WHERE installed_at IS NOT NULL
+           GROUP BY device_id
+        ),
+        derived AS (
           SELECT ds.device_id,
-            CASE WHEN ds.latest_gps_datetime IS NULL THEN NULL
-                 ELSE GREATEST(0, EXTRACT(EPOCH FROM (${now}::timestamptz - ds.latest_gps_datetime)) / 3600.0)
+            CASE WHEN ds.latest_gps_datetime IS NOT NULL
+                   THEN GREATEST(0, EXTRACT(EPOCH FROM (${now}::timestamptz - ds.latest_gps_datetime)) / 3600.0)
+                 WHEN ic.installed_at IS NOT NULL
+                   THEN GREATEST(0, EXTRACT(EPOCH FROM (${now}::timestamptz - ic.installed_at)) / 3600.0)
+                 ELSE NULL
             END AS hours,
             ${departedExists} AS departed
           FROM device_states ds
+          LEFT JOIN install ic ON ic.device_id = ds.device_id
         )
         UPDATE device_states ds SET
           inactivity_hours = dr.hours,

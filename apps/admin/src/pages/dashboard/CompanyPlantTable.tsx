@@ -48,8 +48,10 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
         mirroredDevices: 0,
         operationalDevices: 0,
         warehouseDevices: 0,
+        reportingOperational: 0,
         inactiveOperational: 0,
         healthyOperational: 0,
+        neverReported: 0,
         inactivePct: null,
         fleetHealthPct: null,
         byBucket: {},
@@ -60,14 +62,19 @@ function groupByCompany(rows: CompanyPlantRow[]): CompanyGroup[] {
     g.mirroredDevices += r.mirroredDevices;
     g.operationalDevices += r.operationalDevices;
     g.warehouseDevices += r.warehouseDevices;
+    g.reportingOperational += r.reportingOperational;
     g.inactiveOperational += r.inactiveOperational;
     g.healthyOperational += r.healthyOperational;
+    g.neverReported += r.neverReported;
     for (const b of SLA_BUCKETS) g.byBucket[b] = (g.byBucket[b] ?? 0) + (r.byBucket[b] ?? 0);
   }
   for (const g of byCompany.values()) {
-    const op = g.operationalDevices;
-    g.inactivePct = op > 0 ? Math.round((g.inactiveOperational / op) * 1000) / 10 : null;
-    g.fleetHealthPct = op > 0 ? Math.round((g.healthyOperational / op) * 1000) / 10 : null;
+    // #223 — the rate denominator is the REPORTING count, not the operational one, matching
+    // `withRates` on the backend. Rolling these up client-side with a different denominator from the
+    // one the server used is exactly the numerator/denominator drift #176 closed, one layer up.
+    const reporting = g.reportingOperational;
+    g.inactivePct = reporting > 0 ? Math.round((g.inactiveOperational / reporting) * 1000) / 10 : null;
+    g.fleetHealthPct = reporting > 0 ? Math.round((g.healthyOperational / reporting) * 1000) / 10 : null;
   }
   return [...byCompany.values()];
 }
@@ -252,8 +259,14 @@ export function CompanyPlantTable({
       // devices is the one performing well, and an operator seeing 8 of 20 plants would otherwise be
       // unable to tell the healthy 12 from 12 that are simply missing from the data.
       if (statusScope === 'ALL') return filtered;
+      // #223 — one branch per scope. Falling through to `inactiveOperational` for an unhandled scope
+      // would sort the NEVER_REPORTED view by a column it is not showing.
       const weight = (e: FleetCounts) =>
-        statusScope === 'ACTIVE' ? e.healthyOperational : e.inactiveOperational;
+        statusScope === 'ACTIVE'
+          ? e.healthyOperational
+          : statusScope === 'NEVER_REPORTED'
+            ? e.neverReported
+            : e.inactiveOperational;
       return filtered
         .map((g) => ({ ...g, plants: [...g.plants].sort((a, b) => weight(b) - weight(a)) }))
         .sort((a, b) => weight(b) - weight(a));

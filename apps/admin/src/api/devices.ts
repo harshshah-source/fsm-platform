@@ -99,7 +99,12 @@ export interface DeviceListPage {
 }
 
 export type DeviceSort = 'LONGEST_INACTIVE' | 'NEWEST_ACTIVITY' | 'SLA_SEVERITY' | 'DEVICE_ID' | 'PRIORITY';
-export type DeviceStatusFilter = 'ALL' | 'INACTIVE' | 'ACTIVE';
+/**
+ * `NEVER_REPORTED` added by #223 — a fitted tracker that has never sent a GPS fix is its own state.
+ * Before then it was returned under `ACTIVE`, because "active" meant only `is_inactive = false` and a
+ * device with no timestamp can never be inactive.
+ */
+export type DeviceStatusFilter = 'ALL' | 'INACTIVE' | 'ACTIVE' | 'NEVER_REPORTED';
 
 export interface DeviceListParams {
   search?: string;

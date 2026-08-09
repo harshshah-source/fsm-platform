@@ -60,13 +60,23 @@ WHERE true <zone scope>
   AND p.plant_id NOT IN (SELECT plant_id FROM plant_deactivations WHERE reactivated_at IS NULL)
 ```
 
-Because the five counts come from one scan of one predicate set, they partition the scope exactly and
+Because the counts come from one scan of one predicate set, they partition the scope exactly and
 cannot drift:
 
 ```
 mirrored     = operational + warehouse
-operational  = healthy + inactive
+operational  = healthy + inactive + neverReported     ← THREE states since #223
+reporting    = healthy + inactive
 ```
+
+**Amended 2026-08-09 (#223).** This section stated `operational = healthy + inactive` for a year, and
+that two-state identity was **wrong** — not arithmetically, but as a model. `healthy` was defined as
+the *negation* of `inactive`, and `is_inactive` cannot be true without a timestamp to compare against,
+so a device that had **never reported a single GPS fix** was not inactive, and therefore counted
+healthy. 913 devices fleet-wide, 892 of them confirmed at the source as fitted, deployed and never
+having sent anything: **absence of evidence read as evidence of health.**
+
+Both rates are now taken over `reporting`, not `operational` — see Fleet Health % below.
 
 **Scope filters applied at every level:**
 
@@ -132,13 +142,13 @@ stats.devices.observed = sourceDeviceIds.size;
 
 | | |
 |---|---|
-| **Definition** | Devices currently deployed in the field and tracked by FSM. **The denominator for every rate on the dashboard.** |
+| **Definition** | Devices currently deployed in the field and tracked by FSM. **No longer the denominator for the dashboard rates** — since #223 that is `reportingOperational` (this count minus never-reported devices). |
 | **Counts** | Mirrored devices whose deployment is live — no open `device_departures` row. |
 | **Excludes** | Warehouse / departed devices; devices on a deactivated plant; devices with no plant fitment. |
 | **Source** | `device_states.is_departed` (denormalised from `device_departures` by `DeviceStateService.recompute`) |
 | **Refresh** | Master sync detects departures/restores; the 30-minute recompute mirrors them. |
 | **Formula** | `COUNT(device_states WHERE is_departed = false)` |
-| **Reconciles** | `Σ company = Σ zone = fleet KPI`; also `= healthy + inactive` |
+| **Reconciles** | `Σ company = Σ zone = fleet KPI`; also `= healthy + inactive + neverReported` (#223) |
 | **Live value** | **17,415** pan-India |
 
 ---
@@ -178,14 +188,55 @@ stats.devices.observed = sourceDeviceIds.size;
 
 | | |
 |---|---|
-| **Definition** | Operational devices reporting normally — deployed, tracked, and not inactive. |
-| **Excludes** | Warehouse devices; inactive operational devices. |
-| **Formula** | `COUNT(device_states WHERE is_departed = false AND NOT (is_inactive = true AND sla_bucket IS NOT NULL))` |
-| **Reconciles** | `healthy + inactive = operational`, exactly, at every level. |
-| **Live value** | **13,939** pan-India |
+| **Definition** | Operational devices reporting normally — deployed, tracked, **has reported at least once**, and not inactive. |
+| **Excludes** | Warehouse devices; inactive operational devices; **never-reported devices** (#223). |
+| **Formula** | `COUNT(device_states WHERE is_departed = false AND latest_gps_datetime IS NOT NULL AND NOT (is_inactive = true AND sla_bucket IS NOT NULL))` |
+| **Reconciles** | `healthy + inactive + neverReported = operational`, exactly, at every level. |
 
-Counted directly rather than subtracted, over the complement predicate on the same non-departed set —
-so the identity holds by construction rather than by arithmetic that could be applied inconsistently.
+**Corrected 2026-08-09 (#223).** The paragraph that stood here said:
+
+> *"Counted directly rather than subtracted, over the complement predicate on the same non-departed
+> set — so the identity holds by construction rather than by arithmetic that could be applied
+> inconsistently."*
+
+That reasoning is sound and the conclusion was still wrong, which is the useful part. **Holding "by
+construction" is exactly what made the third state unrepresentable:** engineering `healthy` as the
+literal complement of `inactive` guarantees the two sum to the whole, so any device that fails to be
+inactive *must* be counted healthy, whatever the reason. A device that has never reported fails to be
+inactive because it has no timestamp — a data-absence, not a health signal — and the construction had
+no way to say so. The same document defined healthy in prose as *"operational devices reporting
+normally"*; the SQL said "not inactive"; nothing compared the two for a year.
+
+The identity is now three-way and `neverReported` is measured **independently** rather than as anyone's
+complement, so it is a check that can actually fail. See [#228](../.scratch/fsm-platform-v1/issues/228-guard-pattern-remediation.md)
+on tautological guards.
+
+---
+
+### Never-Reported Devices — *operational*
+
+| | |
+|---|---|
+| **Definition** | Operational devices that have never sent a single GPS fix since being fitted. |
+| **Excludes** | Warehouse devices. |
+| **Formula** | `COUNT(device_states WHERE is_departed = false AND latest_gps_datetime IS NULL)` |
+| **Reconciles** | `healthy + inactive + neverReported = operational`, at every level. |
+| **Live value** | **913** pan-India (Vasavadatta 545, Deepak Fertilizer 208) |
+
+Reported **beside** Fleet Health, not inside it — operator decision P4, 2026-08-09: *"different root
+causes, different owners; 602 year-old devices would make the genuine backlog unreadable."* "Never
+worked" is an installation-quality failure (the installer, the vendor, the commissioning process);
+"stopped working" is a device failure (the field SE). Merging them hides which of the two is degrading.
+
+Derived at read time from `latest_gps_datetime IS NULL` rather than stored as a column, because
+`latest_gps_datetime` is maintained at **ingest** while a stored flag would be written by the
+**recompute** — between the two, a stored flag would still say "never reported" about a device that
+just came alive.
+
+A never-reported device is **also** `is_inactive` once it has been fitted longer than the grace window
+(operator decision P1: a fitted tracker that has never reported is a fault, ticketed like any other
+silent device), which is why `inactiveOperational` is narrowed to reporting devices — otherwise such a
+device would be counted twice and the identity would overshoot.
 
 ---
 
@@ -193,16 +244,32 @@ so the identity holds by construction rather than by arithmetic that could be ap
 
 | | |
 |---|---|
-| **Formula** | `inactiveOperational ÷ operationalDevices × 100`, one decimal |
-| **Excludes** | Warehouse devices, from **both** numerator and denominator. |
-| **Null case** | `—`, never `0.0%`, when the entity has no operational devices — "nothing to measure" is not "nothing wrong". |
+| **Formula** | `inactiveOperational ÷ reportingOperational × 100`, one decimal |
+| **Excludes** | Warehouse devices **and never-reported devices**, from **both** numerator and denominator. |
+| **Null case** | `—`, never `0.0%`, when the entity has nothing that has reported — "nothing to measure" is not "nothing wrong". |
 | **Reconciles** | `Inactive % + Fleet Health % = 100%` for every row. |
 
 ### Fleet Health % — *derived*
 
 | | |
 |---|---|
-| **Formula** | `healthyOperational ÷ operationalDevices × 100`, one decimal |
+| **Formula** | `healthyOperational ÷ reportingOperational × 100`, one decimal |
+
+**The denominator changed 2026-08-09 (#223 P3).** It was `operationalDevices`. Never-reported devices
+are **excluded** from Fleet Health rather than scored 0% — operator decision, with the alternative
+(score them zero, keep them in the denominator) explicitly considered: excluding *"keeps the KPI
+measuring what it claims: reliability of devices that have reported"*, with the never-reported count
+shown beside it.
+
+**Expect a step change on the fix day.** Pan-India, Fleet Health moves **82.96% → 84.84%** once #223
+lands together with [#222](../.scratch/fsm-platform-v1/issues/222-telemetry-staleness.md). The two
+defects were partly cancelling — NDD inflated the figure by ~1.06 points and #222's 5.5 h timestamp
+shift deflated it by ~2.76 — so the net error looked like only ~1.9 points while the gross error was
+~3.9 and unstable. That is why the two shipped as one slice: #223 alone moves the number *down* to
+81.90% and reads as a regression caused by a bug fix.
+
+`soft_inactive_count_history` holds denominators snapshotted under the old definition, so trend charts
+show a discontinuity on the fix day. **Expected and correct, not a regression.**
 
 ---
 
@@ -231,7 +298,20 @@ Not the same thing: FSM keeps recomputing long after a device stops pinging. Bot
 
 Share of eligible device-time spent reporting this month, from the Fleet Uptime monthly report
 (`/api/reports/fleet-uptime`). Excludes devices not eligible for uptime (no active PGI in window, or a
-confirmed Non-Operational marking) and warehouse devices. `—` until a monthly run has been computed.
+confirmed Non-Operational marking), warehouse devices, and — since #223 — **never-reported devices**.
+`—` until a monthly run has been computed.
+
+**Why never-reported devices had to be excluded (#223 P3).** Uptime is computed as failure-cycle
+overlap over the month. A failure cycle is opened from inactivity, and inactivity requires a timestamp
+— so a device that has never reported had never opened a cycle and contributed **a full month of zero
+downtime**, scoring **100%**. The single most broken device in the fleet was scored as the healthiest
+possible device, for 913 devices, 545 of them at one customer. This was the most consequential of the
+six read surfaces the defect reached and neither of the two independent reports that found #223 caught
+it.
+
+The exclusion is applied in the uptime aggregation, **not** by clearing `eligible_for_uptime` — that
+flag is also the ticket-creation gate, and clearing it would silently stop the never-reported devices
+from ever being ticketed, cancelling the decision (P1) that this issue exists to implement.
 
 ---
 
@@ -245,10 +325,15 @@ so the catalog→operational gap has no unexplained losses.
 | AutoPlant Catalog | 50,270 | **− 26,045 not mirrored** — non-operational at source and never known to FSM (read and counted, deliberately not created: the insert-scope pin in `master-sync.service.ts`) |
 | Mirrored into FSM | 24,225 | **− 987 on deactivated plants** — Issue 119; listed under Plant Deactivations |
 | On live plants | 23,238 | splits into operational + warehouse |
-| ├ Operational Devices | 17,415 | splits into healthy + inactive |
+| ├ Operational Devices | 17,415 | splits into healthy + inactive + **never-reported** (#223) |
 | │  ├ Healthy Devices | 13,939 | |
-| │  └ Inactive Devices | 3,476 | |
+| │  ├ Inactive Devices | 3,476 | |
+| │  └ **Never-Reported Devices** | — | **new third branch (#223)** — rendered as a two-way split, the funnel no longer sums |
 | └ Warehouse Devices | 5,823 | reconciles separately |
+
+*(The live values in this table predate #223 and #222. Fleet-wide as measured 2026-08-09: operational
+15,696 · healthy 13,021 · inactive 2,675 · never-reported 913 — and after both fixes, reporting 14,783
+with healthy 12,542, i.e. Fleet Health 84.84%.)*
 
 A zone-scoped caller (a ZM) gets `catalogDevices: null` and `notMirrored: null`, and their funnel
 starts at "Mirrored into FSM" — opening a zone funnel with a pan-India source counter would repeat the
@@ -269,10 +354,11 @@ fixture.
 Σ fleetDirectory.companies[*]       = Σ fleetDirectory.plants[*] = fleetSummary            (all counts)
 
 For every row, at every level:
-  healthyOperational + inactiveOperational = operationalDevices
-  operationalDevices + warehouseDevices    = mirroredDevices
-  Σ byBucket                                = inactiveOperational
-  inactivePct + fleetHealthPct              = 100%   (when operationalDevices > 0)
+  healthyOperational + inactiveOperational + neverReported = operationalDevices   ← #223
+  healthyOperational + inactiveOperational                 = reportingOperational
+  operationalDevices + warehouseDevices                    = mirroredDevices
+  Σ byBucket                                                = inactiveOperational
+  inactivePct + fleetHealthPct                              = 100%   (when reportingOperational > 0)
 
 Composition:
   mirroredTotal − onDeactivatedPlants = mirroredDevices

@@ -25,12 +25,18 @@ const zonalManager: SessionView = { user_id: 'zm1', role: 'ZONAL_MANAGER', zone_
  * The KPI cards each dashboard is contracted to render. Update this ONLY with the decision recorded.
  *
  * The `kpi-operational-*` / `kpi-warehouse-*` / `kpi-*-pct` ids belong to the Operational Fleet strip
- * (the KPI-transparency rework): the six cards that reconcile exactly with the tables below them.
+ * (the KPI-transparency rework): the cards that reconcile exactly with the tables below them.
+ *
+ * `kpi-never-reported` was added by #223 under operator decision P4 — never-reported devices get their
+ * own dashboard figure rather than being folded into a widened "not reporting" number, because "never
+ * worked" is an installation-quality failure with a different owner from "stopped working". It is
+ * listed here so removing it fails with a message that names it.
  */
 const OPERATIONAL_STRIP = [
   'kpi-operational-devices',
   'kpi-healthy-devices',
   'kpi-inactive-operational',
+  'kpi-never-reported',
   'kpi-warehouse-devices',
   'kpi-fleet-health-pct',
   'kpi-inactive-pct',

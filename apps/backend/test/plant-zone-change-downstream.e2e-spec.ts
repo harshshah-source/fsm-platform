@@ -122,6 +122,10 @@ describe('#158 — downstream effects of a plant zone change', () => {
         deviceId: DEVICE_ID,
         isInactive: true,
         slaBucket: 'CRITICAL',
+        // #223 — a device with no `latestGpsDatetime` is NEVER-REPORTED and so appears in neither the
+        // healthy nor the inactive dashboard count. This fixture is about a device that reported and
+        // then went silent, which now has to be stated.
+        latestGpsDatetime: new Date('2026-08-06T04:00:00.000Z'),
         vehicleId,
         plantId,
         companyId,
