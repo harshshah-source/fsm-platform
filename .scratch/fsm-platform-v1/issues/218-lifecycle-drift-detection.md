@@ -1,8 +1,12 @@
 # 218 — Deployment-lifecycle drift: detection first, then the DI fix
 
-Status: in progress — 218a (detection) + 218b (the fix) landed; the three pre-window deliverables done
-(seam assertion, stand-down export, SE-team note); 218c (catch-up window) operator-gated, **not
-approved**, no production data written — awaiting explicit operator approval + timing
+Status: in progress — 218a (detection) + 218b (the fix) **landed but not yet exercised** (committed and
+proven by spec; **no sync has run since**, dev DB still at the 218a baseline `5134/1131/27` — see the
+callout in 218b); the three pre-window deliverables done (seam assertion, stand-down export, SE-team
+note); 218c (catch-up window) operator-gated, **not approved**, no production data written — awaiting
+explicit operator approval + timing. **Cannot be marked done** while
+[#224](./224-lifecycle-health-integration-page.md) (parity gate) and
+[#225](./225-218-doc-deliverables.md) are open.
 Type: HITL (operator gates the catch-up window) · Backend
 Filed: 2026-08-07
 Origin: AutoPlant↔FSM reconciliation against a known-good Excel export
@@ -109,6 +113,28 @@ and 14-test `dashboard-kpi-reconciliation` suites), `tsc --noEmit` clean.
 **No production data written.** The dev-DB lifecycle reading is byte-identical to the 218a baseline
 after the fix — `drift 5134 · missingFromSource 1131 · quietRuns 27` — confirming the fix changes
 future syncs only and applies no catch-up on its own.
+
+> #### ⚠ Landed ≠ exercised — the fix has never actually run here (recorded 2026-08-09)
+>
+> **The two are different claims and this issue should not blur them.** 218b is committed
+> (`9c00ad6`), and it is proven correct against the real `AppModule` by
+> `master-sync-di-wiring.e2e-spec.ts`. But **no master sync has run in this environment since it
+> landed.** The dev DB still reads the untouched 218a baseline — `drift 5134 · missingFromSource
+> 1131 · quietRuns 27` — and `quietRuns` is still 27, which is the same 27 consecutive no-op syncs
+> the issue was opened about. Not one run has been added to it under the fixed code.
+>
+> So the honest status of the deployment-lifecycle pass is: **repaired in code, verified in a test
+> that boots the production graph, and still never having done lifecycle work on the Nest-wired path
+> in this environment.** The only evidence it works outside a spec would be a sync run whose
+> `entity_stats.departures` is non-zero, and that evidence does not exist yet.
+>
+> This is not a defect in 218b — it is the expected consequence of the fix changing future syncs only
+> while the scheduler stays off (`INGESTION_SCHEDULER_ENABLED=false`) and 218c stays ungated. It is
+> recorded because "the DI fix landed" reads, four days later, as "the lifecycle pass is working",
+> and the dev DB says otherwise. The first real sync — whether through the CLI runner or the now-fixed
+> `POST /api/integration/run-pipeline` — is what converts this from *landed* to *exercised*, and the
+> execution-path choice in `WINDOW-PREP-2026-08-07.md` notes the second option would double as exactly
+> that proof.
 
 ### Gate 3 — read-only rehearsal (2026-08-07). Nothing written.
 
