@@ -11,27 +11,91 @@ import type { SourceSnapshotRow } from '../source-reader';
  * or VPN. The reader (`autoplant-source-reader.ts`) is the only thing that touches MySQL.
  */
 
-/** AutoPlant source timestamps are naive IST (+330). Kept as a named constant, configurable per §10. */
-export const AUTOPLANT_UTC_OFFSET_MIN = 330;
+/**
+ * AutoPlant source timestamps are **UTC**, so no offset is applied. Configurable per §10.
+ *
+ * **Corrected 2026-08-09 (#222). This constant was `330` and it was wrong from the day it was
+ * written** — `ap_widgets.tb_vehiclemaster.latest_gps_datetime` is a naive MySQL `DATETIME`, but
+ * AutoPlant writes UTC into it. FSM therefore stored every ping 5.5 h earlier than it happened,
+ * inflating `inactivity_hours` fleet-wide and fabricating 434 of the 665 devices in the CRITICAL band.
+ *
+ * Established by two independent measurements, neither of which is an inference from the column type:
+ *
+ *   1. **95 snapshot runs time-travelled.** `raw_device_snapshots.gps_datetime` holds the
+ *      post-conversion value and `snapshot_runs` records when each run ran, so per-run
+ *      `percentile(finished_at − gps_datetime)` reconstructs the contract at every past instant.
+ *      Every run since the first on 2026-07-07 sits in a **5.52–5.65 h band — flat, no discontinuity**.
+ *      A vendor change would show a step. There was none: it was never IST.
+ *   2. **A second column, a different method.** `FIRST_INSTALLED_DATE_TIME` (also a naive `DATETIME`)
+ *      agrees to the minute with `device_installation_date` (a `TIMESTAMP` in the same row, which the
+ *      server returns already-UTC) across **17,985 devices at exactly 0 minutes, zero at ±330**.
+ *
+ * So "naive `DATETIME` ⇒ IST" is wrong as a house rule for this source, not merely for this column.
+ *
+ * **Why the original verification said otherwise, on real data.** The 2026-07-17 probe compared
+ * `MAX(latest_gps_datetime)` (11:49:46) against an IST wall clock (11:50) and concluded the column
+ * tracked IST. It was reading **5 devices out of 56,564** — three plants that genuinely write IST into
+ * this UTC column — and those 5 alone decide the maximum. **`MAX()` is not a valid probe for a source
+ * contract**: it reports the most extreme writer, not the convention. Use percentiles. That trap fired
+ * three separate times during the investigation, including on the investigator.
+ *
+ * Those ~5 IST-writers are now rejected by the two-directional guard below rather than silently
+ * accepted — see {@link DEFAULT_MAX_FUTURE_SKEW_MINUTES}.
+ */
+export const AUTOPLANT_UTC_OFFSET_MIN = 0;
 
 /**
- * `TRIP_CREATION_DATETIME` needs a ZERO offset, not `AUTOPLANT_UTC_OFFSET_MIN` — the two source
- * timestamps do not share a timezone, despite sitting in the same row:
+ * `TRIP_CREATION_DATETIME` is a MySQL **TIMESTAMP** — stored as a UTC epoch and converted by the SERVER
+ * into the session timezone on read. The AutoPlant session zone is UTC (`@@system_time_zone` = UTC,
+ * `@@session.time_zone` = SYSTEM), so it arrives ALREADY in UTC.
  *
- *   • `latest_gps_datetime` is a MySQL **DATETIME** — stored and returned as a naive wall clock the
- *     server never converts, and AutoPlant writes it in IST. Hence the +330 normalization.
- *   • `TRIP_CREATION_DATETIME` is a MySQL **TIMESTAMP** — stored as a UTC epoch and converted by the
- *     SERVER into the session timezone on read. The AutoPlant session zone is UTC
- *     (`@@system_time_zone` = UTC, `@@session.time_zone` = SYSTEM), so it arrives ALREADY in UTC.
- *
- * Verified against the live source 2026-07-17: server `NOW()` (UTC) 06:20:32 · newest
- * TRIP_CREATION 06:19:02 · newest `latest_gps_datetime` 11:49:46 · real IST wall clock 11:50. Running
- * trip creation through the IST normalizer would therefore shift every value 5.5h into the future.
+ * This is now the same value as {@link AUTOPLANT_UTC_OFFSET_MIN} and is deliberately kept separate.
+ * The two columns arrive UTC for **different reasons** — this one because the server converted it, that
+ * one because AutoPlant writes UTC into a column nothing converts — and only one of those reasons is a
+ * property of MySQL. Collapsing them into one constant would encode the coincidence and lose the
+ * distinction that took #222 a month to recover.
  */
 const TRIP_CREATION_UTC_OFFSET_MIN = 0;
 
-/** Default tolerance for a `latest_gps_datetime` ahead of `now` before it is treated as bogus (§6.6). */
-const DEFAULT_MAX_SKEW_MINUTES = 24 * 60;
+/**
+ * How far AHEAD of `now` a `latest_gps_datetime` may sit before the row is rejected (§6.6).
+ *
+ * **Tightened 24 h → 1 h in the same release as the constant flip (#222 P6, operator 2026-08-09) —
+ * not as a follow-up.** With the offset at 0, the ~5 devices that genuinely write IST into this UTC
+ * column land at `now + 5:30`, which the old 24 h tolerance accepted. `device-state.service.ts` then
+ * clamps their negative `inactivity_hours` to 0 (`GREATEST(0, …)`), so they would read as
+ * **permanently fresh** — never inactive, never eligible for a Troubleshoot Ticket, however long they
+ * actually stay dark. Flipping the constant without tightening this converts a visible fleet-wide
+ * 5.5 h error into five permanently invisible devices.
+ *
+ * 1 h is far wider than any honest disagreement: the source clock is accurate to the second
+ * (measured 15 s) and the widest observed read gap is ~27 min. It is narrower than 5:30 by design.
+ */
+const DEFAULT_MAX_FUTURE_SKEW_MINUTES = 60;
+
+/**
+ * The past-direction floor, and a deliberately modest one: **the year 2000**.
+ *
+ * #222 proposed rejecting "a ping older than the fleet p99 by a wide margin". **That is not built, and
+ * should not be.** A device silent for a year is not implausible data — it is the finding this platform
+ * exists to produce, and #223 is entirely about devices whose telemetry is *absent*. A past guard tuned
+ * to fleet percentiles would drop exactly the devices the system is meant to catch, and it would fail
+ * toward "fine" in precisely the way #228 describes.
+ *
+ * What a per-row past guard CAN do is reject sentinels: MySQL's `0000-00-00 00:00:00` zero-date and
+ * epoch garbage both satisfy the naive-timestamp grammar and would otherwise be journalled as genuine
+ * pings. Same floor and same reasoning as `parseInstalledAt`'s `MIN_PLAUSIBLE_INSTALL_MS`.
+ *
+ * **What this guard does NOT catch, stated plainly:** a *systematic* offset — #222 itself. A row shifted
+ * 5.5 h into the past is indistinguishable, per row, from a device that pinged 5.5 h ago. Only a
+ * distributional check over a whole run can see it (the per-run percentile in the note above, which is
+ * what would have caught this on 2026-07-07). That check is [#228](../../../../.scratch/fsm-platform-v1/issues/228-guard-pattern-remediation.md)'s
+ * R2 and is not built here; this constant must not be mistaken for it.
+ */
+const MIN_PLAUSIBLE_GPS_MS = Date.UTC(2000, 0, 1);
+
+/** Why a row carrying a real ping was dropped. Reported through {@link MapOptions.onReject}. */
+export type RowRejectionReason = 'FUTURE_SKEW' | 'IMPLAUSIBLE_PAST';
 
 /**
  * The `tb_vehiclemaster` columns the reader selects. `dateStrings:true` means datetimes arrive as raw
@@ -113,12 +177,22 @@ export function parseTripCreation(v: string | null | undefined): Date | null {
 }
 
 export interface MapOptions {
-  /** Injectable clock for the future-timestamp guard (defaults to real time). */
+  /** Injectable clock for the skew guard (defaults to real time). */
   now?: Date;
   /** How far ahead of `now` a `latest_gps_datetime` may be before the row is dropped as bogus. */
   maxSkewMinutes?: number;
-  /** Source UTC offset in minutes (IST default). */
+  /** Source UTC offset in minutes (0 — the source is UTC; see {@link AUTOPLANT_UTC_OFFSET_MIN}). */
   offsetMinutes?: number;
+  /**
+   * Called once per row DROPPED by the skew guard, so a rejection is countable rather than silent.
+   *
+   * P6's whole justification is that *"a dropped device is visible as a gap; a permanently-healthy
+   * device is invisible"* — which only holds if something actually looks. Before this, the reader
+   * discarded rejected rows with `if (row) mapped.push(row)` and no counter anywhere, so the five
+   * IST-writers would have vanished as quietly as they previously persisted. Not fired for the two
+   * ordinary skips (no fitted device, never pinged): those are the source's normal shape, not a fault.
+   */
+  onReject?: (deviceId: string, reason: RowRejectionReason) => void;
 }
 
 /**
@@ -163,9 +237,18 @@ export function mapVehicleMasterRow(row: VehicleMasterRow, opts: MapOptions = {}
 
   const normalized = normalizeSourceRow(raw);
 
+  // Two-directional skew guard (#222 Proposed step 5 / P6). Both arms reject; neither is silent.
   const now = opts.now ?? new Date();
-  const maxSkewMs = (opts.maxSkewMinutes ?? DEFAULT_MAX_SKEW_MINUTES) * 60_000;
-  if (normalized.gpsDatetime.getTime() > now.getTime() + maxSkewMs) return null;
+  const maxSkewMs = (opts.maxSkewMinutes ?? DEFAULT_MAX_FUTURE_SKEW_MINUTES) * 60_000;
+  const at = normalized.gpsDatetime.getTime();
+  if (at > now.getTime() + maxSkewMs) {
+    opts.onReject?.(raw.deviceId, 'FUTURE_SKEW');
+    return null;
+  }
+  if (at < MIN_PLAUSIBLE_GPS_MS) {
+    opts.onReject?.(raw.deviceId, 'IMPLAUSIBLE_PAST');
+    return null;
+  }
 
   return normalized;
 }

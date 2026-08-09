@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { AUTOPLANT_UTC_OFFSET_MIN, mapVehicleMasterRow, type VehicleMasterRow } from './mapping';
 import type { SourceChunk, SourceReader, SourceSnapshotRow } from '../source-reader';
 
@@ -21,8 +22,13 @@ import type { SourceChunk, SourceReader, SourceSnapshotRow } from '../source-rea
  *
  * There is deliberately NO cross-run resume cursor: correctness must not depend on a persisted
  * watermark. `snapshot_runs.data_as_of` (max ingested `gps_datetime`) is computed for the freshness
- * banner only and never gates which rows are scanned. Every row is normalized IST→UTC via `mapping.ts`;
- * NULL-device / never-pinged / bogus-future rows are dropped (§6.6). The device id is preserved verbatim.
+ * banner only and never gates which rows are scanned. Every row is normalized via `mapping.ts` (the
+ * source column is **UTC**, so no offset is applied — see `AUTOPLANT_UTC_OFFSET_MIN` and #222);
+ * NULL-device / never-pinged rows are skipped and skew-guard failures are dropped (§6.6). The device id
+ * is preserved verbatim.
+ *
+ * Skew-guard rejections are counted per chunk and surfaced on {@link SourceChunk.rejected} plus a WARN,
+ * because a dropped row is otherwise indistinguishable from a row that never existed (#222 P6).
  *
  * NOTE: the `ORDER BY device_id` scan needs an index on `tb_vehiclemaster.device_id` (present as
  * `idx_device_id`), else each page filesorts the whole table on the source. `device_id` is verified
@@ -60,6 +66,7 @@ export function encodeDeviceCursor(deviceId: string): string {
 }
 
 export class AutoPlantSourceReader implements SourceReader {
+  private readonly logger = new Logger(AutoPlantSourceReader.name);
   private readonly query: AutoPlantSourceReaderDeps['query'];
   private readonly from: string;
   private readonly now: () => Date;
@@ -92,13 +99,29 @@ export class AutoPlantSourceReader implements SourceReader {
     const rows = await this.query<VehicleMasterRow>(sql, params);
 
     const mapped: SourceSnapshotRow[] = [];
+    // #222 P6 — the skew guard's drops are tallied and logged, not swallowed. `FUTURE_SKEW` in
+    // particular is the IST-writer signature: a non-zero count here is the fleet telling us a device
+    // writes a different timezone into this column, which is the only way that fact becomes visible.
+    const rejected: Record<string, number> = {};
+    const onReject = (_deviceId: string, reason: string): void => {
+      rejected[reason] = (rejected[reason] ?? 0) + 1;
+    };
     for (const r of rows) {
       const row = mapVehicleMasterRow(r, {
         now: this.now(),
         offsetMinutes: this.offsetMinutes,
         maxSkewMinutes: this.maxSkewMinutes,
+        onReject,
       });
       if (row) mapped.push(row);
+    }
+    const rejectedAny = Object.keys(rejected).length > 0;
+    if (rejectedAny) {
+      this.logger.warn(
+        `skew guard dropped ${Object.values(rejected).reduce((a, b) => a + b, 0)} row(s) this chunk: ` +
+          `${Object.entries(rejected).map(([k, v]) => `${k}=${v}`).join(' ')}. ` +
+          `FUTURE_SKEW means the device writes a non-UTC wall clock into latest_gps_datetime (#222 P6).`,
+      );
     }
 
     // Advance the cursor from the last DB row actually scanned (not the mapped/filtered set), so dropped
@@ -107,6 +130,6 @@ export class AutoPlantSourceReader implements SourceReader {
     const last = rows[rows.length - 1];
     const nextCursor = exhausted || !last ? null : encodeDeviceCursor(String(last.device_id));
 
-    return { rows: mapped, nextCursor };
+    return { rows: mapped, nextCursor, ...(rejectedAny ? { rejected } : {}) };
   }
 }

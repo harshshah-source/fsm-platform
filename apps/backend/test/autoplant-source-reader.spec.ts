@@ -56,8 +56,8 @@ describe('Phase 3 — AutoPlantSourceReader (single device-scan engine)', () => 
     expect(sql).not.toMatch(/device_id > /); // first page carries no continuation bound
     // device-id preserved verbatim (leading-zero IMEI + alphanumeric vendor id).
     expect(chunk.rows.map((r) => r.deviceId)).toEqual(['0869925073271551', 'AP03TC0959']);
-    // 05:57:47 IST → 00:27:47 UTC.
-    expect(chunk.rows[0].gpsDatetime.toISOString()).toBe('2026-07-02T00:27:47.000Z');
+    // The source column is UTC, so the wall clock IS the instant — no offset applied (#222).
+    expect(chunk.rows[0].gpsDatetime.toISOString()).toBe('2026-07-02T05:57:47.000Z');
     expect(params).toEqual([]);
     // Fewer than chunkSize (2 < 1000) ⇒ exhausted.
     expect(chunk.nextCursor).toBeNull();
@@ -117,5 +117,30 @@ describe('Phase 3 — AutoPlantSourceReader (single device-scan engine)', () => 
     const chunk = await reader(q).readChunk(null, 1000);
     expect(chunk.rows).toHaveLength(0);
     expect(chunk.nextCursor).toBeNull();
+  });
+
+  /**
+   * #222 P6 — the reader must COUNT what the skew guard drops. The operator's reasoning for rejecting
+   * the ~5 IST-writers over accepting them was that *"a dropped device is visible as a gap"*; before
+   * this the reader discarded them with `if (row) mapped.push(row)` and no counter, which would have
+   * made the drop exactly as invisible as the behaviour it replaced.
+   */
+  it('tallies skew-guard rejections per chunk instead of dropping them silently', async () => {
+    const q = fakeQuery([
+      vm('DGOOD', '2026-07-02 11:57:47'),
+      vm('DIST', '2026-07-02 17:30:00'), // IST written into the UTC column: now + 5:30
+      vm('DSENTINEL', '1970-01-01 00:00:00'),
+      vm('DNODEVICE', '2026-07-02 11:00:00', { device_id: null }),
+    ]);
+    const chunk = await reader(q).readChunk(null, 10);
+
+    expect(chunk.rows.map((r) => r.deviceId)).toEqual(['DGOOD']);
+    expect(chunk.rejected).toEqual({ FUTURE_SKEW: 1, IMPLAUSIBLE_PAST: 1 });
+  });
+
+  it('reports no rejection tally when every row is clean', async () => {
+    const q = fakeQuery([vm('D1', '2026-07-02 11:57:00'), vm('D2', '2026-07-02 11:58:00')]);
+    const chunk = await reader(q).readChunk(null, 10);
+    expect(chunk.rejected).toBeUndefined();
   });
 });

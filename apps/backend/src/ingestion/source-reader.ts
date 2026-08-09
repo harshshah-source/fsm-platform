@@ -65,6 +65,17 @@ export interface SourceChunk {
   rows: SourceSnapshotRow[];
   /** Opaque cursor to pass to the next `readChunk`; `null` when the source is exhausted. */
   nextCursor: string | null;
+  /**
+   * Rows carrying a real ping that the source reader's skew guard DROPPED, counted by reason — absent
+   * when nothing was rejected (#222 P6).
+   *
+   * A rejected row leaves no trace anywhere else: it is not journalled, its device's watermark does not
+   * advance, and the cursor rides the raw DB row rather than the mapped one, so the run's own counters
+   * cannot tell a dropped row from a row that was never there. This field is the only place the drop is
+   * observable, which is the entire justification for preferring rejection over silent acceptance.
+   * Optional so non-AutoPlant readers (fixtures, CSV, in-memory) need no change.
+   */
+  rejected?: Record<string, number>;
 }
 
 export interface SourceReader {
