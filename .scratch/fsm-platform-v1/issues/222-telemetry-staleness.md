@@ -1,6 +1,14 @@
 # 222 — FSM shifts every GPS ping 5.5 h into the past (`AUTOPLANT_UTC_OFFSET_MIN` is wrong)
 
-Status: ready-for-agent — **ship as one slice with [#223](./223-ndd-counted-healthy.md)**
+Status: **done 2026-08-09** — shipped as one slice with [#223](./223-ndd-counted-healthy.md).
+Constant flipped, pinned test replaced by a contract test, two-directional skew guard shipped in the
+same release (P6), provenance comment corrected. The **expected auto-recovery closure count is recorded
+below, measured before any code changed** — the operator's blocking gate — and answering it produced
+[#229](./229-auto-recovery-sweep-unwired.md).
+**One acceptance criterion is not locally verifiable:** "after a recompute, per-run
+`p50(finished_at − gps_datetime)` < 1 h" needs a post-fix snapshot run against AutoPlant, which is
+VPN-gated and sits behind the same operator gate as #218c. The code change that produces it is landed
+and tested; the measurement is owed on the first real run.
 Type: AFK · Backend ingestion
 Filed: 2026-08-07
 Origin: AutoPlant↔FSM reconciliation, finding **F2**
@@ -206,12 +214,68 @@ exactly 0 minutes, and not one differs by ±330**, with no step across 2025–20
 So the "naive DATETIME ⇒ IST" inference that produced `+330` is wrong as a *house rule*, not just for
 `latest_gps_datetime`. Two unrelated columns, two independent methods, same answer.
 
+## Expected auto-recovery closure count — MEASURED 2026-08-09, before any code change
+
+Recorded here **before** the fix is applied, per the operator's gate: *"Tell me the expected closure
+count for the auto-recovery sweep […] I want that number in the issue before the sweep runs, not after
+someone asks why SE productivity spiked."*
+
+Every figure this issue and [#223](./223-ndd-counted-healthy.md) assert re-measured clean against `fsm`
+first — operational 15,696 · inactive 2,675 · healthy 13,021 · null-GPS 913 · falsely-inactive 434 ·
+open TROUBLESHOOT 12,571 · CRITICAL 665 of which 434 fabricated (65.3%). All 434 falsely-inactive
+devices do hold an open failure cycle and an open TROUBLESHOOT ticket — 434/434/434, exactly as
+claimed.
+
+**The answer to the question asked is `+5` tickets. The answer to the question behind it is `11,042`.**
+
+| Measurement | Tickets |
+|---|---:|
+| Open TROUBLESHOOT tickets today | 12,571 |
+| …that already satisfy the auto-recovery criterion **today, with no fix applied** | **11,042** |
+| …that would satisfy it after the timestamp correction | **11,047** |
+| **Marginal closures caused by this fix** | **+5** |
+| Of the 434 falsely-inactive: already auto-closable today | 367 |
+| Of the 434 falsely-inactive: would stay open either way | 67 |
+
+**Why the fix barely moves it.** `AutoRecoveryService.runAutoRecovery` never reads `is_inactive`. It
+scans open TROUBLESHOOT tickets and asks one question of `raw_device_snapshots` — ≥3 pings spanning
+≥15 min with `gps_datetime > cycle.opened_at` (`auto-recovery.service.ts:31-52`). Making a device
+healthy does not close its ticket; **the pings already did, months ago.** Shifting every
+`gps_datetime` 5.5 h later changes that verdict for 5 tickets at the margin.
+
+**What the number actually exposes — two findings the gate did not anticipate:**
+
+1. **The auto-recovery sweep has never run, and nothing can run it.** `runAutoRecovery()` has **no
+   production caller** — not a `@Cron`, not a controller route, not a CLI script; the only call site in
+   the repo is `test/auto-recovery.e2e-spec.ts:99`. The single wired entry point is
+   `POST /tickets/:id/auto-recovery-close`, which closes **one** ticket manually. Confirmed at the
+   data: `ticket_events` holds **31,162 OPEN and 11,792 CLOSED transitions and zero
+   `CLOSED_AUTO_RECOVERY`** — the state has never been written.
+2. **11,042 open tickets are already stale, and 9,888 of them sit on devices that are healthy right
+   now.** The queue does not shrink when a device recovers, because the only thing that would shrink it
+   is unwired. This is a **pre-existing 88% overstatement of the open TROUBLESHOOT queue**, and it will
+   fire the instant anyone wires the sweep — with or without this fix, with or without #223.
+
+**Consequence for the release plan.** The SE-productivity distortion the operator is guarding against is
+real, but **this slice does not cause it and cannot trigger it**: no sweep runs. Attributing an
+11,042-closure event to #222 would be the same class of error as the original "not a timezone bug"
+call — a real signal attributed to the wrong cause. Filed separately as
+[#229](./229-auto-recovery-sweep-unwired.md); it must not be quietly bundled into this slice, because
+wiring it is a step change in every SE productivity and auto-recovery metric that needs its own
+operator decision.
+
+*Method: read-only queries against `fsm` (last snapshot run 2026-08-07 10:02 UTC, last recompute the
+same instant). Counted over stored `gps_datetime` and again over `gps_datetime + 5.5h` — the corrected
+value a post-fix ingest writes — since the fix changes future rows only and never rewrites the 1.65 M
+existing ones. The two counts differ by 5.*
+
 ## What breaks
 
-- **434 open TROUBLESHOOT tickets** sit on devices that are about to become healthy. `AutoRecoveryService`
-  will close them (they are pinging; the ≥3-pings-≥15-min criterion is met), but that lands ~434
-  `CLOSED_AUTO_RECOVERY` closures in one sweep, which **inflates the auto-recovery metric** and
-  distorts SE-productivity reporting for that period. Plan for it; do not let it be discovered later.
+- **434 open TROUBLESHOOT tickets** sit on devices that are about to become healthy — but they will
+  **not** close, because nothing runs the sweep (see the measured section above). They simply stop
+  being counted as inactive while their tickets stay open. That is a *smaller* immediate disruption
+  than this issue originally predicted and a *larger* latent one: the queue drifts further from the
+  fleet's real state.
 - Fleet Health % moves **82.96% → 85.72%** on this fix alone. Shipping it with #223 (which moves it
   down 1.06) gives the correct **84.84%**.
 - `soft_inactive_count_history` shows a step discontinuity on the day of the fix — correct, but
@@ -227,8 +291,21 @@ So the "naive DATETIME ⇒ IST" inference that produced `+330` is wrong as a *ho
 
 ## Acceptance
 
-- `AUTOPLANT_UTC_OFFSET_MIN = 0`; the pinned-constant test is gone.
-- After a recompute, per-run `p50(finished_at − gps_datetime)` is **< 1 h** (currently 5.58 h).
-- The 18–24 h false-inactive count returns to ~0.
-- The skew guard rejects both directions, with a test proving each.
-- P6 answered and the chosen handling for the ~5 IST-writers implemented.
+- ✅ `AUTOPLANT_UTC_OFFSET_MIN = 0`; the pinned-constant test is gone — replaced by a contract test that
+  maps a wall clock through `mapVehicleMasterRow` against a **literal**, so no future offset value can
+  satisfy it by agreeing with itself. The two `parseTripCreation` tests that derived their expectation
+  from the constant were re-pinned to a literal `330` for the same reason: at offset 0 they had become
+  tautologies.
+- ✅ The expected auto-recovery closure count is recorded in this issue **before** the fix was applied
+  (2026-08-09 — the operator's blocking gate).
+- ⏳ After a recompute, per-run `p50(finished_at − gps_datetime)` is **< 1 h** (was 5.58 h). **Owed on
+  the first post-fix snapshot run** — needs AutoPlant access, which is operator-gated. Not verifiable
+  locally, and deliberately not claimed.
+- ⏳ The 18–24 h false-inactive count returns to ~0. Same gate: it needs an ingest + recompute against
+  the real source.
+- ✅ The skew guard rejects both directions, with a test proving each — plus a test that it does **not**
+  reject a genuinely silent device, which is the failure mode a percentile-based past guard would have
+  had.
+- ✅ P6 answered and implemented: the ~5 IST-writers are **rejected** (future tolerance 24 h → 1 h) and
+  the rejection is **counted and logged** rather than silent, since P6's whole justification was that a
+  dropped device is visible and a permanently-fresh one is not.

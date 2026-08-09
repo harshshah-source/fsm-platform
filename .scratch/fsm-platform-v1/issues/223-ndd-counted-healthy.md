@@ -1,7 +1,14 @@
 # 223 — Devices that have never reported are counted as "healthy"
 
-Status: needs-triage — **P1 decided by operator 2026-08-07** (never-reported = fault). Design below;
-P2–P7 still unresolved. **Ship as one slice with [#222](./222-telemetry-staleness.md).**
+Status: **done (code) 2026-08-09, with two data-gated acceptance criteria explicitly outstanding** —
+see Acceptance. The state model, the identity and all six read surfaces are landed and green; the
+fleet-wide numbers and `installed_at` coverage need the operator-gated master sync.
+**Q2 (ticket the 602 >1-year cohort, or hold?) is still unanswered and should be settled before the
+first ticketing sweep.**
+**P1 decided by operator 2026-08-07** (never-reported = fault);
+**P2–P7 decided by operator 2026-08-09** (recorded in "Remaining product decisions" below, which is no
+longer a list of unknowns). **Q2 is the one product question still open.**
+**Ship as one slice with [#222](./222-telemetry-staleness.md).**
 Type: HITL (changes a published KPI definition; opens ~912 tickets) · Backend + Admin
 Filed: 2026-08-07
 Origin: AutoPlant↔FSM reconciliation finding **F3**
@@ -143,7 +150,7 @@ commissioning. `mst_vehicle` carries the same columns (`first_installed_dt`) as 
 **FSM ingests no installation date today** — a repo-wide grep finds no reference to any of these
 columns. Adding one is required work, not optional.
 
-## The second question — operationally inactive, reported separately (RECOMMENDATION)
+## The second question — operationally inactive, reported separately (ACCEPTED — P4, 2026-08-09)
 
 Operator asked whether NDD devices should be **merged** into inactive or **operationally inactive but
 reported separately**. Recommendation: **reported separately.** Reasoning:
@@ -163,7 +170,9 @@ reported separately**. Recommendation: **reported separately.** Reasoning:
 **This costs almost nothing to do properly:** one derived boolean alongside `is_inactive`. The
 operational treatment (ticket, dispatch, SLA) is identical either way — only the reporting splits.
 
-**Operator decides. This is a recommendation, not a decision taken.**
+**ACCEPTED by the operator 2026-08-09 as P4.** Stated reasoning: *"Different root causes, different
+owners; 602 year-old devices would make the genuine backlog unreadable."* Never-reported therefore gets
+its **own dashboard figure**, sitting beside Fleet Health rather than folded into it.
 
 ## Design
 
@@ -197,12 +206,31 @@ no enum migration. `SLA_BANDS`' top entry `[168, 'LONG_PENDING']` is open-ended,
 device buckets correctly without new code. The reporting split is then carried by `never_reported`,
 not by a bucket.
 
-**Grace window (P2, unresolved):** the `hours >= threshold` comparison gives a *de facto* grace window
-of `inactivity_threshold_hours` (24 h) for free. If 24 h is the right answer, **no new setting is
-needed** — 153 of 907 are ≤2 days old and a meaningful share of those are legitimately commissioning.
-If the operator wants a longer install grace (say 72 h), it needs its own setting rather than
-overloading `inactivity_threshold_hours`, which is the Fleet-Uptime denominator and must not be
-tuned for this.
+**Grace window — P2 DECIDED (operator, 2026-08-09): 24 h, reusing `inactivity_threshold_hours`. No new
+setting.** The `hours >= threshold` comparison gives that window for free, so the branch above is the
+whole implementation. Operator's stated reasoning: it covers ~86–97% of the measured curve. The
+decision was taken with an explicit invitation to push back — *"if your implementation makes 48
+materially better for a reason I have not seen, say so before building rather than after."*
+
+**Push-back considered and declined, 2026-08-09 — 24 h stands.** No evidence was found that 48 h is
+materially better:
+
+- **The population is not commissioning.** 602 of 907 (66%) were fitted over a year ago; only 153 are
+  ≤2 days old. Interpolating uniformly inside that bucket, 24 h ticket ≈831 devices and 48 h ≈754 — the
+  two windows differ by roughly **77 devices out of 907**, all of them in the band where the answer is
+  genuinely ambiguous.
+- **A false positive self-corrects and is cheap.** A device still commissioning that gets ticketed at
+  24 h closes itself the moment it pings: `AutoRecoveryService`'s ≥3-pings-≥15-min rule is satisfied by
+  a device coming alive, with no SE effort credited. A missed install failure does not self-correct.
+- **One threshold is easier to reason about than two.** At 24 h "inactive" means the same thing for
+  every device on the dashboard. A second, install-only window means every NDD figure has to be read
+  against a different clock from the one beside it.
+
+The measurement that *would* settle this properly — the install→first-ping delay distribution for
+devices that did eventually report — needs AutoPlant source access and has not been run.
+`device_states.first_reported_at` (landed `5a486f8`) is the FSM half of it; the install half arrives
+with the first master sync that writes `device_commissioning`. **If the operator wants 48 h revisited,
+that is the query to run**; it is not a reason to hold this slice.
 
 ### The ticket-creation path is NOT a blocker — correction to `audit/cross-analysis.md`
 
@@ -226,6 +254,18 @@ failure cycle and a TROUBLESHOOT ticket are created by the existing code with no
 `raw_device_snapshots` (`auto-recovery.service.ts:41-47`). An NDD device that finally comes alive
 satisfies that criterion exactly and auto-closes.
 
+**Re-measured 2026-08-09 (operator's pre-application gate — see
+[#222](./222-telemetry-staleness.md) "Expected auto-recovery closure count" for the sweep side).**
+All 913 null-GPS operational devices are `eligible_for_uptime`, **none** holds an open failure cycle,
+and all 913 carry a `plant_id` + `company_id` — so the ticketable count off `device_states` alone is
+**913**, of which 912 survive the deactivated-plant exclusion. Unchanged from 2026-08-07.
+
+**These tickets will not auto-close.** An NDD device has no pings at all, so it can never satisfy
+`AutoRecoveryService`'s ≥3-pings-≥15-min rule — and the sweep is unwired regardless
+([#229](./229-auto-recovery-sweep-unwired.md)). Every one of the ~912 is a permanent addition to the
+open queue until an SE or an installer closes it. That is the opposite risk profile from #222's
+falsely-inactive 434, and it is why Q2 (below) matters.
+
 **Every ticketing precondition is already met by all 913:**
 
 | Precondition | Satisfied |
@@ -239,8 +279,26 @@ satisfies that criterion exactly and auto-closes.
 
 ### Minimum viable change
 
-1. **Mirror `installed_at`** — add the column to `devices`, read `FIRST_INSTALLED_DATE_TIME` in
-   `autoplant-source-reader.ts` / `master-mapping.ts`, backfill on the next master sync.
+1. **Mirror `installed_at`** — ~~add the column to `devices`, read `FIRST_INSTALLED_DATE_TIME` in
+   `autoplant-source-reader.ts` / `master-mapping.ts`~~ **PARTLY DONE in `5a486f8`, and by a better
+   route than this step proposed.** The source read exists and is normalised at offset 0
+   (`master-mapping.ts` `parseInstalledAt` / `mapCommissioning`, fed from the `ap_widgets` join in
+   `autoplant-master-source.ts`), and it lands in the **append-only `device_commissioning` table**
+   rather than a mutable column on `devices` — because `tb_vehiclemaster` rewrites fitment in place
+   (10,565 devices have had `first_installed_dt` moved, 1,757 by more than a year), so a mirrored
+   column would silently lose the original commissioning date on every re-map.
+   **Do not re-implement the read.** What remains is the *derivation* side: `DeviceStateService.recompute`
+   needs an install instant per device to feed the new `hours` branch, read from `device_commissioning`
+   (or a `devices.installed_at` maintained *from* it — the state layer must not re-parse the source).
+   **Which row wins is a design decision this slice must take and record:** `MIN(installed_at)` is
+   "broken since first fitment" (right for a device that has never reported at all under any fitment);
+   `MAX(installed_at)` treats a re-fitment as a fresh commissioning clock. The NDD definition — never
+   reported *ever* — argues for `MIN`.
+   **Blocker on the data, not the code:** `device_commissioning` is **empty** in the dev DB (0 rows,
+   measured 2026-08-09) because no master sync has run since the migration landed, and a master sync
+   now executes #218b's live lifecycle pass — which is exactly the run #218c holds under an operator
+   gate. So the acceptance criterion "coverage ≥ 99% of operational devices" is **not verifiable
+   locally today**; it is verifiable on the first gated master sync.
 2. **Extend the `hours` derivation** in `DeviceStateService.recompute` with the `installed_at` branch.
 3. **Add `never_reported`** as a derived boolean in the same UPDATE.
 4. **Add `neverReported` to `FLEET_COUNT_COLUMNS`** and narrow `healthyOperational` with
@@ -312,34 +370,64 @@ bug fix. Operator confirmed this sequencing 2026-08-07.
 
 ## Open questions
 
-- **Q1.** Is `FIRST_INSTALLED_DATE_TIME` UTC? Not separately verified; matters only if P2 sets a
-  grace window shorter than ~12 h.
+- **Q1. ANSWERED 2026-08-09 — yes, UTC (offset 0). CLOSED.** Measured, not inferred: compared against
+  `device_installation_date` (a MySQL `TIMESTAMP` in the *same row*, so already-UTC on read) across
+  **17,985 devices at exactly 0 minutes' difference, zero at ±330**, with no step across 2025→2026.
+  The "naive `DATETIME` ⇒ IST" house rule that produced #222's `+330` is therefore wrong as a rule, not
+  just for `latest_gps_datetime` — two unrelated columns, two independent methods, same answer.
+  Encoded in `parseInstalledAt` (`master-mapping.ts`, `5a486f8`) as `TRUE_SOURCE_UTC_OFFSET_MIN`.
 - **Q2.** Should the >1-year cohort (602) be ticketed at all, or reported-only until the install-vs-
   field routing question is settled? Interacts with P1's intent.
 - **Q3.** Do the 6 devices with no `installed_at` anywhere need a fallback (`devices.created_at`,
   first appearance in `master_sync_runs`)? They are currently 6 rows; the fallback may not be worth it.
 
-## Remaining product decisions — UNRESOLVED, not guessed at
+## Product decisions — P1–P7 ALL DECIDED
 
-Carried from `audit/cross-analysis.md` §5. **None of these has been assumed in the design above.**
+Carried from `audit/cross-analysis.md` §5. P1 decided 2026-08-07; **P2–P7 decided by the operator
+2026-08-09**, reasoning as stated by them. None was inferred by an agent.
 
-| # | Decision | Blocks |
+| # | Decision | Operator's stated reasoning |
 |---|---|---|
-| **P2** | Grace window from fitment before a never-reported device becomes a fault. 24 h falls out for free; anything else needs its own setting. | The `hours` branch |
-| **P3** | Does a never-reported device count as **0% uptime** or is it **excluded** from Fleet Uptime? Contractual/commercial, not technical. Today all 913 are `eligible_for_uptime` and have no failure cycle, so they score **100% uptime** — the most broken device in the fleet scored as the healthiest. | Uptime aggregation |
-| **P4** | Fourth dashboard tile, or fold into a widened "not reporting" figure? (See recommendation above — separate.) | Admin UI |
-| **P5** | Vasavadatta (545) and Deepak Fertilizer (208) see visible health drops. Customer communication first? | Release sequencing |
-| **P6** | Handling for the ~5 IST-writing devices. Owned by [#222](./222-telemetry-staleness.md). | #222 |
-| **P7** | Ship order — **DECIDED**: #222 + #223 as one slice. | — |
+| **P1** | **DECIDED 2026-08-07 — a fitted tracker that has never reported is a fault, not a pipeline state.** Counted as inactive; raises alerts like any other silent device. | *"A vehicle running untracked since the day it was fitted is exactly the thing this platform exists to catch."* |
+| **P2** | **DECIDED — grace window = 24 h, reusing `inactivity_threshold_hours`. No new setting.** | Covers ~86–97% of the measured curve. Push-back invited and considered; **declined** — see the Design section for the evidence. |
+| **P3** | **DECIDED — never-reported devices are EXCLUDED from Fleet Uptime, NOT scored 0%.** The never-reported count sits **beside** the KPI, not inside it. | *Scoring them zero is defensible, but excluding keeps the KPI measuring what it claims: reliability of devices that have reported.* Operator explicitly invited push-back on this one. |
+| **P4** | **DECIDED — never-reported gets its own dashboard figure** (the "reported separately" recommendation above is ACCEPTED). | *"Different root causes, different owners; 602 year-old devices would make the genuine backlog unreadable."* |
+| **P5** | **DECIDED — customer communication: NOT YET. Build it; the operator decides comms before anything is exposed.** | Vasavadatta (545) and Deepak Fertilizer (208) will see visible drops. |
+| **P6** | **DECIDED — the two-directional skew guard ships in THIS slice**, not as a follow-up. Owned by [#222](./222-telemetry-staleness.md). | The current 24 h guard rejects only the future, so the ~5 IST-writing devices pass it and read as **permanently fresh** — worse than being dropped. *"That is the fourth #228 specimen and it is the only one still latent, so fix it before it activates."* |
+| **P7** | **DECIDED 2026-08-07 — #222 + #223 ship together as one slice.** | #223 alone moves Fleet Health **down** 1.1 points with none of the offsetting +2.8 — a bug fix that reads as a regression. |
+
+**Consequence of P3 on the implementation.** Exclusion is not the same edit as the tile. `eligible_for_uptime`
+is the Fleet-Uptime denominator *and* the ticket-creation gate (`ticket-creation.service.ts:34-52`
+requires `eligibleForUptime: true`), so clearing it for NDD devices would silently cancel P1 — the 892
+confirmed-NDD devices would never be ticketed. **The exclusion must therefore happen in the uptime
+aggregation, not by flipping `eligible_for_uptime`** (`fleet-uptime-aggregation.service.ts:52`). This is
+the one place where two decided items pull in opposite directions through a shared flag; it is called
+out here so the implementation does not discover it by breaking P1.
 
 ## Acceptance
 
-- `devices.installed_at` mirrored from `FIRST_INSTALLED_DATE_TIME`; coverage ≥ 99% of operational devices.
-- `never_reported` derived; `healthyOperational` excludes null-GPS devices.
-- `healthy + inactive + neverReported = operational` holds at fleet, zone, company and plant level,
-  and `reconciliation.service.ts` asserts the **new** identity.
-- `kpi-definitions.md` updated in place (not a new doc — CLAUDE.md convention).
-- Fleet Health % reads **84.84%** fleet-wide with #222 landed.
-- The 892 confirmed-NDD devices are ticketed, or explicitly held per Q2 with the hold recorded.
-- Fleet Composition funnel sums with the third branch.
-- P2–P5 answered and recorded here before the slice is marked done.
+- ⏳ `installed_at` mirrored from `FIRST_INSTALLED_DATE_TIME`; coverage ≥ 99% of operational devices.
+  **Code landed, data absent.** The read and the append-only `device_commissioning` writer exist
+  (`5a486f8`) and `DeviceStateService.recompute` now consumes `MIN(installed_at)`, but the table holds
+  **0 rows** in the dev DB because no master sync has run since its migration — and a master sync now
+  executes #218b's live lifecycle pass, i.e. the run #218c holds under an operator gate. Verifiable on
+  the first gated sync, not before. **Not claimed as met.**
+- ✅ `never_reported` derived; `healthyOperational` excludes null-GPS devices. Derived at read time
+  rather than stored as a column — a deliberate deviation from the Design section above, because
+  `latest_gps_datetime` is maintained at **ingest** while a stored flag would be written by the
+  **recompute**, leaving the flag wrong for up to one interval on exactly the transition that matters.
+- ✅ `healthy + inactive + neverReported = operational` holds at fleet, zone, company and plant level,
+  and `reconciliation.service.ts` asserts the **new** identity — which, unlike the old one, can fail:
+  `neverReported` is measured independently instead of as anyone's complement.
+- ✅ `kpi-definitions.md` updated in place, including a correction of the "identity holds by
+  construction" paragraph that made the third state unrepresentable.
+- ⏳ Fleet Health % reads **84.84%** fleet-wide with #222 landed. Same gate as the coverage criterion:
+  it needs a post-fix ingest + recompute against the real source. The arithmetic is pinned by the e2e
+  identities; the fleet-wide number is not yet observed.
+- ⏳ The 892 confirmed-NDD devices are ticketed, or explicitly held per Q2 with the hold recorded.
+  **Q2 is still unanswered** (the operator did not answer it on 2026-08-09) and the ticket-creation
+  path needs no code change, so this will happen on the first sweep after `installed_at` is populated.
+  **This is the item to decide before that sweep runs**, and it is the same shape of gate the operator
+  set on #222's closure count.
+- ✅ Fleet Composition funnel sums with the third branch.
+- ✅ P2–P5 answered and recorded here before the slice is marked done (see "Product decisions").

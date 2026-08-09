@@ -256,7 +256,7 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 | `vehicles` | Fitment anchor → plant/company/transporter | `vehicle_no` unique; `status` mirrors AutoPlant deployment; transporter FK wired in migration `20260703120000` after nulling dangling values |
 | `transporters` | AutoPlant `mst_transporter` mirror | `sourceTransporterId` unique; written by master sync |
 | `raw_device_snapshots` | One row per ping — highest-volume table | **RANGE-partitioned daily** by `gps_datetime` (rebuilt in `20260706130000` — the original `20260619153000` declared PARTITION BY but only had a DEFAULT partition); PK `(id, gps_datetime)`; unique `(device_id, gps_datetime)` + `ON CONFLICT DO NOTHING` ⇒ idempotent chunk re-runs |
-| `device_states` | Derived hot row per device: inactivity hours, `sla_bucket` (stored), eligibility, denormalised vehicle/plant/company, `trip_creation_datetime`, `first_reported_at` | CHECK `inactivity_hours >= 0`; recomputed set-based by `DeviceStateService`; **18,528 rows in dev DB** (INDEX.md:132). `trip_creation_datetime` (2026-07-17) is maintained at INGEST by `SnapshotIngestionService`, like `latest_gps_datetime` — it is live trip state (18.4%/day churn), not master data; see §3b. **`first_reported_at` + `first_reported_offset_min` (2026-08-09, migration `20260809120000`)**: the first GPS ping ever seen for a device, write-once via `COALESCE` in the same ingest upsert. Nothing else in FSM retains it — `latest_gps_datetime` is overwritten every tick and `raw_device_snapshots` drops partitions after 7 days — so it is observable exactly once, as it happens. Written at **true UTC (offset 0), NOT the live `AUTOPLANT_UTC_OFFSET_MIN = 330`**, because a write-once column frozen under #222's wrong constant would carry the 5.5 h error permanently; until #222 lands it may therefore read *later* than `latest_gps_datetime` on the same row, which is expected and self-heals. **Covered since 2026-08-09** by `snapshot-first-reported-dualwrite.e2e-spec.ts` (7 tests): write-once against both a later AND an earlier ping (COALESCE, not LEAST — a LEAST would pin every device to its pre-#222 value forever), chunk-**min** not chunk-max, offset 0 recorded, and a null corrected timestamp leaving the column unset rather than freezing a `+330` value. Its last test asserts the 5.5 h inversion *deliberately* and should be **deleted when #222 lands** |
+| `device_states` | Derived hot row per device: inactivity hours, `sla_bucket` (stored), eligibility, denormalised vehicle/plant/company, `trip_creation_datetime`, `first_reported_at` | CHECK `inactivity_hours >= 0`; recomputed set-based by `DeviceStateService`; **18,528 rows in dev DB** (INDEX.md:132). `trip_creation_datetime` (2026-07-17) is maintained at INGEST by `SnapshotIngestionService`, like `latest_gps_datetime` — it is live trip state (18.4%/day churn), not master data; see §3b. **`first_reported_at` + `first_reported_offset_min` (2026-08-09, migration `20260809120000`)**: the first GPS ping ever seen for a device, write-once via `COALESCE` in the same ingest upsert. Nothing else in FSM retains it — `latest_gps_datetime` is overwritten every tick and `raw_device_snapshots` drops partitions after 7 days — so it is observable exactly once, as it happens. Written at **true UTC (offset 0)**, because a write-once column frozen under #222's wrong constant would carry the 5.5 h error permanently. **#222 landed 2026-08-09 and `AUTOPLANT_UTC_OFFSET_MIN` is now 0, so the dual-write is degenerate in production** — kept anyway, because the offset is still a per-call parameter (`MapOptions.offsetMinutes`), i.e. the two converge by *configuration*, not by construction, and this is the one irreversible column on the path. **Covered since 2026-08-09** by `snapshot-first-reported-dualwrite.e2e-spec.ts` (7 tests): write-once against both a later AND an earlier ping (COALESCE, not LEAST — a LEAST would pin every device to its pre-#222 value forever), chunk-**min** not chunk-max, offset 0 recorded, and a null corrected timestamp leaving the column unset rather than freezing a `+330` value. **`never_reported` is NOT a column here** — it is derived at read time from `latest_gps_datetime IS NULL` (#223), because that column is maintained at ingest while a derived flag would be written by the recompute, so a stored flag would be stale on exactly the transition that matters |
 | `device_commissioning` | Append-only fitment fact — one row per (device, vehicle, `installed_at`), carrying `installed_by`, `installation_remark`, denormalised plant/company, and the `first_reported_at` snapshot | **Migration `20260809120000` applied AND tracked; written by `MasterSyncService.appendCommissioning` since 2026-08-09.** The writer is best-effort — `createMany({ skipDuplicates: true })` inside one try/catch, running *after* every mirror write and outside any `$transaction`, so a fitment-write failure can neither fail the sync nor roll back the mirror; the run records `entity_stats.commissioning` (`inserted` / `skipped` = already-recorded fitments / `observed`) and `skippedByReason.APPEND_FAILED` when it does fail. Scoped to the devices the run actually **mirrored**, not the whole widened read — writing the ~27k never-mirrored rows would make this table describe a different population than every other FSM surface. It is a table rather than columns on `devices` because `tb_vehiclemaster` rewrites fitment in place (measured: 10,565 devices have had `first_installed_dt` moved, 1,757 by more than a year), so anything reading only the live source row measures a silently-mutating population. Append-only is structural: the unique key IS the fitment identity and the writer is `INSERT … ON CONFLICT DO NOTHING`. **The unique index needs `NULLS NOT DISTINCT`, which Prisma 7.8 cannot express** — `prisma migrate dev` will offer a replacement without it, and accepting that silently breaks append-only-ness (`installed_at` is null on ~13% of source rows; `NULL <> NULL` re-inserts every one on every daily sync). Verified present in the DB via `pg_index.indnullsnotdistinct`. Full state: `.scratch/fsm-platform-v1/HANDOFF-commissioning-capture.md` |
 | `snapshot_runs` / `snapshot_run_chunks` | Ingestion run ledger + per-chunk retry; drives data-as-of banner | partial unique `snapshot_runs_one_in_flight (status) WHERE 'RUNNING'` |
 | `master_sync_runs` / `master_sync_rejects` | Master-sync ledger + itemised skip accounting (#97 Slice 4) | reject rows capped per run, best-effort writes |
@@ -969,10 +969,12 @@ Ranked by blast-radius × likelihood once the funnel activates. Each cites its o
 findings from this audit are filed as **#115** and **#116** (stubs in
 `.scratch/fsm-platform-v1/issues/`).
 
-> **2026-08-09 — the fleet-health state model is wrong in two measured, partly-cancelling ways.**
-> Added out-of-band rather than renumbering the ranked list below; by blast radius these sit around
-> items 3–5. Both were found by reconciling AutoPlant against an operator-verified Excel and
-> confirmed by an independent blind read (`audit/cross-analysis.md`). **Neither is fixed.**
+> **2026-08-09 — the fleet-health state model WAS wrong in two measured, partly-cancelling ways.
+> BOTH ARE NOW FIXED, in one slice, backend + admin.** The description below is kept as the record of
+> what was wrong and how it was established; the resolution follows it. Added out-of-band rather than
+> renumbering the ranked list below; by blast radius these sat around items 3–5. Both were found by
+> reconciling AutoPlant against an operator-verified Excel and confirmed by an independent blind read
+> (`audit/cross-analysis.md`).
 >
 > - **[#222] Every stored GPS timestamp is 5.5 h early.** `AUTOPLANT_UTC_OFFSET_MIN = 330` is wrong —
 >   AutoPlant writes **UTC** into its naive `DATETIME` columns, measured two independent ways (95
@@ -994,9 +996,60 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 >   that made a third state unrepresentable. **Operator decision 2026-08-07: a fitted tracker that has
 >   never reported is a fault** — counted inactive, ticketed, dispatched.
 >
-> **They partly cancel, which is why they must ship together** (operator decision): Fleet Health reads
-> **82.96%** today → 81.90% with #223 alone → 85.72% with #222 alone → **84.84%** correct. #223 alone
-> moves the number *down* and reads as a regression caused by a bug fix.
+> **They partly cancel, which is why they shipped together** (operator decision): Fleet Health read
+> **82.96%** → 81.90% with #223 alone → 85.72% with #222 alone → **84.84%** correct. #223 alone moves
+> the number *down* and reads as a regression caused by a bug fix.
+>
+> ---
+>
+> **RESOLVED 2026-08-09 — #222 + #223 landed as one slice.** What changed:
+>
+> - **`AUTOPLANT_UTC_OFFSET_MIN = 0`** and the pinned test that asserted `330` is gone, replaced by a
+>   contract test that maps a wall clock through `mapVehicleMasterRow` against a **literal** expectation
+>   — an assertion computed from the constant would now be satisfied by any value.
+> - **Two-directional skew guard (P6).** The future tolerance is tightened 24 h → **1 h**, in the same
+>   release as the constant, so the ~5 genuine IST-writers are **rejected** rather than reading as
+>   permanently fresh. Rejections are counted per chunk on `SourceChunk.rejected` and logged — a drop
+>   is only "visible as a gap" if something looks. The past arm is a **sentinel floor (year 2000)**, and
+>   deliberately not the fleet-percentile guard #222 proposed: a ping older than p99 is not implausible
+>   data, it is the finding this platform exists to produce. Catching a *systematic* shift needs a
+>   per-run distributional check, which is [#228]'s R2 and is not built here.
+> - **Three-state fleet model.** `operational = healthy + inactive + neverReported`, with both rates now
+>   taken over **`reportingOperational`** (operational − never-reported) — operator decision P3:
+>   never-reported devices are excluded from Fleet Health, not scored 0%. The three predicates are
+>   defined once in `dashboard.service.ts` (`HEALTHY_OPERATIONAL`, `INACTIVE_OPERATIONAL`,
+>   `NEVER_REPORTED_OPERATIONAL`) and imported by every consumer rather than respelled.
+> - **`never_reported` is derived at read time, NOT a stored column** — a deliberate deviation from
+>   #223's own design. `latest_gps_datetime` is maintained at **ingest** while a stored flag would be
+>   written by the **recompute**, so between the two a stored flag would say "never reported" about a
+>   device that had just come alive.
+> - **`DeviceStateService.recompute` ages a never-reported device from `MIN(device_commissioning.installed_at)`**
+>   (P1), with the 24 h grace window falling out of the existing `inactivity_threshold_hours` for free
+>   (P2 — no new setting; 48 h was considered and declined on the measured evidence, recorded in #223).
+>   MIN not MAX, because the device has produced nothing under any fitment and `tb_vehiclemaster`
+>   rewrites fitment in place.
+> - **All six read surfaces** from `cross-analysis.md` §2.3 now exclude never-reported devices from
+>   "healthy"/"active": KPI strip, Fleet Directory filter, device-list `status` filter (which gains
+>   `NEVER_REPORTED`), **Fleet Uptime**, the soft-inactive denominator (fixed *via* the state layer, by
+>   design — see the note in that service), and the entity-mapping export (new `never_reported` column).
+> - **The Fleet Uptime exclusion is applied in the aggregation, NOT by clearing `eligible_for_uptime`** —
+>   that flag is also the ticket-creation gate, so clearing it would have silently cancelled P1 and left
+>   the 892 confirmed-NDD devices unticketable. Two decided requirements pulling opposite ways through
+>   one shared flag.
+> - **`reconciliation.service.ts`'s `operationalPartition` identity is no longer a tautology.**
+>   `neverReported` is measured independently rather than as anyone's complement, so the check can now
+>   fail on data. A second, honestly-labelled `reportingPartition` carries the structural check.
+> - `docs/kpi-definitions.md` amended **in place**, including a correction of the "the identity holds by
+>   construction" paragraph that made the third state unrepresentable.
+>
+> **Still true and expected:** `soft_inactive_count_history` holds denominators snapshotted under the old
+> definition, so trend charts show a **step discontinuity on the fix day** — documented, not a regression.
+>
+> **Not done, deliberately, and NOT blocking:** `device_commissioning` is **empty in the dev DB** (0 rows)
+> because no master sync has run since its migration landed, and a master sync now executes #218b's live
+> lifecycle pass — the run #218c holds under an operator gate. So #223's *coverage* acceptance
+> ("`installed_at` ≥ 99% of operational devices") and the fleet-wide 84.84% figure are **verifiable only
+> on the first gated master sync**, not locally. The code path is covered by tests; the data is not there.
 >
 > Two data-loss findings sit inside the same population: **[#226]** 15 of those 913 have live
 > telemetry at source that FSM stored NULL over (14 pinged within 24 h) — and 15 is only the slice
@@ -1005,11 +1058,26 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 >
 > **[#228] is the cross-cutting finding and the reason this section needed a callout at all.** Each of
 > the three defects found in two days had a guard that could not fail in the direction its bug
-> travelled: #218's `@Optional()` cannot fail on absence, #223's `healthy + inactive = operational` is
-> a **tautology** (`reconciliation.service.ts:213` says so out loud) that stayed green over 913
-> misclassified devices, and #222's skew guard rejects only the **future**. Compounded by a suite that
-> tests the system against its own beliefs — `autoplant-mapping.spec.ts:131` **asserts the wrong
+> travelled: #218's `@Optional()` cannot fail on absence, #223's `healthy + inactive = operational` was
+> a **tautology** (`reconciliation.service.ts` said so out loud) that stayed green over 913
+> misclassified devices, and #222's skew guard rejected only the **future**. Compounded by a suite that
+> tested the system against its own beliefs — `autoplant-mapping.spec.ts:131` **asserted the wrong
 > constant**, pinning it.
+>
+> **Three of the four specimens are now closed by the #222+#223 slice** (the tautological identity, the
+> one-directional skew guard, and the pinned-constant test). #228 itself stays open: its four remedies
+> — R4 boot-time DI resolution test, **R2 per-run distributional source-contract fingerprints**, R1
+> empirical identities, R3 typed zeros — are unbuilt, and R2 is the one that would actually have caught
+> #222 on 2026-07-07. Nothing in this slice substitutes for it.
+>
+> **[#229] filed 2026-08-09 while satisfying the operator's pre-application gate on #222.** Answering
+> "what is the expected auto-recovery closure count" surfaced that **the sweep never runs**:
+> `runAutoRecovery()` has no `@Cron`, no route and no CLI caller — its only call site is a spec — and
+> `ticket_events` holds **zero `CLOSED_AUTO_RECOVERY` rows** across 42,955 transitions. **11,042 of the
+> 12,571 open TROUBLESHOOT tickets (87.8%) already satisfy the sweep's own predicate today**, 9,888 of
+> them on devices that are healthy right now. The #222 timestamp fix moves that number by **+5**, so the
+> queue overstatement is a pre-existing condition and must not be attributed to this slice. That 12,571
+> baseline is quoted in both #222 and #223 and is **not** a count of broken devices.
 >
 > **Two of those closed on 2026-08-09.** `first_reported_at` no longer ships with zero coverage
 > (`snapshot-first-reported-dualwrite.e2e-spec.ts`, 7 tests). And the typecheck blind spot has a
