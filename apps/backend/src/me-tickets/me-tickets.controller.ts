@@ -1,4 +1,4 @@
-import { Controller, Get, NotFoundException, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, NotFoundException, Param, Query, UseGuards } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -7,6 +7,7 @@ import { RoleGuard } from '../common/guards/role.guard';
 import { MeTicketDetailService, type MeTicketDetailView } from './me-ticket-detail.service';
 import { MeTicketFormsService } from './me-ticket-forms.service';
 import { MeTicketsQueryService, type MeTicketsView } from './me-tickets-query.service';
+import { MeWorkHistoryService, type MeWorkHistoryView } from './me-work-history.service';
 import type { TicketFormView } from '../ticketing/ticket-query.service';
 
 /**
@@ -16,6 +17,7 @@ import type { TicketFormView } from '../ticketing/ticket-query.service';
  * covers TROUBLESHOOT/RECOVERY/INSTALL uniformly (see `MeTicketDetailService`).
  * `GET /me/tickets/:id/forms` (#161 item 3) is the SE-readable variant of the manager-only
  * `GET /tickets/:id/forms`, scoped to the caller's own submissions (see `MeTicketFormsService`).
+ * `GET /me/work-history` (#175) is the per-day assigned/completed series behind Home's chart.
  * All SE-only and read-only — scoped server-side to the caller's own id, never an arbitrary se param
  * (same convention as `SharedPoolController`).
  */
@@ -26,12 +28,25 @@ export class MeTicketsController {
     private readonly tickets: MeTicketsQueryService,
     private readonly ticketDetail: MeTicketDetailService,
     private readonly ticketForms: MeTicketFormsService,
+    private readonly workHistory: MeWorkHistoryService,
   ) {}
 
   @Get('tickets')
   @Roles('SERVICE_ENGINEER')
   list(@CurrentUser() user: AccessTokenClaims): Promise<MeTicketsView> {
     return this.tickets.getMyTickets(user.user_id);
+  }
+
+  /** #175 — the Home "Assigned vs Completed" series. `days` is bounded and sanitised by the service
+   *  (a query value arrives as an unvalidated string), so a junk value renders a default chart rather
+   *  than 400-ing a screen that is otherwise fine. */
+  @Get('work-history')
+  @Roles('SERVICE_ENGINEER')
+  history(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('days') days?: string,
+  ): Promise<MeWorkHistoryView> {
+    return this.workHistory.getWorkHistory(user.user_id, { days: days == null ? undefined : Number(days) });
   }
 
   /** Out-of-coverage / unknown / not-yet-visible-to-this-SE all 404 alike — never distinguished, so

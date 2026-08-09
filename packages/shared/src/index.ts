@@ -143,6 +143,33 @@ export interface MeTicketsView {
   cursor: null;
 }
 
+// ---------------------------------------------------------------------------------------------
+// #175 — GET /api/me/work-history (the Home "Assigned vs Completed" chart).
+// Mirrors apps/backend/src/me-tickets/me-work-history.service.ts.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * One bar-pair in the Home chart (`docs/ui/mobile/home-dashboard.png`), for one **IST calendar day**
+ * (CONTEXT §19 — the operating day; see the backend's `common/ist-day.ts`).
+ *
+ * `completed` is a strict subset of `assigned`: a day's assigned set is what the SE's schedules put in
+ * front of them, and a ticket counts as completed on the day it *closed*, only if it was in that same
+ * day's assigned set. That is what makes the image's `4/6`-style label read as a fraction and keeps a
+ * bar from ever overflowing its track.
+ */
+export interface MeWorkHistoryDay {
+  /** `YYYY-MM-DD`, the IST calendar date. */
+  date: string;
+  assigned: number;
+  completed: number;
+}
+
+/** `GET /api/me/work-history?days=N` → a dense series, oldest day first. Days on which the SE had no
+ *  schedule are present with zeroes, never omitted — the chart always renders N bars. */
+export interface MeWorkHistoryView {
+  days: MeWorkHistoryDay[];
+}
+
 /**
  * SLA bucket enum (CONTEXT "SLA Bucket" / LLD §9). A device's inactivity-age band, severity ascending
  * WARNING → LONG_PENDING. Deliberately omits ACTIVE — the 0–4h band is the *absence* of a bucket
