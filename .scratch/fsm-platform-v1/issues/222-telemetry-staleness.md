@@ -1,47 +1,234 @@
-# 222 — FSM telemetry runs ~5.1 h behind AutoPlant, producing false inactives
+# 222 — FSM shifts every GPS ping 5.5 h into the past (`AUTOPLANT_UTC_OFFSET_MIN` is wrong)
 
-Status: needs-triage
+Status: ready-for-agent — **ship as one slice with [#223](./223-ndd-counted-healthy.md)**
 Type: AFK · Backend ingestion
 Filed: 2026-08-07
 Origin: AutoPlant↔FSM reconciliation, finding **F2**
 (`audit/autoplant-reconciliation/reconciliation-report.md`)
-Deliberately excluded from [#218](./218-lifecycle-drift-detection.md) by operator decision.
+**Re-diagnosed 2026-08-07** by the independent PRISM read + cross-analysis
+(`audit/prism-independent/`, `audit/cross-analysis.md`). The original diagnosis on this issue was
+wrong; see "Correction" below.
+Coordinates with: [#223](./223-ndd-counted-healthy.md) (the two defects move Fleet Health in opposite
+directions and must ship together) · [#228](./228-guard-pattern-remediation.md) (the guard class that
+let this survive)
+
+## Correction — what this issue used to say, and why it was wrong
+
+This issue originally concluded:
+
+> **This is not a timezone bug** — that was tested and ruled out. The offset is ~5.1 h, not the
+> 5 h 30 m an IST double-conversion would produce […] FSM's conversion is correct; its *data* is old.
+
+**That is wrong.** It is a timezone bug, the conversion is wrong, and the data was fresh. The
+reasoning failed because the measurement compared FSM against the **Excel snapshot** rather than
+against the live source, and the two were read **25 minutes apart**.
+
+Reconstructing the original numbers under the timezone hypothesis:
+
+- Excel snapshot instant `06:49:21 IST` = **01:19:21 UTC**.
+- FSM snapshot run 151 finished **01:45 UTC** — ~25 min later.
+- **Frozen device** (stopped pinging before both reads): both systems see the same source value `V`.
+  Excel renders `V` correctly, FSM stores `V − 5:30`. Delta = **exactly 5.5000 h**.
+- **Live device:** Excel captured `≈01:19 UTC`; FSM read `≈01:44 UTC` and stored `01:44 − 5:30`.
+  Delta = **5 h 05 m ≈ 5.10 h**.
+
+Against the distribution this issue reported — `min -5.50 · p05 -5.50 · p50 -5.10 · p95 -5.05` —
+every feature is predicted: a **hard floor at exactly −5.50** (frozen devices), a **median at −5.10**
+(live devices, offset by the read gap), and a **total spread of ~27 min** matching the gap between
+the two reads. The floor reported as `min`/`p05` *was the bug's signature*. Staleness cannot produce
+it: stale data yields a long tail, not a wall at exactly 5.50 h.
+
+The supporting detail was also inverted: *"run 151 completed at 07:15 IST yet the freshest GPS is
+01:44 IST."* `07:15 IST − 5:30 = 01:45 IST`. **The "staleness" was the shift, to the minute.** And
+run 151 was not an incomplete pass — it wrote **20,578 rows**, in line with every healthy run.
 
 ## Problem
 
-Per-device GPS comparison against the ground-truth Excel, both sides normalised to UTC
-(11,578 matched devices):
+`apps/backend/src/ingestion/autoplant/mapping.ts:15`
+
+```ts
+/** AutoPlant source timestamps are naive IST (+330). */
+export const AUTOPLANT_UTC_OFFSET_MIN = 330;
+```
+
+`normalize.ts:32` subtracts that offset. But `ap_widgets.tb_vehiclemaster.latest_gps_datetime` is
+stored in **UTC**, so FSM writes every ping 5.5 h earlier than it happened, inflating
+`inactivity_hours` fleet-wide.
+
+Source probe re-run by hand 2026-08-07:
 
 ```
-min -5.50h · p05 -5.50h · p25 -5.15h · p50 -5.10h · p75 -5.10h · p95 -5.05h
-99.5% of devices older by >1h · only 2 of 11,578 within ±5 min of zero
+@@system_time_zone    UTC
+NOW()                 2026-08-07 11:48:30
+UTC_TIMESTAMP()       2026-08-07 11:48:30     TIMESTAMPDIFF = 0 sec
 ```
 
-**This is not a timezone bug** — that was tested and ruled out. The offset is ~5.1 h, not the
-5 h 30 m an IST double-conversion would produce, and the distribution has a positive tail. FSM's
-conversion is correct; its *data* is old.
+Host wall clock at that instant: `11:48:31 UTC` / `17:18:31 IST`. Server clock accurate to the second.
 
-Snapshot run 151 *completed* at 07:15 IST, yet the freshest GPS in `device_states` was 01:44 IST — so
-this is not simply "no run since". Run 151 took 3m19s against run 149's 9 minutes, which suggests an
-incomplete or cursor-bounded pass rather than a missed schedule.
+## The source never changed — the original verification measured five outlier devices
 
-## Impact (measured)
+`mapping.ts:17-30` documents a live verification on 2026-07-17 that appeared to show the column
+tracking IST:
 
-**80 devices were false-inactive** on the 2026-08-07 snapshot: the Excel shows them Active, FSM marks
-them inactive, and their true GPS age is **18.2 h – 24.0 h** — precisely the window where a +5.1 h
-bias crosses the 24 h inactivity threshold. Each is a spurious SLA breach and a candidate for an
-auto-created ticket against a healthy device.
+> *newest `latest_gps_datetime` **11:49:46** · real IST wall clock **11:50***
 
-The bias is systematic and one-directional, so it inflates every inactivity-derived figure on the
-dashboard, not just the 80 that crossed the threshold on this particular snapshot.
+"Newest" = `MAX()`. Counting devices whose value sits **ahead of UTC-now** (impossible for a UTC
+column):
 
-## Possibly related, unverified
+| Bucket | Devices |
+|---|---:|
+| `> UTC_now + 5h` — IST-stored, fresh | **4** |
+| `> UTC_now` — IST-stored, older | **1** |
+| within last 24 h UTC | 21,245 |
+| older than 24 h UTC | 35,314 |
 
-`raw_device_snapshots` has daily partitions only through `y2026m07d11`; August rows are landing in
-`_default`. Flagged as an observation, not a claim — the partition-maintenance path was not
-investigated.
+**Five devices out of 56,564** (plants `GSR`, `SCNEL GHY CEMENT`, `ACC CEMENT LIMITED-LONI KALBHOR`)
+genuinely write IST into a UTC column, and they alone decide `MAX()`. Today the same probe gives
+`17:18:16` against an IST wall clock of `17:18:31` — a 15-second gap, versus 14 seconds on
+2026-07-17. **Identical signature, one month apart.** The 2026-07-17 verification generalised from a
+maximum to a population.
+
+### Decisive proof: the contract never moved
+
+`raw_device_snapshots.gps_datetime` stores the **post-conversion** value and `snapshot_runs` records
+when each run ran, so per-run `percentile(finished_at − gps_datetime)` time-travels the contract.
+(`MAX()` must not be used here — it selects the same IST outliers and the lag looks like ~0.03 h on
+every run. That trap fired three separate times during this investigation.)
+
+| Run | Finished (UTC) | Rows | p50 lag | p10 lag | p01 lag |
+|---|---|---:|---:|---:|---:|
+| 2 | 07-07 04:51 | 21,945 | 5.592 | 5.552 | 5.536 |
+| 26 | 07-08 06:29 | 18,627 | 5.594 | 5.565 | 5.552 |
+| 91 | 07-21 11:23 | 19,109 | 5.582 | 5.541 | 5.527 |
+| 107 | 07-29 12:32 | 19,263 | 5.571 | 5.552 | 5.532 |
+| 148 | 08-06 05:01 | 21,055 | 5.606 | 5.549 | 5.531 |
+| **152** | **08-07 10:02** | **20,466** | **5.571** | **5.542** | **5.534** |
+
+**95 runs measured, every one in the 5.52–5.65 h band. Flat, no discontinuity, including across
+2026-07-17.** FSM has over-subtracted since the first snapshot run on 2026-07-07. **`+330` was wrong
+when it was written.** There is no vendor change to chase and no announcement to find.
+
+Device-level confirmation, run 152 (ran 09:58–10:02 UTC):
+
+| device | source raw (at probe time) | FSM stored (UTC) | reading |
+|---|---|---|---|
+| 867542081342639 | 11:50:38 | 04:31:09 | source ≈10:01 at run time → **stored = source − 5:30** ✗ |
+| **860103064768360** | **17:20:15** | **09:58:34** | IST-writer: 15:28 IST at run time → 09:58 UTC ✓ correct |
+
+Lag bimodality on the newest run: **4** devices `<1h` (IST-writers, `+330` correct) · **18,486** at
+5.0–6.0 h (UTC-writers, over-subtracted) · 1,976 `>6h` (genuinely stale).
+
+## Impact (measured 2026-08-07, re-verified)
+
+| | Fleet-wide |
+|---|---:|
+| Operational devices | 15,696 |
+| Currently counted inactive | **2,675** |
+| Inactive with the shift backed out | 2,241 |
+| **Falsely inactive** | **434 (16.2% of the inactive queue)** |
+| Falsely inactive devices **holding an open TROUBLESHOOT ticket** | **434 — all of them** |
+
+Every device silent 18.5–24 h is misclassified. Because `sla_bucket` derives from the same inflated
+`inactivity_hours`, severity bands inflate with it — of the 665 devices currently in `CRITICAL`
+(24–48 h), **434 are fabricated (65% of the band)**. This propagates into ticket priority, the
+recommender's ordering, SLA reporting and Fleet Uptime.
+
+## Why it failed silently
+
+`mapping.ts:168` rejects a timestamp only when it is **ahead** of now:
+
+```ts
+if (normalized.gpsDatetime.getTime() > now.getTime() + maxSkewMs) return null;
+```
+
+An error pushing timestamps into the **past** cannot trip it. And
+`apps/backend/test/autoplant-mapping.spec.ts:131` asserts `expect(AUTOPLANT_UTC_OFFSET_MIN).toBe(330)`
+— **a test that pins the wrong value in place** and will go red on the correct fix. Every mapping
+test constructs its own input rather than reading the live source, so a source contract that was
+never true could not be falsified by the suite. See [#228](./228-guard-pattern-remediation.md).
+
+## Scope warning — this is NOT a one-line constant change
+
+**Added 2026-08-09.** [#228](./228-guard-pattern-remediation.md)'s fourth specimen establishes that
+**Proposed step 5 (the two-directional skew guard) must ship in the SAME release as step 1**, not as a
+follow-up. Flipping the constant alone does not drop the ~5 IST-writing devices as this issue long
+claimed — it makes them read as permanently fresh, so they can never be detected as inactive or
+ticketed again (see the corrected Open Question below). Shipping step 1 without step 5 converts a
+visible fleet-wide 5.5 h error into five permanently invisible devices.
+
+Whoever picks this up should size it as: constant + guard + pinned-test removal + recompute +
+P6 answered, coordinated with [#223](./223-ndd-counted-healthy.md) — not as a one-line edit.
+
+## Proposed
+
+1. `AUTOPLANT_UTC_OFFSET_MIN = 0`.
+2. **Delete or rewrite** `autoplant-mapping.spec.ts:131`. Replace the literal assertion with a live
+   source probe (opt-in, VPN-gated) or a distributional guard, not another pinned constant.
+3. Correct the now-false provenance comment at `mapping.ts:17-30` — record that the column is UTC,
+   that ~5 devices write IST, and that `MAX()` is not a valid probe for this contract.
+4. Recompute `device_states`; ~434 devices leave the inactive queue.
+5. **Two-directional skew guard** — reject a timestamp implausibly far in the *past* as well as the
+   future. A ping older than the fleet p99 by a wide margin is as suspect as one in the future.
+
+### Open question — the ~5 genuine IST-writing devices
+
+**Corrected 2026-08-09.** This section previously said the skew guard "will reject them and they will
+stop ingesting entirely," and P6 was framed as a choice about accepting that drop. **That is not what
+today's code does**, and the decision should be taken on the real behaviour.
+
+`DEFAULT_MAX_SKEW_MINUTES` is **24 h** (`mapping.ts:34`) and no caller overrides it —
+`autoplant-source-reader.ts:77` passes through a `maxSkewMinutes` that `ingestion.module.ts:160-166`
+never sets. Flipping the constant to `0` puts these devices **5.5 h** into the future, which is well
+inside a 24 h tolerance, so `mapping.ts:168` **does not reject them**. They keep ingesting.
+
+The actual failure mode is worse than a drop, because it is silent: a timestamp in the future makes
+`inactivity_hours` negative, which `device-state.service.ts:100` clamps to 0 via `GREATEST(0, …)`.
+These five devices would read as **permanently fresh** — never inactive, never eligible for a
+TROUBLESHOOT ticket, no matter how long they actually stay dark. A dropped device is visible as a
+gap; a permanently-healthy device is invisible.
+
+Rejection only becomes the outcome if **Proposed step 5** (the two-directional guard) ships with a
+past/future threshold tighter than 5.5 h — i.e. it is a consequence of this issue's own proposed fix,
+not of the constant flip. The two therefore have to be decided together.
+
+**Operator decision — recorded as P6 in `audit/cross-analysis.md`, unresolved.** Options, restated:
+accept five permanently false-healthy devices, special-case the ~5 device ids, or detect per-device
+convention at ingest. "Accept the drop" was never on the table under current code.
+
+### Independent corroboration from a second column (2026-08-09)
+
+Measured while scoping the commissioning capture, and worth recording here because this issue has
+been wrong once already: `tb_vehiclemaster.FIRST_INSTALLED_DATE_TIME` is **also** a naive MySQL
+`DATETIME`, and it too is written in **UTC**. Measured against `device_installation_date` — a
+`TIMESTAMP` in the *same row*, which the server returns already-UTC — **17,985 devices differ by
+exactly 0 minutes, and not one differs by ±330**, with no step across 2025–2026.
+
+So the "naive DATETIME ⇒ IST" inference that produced `+330` is wrong as a *house rule*, not just for
+`latest_gps_datetime`. Two unrelated columns, two independent methods, same answer.
+
+## What breaks
+
+- **434 open TROUBLESHOOT tickets** sit on devices that are about to become healthy. `AutoRecoveryService`
+  will close them (they are pinging; the ≥3-pings-≥15-min criterion is met), but that lands ~434
+  `CLOSED_AUTO_RECOVERY` closures in one sweep, which **inflates the auto-recovery metric** and
+  distorts SE-productivity reporting for that period. Plan for it; do not let it be discovered later.
+- Fleet Health % moves **82.96% → 85.72%** on this fix alone. Shipping it with #223 (which moves it
+  down 1.06) gives the correct **84.84%**.
+- `soft_inactive_count_history` shows a step discontinuity on the day of the fix — correct, but
+  expect it.
+
+## Withdrawn from the original issue
+
+- *"Not a timezone bug"* — withdrawn, see Correction.
+- *"Run 151's 3m19s duration suggests an incomplete pass"* — not supported; 20,578 rows written.
+- The `raw_device_snapshots` partition observation (August rows landing in `_default`) is **unrelated
+  to this defect** and remains an open, separate observation. `PARTITION_MAINTENANCE_ENABLED="false"`
+  in `apps/backend/.env` is the likely cause.
 
 ## Acceptance
 
-- The ~5.1 h lag explained: incomplete pass, cursor not advancing, or a genuinely stalled ingest.
-- Once fixed, the false-inactive count at the 18–24 h band returns to ~0.
+- `AUTOPLANT_UTC_OFFSET_MIN = 0`; the pinned-constant test is gone.
+- After a recompute, per-run `p50(finished_at − gps_datetime)` is **< 1 h** (currently 5.58 h).
+- The 18–24 h false-inactive count returns to ~0.
+- The skew guard rejects both directions, with a test proving each.
+- P6 answered and the chosen handling for the ~5 IST-writers implemented.
