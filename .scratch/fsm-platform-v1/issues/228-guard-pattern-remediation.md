@@ -1,5 +1,11 @@
 # 228 — Every guard in this system is one-directional, and each fails toward "fine"
 
+> **Scope widened 2026-08-10 by a fifth specimen ([#229](./229-auto-recovery-sweep-unwired.md)).** The
+> title says *guard*; the property is broader. What all five specimens share is that **non-execution is
+> observationally identical to execution with nothing to do** — a guard that never rejects, a pass that
+> returns early, and a sweep that is never called all emit exactly nothing. Read "guard" below as "any
+> mechanism whose silence is indistinguishable from success".
+
 Status: needs-triage
 Type: HITL (changes testing/observability posture across the backend) · Backend tooling + tests
 Filed: 2026-08-07
@@ -91,12 +97,58 @@ This is the fourth independent mechanism producing the same reading:
 | 2 | NDD — never-reported devices counted in the healthy denominator ([#223](./223-ndd-counted-healthy.md)) | "healthy" |
 | 3 | Deployment-lifecycle pass dead under Nest DI ([#218](./218-deployment-lifecycle-di.md)) | "nothing to do" |
 | 4 | One-directional skew guard + `GREATEST(0, …)` clamp | "always fresh" |
+| 5 | Auto-recovery sweep never wired to any caller ([#229](./229-auto-recovery-sweep-unwired.md)) | "nothing to close" |
 
 Note that specimen 4 is **latent** — it activates only when #222 flips the constant. That makes it the
 cheapest of the four to fix, and the only one that can still be fixed *before* it does any damage.
 It is also the argument for R2 and for #222's two-directional guard being decided together rather than
 sequentially: fixing the timezone without fixing the guard converts a fleet-wide 5.5 h error into five
 permanently invisible devices.
+
+### A fifth specimen: the sweep that was never wired (2026-08-10) — and it widens the thesis
+
+[#229](./229-auto-recovery-sweep-unwired.md). `AutoRecoveryService.runAutoRecovery` has **no production
+caller** — no `@Cron`, no route, no CLI; its only call site in the repository is
+`test/auto-recovery.e2e-spec.ts`. Confirmed at the data, not inferred: across **42,955 `ticket_events`
+transitions there are zero `CLOSED_AUTO_RECOVERY` rows**. **11,042 of the 12,571 open TROUBLESHOOT
+tickets (87.8%) already satisfy the sweep's own predicate**, 9,888 of them on devices that are healthy
+right now. The open queue overstates real field work by roughly 9,888 tickets, and that 12,571 figure
+is quoted as a baseline in both #222 and #223.
+
+**This is admitted as a specimen, but it is NOT another instance of the existing pattern — it is a
+generalisation of it, and the difference matters for the remedies.**
+
+The first four specimens share a shape: *a check exists and cannot fail in the direction its bug
+travels.* #229 has no check to be one-directional. Nothing was skipped, mis-scoped or wrongly
+asserted; a mechanism was simply never connected, and eleven of its twelve sibling sweeps were.
+
+What it shares — and this is the deeper property all five have — is that **non-execution is
+observationally identical to execution with nothing to do.** A sweep that runs and closes zero tickets
+and a sweep that never runs emit the same thing: no log line, no metric, no row. That is the same
+reason `@Optional()` absence looked like presence, a tautology looked like a passing check, and a
+skew guard that never rejected looked like a clean feed. The system cannot distinguish *"checked and
+fine"* from *"never checked"* — and every one of these five defects lived in that gap.
+
+So the title's framing — *"every **guard** is one-directional"* — is too narrow by one word. The
+property is not specific to guards; it applies to **any mechanism whose non-execution is silent**.
+A guard is just the case where the silence is easiest to mistake for good news.
+
+**The remedies below already cover it, which is corroboration rather than coincidence.** **R3**
+(*"nothing happened" must be distinguishable from "nothing to do"*) is exactly #229's fix stated in
+advance — it was written about a pass returning early, and applies unchanged to a pass never invoked.
+**R4** (boot-time resolution assertion) is the right *shape*, extended one step: assert not only that
+every `@Optional()` collaborator resolved, but that **every sweep-shaped service has a registered
+trigger**. That is a cheap widening of a test #228 already wants to write, and it would have caught
+this on the day auto-recovery was built.
+
+**Do not fold #229's fix into this issue.** Wiring the sweep is an 11,042-closure event against a
+12,571-ticket open book and is operator-gated with its own dry-run, agreed count and window (#229
+"Gating posture"). #228 owns the *class*; #229 owns the *event*.
+
+**Worth a pass, not assumed:** R4's widened form implies an audit for other never-invoked sweeps.
+`FleetUptimeAggregationService` and `VerificationService` both document themselves as on-demand with
+no scheduler — deliberate and written down, unlike this one. Whether any others are undocumented-unwired
+is unmeasured, and is #229's D4.
 
 ## Proposed remedies
 

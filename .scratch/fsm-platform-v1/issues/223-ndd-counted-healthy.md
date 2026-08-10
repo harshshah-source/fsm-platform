@@ -337,7 +337,7 @@ that reads the booleans. **1–2 weeks.** Do not attempt it in this slice.
 | 6 | **Ops Explorer `plants` dataset** | `healthyDeviceCount` uses `is_inactive = false` while claiming *"Same predicate as FLEET_COUNT_COLUMNS.healthyOperational"* (`dataset-registry.ts:1072`). Only equivalent because `is_inactive` implies a non-null bucket. Both need the new predicate. |
 | 7 | **Admin components** | `OperationalFleetSection`, `ZoneOverviewTable`, `CompanyPlantTable`, `ScorecardTable`, `FleetDirectoryPage`, `ZoneDrilldownSection` all consume the two-way split. |
 | 8 | **`soft_inactive_count_history`** | Holds denominators snapshotted under the old definition. Trend charts step-change on the fix day — correct, but expect it. |
-| 9 | **~912 new TROUBLESHOOT tickets in one sweep** | Against a baseline of **12,571 open** — a **+7.3%** step. Needs a controlled rollout (see Risks). |
+| 9 | **~912 new TROUBLESHOOT tickets in one sweep** | Against a baseline of **12,571 open** — a **+7.3%** step. Needs a controlled rollout (see Risks). ⚠ **The 12,571 denominator does not measure devices in trouble.** It is an *unswept queue*: 11,042 of those tickets (87.8%) already meet the auto-recovery criterion and 9,888 sit on devices that are healthy right now, because nothing closes them — `runAutoRecovery` has no production caller ([#229](./229-auto-recovery-sweep-unwired.md)). The real open-work baseline is nearer **1,500**, against which ~912 is a **+60%** step, not +7.3%. |
 
 **Not affected:** SLA bucketing logic (bands unchanged), dispatch/recommender (consume tickets),
 auto-recovery, the departure invariant.

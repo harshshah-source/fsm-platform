@@ -1,6 +1,8 @@
 # 229 — `AutoRecoveryService.runAutoRecovery` has no production caller; 11,042 open tickets are already closable
 
-Status: needs-triage
+Status: needs-triage — **enabling the sweep is OPERATOR-GATED** (posture recorded 2026-08-10; see
+"Gating posture" below). Writing the wiring is ordinary work; *switching it on* is an 11,042-closure
+event needing a dry-run, an agreed expected count, and a window.
 Type: HITL (wiring it is a step change in every auto-recovery / SE-productivity metric) · Backend
 Filed: 2026-08-09
 Origin: measured while satisfying the operator's pre-application gate on
@@ -68,6 +70,31 @@ whether it *is* called. Nothing asserts the wiring.
 
 Compare `INGESTION_SCHEDULER_ENABLED` / `autoplant:window-preflight` (#218), where the *presence* of a
 binding is asserted programmatically against the real `AppModule`. That pattern is the fix template.
+
+## Gating posture — OPERATOR-GATED. Turning the sweep on is an event, not a deploy.
+
+**Recorded 2026-08-10 at the operator's instruction, before any implementation.** This section governs
+*how* the switch is thrown, not *what* is built; the "What to build" section below deliberately stops
+at the wiring.
+
+Wiring this sweep is a **single write action that closes ~11,042 tickets against a 12,571-ticket open
+book — 88% of it, in one pass.** That is not a deployment outcome, it is an operational event with a
+before and an after that every downstream report will show. It carries the same posture as #128/#218's
+departure catch-up and is gated the same way:
+
+| Requirement | Why it is not optional |
+|---|---|
+| **1. A read-only dry-run first**, reporting the exact ticket ids it would close, grouped by company/plant/zone, with the ping evidence that qualifies each. | The criterion is evaluated per ticket against `raw_device_snapshots`; nobody has ever seen its output on real data, because it has never run. A count is not evidence — #222's `MAX()` trap and this issue's own `+5`-vs-`11,042` finding are both cases where the aggregate hid what the rows said. |
+| **2. An expected closure count agreed in advance and written into this issue**, exactly as the operator required for #222. | Stated verbatim there: *"I want that number in the issue before the sweep runs, not after someone asks why SE productivity spiked."* The same reasoning applies with ~25× the blast radius. The figure must be re-measured immediately before execution, not reused from 2026-08-09 — it moves as devices ping. |
+| **3. An agreed execution window.** | `CLOSED_AUTO_RECOVERY` is deliberately distinct from SE-repaired `CLOSED`, so SE productivity is protected — but **auto-recovery rate, monthly Fleet Uptime closure splits, open-queue counts and every trend chart that reads them step-change on the day.** A window makes that a dated, explainable event instead of an anomaly someone finds later. |
+| **4. A decision on the backlog vs. the steady state (D1 below).** | One pass closing 11,042 and a cron closing a handful a day are different products. The first is a backfill; the second is the mechanism working. They should not be the same action by accident. |
+
+**Not gated, and worth separating:** *writing* the cron and its wiring assertion is ordinary work and
+needs no gate — it is only *enabling* it against production data that does. Land the code disabled.
+
+**Do not treat the 12,571 baseline as open work.** It is the unswept queue this issue is about;
+9,888 of those tickets are on devices that are healthy right now. Real open work is nearer 1,500.
+Every rate quoted against 12,571 across #222 and #223 is diluted ~8× and is flagged in place.
 
 ## What to build
 

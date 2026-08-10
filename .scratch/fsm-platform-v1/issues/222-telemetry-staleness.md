@@ -222,7 +222,11 @@ someone asks why SE productivity spiked."*
 
 Every figure this issue and [#223](./223-ndd-counted-healthy.md) assert re-measured clean against `fsm`
 first — operational 15,696 · inactive 2,675 · healthy 13,021 · null-GPS 913 · falsely-inactive 434 ·
-open TROUBLESHOOT 12,571 · CRITICAL 665 of which 434 fabricated (65.3%). All 434 falsely-inactive
+open TROUBLESHOOT 12,571 (⚠ **an unswept queue, not a count of devices in trouble** — 11,042 of those
+tickets already meet the auto-recovery criterion and 9,888 are on devices that are healthy right now,
+because nothing closes them; see [#229](./229-auto-recovery-sweep-unwired.md). Any rate expressed
+against 12,571 is diluted roughly 8× and should be read against ~1,500 real open work) ·
+CRITICAL 665 of which 434 fabricated (65.3%). All 434 falsely-inactive
 devices do hold an open failure cycle and an open TROUBLESHOOT ticket — 434/434/434, exactly as
 claimed.
 
@@ -230,7 +234,7 @@ claimed.
 
 | Measurement | Tickets |
 |---|---:|
-| Open TROUBLESHOOT tickets today | 12,571 |
+| Open TROUBLESHOOT tickets today ⚠ *not a count of devices in trouble — see below* | 12,571 |
 | …that already satisfy the auto-recovery criterion **today, with no fix applied** | **11,042** |
 | …that would satisfy it after the timestamp correction | **11,047** |
 | **Marginal closures caused by this fix** | **+5** |
