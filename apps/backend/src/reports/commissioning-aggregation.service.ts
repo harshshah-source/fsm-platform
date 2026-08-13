@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
+import { EXCLUDE_DEACTIVATED_PLANTS } from '../dashboard/dashboard.service';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { readCommissioningConfig, type CommissioningConfig } from './commissioning.config';
@@ -22,8 +23,15 @@ import { classifyInstaller, type InstallerKind } from './installer-classificatio
  * `device_states.first_reported_at`. `device_commissioning.first_reported_at` is a snapshot taken at
  * OBSERVATION time (`master-sync.service.ts:481` — "a later first ping does not retro-fill an older
  * row"), so for a genuinely new fitment the device has not reported yet and the value is null
- * permanently. Measured on the dev mirror: 0 of 24,294 rows populated. It is provenance, not outcome;
- * a reader that required both columns to agree would report zero commissioned devices forever.
+ * permanently. Measured on the dev mirror: 371 of 25,387 rows populated — the non-zero rows are later
+ * runs snapshotting devices that have since begun reporting, which is exactly why it is provenance and
+ * not outcome. A reader that required both columns to agree would report almost nothing as commissioned.
+ *
+ * **Which devices are IN the measure — see {@link CommissioningPopulation} (#233).** Every count here
+ * defaults to the operational fleet, the same population every rate on the dashboard is taken over.
+ * Before #233 there was no such predicate and a device returned to a warehouse was counted as a failed
+ * install: measured live over 90 days, 6,832 fitments / 2,668 failed (39.1%) against 2,645 / 147 (5.6%)
+ * once departed devices are excluded, because 4,127 of the 6,405 cohort devices were departed.
  */
 @Injectable()
 export class CommissioningAggregationService {
@@ -43,22 +51,30 @@ export class CommissioningAggregationService {
     const graceCutoff = new Date(now.getTime() - opts.graceHours * 3_600_000);
 
     const rows = await this.prisma.$queryRaw<RawCohortRow[]>(Prisma.sql`
-      ${this.gradedSource({ since: cohortStart, until: now, restrictZone, plantId: opts.plantId, remarks: opts.remarks })}
+      ${this.gradedSource({ since: cohortStart, until: now, population: opts.population, restrictZone, plantId: opts.plantId, remarks: opts.remarks })}
       SELECT
         GROUPING(plant_id)::int AS "gPlant",
         GROUPING(installed_by)::int AS "gInstaller",
         plant_id::text AS "plantId", zone_id::text AS "zoneId", plant_name AS "plantName",
         installed_by AS "installerKey",
-        count(*)::int AS fitments,
-        count(*) FILTER (WHERE commissioned)::int AS online,
+        count(*) FILTER (WHERE in_population)::int AS fitments,
+        count(*) FILTER (WHERE in_population AND commissioned)::int AS online,
         -- Silent INSIDE the grace window is pending, not failed. 96.97% of genuine new installations
         -- report within 12–24h, so treating the grace population as defective cries wolf on the
         -- majority. Past the window and still silent is the actual defect.
-        count(*) FILTER (WHERE NOT commissioned AND installed_at > ${graceCutoff})::int AS pending,
-        count(*) FILTER (WHERE NOT commissioned AND installed_at <= ${graceCutoff})::int AS failed,
+        count(*) FILTER (WHERE in_population AND NOT commissioned AND installed_at > ${graceCutoff})::int AS pending,
+        count(*) FILTER (WHERE in_population AND NOT commissioned AND installed_at <= ${graceCutoff})::int AS failed,
+        -- No in_population filter needed: ttfr_hours is already null outside the population, in the
+        -- same CASE that gates the epoch. One gate, not two spellings of it.
         count(ttfr_hours)::int AS "ttfrSample",
         (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttfr_hours))::float8 AS "medianHours",
-        (percentile_cont(0.95) WITHIN GROUP (ORDER BY ttfr_hours))::float8 AS "p95Hours"
+        (percentile_cont(0.95) WITHIN GROUP (ORDER BY ttfr_hours))::float8 AS "p95Hours",
+        -- The census is deliberately NOT population-filtered: it is what names the drop between the
+        -- fitments in the window and the fitments in the measure. Only the grand-total row is read.
+        count(*)::int AS "censusFitments",
+        count(*) FILTER (WHERE operational)::int AS "censusOperational",
+        count(*) FILTER (WHERE warehouse)::int AS "censusWarehouse",
+        count(*) FILTER (WHERE unmirrored)::int AS "censusUnmirrored"
       FROM graded
       -- One pass, three shapes. Three separate queries would each evaluate their own window boundary
       -- and could disagree about a device sitting exactly on the grace line; GROUPING SETS makes the
@@ -77,16 +93,21 @@ export class CommissioningAggregationService {
         zoneId: restrictZone != null ? String(restrictZone) : null,
         plantId: opts.plantId != null ? String(opts.plantId) : null,
         remarks: opts.remarks ?? null,
+        population: opts.population,
       },
+      population: totalsRow ? census(totalsRow) : EMPTY_CENSUS,
       // An absent grand-total row means an empty population, which is a legitimate answer here — see
       // EMPTY_COHORT for why that is a named constant rather than a computed zero.
       totals: totalsRow ? counts(totalsRow) : EMPTY_COHORT,
+      // A group whose every fitment fell outside the population is dropped rather than rendered as a
+      // row of zeroes. Under `population=all` nothing can be filtered out, so this is a no-op there —
+      // it exists so the operational view does not list plants that contributed nothing to it.
       byPlant: rows
-        .filter((r) => r.gPlant === 0)
+        .filter((r) => r.gPlant === 0 && r.fitments > 0)
         .map((r) => ({ plantId: r.plantId!, plantName: r.plantName!, zoneId: r.zoneId!, ...counts(r) }))
         .sort(byFitments),
       byInstaller: rows
-        .filter((r) => r.gInstaller === 0)
+        .filter((r) => r.gInstaller === 0 && r.fitments > 0)
         .map((r) => ({ installerKey: r.installerKey, installerKind: classifyInstaller(r.installerKey), ...counts(r) }))
         .sort(byFitments),
     };
@@ -107,30 +128,34 @@ export class CommissioningAggregationService {
       ? Prisma.sql`plant_id::text AS "plantId", zone_id::text AS "zoneId", plant_name AS "plantName"`
       : Prisma.sql`installed_by AS "installerKey"`;
     const groupColumns = byPlant ? Prisma.sql`plant_id, zone_id, plant_name` : Prisma.sql`installed_by`;
+    // Every aggregate below is population-filtered, so the ordering has to be too — otherwise the
+    // worst-first sort would rank on a rate nobody can see in the table beside it.
     const ordering =
       opts.sort === 'neverOnlineRate'
-        ? Prisma.sql`(count(*) FILTER (WHERE NOT commissioned))::numeric / count(*) DESC, count(*) DESC`
-        : Prisma.sql`count(*) DESC`;
+        ? Prisma.sql`(count(*) FILTER (WHERE in_population AND NOT commissioned))::numeric / count(*) FILTER (WHERE in_population) DESC, count(*) FILTER (WHERE in_population) DESC`
+        : Prisma.sql`count(*) FILTER (WHERE in_population) DESC`;
 
     const rows = await this.prisma.$queryRaw<RawQualityRow[]>(Prisma.sql`
-      ${this.gradedSource({ since, until: now, restrictZone, plantId: opts.plantId, remarks: opts.remarks })}
+      ${this.gradedSource({ since, until: now, population: opts.population, restrictZone, plantId: opts.plantId, remarks: opts.remarks })}
       SELECT ${keyColumns},
-        count(*)::int AS installs,
+        count(*) FILTER (WHERE in_population)::int AS installs,
         -- The exact complement of the commissioned flag, not a second definition of it. If this
         -- drifted from the cohort endpoint the two surfaces would disagree about "came online".
-        count(*) FILTER (WHERE NOT commissioned)::int AS "neverOnline",
-        count(DISTINCT plant_id)::int AS "distinctPlants",
+        count(*) FILTER (WHERE in_population AND NOT commissioned)::int AS "neverOnline",
+        count(DISTINCT plant_id) FILTER (WHERE in_population)::int AS "distinctPlants",
         -- Pinned to UTC rather than the session zone so "one afternoon" means the same thing wherever
         -- this runs.
-        count(DISTINCT (installed_at AT TIME ZONE 'UTC')::date)::int AS "distinctInstallDays",
-        min(installed_at) AS "firstInstallAt",
-        max(installed_at) AS "lastInstallAt",
+        count(DISTINCT (installed_at AT TIME ZONE 'UTC')::date) FILTER (WHERE in_population)::int AS "distinctInstallDays",
+        min(installed_at) FILTER (WHERE in_population) AS "firstInstallAt",
+        max(installed_at) FILTER (WHERE in_population) AS "lastInstallAt",
         count(ttfr_hours)::int AS "ttfrSample",
         (percentile_cont(0.5) WITHIN GROUP (ORDER BY ttfr_hours))::float8 AS "medianHours",
         (percentile_cont(0.95) WITHIN GROUP (ORDER BY ttfr_hours))::float8 AS "p95Hours"
       FROM graded
       GROUP BY ${groupColumns}
-      HAVING count(*) >= ${opts.minInstalls}
+      -- The floor is >= 1, so a group with no in-population fitments drops out here and needs no
+      -- second filter in TypeScript — unlike the cohort's breakdowns, which have no HAVING.
+      HAVING count(*) FILTER (WHERE in_population) >= ${opts.minInstalls}
       ORDER BY ${ordering}`);
 
     return {
@@ -144,6 +169,7 @@ export class CommissioningAggregationService {
         plantId: opts.plantId != null ? String(opts.plantId) : null,
         remarks: opts.remarks ?? null,
         minInstalls: opts.minInstalls,
+        population: opts.population,
       },
       rows: rows.map((r) => quality(r, byPlant)),
     };
@@ -166,10 +192,18 @@ export class CommissioningAggregationService {
    *
    * `installed_at` being NULL (≈13% of source rows) drops out naturally — a fitment with no date
    * cannot be inside a time-bounded cohort, and `NULL >= since` is not true.
+   *
+   * **The population split (#233) is computed here and nowhere else.** `operational` is the same
+   * predicate every rate on the dashboard is taken over, and `EXCLUDE_DEACTIVATED_PLANTS` is
+   * IMPORTED from `dashboard.service.ts` rather than restated — a checker (or a report) written from
+   * a second spelling only verifies that the second spelling agrees with itself, which is the exact
+   * failure #176 closed. The three flags partition the window exactly, so the census the endpoints
+   * publish is arithmetic rather than a claim.
    */
   private gradedSource(opts: {
     since: Date;
     until: Date;
+    population: CommissioningPopulation;
     restrictZone: bigint | null;
     plantId: bigint | null;
     remarks: string[] | null;
@@ -182,10 +216,23 @@ export class CommissioningAggregationService {
         : Prisma.empty,
     ];
 
+    // `EXCLUDE_DEACTIVATED_PLANTS` is authored as a WHERE-clause fragment (it opens with `AND`), so it
+    // is anchored on TRUE to be usable as a bare boolean here. Anchoring is what lets it be imported
+    // as-is instead of copied without its leading conjunction.
+    const operational = Prisma.sql`(ds.device_id IS NOT NULL AND ds.is_departed = false AND (TRUE ${EXCLUDE_DEACTIVATED_PLANTS}))`;
+    // Under `all` this is the literal TRUE, which is how `population=all` reproduces the pre-#233
+    // numbers byte for byte — the regression floor, not a separate query path.
+    const inPopulation = opts.population === 'all' ? Prisma.sql`TRUE` : Prisma.sql`operational`;
+
     return Prisma.sql`
       WITH scoped AS (
         SELECT dc.plant_id, p.zone_id, p.name AS plant_name, dc.installed_by, dc.installed_at,
-               ds.first_reported_at
+               ds.first_reported_at,
+               -- A commissioning fact deliberately carries no FKs (#227), so a fitment CAN outlive
+               -- the mirror row for its device. That is a fourth outcome, not a departed device.
+               (ds.device_id IS NULL) AS unmirrored,
+               (ds.device_id IS NOT NULL AND ds.is_departed = true) AS warehouse,
+               ${operational} AS operational
         FROM device_commissioning dc
         JOIN plants p ON p.plant_id = dc.plant_id
         -- LEFT: a fitment whose device has no state row yet is silent, not missing from the cohort.
@@ -195,16 +242,19 @@ export class CommissioningAggregationService {
       ),
       graded AS (
         SELECT plant_id, zone_id, plant_name, installed_by, installed_at,
+               unmirrored, warehouse, operational,
+               ${inPopulation} AS in_population,
                (first_reported_at IS NOT NULL AND first_reported_at >= installed_at) AS commissioned,
                -- Timing derives from the same predicate as the commissioned flag above — one
-               -- definition, not two — and is additionally gated on the epoch. Before it,
-               -- first_reported_at holds a last-seen value, which yields a median of ~8,707 hours
-               -- on real data. NULL here means "not measurable", so count(ttfr_hours) is the
-               -- honest sample size.
+               -- definition, not two — and is additionally gated on the epoch AND on the population.
+               -- Before the epoch, first_reported_at holds a last-seen value, which yields a median
+               -- of ~8,707 hours on real data. NULL here means "not measurable", so count(ttfr_hours)
+               -- is the honest sample size and needs no FILTER of its own at any call site.
                CASE
                  WHEN first_reported_at IS NOT NULL
                   AND first_reported_at >= installed_at
                   AND installed_at >= ${this.config.ttfrEpoch}
+                  AND ${inPopulation}
                  THEN EXTRACT(epoch FROM (first_reported_at - installed_at))::float8 / 3600.0
                END AS ttfr_hours
         FROM scoped
@@ -237,6 +287,32 @@ export class CommissioningAggregationService {
  */
 export const NO_TIMING: CommissioningTiming = { medianHours: null, p95Hours: null, sampleSize: 0 };
 const EMPTY_COHORT: CohortCounts = { fitments: 0, online: 0, pending: 0, failed: 0, ttfr: NO_TIMING };
+const EMPTY_CENSUS: CommissioningPopulationCensus = {
+  fitmentsInWindow: 0,
+  operational: 0,
+  warehouse: 0,
+  deactivatedPlant: 0,
+  unmirrored: 0,
+};
+
+/**
+ * The population census — what the window held, and what each step dropped (#233 AC-4).
+ *
+ * `deactivatedPlant` is the REMAINDER rather than its own `count(*) FILTER`, and that is deliberate:
+ * computed this way the four parts sum to `fitmentsInWindow` by construction, so the census cannot
+ * claim a partition it does not have. A fifth category appearing at source would show up as a negative
+ * remainder — visible — rather than as a silently unbalanced total.
+ */
+function census(row: RawCohortRow): CommissioningPopulationCensus {
+  const { censusFitments, censusOperational, censusWarehouse, censusUnmirrored } = row;
+  return {
+    fitmentsInWindow: censusFitments,
+    operational: censusOperational,
+    warehouse: censusWarehouse,
+    deactivatedPlant: censusFitments - censusOperational - censusWarehouse - censusUnmirrored,
+    unmirrored: censusUnmirrored,
+  };
+}
 
 /**
  * Build a timing block. The zero-sample case is a distinct branch — see {@link NO_TIMING}.
@@ -292,9 +368,44 @@ interface ReportScope {
   zoneId: number | null;
 }
 
+/**
+ * Which fitments are IN the measure (#233).
+ *
+ * `operational` is the default and is the same population every rate on the dashboard is taken over:
+ * `device_states.is_departed = false`, on a plant that is not deactivated. A device returned to a
+ * warehouse is silent because it is in a box — counting it as a failed install is the defect #176
+ * closed on the dashboard and this filter closes here.
+ *
+ * `all` drops the predicate entirely and reproduces the pre-#233 numbers exactly. It is for
+ * reconciliation and audit — walking a figure back to every fitment the window held — and is the
+ * regression floor for the existing specs, not a second measure with its own meaning.
+ */
+export type CommissioningPopulation = 'operational' | 'all';
+
+/**
+ * Every fitment in the window, and where each one went. Reported alongside the counts so the drop
+ * between "fitments AutoPlant recorded" and "fitments this measure is over" is NAMED rather than
+ * silent — the same rule the Fleet Composition funnel follows.
+ *
+ * The four parts sum to `fitmentsInWindow` — see {@link census}.
+ */
+export interface CommissioningPopulationCensus {
+  /** Fitments matching the window and every non-population filter (zone / plant / remark). */
+  fitmentsInWindow: number;
+  /** In the field: `is_departed = false`, plant live. The `operational` population. */
+  operational: number;
+  /** Returned to a warehouse — an open `device_departures` row. Silent by circumstance, not by fault. */
+  warehouse: number;
+  /** On a plant deactivated under #119. Excluded from every other dashboard count for the same reason. */
+  deactivatedPlant: number;
+  /** No `device_states` row at all — the fitment outlived the mirror (#227). Not the same as departed. */
+  unmirrored: number;
+}
+
 export interface CohortOptions {
   cohortDays: number;
   graceHours: number;
+  population: CommissioningPopulation;
   zoneId: bigint | null;
   plantId: bigint | null;
   remarks: string[] | null;
@@ -305,6 +416,7 @@ export interface InstallQualityOptions {
   groupBy: InstallQualityGroupBy;
   sort: InstallQualitySort;
   minInstalls: number;
+  population: CommissioningPopulation;
   zoneId: bigint | null;
   plantId: bigint | null;
   remarks: string[] | null;
@@ -349,7 +461,9 @@ export interface CommissioningCohortReport {
   generatedAt: string;
   /** Non-null only when the viewer is CLAMPED (a ZM). The UI renders its caveat off this. */
   scopedToZoneId: string | null;
-  filters: { zoneId: string | null; plantId: string | null; remarks: string[] | null };
+  filters: { zoneId: string | null; plantId: string | null; remarks: string[] | null; population: CommissioningPopulation };
+  /** What the window held and what each step dropped. `totals.fitments` equals the selected part. */
+  population: CommissioningPopulationCensus;
   totals: CohortCounts;
   byPlant: CohortPlantRow[];
   byInstaller: CohortInstallerRow[];
@@ -378,7 +492,13 @@ export interface InstallQualityReport {
   generatedAt: string;
   groupBy: InstallQualityGroupBy;
   scopedToZoneId: string | null;
-  filters: { zoneId: string | null; plantId: string | null; remarks: string[] | null; minInstalls: number };
+  filters: {
+    zoneId: string | null;
+    plantId: string | null;
+    remarks: string[] | null;
+    minInstalls: number;
+    population: CommissioningPopulation;
+  };
   rows: InstallQualityRow[];
 }
 
@@ -396,6 +516,11 @@ interface RawCohortRow {
   ttfrSample: number;
   medianHours: number | null;
   p95Hours: number | null;
+  /** Population census — meaningful only on the grand-total row; see {@link census}. */
+  censusFitments: number;
+  censusOperational: number;
+  censusWarehouse: number;
+  censusUnmirrored: number;
 }
 
 interface RawQualityRow {

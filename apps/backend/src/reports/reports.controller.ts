@@ -7,6 +7,7 @@ import { RoleGuard } from '../common/guards/role.guard';
 import {
   CommissioningAggregationService,
   type CommissioningCohortReport,
+  type CommissioningPopulation,
   type InstallQualityGroupBy,
   type InstallQualityReport,
   type InstallQualitySort,
@@ -44,6 +45,10 @@ export class ReportsController {
    * Live commissioning cohort — fitments inside `cohortDays`, split online / pending / failed with the
    * per-plant and per-installer breakdowns. Manager roles; a ZM is clamped to their own zone in the
    * service and told so via `scopedToZoneId`.
+   *
+   * `population` defaults to `operational` (#233): warehouse devices are silent because they are in a
+   * box, and counting them as failed installs put the live 90-day failure rate at 39.1% against an
+   * actual 5.6%. `population=all` reproduces the pre-#233 figures for reconciliation.
    */
   @Get('commissioning/cohort')
   @Roles(...MANAGER_ROLES)
@@ -51,6 +56,7 @@ export class ReportsController {
     @CurrentUser() user: AccessTokenClaims,
     @Query('cohortDays') cohortDays?: string,
     @Query('graceHours') graceHours?: string,
+    @Query('population') population?: string,
     @Query('zoneId') zoneId?: string,
     @Query('plantId') plantId?: string,
     @Query('remark') remark?: string | string[],
@@ -60,6 +66,7 @@ export class ReportsController {
       {
         cohortDays: parseBoundedInt(cohortDays, 'cohortDays', COHORT_DAYS),
         graceHours: parseBoundedInt(graceHours, 'graceHours', GRACE_HOURS),
+        population: parseEnum(population, 'population', POPULATIONS, 'operational'),
         zoneId: parseOptBigInt(zoneId, 'zoneId'),
         plantId: parseOptBigInt(plantId, 'plantId'),
         remarks: parseRemarks(remark),
@@ -76,6 +83,7 @@ export class ReportsController {
     @Query('groupBy') groupBy?: string,
     @Query('sort') sort?: string,
     @Query('minInstalls') minInstalls?: string,
+    @Query('population') population?: string,
     @Query('zoneId') zoneId?: string,
     @Query('plantId') plantId?: string,
     @Query('remark') remark?: string | string[],
@@ -87,6 +95,7 @@ export class ReportsController {
         groupBy: parseEnum(groupBy, 'groupBy', INSTALL_QUALITY_GROUP_BYS, 'installer'),
         sort: parseEnum(sort, 'sort', INSTALL_QUALITY_SORTS, 'installs'),
         minInstalls: parseBoundedInt(minInstalls, 'minInstalls', MIN_INSTALLS),
+        population: parseEnum(population, 'population', POPULATIONS, 'operational'),
         zoneId: parseOptBigInt(zoneId, 'zoneId'),
         plantId: parseOptBigInt(plantId, 'plantId'),
         remarks: parseRemarks(remark),
@@ -255,6 +264,8 @@ export class ReportsController {
 
 const INSTALL_QUALITY_GROUP_BYS: InstallQualityGroupBy[] = ['installer', 'plant'];
 const INSTALL_QUALITY_SORTS: InstallQualitySort[] = ['installs', 'neverOnlineRate'];
+/** Order matters only for the error message; `operational` is the default at both call sites (#233). */
+const POPULATIONS: CommissioningPopulation[] = ['operational', 'all'];
 /** No ceiling worth enforcing — a high floor only ever shrinks the result set. */
 const MIN_INSTALLS = { min: 1, max: 100_000, fallback: 1 } as const;
 

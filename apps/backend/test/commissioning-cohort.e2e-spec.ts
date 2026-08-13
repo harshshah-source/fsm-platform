@@ -55,12 +55,17 @@ describe('GET /api/reports/commissioning — cohort + install quality (real DI g
   let plantEpoch: bigint; // pre-epoch TTFR exclusion
   let plantEmpty: bigint; // inert-on-empty
   let plantOut: bigint; // outside the ZM's zone
+  let plantPop: bigint; // the #233 population split
+  let plantDead: bigint; // deactivated under #119
+  let deactivationId: bigint;
 
   const TECH = `ZZ_TECH_${NS}`;
   const BURST = `ZZ BURST ${NS}`;
   const PERSON = `ZZ PERSON ${NS}`;
   const UNDERSCORED = `ZZPLANT_SOMEONE${NS}`;
   const MACHINE = 'INTEGRATION_SERVICE';
+  /** Owns only the #233 population fixtures, so its row isolates the split from every other assertion. */
+  const POP = `ZZ_POP_${NS}`;
 
   const deviceIds: string[] = [];
   const plantIds: bigint[] = [];
@@ -88,6 +93,11 @@ describe('GET /api/reports/commissioning — cohort + install quality (real DI g
     plantEpoch = await plant('epoch', ZONE_NORTH);
     plantEmpty = await plant('empty', ZONE_NORTH);
     plantOut = await plant('out', zoneOther);
+    plantPop = await plant('pop', ZONE_NORTH);
+    plantDead = await plant('dead', ZONE_NORTH);
+    deactivationId = (await prisma.plantDeactivation.create({
+      data: { plantId: plantDead, reason: `commissioning population fixture ${NS}` },
+    })).id;
 
     // --- the cohort population on `plantCohort`: 5 fitments inside a 7-day window ------------------
     // A/B came online (TTFR 2h and 6h). C is silent inside the 48h grace. D is silent PAST it. E holds
@@ -126,6 +136,19 @@ describe('GET /api/reports/commissioning — cohort + install quality (real DI g
 
     // --- outside the ZM's zone --------------------------------------------------------------------
     await fitment({ suffix: 'O', plantId: plantOut, installedAt: hoursAgo(6), firstReportedAt: hoursAgo(5), installedBy: TECH });
+
+    // --- the #233 population split, all on `plantPop`/`plantDead` ---------------------------------
+    // Four fitments, one per population state, deliberately given the SAME shape as each other —
+    // silent and well past the 48h grace — so the ONLY thing that can move them between `failed` and
+    // "not in the measure" is the population predicate itself. Before #233 all four counted as failed
+    // installs; that is the 39.1%-vs-5.6% defect in miniature.
+    await fitment({ suffix: 'W1', plantId: plantPop, installedAt: hoursAgo(90), firstReportedAt: null, installedBy: POP, departed: true });
+    await fitment({ suffix: 'W2', plantId: plantPop, installedAt: hoursAgo(90), firstReportedAt: null, installedBy: POP, departed: true });
+    await fitment({ suffix: 'G1', plantId: plantPop, installedAt: hoursAgo(90), firstReportedAt: null, installedBy: POP });
+    await fitment({ suffix: 'K1', plantId: plantDead, installedAt: hoursAgo(90), firstReportedAt: null, installedBy: POP });
+    // No `device_states` row at all — a fitment that outlived its mirror row (#227). The table carries
+    // no FKs precisely so this is representable, and it is NOT the same claim as "departed".
+    await fitment({ suffix: 'M1', plantId: plantPop, installedAt: hoursAgo(90), firstReportedAt: null, installedBy: POP, unmirrored: true });
   });
 
   async function fitment(spec: {
@@ -134,20 +157,27 @@ describe('GET /api/reports/commissioning — cohort + install quality (real DI g
     installedAt: Date;
     firstReportedAt: Date | null;
     installedBy: string | null;
+    /** #233: returned to a warehouse — silent by circumstance, not by fault. */
+    departed?: boolean;
+    /** #233: no `device_states` row is written at all — the fitment outlived the mirror (#227). */
+    unmirrored?: boolean;
   }): Promise<void> {
     const deviceId = `ZZC${NS}${spec.suffix}`;
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
-    await prisma.deviceState.create({
-      data: {
-        deviceId,
-        plantId: spec.plantId,
-        companyId,
-        firstReportedAt: spec.firstReportedAt,
-        firstReportedOffsetMin: spec.firstReportedAt ? 0 : null,
-        computedAt: NOW,
-      },
-    });
+    if (!spec.unmirrored) {
+      await prisma.deviceState.create({
+        data: {
+          deviceId,
+          plantId: spec.plantId,
+          companyId,
+          isDeparted: spec.departed ?? false,
+          firstReportedAt: spec.firstReportedAt,
+          firstReportedOffsetMin: spec.firstReportedAt ? 0 : null,
+          computedAt: NOW,
+        },
+      });
+    }
     await prisma.deviceCommissioning.create({
       data: {
         deviceId,
@@ -169,6 +199,7 @@ describe('GET /api/reports/commissioning — cohort + install quality (real DI g
     await prisma.deviceCommissioning.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.deviceState.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
+    await prisma.plantDeactivation.deleteMany({ where: { id: deactivationId } });
     await prisma.plant.deleteMany({ where: { plantId: { in: plantIds } } });
     await prisma.company.deleteMany({ where: { companyId } });
     await prisma.zone.deleteMany({ where: { zoneId: zoneOther } });
@@ -475,6 +506,113 @@ describe('GET /api/reports/commissioning — cohort + install quality (real DI g
     it('rejects an unauthenticated request', async () => {
       await request(app.getHttpServer()).get('/api/reports/commissioning/cohort').expect(401);
       await request(app.getHttpServer()).get('/api/reports/commissioning/installers').expect(401);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // 5. The population predicate (#233)
+  //
+  // The defect this closes, in one sentence: the cohort had no operational-fleet predicate, so a
+  // device returned to a warehouse was counted as a FAILED INSTALL. Measured live on `fsm` over 90
+  // days before the fix — 6,832 fitments / 2,668 failed (39.1%); after — 2,645 / 147 (5.6%), because
+  // 4,127 of the 6,405 cohort devices were departed.
+  //
+  // The `POP` installer owns five fitments of deliberately IDENTICAL shape (silent, 90h old, well past
+  // the grace window). They differ in exactly one way — which population they belong to — so anything
+  // that moves between the two runs below is the predicate and nothing else.
+  //   W1, W2  warehouse (is_departed = true)
+  //   G1      operational
+  //   K1      on a plant deactivated under #119
+  //   M1      no device_states row at all (#227)
+  // ---------------------------------------------------------------------------------------------
+  describe('population', () => {
+    const popRow = (body: { byInstaller: { installerKey: string }[] }) =>
+      body.byInstaller.find((r) => r.installerKey === POP) as
+        | { fitments: number; online: number; pending: number; failed: number }
+        | undefined;
+
+    it('defaults to the operational fleet: a warehoused device is not a failed install (AC-1)', async () => {
+      const token = await login('ops.head@fsm.test');
+      const res = await cohort(token, { cohortDays: 7 });
+
+      // Only G1 survives. W1/W2 are in a box, K1's plant is deactivated, M1 has no mirror row —
+      // none of them is evidence that an install failed.
+      expect(popRow(res.body)).toMatchObject({ fitments: 1, online: 0, pending: 0, failed: 1 });
+    });
+
+    it('population=all reproduces the pre-#233 numbers exactly (AC-2)', async () => {
+      const token = await login('ops.head@fsm.test');
+      const res = await cohort(token, { cohortDays: 7, population: 'all' });
+
+      // All five, and every one of them graded `failed` — which is precisely what the old query did
+      // to 2,668 fitments on live data.
+      expect(popRow(res.body)).toMatchObject({ fitments: 5, online: 0, pending: 0, failed: 5 });
+    });
+
+    it('reports the census, and its parts sum to the window exactly (AC-3, AC-4)', async () => {
+      const token = await login('ops.head@fsm.test');
+      const res = await cohort(token, { cohortDays: 7 });
+      const c = res.body.population;
+
+      // The identity — the whole reason `deactivatedPlant` is a remainder rather than its own FILTER.
+      expect(c.operational + c.warehouse + c.deactivatedPlant + c.unmirrored).toBe(c.fitmentsInWindow);
+      // And each drop is named rather than merely absent. Fixture-relative (`toBeGreaterThanOrEqual`)
+      // because #156's leaked fixtures mean this database is never empty of other people's rows.
+      expect(c.warehouse).toBeGreaterThanOrEqual(2);
+      expect(c.deactivatedPlant).toBeGreaterThanOrEqual(1);
+      expect(c.unmirrored).toBeGreaterThanOrEqual(1);
+    });
+
+    it('the census does NOT move with the population filter — it describes the window, not the measure', async () => {
+      const token = await login('ops.head@fsm.test');
+      const operational = await cohort(token, { cohortDays: 7 });
+      const all = await cohort(token, { cohortDays: 7, population: 'all' });
+
+      // If the census were population-filtered it could never name what the filter removed, which is
+      // the one job it has.
+      expect(all.body.population).toEqual(operational.body.population);
+      // The selected part, by contrast, must equal the census entry it selects.
+      expect(operational.body.totals.fitments).toBe(operational.body.population.operational);
+      expect(all.body.totals.fitments).toBe(all.body.population.fitmentsInWindow);
+    });
+
+    it('drops a group whose every fitment fell outside the population, rather than showing zeroes', async () => {
+      const token = await login('ops.head@fsm.test');
+      const res = await cohort(token, { cohortDays: 7 });
+
+      // `plantDead` contributes only K1, which the operational predicate removes. A row of zeroes
+      // would read as "this plant fitted nothing", which is a different and false claim.
+      const dead = res.body.byPlant.find((r: { plantId: string }) => r.plantId === String(plantDead));
+      expect(dead).toBeUndefined();
+      const all = await cohort(token, { cohortDays: 7, population: 'all' });
+      expect(all.body.byPlant.find((r: { plantId: string }) => r.plantId === String(plantDead))).toBeDefined();
+    });
+
+    it('applies the same predicate to install quality, and echoes it in filters', async () => {
+      const token = await login('ops.head@fsm.test');
+      const operational = await installers(token, { lookbackDays: 30 });
+      const all = await installers(token, { lookbackDays: 30, population: 'all' });
+
+      const find = (body: { rows: { installerKey: string }[] }) => body.rows.find((r) => r.installerKey === POP) as
+        | { installs: number; neverOnline: number; neverOnlineRate: number; distinctPlants: number }
+        | undefined;
+
+      expect(find(operational.body)).toMatchObject({ installs: 1, neverOnline: 1, neverOnlineRate: 1 });
+      // Two plants only under `all`: plantDead's fitment is excluded from the operational view, so a
+      // count(DISTINCT) that ignored the filter would leak it back in.
+      expect(find(operational.body)!.distinctPlants).toBe(1);
+      expect(find(all.body)).toMatchObject({ installs: 5, neverOnline: 5, distinctPlants: 2 });
+
+      expect(operational.body.filters.population).toBe('operational');
+      expect(all.body.filters.population).toBe('all');
+    });
+
+    it('rejects an unknown population rather than silently falling back', async () => {
+      const token = await login('ops.head@fsm.test');
+      // Silently defaulting would answer a question the caller did not ask — the same failure the ZM
+      // clamp rejects rather than overrides.
+      await cohort(token, { cohortDays: 7, population: 'everything' }, 400);
+      await installers(token, { lookbackDays: 30, population: 'everything' }, 400);
     });
   });
 });
