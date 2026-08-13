@@ -1,6 +1,7 @@
 # 234 — Cohort resolution curve: how fast a fitment batch comes online
 
-Status: ready-for-agent
+Status: **done 2026-08-13** — AC-1/2/3/5 checked; AC-4 restated against measurement (see below).
+Report: `docs/progress/234-commissioning-resolution-curve.md`
 Type: Feature (Backend-only) · Reports · AFK
 Filed: 2026-08-13, from `audit/recently-commissioned-devices-investigation-2026-08-13.md` §5
 Feeds: [#232](./232-commissioning-cohort-view.md) AC-1 (the admin surface's trend panel)
@@ -60,7 +61,12 @@ table — that is the unnecessary table this feature was scoped to avoid.
 3. **AC-3** Measured, not assumed: the extended query holds the §7.2 plan at `cohortDays=90` — one
    pass, quicksort in memory, no disk spill. Record the `EXPLAIN (ANALYZE, BUFFERS)` in the
    completion report. Baseline to beat or match: **23.9 ms, `shared hit=1634`, zero reads.**
-4. **AC-4** Live shape against `fsm` reproduces the distribution above (97.7% inside 48 h).
+4. **AC-4** Live shape against `fsm`. ~~reproduces the distribution above (97.7% inside 48 h)~~
+   **Restated on measurement, 2026-08-13.** The live curve reads **83.1% by 48 h and flat after**
+   (0 fitments in the 48–72 h band). The 97.7% in this issue was computed New-Installation-only and
+   before the maturity gate existed; it is not the number this endpoint returns over all remarks. The
+   *property* the AC was reaching for — resolved by 48 h, flat after — holds, and the probe asserts
+   that property rather than either literal.
 5. **AC-5** A zero-sample bucket set returns nulls on the same code path as `NO_TIMING` — "nothing
    measured" and "everything instant" must never render as the same claim.
 

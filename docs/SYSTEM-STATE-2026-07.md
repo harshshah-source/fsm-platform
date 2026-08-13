@@ -898,6 +898,22 @@ between states and a device ageing out of the window requires no write.
 > collection glob because they assert properties of mutating data and cannot be a green/red gate.
 > #232's AC-2 ("validate against live `fsm`") had sat unexecuted for three days behind 35 green fixture
 > tests that could not have caught this, every fixture device being operational.
+>
+> **Also 2026-08-13 (#234) — the cohort payload carries a `resolution` curve**: % online by hours since
+> fitment (bands 4/12/24/48/72), as `count(*) FILTER (…)` columns on the *same* `GROUPING SETS` pass —
+> no second query, no new endpoint, no new table, no job. It is the only cohort trend FSM can honestly
+> compute today; the calendar-time inactivity series stays **deferred with its precondition stated**,
+> because #229's auto-recovery has still never run and 1,799 of the operational cohort's 2,183
+> `failure_cycles` are `OPEN`, which would make any calendar series rise as a scheduler artefact.
+> Two exclusions make it correct and both are reported rather than silent: **maturity** (a fitment
+> younger than the widest band cannot be graded against that band) and the **epoch gate applied
+> symmetrically** — pre-epoch fitments leave the curve whatever they did. The first cut excluded only
+> the pre-epoch fitments that came *online* and read **37.2% online-by-48 h against a true 83.1%**;
+> every fixture passed and only the live probe showed it. Live today: 83.1% by 48 h and flat after,
+> `curve=65 (sample 56 + never 9)`, `preEpochExcluded=2040`, 520 immature of 2,625, **26 ms** at the
+> 90-day ceiling. The pre-epoch contamination ages out with no backfill — once the epoch passes 90 days
+> (~2026-11-07) no cohort window can contain a pre-epoch fitment. Report:
+> `docs/progress/234-commissioning-resolution-curve.md`.
 
 Three things a reader of these numbers has to know, all of them counter-intuitive:
 
