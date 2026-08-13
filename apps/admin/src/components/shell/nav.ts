@@ -114,6 +114,7 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
     const analytics: NavLink[] = [
       { label: 'Reports', to: '/reports', icon: IconGrid },
       { label: 'Device Detail', to: '/reports/device', icon: IconTicket },
+      { label: 'Commissioning Cohort', to: '/reports/commissioning', icon: IconActivity },
       { label: 'Root Cause Analytics', to: '/reports/root-cause', icon: IconActivity },
       { label: 'System Efficiency', to: '/reports/system-efficiency', icon: IconActivity },
     ];

@@ -29,6 +29,7 @@ import { IntradayQueuePage } from './pages/schedules/IntradayQueuePage';
 import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
+import { CommissioningCohortPage } from './pages/reports/CommissioningCohortPage';
 import { CsmApprovalSharePage } from './pages/reports/CsmApprovalSharePage';
 import { ExportsPage } from './pages/exports/ExportsPage';
 import { OpsExplorerPage } from './pages/ops-explorer/OpsExplorerPage';
@@ -177,6 +178,16 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <RootCauseAnalyticsPage />
+              </RoleRoute>
+            }
+          />
+          {/* Commissioning Cohort (#232 / #233 / #234) — install quality for recently fitted devices.
+              Manager roles; a ZM is clamped to their own zone in the service and told so on the page. */}
+          <Route
+            path="/reports/commissioning"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <CommissioningCohortPage />
               </RoleRoute>
             }
           />

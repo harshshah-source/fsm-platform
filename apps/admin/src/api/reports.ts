@@ -199,3 +199,155 @@ export interface ZmScorecardReport {
   trend: unknown[];
 }
 export const apiZmScorecard = () => get<ZmScorecardReport>('/reports/zm-scorecard');
+
+// ---- Commissioning cohort & install quality (#232 / #233 / #234) ----------------
+
+/**
+ * Which fitments are in the measure (#233). `operational` — the default, and the same population
+ * every rate on the dashboard is taken over — excludes warehouse devices and deactivated plants.
+ * `all` reproduces the pre-#233 figures and exists for reconciliation, not as a second measure.
+ */
+export type CommissioningPopulation = 'operational' | 'all';
+
+/** Every fitment in the window and where each one went. The four parts sum to `fitmentsInWindow`. */
+export interface CommissioningPopulationCensus {
+  fitmentsInWindow: number;
+  operational: number;
+  warehouse: number;
+  deactivatedPlant: number;
+  unmirrored: number;
+}
+
+export interface CommissioningTiming {
+  /** Null — rendered "—" — when nothing was measured. Never conflate with a measured 0. */
+  medianHours: number | null;
+  p95Hours: number | null;
+  sampleSize: number;
+}
+
+export interface CohortCounts {
+  fitments: number;
+  online: number;
+  /** Silent, still inside the grace window. Not yet a defect. */
+  pending: number;
+  /** Silent, past the grace window. A defect. */
+  failed: number;
+  ttfr: CommissioningTiming;
+}
+
+export interface CommissioningResolutionBucket {
+  upToHours: number;
+  fitments: number;
+  cumulativeOnline: number;
+  /** Null when the curve has no denominator — the chart must draw nothing, not a line at 0. */
+  cumulativeOnlinePct: number | null;
+}
+
+/** How fast the cohort came online (#234). See `preEpochExcluded` for the one counter-intuitive part. */
+export interface CommissioningResolution {
+  maturityHours: number;
+  maturedFitments: number;
+  curveFitments: number;
+  sampleSize: number;
+  neverOnline: number;
+  /** Matured but fitted before the TTFR epoch — excluded whatever they did, so the gate is symmetric. */
+  preEpochExcluded: number;
+  buckets: CommissioningResolutionBucket[];
+  beyondLastBucket: number;
+}
+
+export type InstallerKind = 'PERSON' | 'SERVICE_ACCOUNT' | 'UNCLASSIFIED' | 'UNATTRIBUTED';
+
+export interface CohortPlantRow extends CohortCounts {
+  plantId: string;
+  plantName: string;
+  zoneId: string;
+}
+
+export interface CohortInstallerRow extends CohortCounts {
+  installerKey: string | null;
+  installerKind: InstallerKind;
+}
+
+export interface CommissioningCohortReport {
+  cohortDays: number;
+  graceHours: number;
+  cohortStart: string;
+  generatedAt: string;
+  /** Non-null only when the viewer is CLAMPED (a ZM) — the page renders its caveat off this. */
+  scopedToZoneId: string | null;
+  filters: { zoneId: string | null; plantId: string | null; remarks: string[] | null; population: CommissioningPopulation };
+  population: CommissioningPopulationCensus;
+  resolution: CommissioningResolution;
+  totals: CohortCounts;
+  byPlant: CohortPlantRow[];
+  byInstaller: CohortInstallerRow[];
+}
+
+export interface InstallQualityRow {
+  installerKey?: string | null;
+  installerKind?: InstallerKind;
+  plantId?: string;
+  plantName?: string;
+  zoneId?: string;
+  installs: number;
+  neverOnline: number;
+  /** 0–1, three decimals. */
+  neverOnlineRate: number;
+  firstInstallAt: string | null;
+  lastInstallAt: string | null;
+  distinctPlants: number;
+  /** 1 across many installs is the one-afternoon signature. */
+  distinctInstallDays: number;
+  ttfr: CommissioningTiming;
+}
+
+export interface InstallQualityReport {
+  lookbackDays: number;
+  since: string;
+  generatedAt: string;
+  groupBy: 'installer' | 'plant';
+  scopedToZoneId: string | null;
+  filters: {
+    zoneId: string | null;
+    plantId: string | null;
+    remarks: string[] | null;
+    minInstalls: number;
+    population: CommissioningPopulation;
+  };
+  rows: InstallQualityRow[];
+}
+
+/**
+ * The live cohort. `cohortDays` is capped at 90 server-side — a measured performance contract, not
+ * taste — so the page says "last 90 days" rather than "last 3 months".
+ */
+export const apiCommissioningCohort = (params: {
+  cohortDays?: number;
+  graceHours?: number;
+  population?: CommissioningPopulation;
+  remarks?: string[];
+} = {}) => {
+  const q = new URLSearchParams();
+  if (params.cohortDays !== undefined) q.set('cohortDays', String(params.cohortDays));
+  if (params.graceHours !== undefined) q.set('graceHours', String(params.graceHours));
+  if (params.population !== undefined) q.set('population', params.population);
+  // Repeatable: Express hands the backend a string for one and an array for several.
+  for (const remark of params.remarks ?? []) q.append('remark', remark);
+  const qs = q.toString();
+  return get<CommissioningCohortReport>(`/reports/commissioning/cohort${qs ? `?${qs}` : ''}`);
+};
+
+/** Install quality over a longer lookback — the historical installer / plant breakdown. */
+export const apiCommissioningInstallers = (params: {
+  lookbackDays?: number;
+  groupBy?: 'installer' | 'plant';
+  sort?: 'installs' | 'neverOnlineRate';
+  minInstalls?: number;
+  population?: CommissioningPopulation;
+} = {}) => {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined) q.set(k, String(v));
+  const qs = q.toString();
+  return get<InstallQualityReport>(`/reports/commissioning/installers${qs ? `?${qs}` : ''}`);
+};
