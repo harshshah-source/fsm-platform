@@ -178,7 +178,7 @@ are running now**, while `INGESTION_SCHEDULER_ENABLED` (`:18`) and `PARTITION_MA
 | External source | AutoPlant MySQL over VPN, `mysql2@^3.15.3`, lazy pool, unset env ⇒ empty/mock sources so dev/CI boots | `ingestion.module.ts` (`readAutoPlantMysqlConfig()===null` branches) |
 | Cron | **In-process** `@nestjs/schedule@^4.1.2` only. Two scheduler homes: `IntegrationSchedulerService` (ingestion, owns `ScheduleModule.forRoot()` in `ingestion.module.ts`) and `BusinessSweepSchedulerModule`+`DispatchSchedulerService` (field-loop sweeps + daily dispatch) | `ingestion.module.ts`, `scheduling/business-sweep-scheduler.service.ts`, `scheduling/dispatch-scheduler.service.ts` |
 | Queueing | **None.** No Redis, no BullMQ, no S3 in `apps/backend/package.json` — CLAUDE.md's "Redis/BullMQ, S3" line is aspirational, not current (§4 correction) | `package.json` deps grep |
-| Auth store | **In-memory** users + refresh tokens (`InMemoryUserStore`/`InMemoryRefreshTokenStore`); DB `users` table exists but cannot log in — owned by open issue #91 | `auth/user-store.ts`, `auth/refresh-token-store.ts` |
+| Auth store | **Postgres-backed** users + refresh tokens (`PrismaUserStore`/`PrismaRefreshTokenStore`, #91 S1–S4 done 2026-08-03; `auth/user-store.ts` is deleted). A dev database gets its logins from `npm run seed:dev` (#194) — nothing seeds them at boot any more. See §3j | `auth/prisma-user-store.ts`, `auth/prisma-refresh-token-store.ts`, `auth/dev-seed.ts` |
 | Deployment | **None** — no Dockerfile, no compose, no runbook (issue #111 open) | repo root inspection; `docs/audits/2026-07-07-…reaudit.md` |
 
 ### 1.4 Module map
@@ -659,9 +659,20 @@ in `user_credentials` (scrypt), sessions survive a restart, and `src/auth/user-s
 `src/auth/auth-fixture-seed.ts`; the guard chain clamps each ZM to their `zone_id`.
 **Correction (2026-08-04):** this paragraph previously said the dev *seed* carries those accounts. It
 does not — `seedAuthFixtureUsers` is called only from `test/global-setup.ts`, i.e. against `fsm_test`.
-**No committed path seeds a credential on a dev database**, so a clean clone can start the backend and
-still have every login 401 (`user_credentials` was measured empty on the dev DB, 0 rows). Owned by
-**#194**; #91 S4's in-memory retirement removed the implicit dev-login provision without a replacement. ~~`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret~~ **closed by #98
+**Closed by #194 (2026-08-13):** `npm run seed:dev` (`src/seed-dev.ts` → `src/auth/dev-seed.ts`) is
+the committed dev entrypoint that was missing. It reuses the same fixture list — so the eight
+accounts a spec logs in as and the eight a browser logs in as are the same rows — and is **default-off
+in every environment**: it requires `ALLOW_DEV_SEED=true` and is refused outright under
+`NODE_ENV=production`, which the flag cannot override (`src/auth/dev-seed.config.ts`). It preflights
+that the operational zones exist, because a ZM seeded against an unseeded database gets a null
+`zone_id` and becomes a login that authenticates then 403s everywhere; the enforced order is
+migrate → `seed` → `seed:dev` → start. `src/seed.ts` is untouched: the wall that keeps a real-database
+seed from minting `*@fsm.test` credentials stands, and #194 built the other half rather than relaxing
+it. Runbook: `docs/runbooks/local-development-login.md`. Before this, a clean clone could start the
+backend and still have every login 401 (`user_credentials` measured empty on the dev DB, 0 rows) with
+no diagnostic — #91 S4's in-memory retirement had removed the implicit dev-login provision without a
+replacement, and `test/dev-seed.e2e-spec.ts` is now the tripwire against that regressing again.
+~~`JWT_ACCESS_SECRET` falls back to a hardcoded dev secret~~ **closed by #98
 (done 2026-07-12, 4 slices `25a46d4`…`55183e6`): fail-fast boot config (no JWT fallback), public
 liveness/readiness probes, graceful shutdown + fatal bootstrap guard, global exception filter with
 error correlation ids (pino swap deliberately not adopted — Nest Logger retained).**
@@ -962,10 +973,11 @@ question. Grain differs by design and is stated on both — the cohort counts **
 counts **devices**, and 6.4% of cohort devices carry more than one fitment in 90 days.
 Report: `docs/progress/235-commissioning-drillthrough.md`.
 
-**Still open:** neither page has **ever been opened in a browser against a live backend** — no
-committed path seeds a dev credential (#194), so every login 401s there; both are proven by tests over
-payload shapes taken from the live probe's real output. Full investigation:
-`audit/recently-commissioned-devices-investigation-2026-08-13.md`.
+**Still open:** neither page has **ever been opened in a browser against a live backend**; both are
+proven by tests over payload shapes taken from the live probe's real output, which is not the same as
+having watched them render. The *reason* is gone as of 2026-08-13 — #194 landed `npm run seed:dev`,
+so a dev login is now reproducible on any machine — but the eyeball pass itself has not been done.
+Full investigation: `audit/recently-commissioned-devices-investigation-2026-08-13.md`.
 
 ---
 

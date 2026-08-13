@@ -6,6 +6,15 @@ Type: AFK
 > **Done 2026-07-20** — `InMemoryUserStore` now seeds `zm.south`/`zm.east`/`zm.west` (zones 2/3/4)
 > alongside `zm.north`; `test/per-zone-zm-logins.e2e-spec.ts` (5/5) asserts each ZM's `zone_id` and the
 > South-ZM cross-zone 403. No FE change (login is email/password). Uncommitted.
+>
+> **Where these accounts live now (updated 2026-08-13, [#194](./194-no-dev-login-seed-path.md)):**
+> `InMemoryUserStore` was deleted by #91 S4 and this note's "now seeds" is history. The four ZM
+> accounts are rows in `src/auth/auth-fixture-seed.ts`, written to a database by two callers —
+> `test/global-setup.ts` (into `fsm_test`, automatically, every suite run) and `npm run seed:dev`
+> (#194's gated dev entrypoint, `src/auth/dev-seed.ts`). Between #91 S4 and #194 the *only* caller
+> was the test one, which is why a dev database had no ZM login at all for nine days. The spec this
+> issue delivered is unchanged and still passing. Setup path:
+> `docs/runbooks/local-development-login.md`.
 
 > Operator ask (2026-07-20): a separate login for the ZM of each operational zone. Today the dev
 > auth seed carries a single `zm.north@fsm.test` (zone 1) — there is no South/East/West ZM account,

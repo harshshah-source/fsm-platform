@@ -1,7 +1,21 @@
 # 194 — No committed path seeds a login for the dev database
 
-Status: ready-for-agent
+Status: done
 Type: AFK · Backend · Dev environment
+
+> **Done 2026-08-13** — `npm run seed:dev` (`src/seed-dev.ts` → `src/auth/dev-seed.ts`), gated by a
+> default-off `ALLOW_DEV_SEED` and an unconditional refusal under `NODE_ENV=production` that the flag
+> cannot override. Reuses the existing fixture list rather than defining the accounts a second time,
+> so the eight logins a spec uses and the eight a browser uses are the same rows. `src/seed.ts` is
+> untouched — the wall stands; this is the other half. 19 tests (10 pure guard, 4 e2e, +2 on #182's
+> allowlist, +3 zone preflight), all three refusal/success paths exercised for real against `fsm`.
+> Full record: `docs/progress/194-dev-login-seed-path.md`. Runbook:
+> `docs/runbooks/local-development-login.md`.
+>
+> Two things worth carrying forward: a **zone preflight** the ACs did not ask for (seeding before
+> `npm run seed` silently produced ZMs with a null `zone_id` — a login that authenticates then 403s
+> everywhere, worse to diagnose than the 401 this issue removed), and a **data-derived third guard
+> considered and rejected** with the residual risk stated in `dev-seed.config.ts` rather than hidden.
 
 Filed 2026-08-04, hit while starting the backend after [#193](./193-zone-drilldown-enrichment.md).
 Not a duplicate of [#91](./91-production-auth-postgres-backed-credential-store.md) — see
@@ -107,7 +121,13 @@ a clean clone cannot reach a working state. Neither blocks the other.
 - #133's done-note says `InMemoryUserStore` "now seeds `zm.south`/`zm.east`/`zm.west`". That store is
   deleted; the note should point at wherever those accounts live after this issue.
 
-## Current workaround (applied to this machine only — NOT a fix)
+## Current workaround (applied to this machine only — NOT a fix) — *retired 2026-08-13*
+
+> The accounts described below now exist on this machine because **committed code** put them there
+> (`ALLOW_DEV_SEED=true npm run seed:dev`), not because a session hand-ran the test fixture. Kept as
+> the record of what the gap looked like. Note `ensureCredential` never rotates, so the rows are the
+> originals — the seeder confirmed them rather than replacing them.
+
 
 `seedAuthFixtureUsers` was run against `fsm` via a one-off script (not committed, nothing in the repo
 changed), creating the 8 `*@fsm.test` accounts with password `correct-password`. Verified: login →
@@ -117,24 +137,41 @@ This does not survive a database reset and exists on no other machine.
 
 ## Acceptance criteria
 
-- [ ] A committed, documented entrypoint (e.g. `npm run seed:dev`) leaves the dev database with at
+- [x] A committed, documented entrypoint (e.g. `npm run seed:dev`) leaves the dev database with at
       least one working login per manager role — `OPERATIONS_HEAD`, `CENTRAL_SERVICE_MANAGER`,
       `ZONAL_MANAGER` (one per operational zone), `WAREHOUSE_MANAGER`, `SERVICE_ENGINEER`.
-- [ ] It is **idempotent** (re-runnable after a partial run, like `seedAuthFixtureUsers` already is)
+      *All eight fixture accounts; run for real against `fsm` → `Seeded 8 dev login(s)`.*
+- [x] It is **idempotent** (re-runnable after a partial run, like `seedAuthFixtureUsers` already is)
       and creates only `users` + `user_credentials` rows — no reference data, no device/ticket rows.
-- [ ] It **refuses to run against a non-development database.** This is the property that let the
-      fixture be walled off in the first place, and it must not be lost: an explicit opt-in
-      (`ALLOW_DEV_SEED=true`, or refusing when `NODE_ENV=production`) with a clear error, plus a test
-      asserting the refusal. Decide and record whether the accounts keep the well-known
-      `correct-password` or take it from an env var.
-- [ ] `apps/admin/visual/manifest.mjs`'s `CREDS` resolve against a database prepared by this script,
+      *Asserted twice-run, plus a before/after census over zones/plants/devices/tickets/users/creds.*
+- [x] It **refuses to run against a non-development database.** *Two layers: default-off
+      `ALLOW_DEV_SEED`, and an unconditional `NODE_ENV=production` refusal the flag cannot override.
+      7 unit tests + 2 e2e; both refusals also exercised for real (exit 1, database untouched). A
+      third, data-derived layer was **considered and rejected** — reasoning and residual risk in
+      `src/auth/dev-seed.config.ts`.* **Password decision: the well-known `correct-password` is
+      kept as the default**, overridable via `DEV_SEED_PASSWORD`, blank rejected rather than falling
+      back. Requiring an env var would have broken the AC below on its face, since `manifest.mjs`
+      hardcodes that password and the AC asks for a clean machine to work unconfigured.
+- [x] `apps/admin/visual/manifest.mjs`'s `CREDS` resolve against a database prepared by this script,
       so `npm run visual:capture` works on a clean machine. (Re-capturing the stale
       `visual/baseline/` is **not** in scope — that is an operator-eyeball gate.)
-- [ ] Setup documentation states the sequence — migrate → seed → seed:dev → start — and the resulting
-      credentials.
-- [ ] The three stale doc/comment sites above are corrected to match.
-- [ ] A test asserts that a freshly seeded dev database can authenticate at least one manager role,
+      *Same accounts, same default password, prerequisite documented in `manifest.mjs`. Note the
+      harness itself was not run end to end — see the progress report's "Not done".*
+- [x] Setup documentation states the sequence — migrate → seed → seed:dev → start — and the resulting
+      credentials. *`docs/runbooks/local-development-login.md` + an `.env.example` section.*
+- [x] The three stale doc/comment sites above are corrected to match. *Plus a fourth found in
+      passing: SYSTEM-STATE §1.3's "Auth store" row still described the deleted in-memory stores.*
+- [x] A test asserts that a freshly seeded dev database can authenticate at least one manager role,
       so this cannot silently regress the way #91 S4 regressed it.
+      *`test/dev-seed.e2e-spec.ts` — logs in as `ops.head@fsm.test`, asserts `OPERATIONS_HEAD`.*
+
+## Enforced beyond the ACs — the zone preflight
+
+`seedAuthFixtureUsers` resolves each ZM's zone by **name**. On a database where `npm run seed` has
+not run, that lookup misses *silently*: the upsert succeeds and writes a `ZONAL_MANAGER` with a null
+`zone_id` — an account that logs in and then 403s on every zone-scoped route. That is harder to
+diagnose than the 401 this issue removes, so `seed:dev` refuses when the operational zones are absent
+and names them plus the command to run. The documented order is enforced, not merely written down.
 
 ## Explicit non-goals
 
