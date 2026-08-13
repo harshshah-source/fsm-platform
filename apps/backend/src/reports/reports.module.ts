@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { CommissioningAggregationService } from './commissioning-aggregation.service';
 import { FleetUptimeAggregationService } from './fleet-uptime-aggregation.service';
 import { ReportsService } from './reports.service';
 import { RootCauseAnalyticsAggregationService } from './root-cause-aggregation.service';
@@ -15,7 +16,7 @@ import { ZmPerformanceAggregationService } from './zm-performance-aggregation.se
  */
 @Module({
   imports: [PrismaModule],
-  providers: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService, RootCauseAnalyticsAggregationService, ZmPerformanceAggregationService, SystemEfficiencyAggregationService],
-  exports: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService, RootCauseAnalyticsAggregationService, ZmPerformanceAggregationService, SystemEfficiencyAggregationService],
+  providers: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService, RootCauseAnalyticsAggregationService, ZmPerformanceAggregationService, SystemEfficiencyAggregationService, CommissioningAggregationService],
+  exports: [ReportsService, FleetUptimeAggregationService, SoftInactiveCountService, RootCauseAnalyticsAggregationService, ZmPerformanceAggregationService, SystemEfficiencyAggregationService, CommissioningAggregationService],
 })
 export class ReportsModule {}

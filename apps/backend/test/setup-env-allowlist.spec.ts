@@ -34,6 +34,7 @@ describe('setup-env allowlist (#182)', () => {
     env.DEV_AUTH_ZONE = 'EAST';
     env.AUTOPLANT_MYSQL_HOST = 'prod-mysql.example';
     env.AUTO_RECOVERY_MAX_PER_PASS = 'unlimited';
+    env.COMMISSIONING_TTFR_EPOCH = '2020-01-01T00:00:00.000Z';
     env.DB_POOL_MAX = '1000';
     env.PLANT_ELIGIBILITY_REFRESH_CRON = '* * * * *';
 
@@ -47,6 +48,9 @@ describe('setup-env allowlist (#182)', () => {
     // #229 — an uncapped auto-recovery pass leaking in from a developer's .env would turn the
     // suite's bounded fixtures into a full-table drain.
     expect(env.AUTO_RECOVERY_MAX_PER_PASS).toBeUndefined();
+    // #232 — the TTFR epoch decides which fitments contribute a timing sample at all. A developer's
+    // re-baselined epoch reaching the suite would silently change every median the specs assert.
+    expect(env.COMMISSIONING_TTFR_EPOCH).toBeUndefined();
     expect(env.DB_POOL_MAX).toBeUndefined();
     expect(env.PLANT_ELIGIBILITY_REFRESH_CRON).toBeUndefined();
   });

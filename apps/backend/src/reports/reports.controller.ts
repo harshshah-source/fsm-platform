@@ -4,6 +4,14 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
+import {
+  CommissioningAggregationService,
+  type CommissioningCohortReport,
+  type InstallQualityGroupBy,
+  type InstallQualityReport,
+  type InstallQualitySort,
+} from './commissioning-aggregation.service';
+import { COHORT_DAYS, GRACE_HOURS, LOOKBACK_DAYS } from './commissioning.config';
 import { FleetUptimeAggregationService, type FleetUptimeAggregationResult } from './fleet-uptime-aggregation.service';
 import { type DistributionFilters, type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SoftInactiveTrend, type SystemEfficiencyReport, type VerificationOutcomesReport, type WorkTypeMixReport, type ZmScorecardReport, ReportsService } from './reports.service';
 import { type RootCauseAggregationResult, RootCauseAnalyticsAggregationService } from './root-cause-aggregation.service';
@@ -29,7 +37,62 @@ export class ReportsController {
     private readonly rootCauseAggregation: RootCauseAnalyticsAggregationService,
     private readonly zmPerformance: ZmPerformanceAggregationService,
     private readonly systemEfficiency: SystemEfficiencyAggregationService,
+    private readonly commissioning: CommissioningAggregationService,
   ) {}
+
+  /**
+   * Live commissioning cohort — fitments inside `cohortDays`, split online / pending / failed with the
+   * per-plant and per-installer breakdowns. Manager roles; a ZM is clamped to their own zone in the
+   * service and told so via `scopedToZoneId`.
+   */
+  @Get('commissioning/cohort')
+  @Roles(...MANAGER_ROLES)
+  commissioningCohort(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('cohortDays') cohortDays?: string,
+    @Query('graceHours') graceHours?: string,
+    @Query('zoneId') zoneId?: string,
+    @Query('plantId') plantId?: string,
+    @Query('remark') remark?: string | string[],
+  ): Promise<CommissioningCohortReport> {
+    return this.commissioning.cohort(
+      { role: user.role, zoneId: user.zone_id },
+      {
+        cohortDays: parseBoundedInt(cohortDays, 'cohortDays', COHORT_DAYS),
+        graceHours: parseBoundedInt(graceHours, 'graceHours', GRACE_HOURS),
+        zoneId: parseOptBigInt(zoneId, 'zoneId'),
+        plantId: parseOptBigInt(plantId, 'plantId'),
+        remarks: parseRemarks(remark),
+      },
+    );
+  }
+
+  /** Install quality over a longer lookback — the historical installer / plant breakdown. */
+  @Get('commissioning/installers')
+  @Roles(...MANAGER_ROLES)
+  commissioningInstallers(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('lookbackDays') lookbackDays?: string,
+    @Query('groupBy') groupBy?: string,
+    @Query('sort') sort?: string,
+    @Query('minInstalls') minInstalls?: string,
+    @Query('zoneId') zoneId?: string,
+    @Query('plantId') plantId?: string,
+    @Query('remark') remark?: string | string[],
+  ): Promise<InstallQualityReport> {
+    return this.commissioning.installQuality(
+      { role: user.role, zoneId: user.zone_id },
+      {
+        lookbackDays: parseBoundedInt(lookbackDays, 'lookbackDays', LOOKBACK_DAYS),
+        groupBy: parseEnum(groupBy, 'groupBy', INSTALL_QUALITY_GROUP_BYS, 'installer'),
+        sort: parseEnum(sort, 'sort', INSTALL_QUALITY_SORTS, 'installs'),
+        minInstalls: parseBoundedInt(minInstalls, 'minInstalls', MIN_INSTALLS),
+        zoneId: parseOptBigInt(zoneId, 'zoneId'),
+        plantId: parseOptBigInt(plantId, 'plantId'),
+        remarks: parseRemarks(remark),
+      },
+    );
+  }
 
   @Get('fleet-uptime')
   @Roles(...MANAGER_ROLES)
@@ -44,7 +107,8 @@ export class ReportsController {
     );
   }
 
-  /** Recompute a month's summary on demand (Operations Head). Cron-wired at month-end when scheduling lands. */
+  /** Recompute a month's summary on demand (Operations Head). Also cron-driven by
+   *  `business-fleet-uptime` since #108 — this is the manual trigger, not the only path (#229 §4). */
   @Post('fleet-uptime/recompute')
   @HttpCode(200)
   @Roles('OPERATIONS_HEAD')
@@ -179,13 +243,54 @@ export class ReportsController {
     return this.reports.verificationOutcomes({ role: user.role, zoneId: user.zone_id }, parseDistribution(from, to, zoneId, companyId, plantId));
   }
 
-  /** Recompute a day's efficiency summary on demand (Operations Head). Cron-wired daily when scheduling lands. */
+  /** Recompute a day's efficiency summary on demand (Operations Head). Also cron-driven daily by
+   *  `business-system-efficiency` since #108 — this is the manual trigger, not the only path (#229 §4). */
   @Post('efficiency/recompute')
   @HttpCode(200)
   @Roles('OPERATIONS_HEAD')
   recomputeEfficiency(@Query('day') day?: string): Promise<SystemEfficiencyAggregationResult> {
     return this.systemEfficiency.computeDay(dayToDate(day ?? currentDay()));
   }
+}
+
+const INSTALL_QUALITY_GROUP_BYS: InstallQualityGroupBy[] = ['installer', 'plant'];
+const INSTALL_QUALITY_SORTS: InstallQualitySort[] = ['installs', 'neverOnlineRate'];
+/** No ceiling worth enforcing — a high floor only ever shrinks the result set. */
+const MIN_INSTALLS = { min: 1, max: 100_000, fallback: 1 } as const;
+
+/**
+ * Parse a bounded integer window param. The ceiling is a performance contract, not taste — an
+ * unbounded lookback is the one query shape that abandons the `installed_at` index and spills its
+ * GROUP BY to disk (see `commissioning.config.ts` for the measurements). Rejecting out-of-range input
+ * at the edge is what keeps that plan unreachable, so this throws rather than clamping silently.
+ */
+function parseBoundedInt(raw: string | undefined, field: string, bounds: { min: number; max: number; fallback: number }): number {
+  if (raw === undefined || raw === '') return bounds.fallback;
+  if (!/^\d+$/.test(raw)) throw new BadRequestException({ code: 'INVALID_WINDOW', hint: `${field} must be a positive integer` });
+  const value = Number(raw);
+  if (value < bounds.min || value > bounds.max) {
+    throw new BadRequestException({ code: 'WINDOW_OUT_OF_RANGE', hint: `${field} must be between ${bounds.min} and ${bounds.max}` });
+  }
+  return value;
+}
+
+/** Parse an optional bigint id query param, rejecting non-numeric input. */
+function parseOptBigInt(raw: string | undefined, field: string): bigint | null {
+  const parsed = parseOptInt(raw, field);
+  return parsed === undefined ? null : BigInt(parsed);
+}
+
+function parseEnum<T extends string>(raw: string | undefined, field: string, allowed: T[], fallback: T): T {
+  if (raw === undefined || raw === '') return fallback;
+  if (!allowed.includes(raw as T)) throw new BadRequestException({ code: 'INVALID_FILTER', hint: `${field} must be one of ${allowed.join(' | ')}` });
+  return raw as T;
+}
+
+/** `?remark=` is repeatable; Express hands over a string for one and an array for several. */
+function parseRemarks(raw: string | string[] | undefined): string[] | null {
+  if (raw === undefined) return null;
+  const values = (Array.isArray(raw) ? raw : [raw]).map((v) => v.trim()).filter((v) => v !== '');
+  return values.length > 0 ? values : null;
 }
 
 /** Shared query parsing for the two Issue-90 distribution endpoints. */
