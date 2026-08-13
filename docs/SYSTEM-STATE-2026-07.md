@@ -881,11 +881,31 @@ beside it.
 table**: cohort membership is derived (`installed_at >= now() - N days`), so nothing moves a device
 between states and a device ageing out of the window requires no write.
 
+> **Amended 2026-08-13 (#233) — the cohort had no operational-fleet predicate, and now it does.** Every
+> count on both endpoints defaults to `population=operational` (`device_states.is_departed = false` plus
+> the **imported** `EXCLUDE_DEACTIVATED_PLANTS`); `population=all` reproduces the previous behaviour for
+> reconciliation. Before the fix a device returned to a warehouse — silent because it is in a box —
+> was graded a **failed install**: live `fsm` over 90 days read **6,810 fitments / 2,655 failed (39.0%)**
+> against **2,623 / 136 (5.2%)** once departed devices are excluded, 4,187 of the window's fitments
+> being warehouse. Same defect class as #176, in a new surface, invisible because no screen calls these
+> endpoints. The payload now carries a `population` census
+> (`fitmentsInWindow = operational + warehouse + deactivatedPlant + unmirrored`, the last computed as a
+> remainder so the partition holds by construction) so every drop is named. `FLEET_COUNT_COLUMNS` was
+> **not** modified — only imported. Report: `docs/progress/233-commissioning-population.md`.
+>
+> The validation that found it is also new infrastructure: **`test/probes/` + `vitest.probe.config.ts`**,
+> a lane for checks that run against the live dev mirror, kept structurally outside the suite's
+> collection glob because they assert properties of mutating data and cannot be a green/red gate.
+> #232's AC-2 ("validate against live `fsm`") had sat unexecuted for three days behind 35 green fixture
+> tests that could not have caught this, every fixture device being operational.
+
 Three things a reader of these numbers has to know, all of them counter-intuitive:
 
 - **Online is `device_states.first_reported_at`, never `device_commissioning.first_reported_at`.** The
-  latter is an observation-time snapshot, populated on **0 of 24,294 rows**; a reader requiring both to
-  agree reports zero commissioned devices forever.
+  latter is an observation-time snapshot, populated on **371 of 25,387 rows** (corrected 2026-08-13 —
+  the figure here previously read "0 of 24,294"; later syncs snapshot the value for devices that have
+  since begun reporting, which is exactly why it is provenance and not outcome). A reader requiring
+  both to agree reports almost nothing as commissioned.
 - **Fitments before `COMMISSIONING_TTFR_EPOCH` count as installs but contribute no *timing* sample.**
   The write-once column captured a last-seen value for devices already reporting when it landed —
   15,345 of 23,086 stamped on the day it shipped, 2,138 stamped before their own `installed_at`, median
@@ -903,7 +923,13 @@ the `GROUP BY` to disk at 1,078 ms. No index fixes it — the cost is the sort f
 
 **Not built: any admin surface.** Two manager-facing endpoints exist that no screen calls — the open
 parity-gate item on #232, whose deferral reason is *not* an external-integration blocker. The figures
-also have no `kpiCatalog`/`kpi-definitions.md` entries yet, and have never been run against live `fsm`.
+also have no `kpiCatalog`/`kpi-definitions.md` entries yet. ~~and have never been run against live
+`fsm`~~ — **run 2026-08-13 (#233); see the amendment above.** #232 AC-1 is now unblocked and fed by
+**#234** (the fitment-relative resolution curve — the only cohort trend derivable today, since
+`device_states` is overwritten, `raw_device_snapshots` is 7-day retained, and the `failure_cycles`
+reconstruction is distorted while 1,799 of 2,183 cohort cycles sit `OPEN` under #229's un-run
+auto-recovery); drill-through is **#235**. Full investigation:
+`audit/recently-commissioned-devices-investigation-2026-08-13.md`.
 
 ---
 
