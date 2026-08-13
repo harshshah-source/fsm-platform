@@ -2,7 +2,12 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { EXCLUDE_DEACTIVATED_PLANTS } from '../dashboard/dashboard.service';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { readCommissioningConfig, type CommissioningConfig } from './commissioning.config';
+import {
+  readCommissioningConfig,
+  RESOLUTION_BUCKET_HOURS,
+  RESOLUTION_MATURITY_HOURS,
+  type CommissioningConfig,
+} from './commissioning.config';
 import { classifyInstaller, type InstallerKind } from './installer-classification';
 
 /**
@@ -50,6 +55,11 @@ export class CommissioningAggregationService {
     const cohortStart = new Date(now.getTime() - opts.cohortDays * 24 * 3_600_000);
     const graceCutoff = new Date(now.getTime() - opts.graceHours * 3_600_000);
 
+    // Old enough to have been observed for the full range the curve plots — see
+    // RESOLUTION_MATURITY_HOURS for why a curve without this is biased hardest on the recent cohort.
+    const maturityCutoff = new Date(now.getTime() - RESOLUTION_MATURITY_HOURS * 3_600_000);
+    const matured = Prisma.sql`in_population AND installed_at <= ${maturityCutoff}`;
+
     const rows = await this.prisma.$queryRaw<RawCohortRow[]>(Prisma.sql`
       ${this.gradedSource({ since: cohortStart, until: now, population: opts.population, restrictZone, plantId: opts.plantId, remarks: opts.remarks })}
       SELECT
@@ -74,7 +84,28 @@ export class CommissioningAggregationService {
         count(*)::int AS "censusFitments",
         count(*) FILTER (WHERE operational)::int AS "censusOperational",
         count(*) FILTER (WHERE warehouse)::int AS "censusWarehouse",
-        count(*) FILTER (WHERE unmirrored)::int AS "censusUnmirrored"
+        count(*) FILTER (WHERE unmirrored)::int AS "censusUnmirrored",
+        -- #234, the resolution curve. CUMULATIVE by construction (ttfr_hours < bound) rather than
+        -- banded-then-summed: the curve is what gets read, and deriving the bands from it in
+        -- TypeScript cannot produce a band that disagrees with the cumulative total above it.
+        ${Prisma.join(
+          RESOLUTION_BUCKET_HOURS.map(
+            (bound, i) => Prisma.sql`count(*) FILTER (WHERE ${matured} AND ttfr_hours < ${bound})::int AS "r${Prisma.raw(String(i))}"`,
+          ),
+          ', ',
+        )},
+        -- The three outcomes a MATURED fitment can have. They partition rMatured exactly, which is
+        -- what makes the curve's denominator arithmetic rather than a claim.
+        --
+        -- The epoch gate is applied SYMMETRICALLY, and that is load-bearing. Excluding pre-epoch
+        -- fitments that came online (their stamp measures the epoch) while keeping pre-epoch fitments
+        -- that stayed silent would put a legacy never-online population in the denominator with no way
+        -- into any numerator band. Measured on live fsm, that asymmetry read 37.2% online-by-48h
+        -- against an actual 96.97%. Pre-epoch fitments leave the curve entirely, whatever they did.
+        count(ttfr_hours) FILTER (WHERE ${matured})::int AS "rSample",
+        count(*) FILTER (WHERE ${matured} AND post_epoch AND NOT commissioned)::int AS "rNever",
+        count(*) FILTER (WHERE ${matured} AND NOT post_epoch)::int AS "rPreEpoch",
+        count(*) FILTER (WHERE ${matured})::int AS "rMatured"
       FROM graded
       -- One pass, three shapes. Three separate queries would each evaluate their own window boundary
       -- and could disagree about a device sitting exactly on the grace line; GROUPING SETS makes the
@@ -96,6 +127,7 @@ export class CommissioningAggregationService {
         population: opts.population,
       },
       population: totalsRow ? census(totalsRow) : EMPTY_CENSUS,
+      resolution: totalsRow ? resolution(totalsRow) : EMPTY_RESOLUTION,
       // An absent grand-total row means an empty population, which is a legitimate answer here — see
       // EMPTY_COHORT for why that is a named constant rather than a computed zero.
       totals: totalsRow ? counts(totalsRow) : EMPTY_COHORT,
@@ -244,6 +276,9 @@ export class CommissioningAggregationService {
         SELECT plant_id, zone_id, plant_name, installed_by, installed_at,
                unmirrored, warehouse, operational,
                ${inPopulation} AS in_population,
+               -- #234: the curve's eligibility gate, kept as its own column so it can be applied
+               -- symmetrically to online and silent fitments alike. Same epoch as ttfr_hours below.
+               (installed_at >= ${this.config.ttfrEpoch}) AS post_epoch,
                (first_reported_at IS NOT NULL AND first_reported_at >= installed_at) AS commissioned,
                -- Timing derives from the same predicate as the commissioned flag above — one
                -- definition, not two — and is additionally gated on the epoch AND on the population.
@@ -294,6 +329,22 @@ const EMPTY_CENSUS: CommissioningPopulationCensus = {
   deactivatedPlant: 0,
   unmirrored: 0,
 };
+/** Same rule as {@link NO_TIMING}: every percentage is null, because nothing was measured. */
+const EMPTY_RESOLUTION: CommissioningResolution = {
+  maturityHours: RESOLUTION_MATURITY_HOURS,
+  maturedFitments: 0,
+  curveFitments: 0,
+  sampleSize: 0,
+  neverOnline: 0,
+  preEpochExcluded: 0,
+  buckets: RESOLUTION_BUCKET_HOURS.map((upToHours) => ({
+    upToHours,
+    fitments: 0,
+    cumulativeOnline: 0,
+    cumulativeOnlinePct: null,
+  })),
+  beyondLastBucket: 0,
+};
 
 /**
  * The population census — what the window held, and what each step dropped (#233 AC-4).
@@ -329,6 +380,60 @@ export function timing(sampleSize: number, medianHours: number | null, p95Hours:
 
 function round2(value: number | null): number | null {
   return value === null ? null : Math.round(value * 100) / 100;
+}
+
+/**
+ * Build the resolution curve (#234) — how fast this cohort's fitments came online.
+ *
+ * **The denominator is the whole design.** It is `curveFitments = sampleSize + neverOnline`: matured,
+ * post-epoch fitments, whose outcome is observable in both directions. Three populations are outside
+ * it, and each excluded count is REPORTED rather than silently dropped — the census rule.
+ *
+ *  - **Immature fitments** (younger than {@link RESOLUTION_MATURITY_HOURS}). A device fitted two hours
+ *    ago and still silent has not failed to report within 72 h — it has not had 72 hours. Counting it
+ *    would bias the curve downward, hardest on exactly the recent cohort an operator is reading.
+ *  - **`preEpochExcluded`** — matured but fitted before the TTFR epoch, **whatever it did**.
+ *  - Everything the population filter already removed (#233).
+ *
+ * **The epoch gate is applied symmetrically, and that is the correction that matters here.** The first
+ * cut of this excluded pre-epoch fitments that came *online* (their stamp measures the epoch, median
+ * ~8,707 h against 17.26 h after) while leaving pre-epoch fitments that stayed *silent* in the
+ * denominator. That put a legacy never-online population — the blank-remark bulk load — into the
+ * denominator with no way into any numerator band. Measured on live `fsm` it read **37.2% online by
+ * 48 h against an actual 96.97%**: not a rounding error, an inverted conclusion. A fitment either
+ * carries comparable timing or it does not; what it happened to do cannot decide its eligibility.
+ *
+ * `cumulativeOnlinePct` is null, not 0, when nothing was measured — {@link NO_TIMING}'s rule applied to
+ * the curve. "No sample" and "nothing came online in the first four hours" are different claims, and on
+ * a chart the second one draws a line at the floor while the first must draw nothing at all.
+ *
+ * Exported so the arithmetic is pinned DIRECTLY. Reaching it through the e2e would mean fixtures whose
+ * maturity and epoch membership are both functions of the wall clock — a test that passes this week and
+ * silently stops exercising the branches later. The DB-free unit tests are the stronger signal here
+ * (#217's precedent, and #156's reason).
+ */
+export function resolution(row: RawCohortRow): CommissioningResolution {
+  const cumulative = RESOLUTION_BUCKET_HOURS.map((_, i) => row[`r${i}` as 'r0'] ?? 0);
+  const denominator = row.rSample + row.rNever;
+
+  return {
+    maturityHours: RESOLUTION_MATURITY_HOURS,
+    maturedFitments: row.rMatured,
+    curveFitments: denominator,
+    sampleSize: row.rSample,
+    neverOnline: row.rNever,
+    preEpochExcluded: row.rPreEpoch,
+    buckets: RESOLUTION_BUCKET_HOURS.map((upToHours, i) => ({
+      upToHours,
+      // The band is the difference between two cumulative counts, so a band can never disagree with
+      // the curve it is drawn under.
+      fitments: cumulative[i] - (i === 0 ? 0 : cumulative[i - 1]),
+      cumulativeOnline: cumulative[i],
+      cumulativeOnlinePct: denominator === 0 ? null : Math.round((cumulative[i] / denominator) * 1000) / 10,
+    })),
+    // Everything past the widest band: online, measurable, and slower than the curve plots.
+    beyondLastBucket: row.rSample - (cumulative[cumulative.length - 1] ?? 0),
+  };
 }
 
 function counts(row: RawCohortRow): CohortCounts {
@@ -402,6 +507,50 @@ export interface CommissioningPopulationCensus {
   unmirrored: number;
 }
 
+/** One band of the resolution curve (#234). Bands are contiguous and cumulative counts are monotone. */
+export interface CommissioningResolutionBucket {
+  /** Upper bound in hours since fitment. The band is `(previous bound, upToHours]`. */
+  upToHours: number;
+  /** Fitments that came online inside THIS band. */
+  fitments: number;
+  /** Fitments online by `upToHours` — the curve. Equal to the sum of every band up to here. */
+  cumulativeOnline: number;
+  /** `cumulativeOnline / (sampleSize + neverOnline)`, 0–100, 1 decimal. **Null when nothing was measured.** */
+  cumulativeOnlinePct: number | null;
+}
+
+/**
+ * How fast this cohort came online (#234) — the only cohort trend FSM can honestly compute today.
+ *
+ * Three identities, all arithmetic rather than claims:
+ *   `sampleSize + neverOnline = curveFitments`
+ *   `curveFitments + preEpochExcluded = maturedFitments`
+ *   `maturedFitments + (immature) = totals.fitments`
+ *
+ * See {@link resolution} for why each excluded population is excluded.
+ */
+export interface CommissioningResolution {
+  /** How old a fitment must be to enter the curve. Equals the widest band. */
+  maturityHours: number;
+  /** Fitments in the population old enough to be plotted. `totals.fitments` minus these are immature. */
+  maturedFitments: number;
+  /** The curve's denominator: matured AND post-epoch, i.e. observable in both directions. */
+  curveFitments: number;
+  /** Curve fitments with a measurable time-to-first-report. The numerator pool. */
+  sampleSize: number;
+  /** Curve fitments still silent past `maturityHours`. Broken, not slow. */
+  neverOnline: number;
+  /**
+   * Matured but fitted before the TTFR epoch — excluded **whatever they did**, because their stamp
+   * measures the epoch rather than the install. Gating this on outcome instead is what made the first
+   * cut of the curve read 37.2% against an actual 96.97%.
+   */
+  preEpochExcluded: number;
+  buckets: CommissioningResolutionBucket[];
+  /** Measurable, online, and slower than the widest band. `sampleSize - last cumulativeOnline`. */
+  beyondLastBucket: number;
+}
+
 export interface CohortOptions {
   cohortDays: number;
   graceHours: number;
@@ -464,6 +613,8 @@ export interface CommissioningCohortReport {
   filters: { zoneId: string | null; plantId: string | null; remarks: string[] | null; population: CommissioningPopulation };
   /** What the window held and what each step dropped. `totals.fitments` equals the selected part. */
   population: CommissioningPopulationCensus;
+  /** How fast the cohort came online (#234). Over the same population as `totals`. */
+  resolution: CommissioningResolution;
   totals: CohortCounts;
   byPlant: CohortPlantRow[];
   byInstaller: CohortInstallerRow[];
@@ -502,7 +653,8 @@ export interface InstallQualityReport {
   rows: InstallQualityRow[];
 }
 
-interface RawCohortRow {
+/** Exported for {@link resolution}'s unit tests — it is the shape that function reads. */
+export interface RawCohortRow {
   gPlant: number;
   gInstaller: number;
   plantId: string | null;
@@ -521,6 +673,16 @@ interface RawCohortRow {
   censusOperational: number;
   censusWarehouse: number;
   censusUnmirrored: number;
+  /** Cumulative resolution counts, one per RESOLUTION_BUCKET_HOURS entry; see {@link resolution}. */
+  r0: number;
+  r1: number;
+  r2: number;
+  r3: number;
+  r4: number;
+  rSample: number;
+  rNever: number;
+  rPreEpoch: number;
+  rMatured: number;
 }
 
 interface RawQualityRow {

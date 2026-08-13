@@ -44,6 +44,40 @@ export const COHORT_DAYS = { min: 1, max: 90, fallback: 7 } as const;
 export const GRACE_HOURS = { min: 1, max: 720, fallback: 48 } as const;
 export const LOOKBACK_DAYS = { min: 1, max: 365, fallback: 30 } as const;
 
+/**
+ * Upper bounds, in hours since fitment, of the resolution curve's bands (#234).
+ *
+ * The question this answers is "how fast does a batch of fitments come online", which is the only
+ * cohort trend FSM can honestly compute today. `device_states` is overwritten in place,
+ * `raw_device_snapshots` is 7-day retained, and reconstructing silence from `failure_cycles` intervals
+ * is distorted while auto-recovery has never run (#229) — 1,799 of the operational 90-day cohort's
+ * 2,183 cycles sit `OPEN`, so a calendar-time series would rise monotonically as an artefact of the
+ * scheduler being off. This curve depends on none of that: it is `first_reported_at - installed_at`,
+ * two stored facts.
+ *
+ * The boundaries are where the measured distribution actually bends rather than round numbers —
+ * live `fsm`, post-epoch, 520 samples: `<1h` 52 · `1–4h` 87 · `4–12h` 93 · `12–24h` **189** · `24–48h`
+ * 91 · `48–72h` 6 · `>72h` 2. The mass is in 12–24 h and the tail is gone by 48 h, which is what makes
+ * `GRACE_HOURS.fallback = 48` a measurement rather than a preference.
+ */
+export const RESOLUTION_BUCKET_HOURS = [4, 12, 24, 48, 72] as const;
+
+/**
+ * How old a fitment must be to enter the curve — the widest band, so every fitment on the chart has
+ * been observed for the full range the chart plots.
+ *
+ * **This is the difference between a correct curve and a subtly wrong one.** A device fitted two hours
+ * ago and still silent has not "failed to report within 72 h"; it has not had 72 hours. Counting it in
+ * the denominator of every band biases the whole curve downward, and worse, biases it most on exactly
+ * the recent cohort an operator is looking at. Excluding immature fitments is the cheap form of the
+ * right-censoring a survival model would do properly, and the count that gets excluded is reported
+ * (`immatureFitments`) rather than silently dropped.
+ *
+ * The residual error it accepts: a fitment matured at exactly 72 h that would have come online at 100 h
+ * is recorded as never-online. Measured, that is under 0.4% of samples.
+ */
+export const RESOLUTION_MATURITY_HOURS = RESOLUTION_BUCKET_HOURS[RESOLUTION_BUCKET_HOURS.length - 1];
+
 export interface CommissioningConfig {
   /** Fitments observed before this instant contribute to counts but never to a timing sample. */
   ttfrEpoch: Date;

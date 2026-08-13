@@ -607,6 +607,18 @@ describe('GET /api/reports/commissioning — cohort + install quality (real DI g
       expect(all.body.filters.population).toBe('all');
     });
 
+    it('scopes the resolution curve to the population too', async () => {
+      const token = await login('ops.head@fsm.test');
+      const operational = await cohort(token, { cohortDays: 7 });
+      const all = await cohort(token, { cohortDays: 7, population: 'all' });
+
+      // W1/W2/K1/M1 are all matured (90h) and silent, so under `all` they land in the curve's
+      // never-online count. If the curve read a different population than the counts beside it, the
+      // page would show a cohort of 2,623 next to a curve drawn over 6,810.
+      expect(all.body.resolution.neverOnline).toBeGreaterThan(operational.body.resolution.neverOnline);
+      expect(all.body.resolution.maturedFitments).toBeGreaterThan(operational.body.resolution.maturedFitments);
+    });
+
     it('rejects an unknown population rather than silently falling back', async () => {
       const token = await login('ops.head@fsm.test');
       // Silently defaulting would answer a question the caller did not ask — the same failure the ZM
@@ -614,5 +626,70 @@ describe('GET /api/reports/commissioning — cohort + install quality (real DI g
       await cohort(token, { cohortDays: 7, population: 'everything' }, 400);
       await installers(token, { lookbackDays: 30, population: 'everything' }, 400);
     });
+  });
+
+  // ---------------------------------------------------------------------------------------------
+  // 6. The resolution curve, over HTTP (#234)
+  //
+  // The ARITHMETIC lives in `commissioning-units.spec.ts` and is pinned there directly, because
+  // reaching it from here would need fixtures that are simultaneously matured (older than
+  // RESOLUTION_MATURITY_HOURS) and post-epoch (younger than COMMISSIONING_TTFR_EPOCH) — a window whose
+  // width is a function of today's date. A test like that passes this week and silently stops
+  // exercising its branches later.
+  //
+  // What is asserted here is the WIRING: that the curve is served, that it is computed over the same
+  // population and the same `commissioned` expression as the counts beside it, and that the two
+  // identities hold on real rows rather than on a hand-built object.
+  // ---------------------------------------------------------------------------------------------
+  describe('resolution curve', () => {
+    it('serves the curve with the configured bands', async () => {
+      const token = await login('ops.head@fsm.test');
+      const res = await cohort(token, { cohortDays: 7 });
+
+      expect(res.body.resolution.buckets.map((b: { upToHours: number }) => b.upToHours)).toEqual([4, 12, 24, 48, 72]);
+      expect(res.body.resolution.maturityHours).toBe(72);
+    });
+
+    it('partitions the matured population, and never claims more than the cohort holds', async () => {
+      const token = await login('ops.head@fsm.test');
+      const res = await cohort(token, { cohortDays: 7 });
+      const r = res.body.resolution;
+
+      // All three identities, on live rows. The last is what stops an immature fitment being counted
+      // as a failure to report within 72h when it has not had 72 hours.
+      expect(r.sampleSize + r.neverOnline).toBe(r.curveFitments);
+      expect(r.curveFitments + r.preEpochExcluded).toBe(r.maturedFitments);
+      expect(r.maturedFitments).toBeLessThanOrEqual(res.body.totals.fitments);
+    });
+
+    it('excludes an immature fitment from the curve while still counting it in the cohort', async () => {
+      const token = await login('ops.head@fsm.test');
+      const res = await cohort(token, { cohortDays: 7, plantId: String(plantCohort) });
+
+      // plantCohort holds 5 fitments; only D (90h) is matured. A/B/C/E are 6-30h old and belong in the
+      // cohort — they are real fitments — but cannot yet be graded against a 72h curve.
+      expect(res.body.totals.fitments).toBe(5);
+      expect(res.body.resolution.maturedFitments).toBe(1);
+      // And D is silent, so the curve is a measured 0%, not a null one.
+      expect(res.body.resolution.neverOnline).toBe(1);
+      expect(res.body.resolution.buckets.every((b: { cumulativeOnlinePct: number }) => b.cumulativeOnlinePct === 0)).toBe(true);
+    });
+
+    it('never samples more than the cohort measured, because the curve is a subset of it', async () => {
+      const token = await login('ops.head@fsm.test');
+      const res = await cohort(token, { cohortDays: 90 });
+
+      // Both read `ttfr_hours`; the curve additionally requires maturity. If this ever inverted, the
+      // curve would be drawing on rows the median beside it never saw.
+      expect(res.body.resolution.sampleSize).toBeLessThanOrEqual(res.body.totals.ttfr.sampleSize);
+    });
+
+    // NOT tested here: a pre-epoch fitment landing in `onlineUnmeasured` with a wholly null curve.
+    // It is unreachable from THIS endpoint by construction and increasingly so — `COHORT_DAYS.max` is
+    // 90 and `DEFAULT_TTFR_EPOCH` is fixed, so once the epoch is more than 90 days old no cohort
+    // window can contain a pre-epoch fitment and `onlineUnmeasured` is permanently 0 here. That is
+    // desirable (the epoch contamination ages out on its own) but it makes any fixture for it a test
+    // with a fuse. The branch is pinned deterministically in `commissioning-units.spec.ts` instead —
+    // "returns NULL percentages when nothing was measured" is exactly this shape.
   });
 });

@@ -5,17 +5,23 @@ import { CommissioningAggregationService } from '../../src/reports/commissioning
 import type { PrismaService } from '../../src/prisma/prisma.service';
 
 /**
- * #233 AC-1 / AC-6 — the population fix, exercised against the LIVE dev `fsm` database.
+ * #233 / #234 — the commissioning view, exercised against the LIVE dev `fsm` database.
  *
- * This file is a PROBE, not part of the suite: `vitest.config.ts` collects `*.spec.ts` against
- * `fsm_test`, and this one deliberately points a second client at `fsm` instead. It is named
- * `*.probe.spec.ts` and run explicitly, because the figures it asserts are properties of a mutating
- * mirror, not of a fixture — re-running it after a master sync will legitimately move them.
+ * A PROBE, not part of the suite. `vitest.config.ts` collects `**\/*.{spec,e2e-spec}.ts` against
+ * `fsm_test`; this lives at `test/probes/*.probe.ts`, which that glob cannot match, and runs only
+ * under `vitest.probe.config.ts`. It asserts properties of a mutating AutoPlant mirror, so it can
+ * never be a green/red gate — every assertion here is a RELATION between two runs or an identity,
+ * never a frozen figure that the next master sync would falsify.
  *
  * It exists because #232's AC-2 ("validate against live `fsm`") was written, left unexecuted for
  * three days, and when finally executed turned out to be the defect report for #233. Fixture greens
  * did not catch a missing predicate, because every fixture device was operational. The lesson is
  * cheap to encode: run the real service against the real mirror and look at the number.
+ *
+ * It earned its keep twice. #234's first cut passed every fixture test and was still wrong — the
+ * resolution curve excluded pre-epoch fitments that came online while keeping pre-epoch fitments that
+ * stayed silent, and only the live run showed the consequence: 37.2% online-by-48h against a true
+ * 83.1%. No fixture had enough legacy rows to reveal it.
  *
  * Deliberately NOT a hand-copied query. It instantiates the actual `CommissioningAggregationService`,
  * so what is measured is the code path the endpoint serves — a second spelling would only prove the
@@ -72,11 +78,44 @@ describe('LIVE fsm — commissioning population (#233)', () => {
     const elapsed = Date.now() - started;
 
     // eslint-disable-next-line no-console
-    console.log(`#233 live fsm, cohort(90d) round trip: ${elapsed} ms`);
-    // Measured 23.9 ms of server time on 2026-08-13 (all buffers cached, quicksort in memory). The
-    // generous ceiling is for round-trip and cold cache; what it actually guards is the one shape that
-    // changes plan — a sequential scan with the GROUP BY spilling to disk, which lands near 1,078 ms.
+    console.log(`#233/#234 live fsm, cohort(90d) round trip: ${elapsed} ms`);
+    // Measured 23.9 ms of server time on 2026-08-13 (all buffers cached, quicksort in memory), and
+    // still ~21 ms after #234 added 9 FILTER columns to the same pass. The generous ceiling is for
+    // round-trip and cold cache; what it actually guards is the one shape that changes plan — a
+    // sequential scan with the GROUP BY spilling to disk, which lands near 1,078 ms.
     expect(elapsed).toBeLessThan(750);
+  }, 60_000);
+
+  it('#234 — the resolution curve, over the live cohort', async () => {
+    const res = await service.cohort(OH, { ...BASE, cohortDays: 90, population: 'operational' });
+    const r = res.resolution;
+
+    // eslint-disable-next-line no-console
+    console.log(
+      '\n#234 live fsm, resolution curve (90-day cohort, operational)\n' +
+        `  matured=${r.maturedFitments} of ${res.totals.fitments} fitments (${res.totals.fitments - r.maturedFitments} immature)\n` +
+        `  curve=${r.curveFitments} (sample=${r.sampleSize} neverOnline=${r.neverOnline}) ` +
+        `preEpochExcluded=${r.preEpochExcluded} beyond72h=${r.beyondLastBucket}\n` +
+        r.buckets.map((b) => `  <=${String(b.upToHours).padStart(3)}h  n=${String(b.fitments).padStart(4)}  cum=${b.cumulativeOnline} (${b.cumulativeOnlinePct}%)`).join('\n') +
+        '\n',
+    );
+
+    // All three identities, on the real mirror rather than on a fixture.
+    expect(r.sampleSize + r.neverOnline).toBe(r.curveFitments);
+    expect(r.curveFitments + r.preEpochExcluded).toBe(r.maturedFitments);
+    expect(r.maturedFitments).toBeLessThanOrEqual(res.totals.fitments);
+    // Monotone, and the bands reconstruct the curve.
+    const cum = r.buckets.map((b) => b.cumulativeOnline);
+    expect(cum).toEqual([...cum].sort((a, b) => a - b));
+    expect(r.buckets.reduce((s, b) => s + b.fitments, 0)).toBe(cum[cum.length - 1]);
+    // The shape the feasibility read predicted and #232's config was calibrated on: the curve is
+    // essentially resolved by 48h and flat after. Asserted as a PROPERTY, not as a literal — the live
+    // value is 83.1% across all remarks today (the 96.97% figure is New-Installation-only, and this
+    // sample is 4 days of post-epoch data), and it will move as the epoch recedes and the sample grows.
+    const at48 = r.buckets.find((b) => b.upToHours === 48)!.cumulativeOnlinePct;
+    const at72 = r.buckets.find((b) => b.upToHours === 72)!.cumulativeOnlinePct;
+    expect(at48).not.toBeNull();
+    expect(at72! - at48!).toBeLessThan(2);
   }, 60_000);
 
   it('applies the same predicate to install quality', async () => {
