@@ -5,6 +5,12 @@
 // (session is React-state only — no boot-restore), navigates, and full-page-screenshots at 1440px.
 //
 // `role`   — seeded login key (see CREDS); null = capture logged out.
+//
+// PREREQUISITE: these accounts must exist on the database the backend is pointed at. They are
+// created by `npm run seed:dev` in apps/backend (#194) — see docs/runbooks/local-development-login.md.
+// Until that existed, every login here 401'd on any machine but the one that had hand-run the test
+// fixture, which is the likeliest reason visual/baseline/ went un-recaptured after 2026-07-28.
+// If you set DEV_SEED_PASSWORD when seeding, change the passwords below to match.
 // `acting` — zone number to "Act as ZM for" (CSM/OH acting-as-zone view, reference 02).
 // `open`   — 'firstTicket' opens the first row of /tickets as a detail drawer (references 08/09/28).
 

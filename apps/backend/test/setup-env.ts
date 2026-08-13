@@ -24,6 +24,11 @@ const APP_NAMESPACE_LITERALS = [
   'PUBLIC_API_URL',
   'INSTALL_CSV_MAX_ROWS',
   'DEV_AUTH_ZONE',
+  // #194 — the dev-login seeder's opt-in and password override. A developer who has enabled the
+  // seeder on their own box must not thereby change suite behaviour; `dev-seed.spec.ts` and
+  // `dev-seed.e2e-spec.ts` pass an explicit env object rather than reading `process.env`.
+  'ALLOW_DEV_SEED',
+  'DEV_SEED_PASSWORD',
 ];
 
 /**

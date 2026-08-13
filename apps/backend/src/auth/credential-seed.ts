@@ -10,7 +10,7 @@ import { hashPassword } from './password-hasher';
  * live test/dev session.
  */
 export async function ensureCredential(
-  prisma: PrismaClient,
+  prisma: Pick<PrismaClient, 'userCredential'>,
   userId: string,
   password: string,
 ): Promise<void> {

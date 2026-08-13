@@ -37,6 +37,8 @@ describe('setup-env allowlist (#182)', () => {
     env.COMMISSIONING_TTFR_EPOCH = '2020-01-01T00:00:00.000Z';
     env.DB_POOL_MAX = '1000';
     env.PLANT_ELIGIBILITY_REFRESH_CRON = '* * * * *';
+    env.ALLOW_DEV_SEED = 'true';
+    env.DEV_SEED_PASSWORD = 'something-the-developer-chose';
 
     sanitizeTestEnv(env);
 
@@ -53,6 +55,10 @@ describe('setup-env allowlist (#182)', () => {
     expect(env.COMMISSIONING_TTFR_EPOCH).toBeUndefined();
     expect(env.DB_POOL_MAX).toBeUndefined();
     expect(env.PLANT_ELIGIBILITY_REFRESH_CRON).toBeUndefined();
+    // #194 — a developer who has opted their own box into the dev-login seeder must not thereby
+    // change what the suite does. `dev-seed.spec.ts` passes env in explicitly for the same reason.
+    expect(env.ALLOW_DEV_SEED).toBeUndefined();
+    expect(env.DEV_SEED_PASSWORD).toBeUndefined();
   });
 
   it('sets the R1.a fixed test values regardless of what the ambient env held', () => {

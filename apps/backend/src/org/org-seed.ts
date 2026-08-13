@@ -8,8 +8,16 @@ import {
  * Canonical reference/org seed for downstream slices (Issue 02 AC#7). Idempotent: every row is
  * keyed by a natural key and upserted (or guarded by existence), so re-running never duplicates.
  * This is the dev/test fixture the Recommender (Issue 10), SLA engine (Issue 05), and dashboards
- * (Issue 06) build against. Login accounts stay in the in-memory auth store until that is swapped
- * to Postgres, so this seeds reference data, not credentials.
+ * (Issue 06) build against.
+ *
+ * **Reference data, not credentials** — and that separation is now permanent rather than temporary.
+ * This docstring used to say login accounts "stay in the in-memory auth store until that is swapped
+ * to Postgres"; the swap happened (#91 S1–S4) and `InMemoryUserStore` is deleted. Credentials are
+ * seeded by a *separate*, explicitly gated entrypoint — `npm run seed:dev` (#194,
+ * `src/auth/dev-seed.ts`) — precisely so that this one, which is expected to be run against real
+ * databases, can never mint `*@fsm.test` logins. Run order is `seed` then `seed:dev`: the ZM
+ * accounts are scoped by zone NAME and resolve against the `zones` table written here.
+ * See `docs/runbooks/local-development-login.md`.
  */
 
 // Operational zones (FSM-owned partition, ADR-0018 one ZM per zone). UNZONED is the holding zone the
