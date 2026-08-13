@@ -1,7 +1,11 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render as rtlRender, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CommissioningCohortPage } from '../src/pages/reports/CommissioningCohortPage';
+
+/** The plant column drills through (#235), so the page needs router context. */
+const render = (ui: React.ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 /**
  * #232 AC-1 — Commissioning Cohort page (ref `21-reports.png`).
@@ -233,6 +237,37 @@ describe('Commissioning Cohort (#232 AC-1)', () => {
     // A 0% curve says every device stayed dark. "Nothing was measured" is a different claim and has to
     // read differently.
     expect(await screen.findByText(/needs fitments older than the grace window/i)).toBeInTheDocument();
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // #235 — drill-through into the device list.
+  // -----------------------------------------------------------------------------------------------
+  it('links each plant row on its ID, carrying the window with it', async () => {
+    render(<CommissioningCohortPage />);
+    const link = await screen.findByTestId('cc-plant-link-11');
+    // Links on plantId, NOT on the displayed name. #217 S2 found exactly that defect — a drilldown
+    // that substituted a display value into an id param and silently went nowhere useful.
+    expect(link).toHaveAttribute('href', '/reports/device?plantId=11&commissionedWithinDays=90');
+    expect(link).toHaveTextContent('RCP-9211');
+  });
+
+  it('carries the CURRENT window into the link, not the default', async () => {
+    render(<CommissioningCohortPage />);
+    await screen.findByTestId('cc-plant-link-11');
+    await userEvent.selectOptions(screen.getByLabelText(/cohort window/i), '7');
+
+    // A link frozen at 90 days would send the reader to a different population than the row they
+    // clicked — the two-answers-to-one-question failure the shared predicate exists to prevent.
+    await waitFor(() => {
+      expect(screen.getByTestId('cc-plant-link-11')).toHaveAttribute('href', '/reports/device?plantId=11&commissionedWithinDays=7');
+    });
+  });
+
+  it('states its grain, because the list it links into counts something else', async () => {
+    render(<CommissioningCohortPage />);
+    // 6.4% of cohort devices carry more than one fitment in 90 days, so the two totals legitimately
+    // differ. Unstated, that reads as a bug.
+    expect(await screen.findByTestId('commissioning-grain-note')).toHaveTextContent(/two fitments here and one row on the device list/i);
   });
 
   it('surfaces a load failure rather than rendering an empty page as if it were zero', async () => {

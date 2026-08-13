@@ -3,6 +3,7 @@ import { AuditService } from '../audit/audit.service';
 import { Prisma } from '../generated/prisma/client';
 import { type DealType, type SlaBucket } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { cohortWindowStart, deviceCommissionedWithin } from '../reports/commissioning-window';
 
 export interface DeviceView {
   deviceId: string;
@@ -77,6 +78,12 @@ export interface DeviceListFilters {
   plantId?: number;
   /** Restrict to devices at or above CRITICAL severity (the scorecard drill-down, Issue 122). */
   criticalPlus?: boolean;
+  /**
+   * Restrict to devices with a commissioning fitment inside the last N days — the #232 cohort page's
+   * drill-through (#235). Bounded by `COHORT_DAYS.max` at the controller, and DEVICE-grain: a device
+   * re-mapped twice in the window is one row here and two fitments there.
+   */
+  commissionedWithinDays?: number;
 }
 
 /** The distinct zones / companies / plants present in the caller's device scope — sources the filter dropdowns. */
@@ -293,8 +300,15 @@ export class DeviceService {
   }
 
   /** The scope + filter WHERE fragments shared by the list query (search only applies to the list). */
-  private buildConds(scope: DeviceListScope, opts: DeviceListFilters): Prisma.Sql[] {
+  private buildConds(scope: DeviceListScope, opts: DeviceListFilters, now: Date = new Date()): Prisma.Sql[] {
     const conds: Prisma.Sql[] = [];
+    // #235 — the cohort drill-through. An EXISTS rather than a join so the one-row-per-device grain
+    // cannot fan out on a device with several fitments in the window, and the predicate itself is
+    // IMPORTED (`commissioning-window.ts`) rather than restated: this list is entered by clicking a
+    // cohort row, and two spellings of "recent" would show two answers to one question.
+    if (opts.commissionedWithinDays !== undefined) {
+      conds.push(Prisma.sql`AND ${deviceCommissionedWithin(cohortWindowStart(now, opts.commissionedWithinDays), now)}`);
+    }
     if (scope.role === 'ZONAL_MANAGER' && scope.zoneId !== null) {
       conds.push(Prisma.sql`AND p.zone_id = ${BigInt(scope.zoneId)}`);
     }

@@ -48,10 +48,10 @@ function stub(extra?: (url: string, opts?: RequestInit) => Response | undefined)
   vi.stubGlobal('fetch', fetchMock);
 }
 
-function renderPage(session: SessionView = OH) {
+function renderPage(session: SessionView = OH, initialUrl = '/reports/device') {
   return render(
     <AuthProvider initialSession={session}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initialUrl]}>
         <DeviceDetailPage />
       </MemoryRouter>
     </AuthProvider>,
@@ -214,5 +214,66 @@ describe('Device Detail — AutoPlant enrichment columns', () => {
     const row = within(await screen.findByTestId('dev-row-900'));
     expect(row.getAllByText('—').length).toBeGreaterThanOrEqual(3);
     expect(row.getByText('RJ-14-AA')).toBeInTheDocument(); // row still renders
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // #235 — the Commissioning Cohort drill-through arrives here as a URL param.
+  //
+  // #217 S2's lesson is the whole reason these exist: a drilldown whose TARGET does not read the param
+  // it is handed is a link that silently does nothing, and it looks fine from the sending side.
+  // -----------------------------------------------------------------------------------------------
+  describe('commissionedWithinDays drill-through (#235)', () => {
+    it('reads the param off the URL and sends it to the backend', async () => {
+      stub();
+      renderPage(OH, '/reports/device?plantId=11&commissionedWithinDays=90');
+      await screen.findByTestId('dev-row-900');
+
+      const listCall = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes('/devices?'));
+      expect(listCall).toContain('commissionedWithinDays=90');
+      expect(listCall).toContain('plantId=11');
+    });
+
+    it('shows the scope as a chip, and names the grain it counts', async () => {
+      stub();
+      renderPage(OH, '/reports/device?commissionedWithinDays=30');
+      // Applied-but-invisible is how someone concludes the fleet has shrunk. And the grain is stated
+      // because the cohort page counts fitments while this table counts devices — both are right.
+      const chip = await screen.findByTestId('commissioned-scope');
+      expect(chip).toHaveTextContent(/last 30 days/i);
+      expect(chip).toHaveTextContent(/counting devices, not fitments/i);
+    });
+
+    it('clears the scope and re-queries without it', async () => {
+      stub();
+      renderPage(OH, '/reports/device?commissionedWithinDays=30');
+      await screen.findByTestId('dev-row-900');
+      fetchMock.mockClear();
+
+      await userEvent.click(screen.getByTestId('commissioned-scope-clear'));
+
+      await screen.findByTestId('dev-row-900');
+      expect(screen.queryByTestId('commissioned-scope')).not.toBeInTheDocument();
+      const after = fetchMock.mock.calls.map(([u]) => String(u)).filter((u) => u.includes('/devices?'));
+      expect(after.length).toBeGreaterThan(0);
+      expect(after.every((u) => !u.includes('commissionedWithinDays'))).toBe(true);
+    });
+
+    it('ignores a garbage param rather than passing it to the backend', async () => {
+      stub();
+      renderPage(OH, '/reports/device?commissionedWithinDays=abc');
+      await screen.findByTestId('dev-row-900');
+      // The backend 400s on this, which would blank a page the user reached by a normal link. Held as
+      // a number here so a hand-edited URL degrades to "no filter" instead of to an error.
+      expect(screen.queryByTestId('commissioned-scope')).not.toBeInTheDocument();
+      const listCall = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes('/devices?'));
+      expect(listCall).not.toContain('commissionedWithinDays');
+    });
+
+    it('renders no chip at all when the page is entered normally', async () => {
+      stub();
+      renderPage(OH);
+      await screen.findByTestId('dev-row-900');
+      expect(screen.queryByTestId('commissioned-scope')).not.toBeInTheDocument();
+    });
   });
 });

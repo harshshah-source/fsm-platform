@@ -14,6 +14,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
+import { COHORT_DAYS } from '../reports/commissioning.config';
 import { type DealType, type SlaBucket } from '../generated/prisma/enums';
 import { DeviceDetailService, type DeviceCycleView, type DeviceDowntimeTrend } from './device-detail.service';
 import {
@@ -62,6 +63,7 @@ export class DevicesController {
     @Query('companyId') companyId?: string,
     @Query('plantId') plantId?: string,
     @Query('criticalPlus') criticalPlus?: string,
+    @Query('commissionedWithinDays') commissionedWithinDays?: string,
   ): Promise<DeviceListPage> {
     return this.devices.listDevices(
       { role: user.role, zoneId: user.zone_id },
@@ -76,6 +78,7 @@ export class DevicesController {
         companyId: companyId ? Number(companyId) : undefined,
         plantId: plantId ? Number(plantId) : undefined,
         criticalPlus: criticalPlus === 'true' || criticalPlus === '1',
+        commissionedWithinDays: parseCohortDays(commissionedWithinDays),
       },
     );
   }
@@ -138,4 +141,25 @@ export class DevicesController {
     if (id === '') throw new BadRequestException({ code: 'INVALID_DEVICE_ID' });
     return id;
   }
+}
+
+/**
+ * Parse `?commissionedWithinDays=` (#235), bounded by the SAME ceiling the cohort report enforces.
+ *
+ * Rejects rather than clamps, matching `reports.controller.ts`'s `parseBoundedInt`. The ceiling is a
+ * measured performance contract on the cohort side, and this filter is entered by clicking through
+ * FROM that page — silently answering a 200-day question with 90 days of data would make the two
+ * surfaces disagree while both looked fine.
+ */
+function parseCohortDays(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === '') return undefined;
+  if (!/^\d+$/.test(raw)) throw new BadRequestException({ code: 'INVALID_WINDOW', hint: 'commissionedWithinDays must be a positive integer' });
+  const value = Number(raw);
+  if (value < COHORT_DAYS.min || value > COHORT_DAYS.max) {
+    throw new BadRequestException({
+      code: 'WINDOW_OUT_OF_RANGE',
+      hint: `commissionedWithinDays must be between ${COHORT_DAYS.min} and ${COHORT_DAYS.max}`,
+    });
+  }
+  return value;
 }

@@ -77,6 +77,19 @@ export function DeviceDetailPage() {
   const [zoneId, setZoneId] = useState(searchParams.get('zoneId') ?? ''); // '' = all; 'UNZONED' or a numeric id string
   const [companyId, setCompanyId] = useState(searchParams.get('companyId') ?? ''); // '' = all
   const [plantId, setPlantId] = useState(searchParams.get('plantId') ?? ''); // '' = all; follows the company pick
+  /**
+   * #235 — the Commissioning Cohort drill-through. Read-only: it arrives on the URL and is cleared by
+   * a chip rather than offered as a dropdown, because it is a scope you were sent here WITH, not a
+   * filter you would go looking for on a general device list.
+   *
+   * Held as a number so a garbage param cannot reach the request. The backend rejects out-of-range
+   * with a 400, and #217 S2's lesson is the other half: a drill-through whose target does not read the
+   * param it is handed is a link that silently does nothing.
+   */
+  const [commissionedWithinDays, setCommissionedWithinDays] = useState<number | null>(() => {
+    const raw = Number(searchParams.get('commissionedWithinDays'));
+    return Number.isInteger(raw) && raw > 0 ? raw : null;
+  });
   const [assignOpen, setAssignOpen] = useState(false);
   // Bumped after a successful manual assignment so the list refetches with fresh assignment columns.
   const [assignedToken, setAssignedToken] = useState(0);
@@ -108,7 +121,7 @@ export function DeviceDetailPage() {
   // past a now-smaller result set.
   useEffect(() => {
     setPage(0);
-  }, [search, sort, status, bucket, zoneId, companyId, plantId]);
+  }, [search, sort, status, bucket, zoneId, companyId, plantId, commissionedWithinDays]);
 
   // The plant dropdown follows the company pick — drop a plant that no longer belongs. Skips until
   // the options have actually loaded, so a deep-linked plantId isn't cleared by the empty first render.
@@ -132,6 +145,7 @@ export function DeviceDetailPage() {
       zoneId: zoneId === '' ? undefined : zoneId === 'UNZONED' ? 'UNZONED' : Number(zoneId),
       companyId: companyId === '' ? undefined : Number(companyId),
       plantId: plantId === '' ? undefined : Number(plantId),
+      commissionedWithinDays: commissionedWithinDays ?? undefined,
     })
       .then((res) => {
         if (!live) return;
@@ -143,7 +157,7 @@ export function DeviceDetailPage() {
     return () => {
       live = false;
     };
-  }, [search, page, sort, status, bucket, zoneId, companyId, plantId, assignedToken, retryToken]);
+  }, [search, page, sort, status, bucket, zoneId, companyId, plantId, commissionedWithinDays, assignedToken, retryToken]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -319,6 +333,28 @@ export function DeviceDetailPage() {
       {error && (
         <div role="alert" className="mb-4 rounded-md border border-critical/30 bg-critical-bg px-3 py-2 text-sm text-critical">
           {error}
+        </div>
+      )}
+
+      {/* #235 — the Commissioning Cohort scope, when the page was entered from there. A dismissible
+          chip rather than a dropdown: this narrows the list to a population the user was SENT here
+          with, and leaving it applied but invisible is how someone concludes the fleet has shrunk.
+          The grain is stated on it, because the cohort page counts FITMENTS and this table counts
+          DEVICES — a device re-mapped twice in the window is two there and one here, and both are
+          right. */}
+      {commissionedWithinDays !== null && (
+        <div className="mb-4 flex items-center gap-2" data-testid="commissioned-scope">
+          <span className="rounded-full border border-brand-600/30 bg-brand-600/10 px-2.5 py-1 text-[12px] text-ink-strong">
+            Commissioned in the last {commissionedWithinDays} days · counting devices, not fitments
+          </span>
+          <button
+            type="button"
+            data-testid="commissioned-scope-clear"
+            onClick={() => setCommissionedWithinDays(null)}
+            className="text-[12px] text-ink-muted underline-offset-2 hover:underline focus-ring rounded"
+          >
+            Clear
+          </button>
         </div>
       )}
 

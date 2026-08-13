@@ -119,6 +119,11 @@ export interface DeviceListParams {
   plantId?: number;
   /** Restrict to devices at or above CRITICAL severity (scorecard drill-down). */
   criticalPlus?: boolean;
+  /**
+   * Restrict to devices with a commissioning fitment inside the last N days — the #232 cohort page's
+   * drill-through (#235). Capped at 90 server-side; out of range is a 400, not a silent clamp.
+   */
+  commissionedWithinDays?: number;
 }
 
 /** The distinct zones / companies / plants in the caller's scope — sources the filter dropdowns. */
@@ -144,6 +149,7 @@ export async function apiDeviceList(opts: DeviceListParams = {}): Promise<Device
   if (opts.companyId != null) params.set('companyId', String(opts.companyId));
   if (opts.plantId != null) params.set('plantId', String(opts.plantId));
   if (opts.criticalPlus) params.set('criticalPlus', 'true');
+  if (opts.commissionedWithinDays != null) params.set('commissionedWithinDays', String(opts.commissionedWithinDays));
   const qs = params.toString();
   const data = await get<DeviceListPage | DeviceListRow[]>(`/devices${qs ? `?${qs}` : ''}`);
   // Tolerate both shapes: the paged `{ rows, total }` and the legacy bare array (a backend that

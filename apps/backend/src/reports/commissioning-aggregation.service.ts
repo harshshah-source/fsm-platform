@@ -8,6 +8,7 @@ import {
   RESOLUTION_MATURITY_HOURS,
   type CommissioningConfig,
 } from './commissioning.config';
+import { cohortWindowStart, commissionedWithinWindow } from './commissioning-window';
 import { classifyInstaller, type InstallerKind } from './installer-classification';
 
 /**
@@ -52,7 +53,7 @@ export class CommissioningAggregationService {
    */
   async cohort(scope: ReportScope, opts: CohortOptions, now: Date = new Date()): Promise<CommissioningCohortReport> {
     const restrictZone = this.resolveZone(scope, opts.zoneId);
-    const cohortStart = new Date(now.getTime() - opts.cohortDays * 24 * 3_600_000);
+    const cohortStart = cohortWindowStart(now, opts.cohortDays);
     const graceCutoff = new Date(now.getTime() - opts.graceHours * 3_600_000);
 
     // Old enough to have been observed for the full range the curve plots — see
@@ -153,7 +154,7 @@ export class CommissioningAggregationService {
    */
   async installQuality(scope: ReportScope, opts: InstallQualityOptions, now: Date = new Date()): Promise<InstallQualityReport> {
     const restrictZone = this.resolveZone(scope, opts.zoneId);
-    const since = new Date(now.getTime() - opts.lookbackDays * 24 * 3_600_000);
+    const since = cohortWindowStart(now, opts.lookbackDays);
     const byPlant = opts.groupBy === 'plant';
 
     const keyColumns = byPlant
@@ -269,7 +270,7 @@ export class CommissioningAggregationService {
         JOIN plants p ON p.plant_id = dc.plant_id
         -- LEFT: a fitment whose device has no state row yet is silent, not missing from the cohort.
         LEFT JOIN device_states ds ON ds.device_id = dc.device_id
-        WHERE dc.installed_at >= ${opts.since} AND dc.installed_at <= ${opts.until}
+        WHERE ${commissionedWithinWindow(opts.since, opts.until)}
         ${Prisma.join(filters, ' ')}
       ),
       graded AS (

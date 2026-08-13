@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   apiCommissioningCohort,
   apiCommissioningInstallers,
@@ -163,7 +164,26 @@ export function CommissioningCohortPage() {
   );
 
   const plantColumns: Column<CohortPlantRow>[] = [
-    { key: 'plant', header: 'Plant', render: (r) => r.plantName, sortable: true, sortValue: (r) => r.plantName },
+    {
+      key: 'plant',
+      header: 'Plant',
+      // #235 drill-through. Links on `plantId`, never on the displayed name — the #217 S2 defect was
+      // exactly a drilldown that substituted a display value into an id param. The target reads every
+      // param handed to it (verified against DeviceDetailPage's contract, not assumed).
+      render: (r) => (
+        <Link
+          to={`/reports/device?plantId=${r.plantId}&commissionedWithinDays=${cohortDays}`}
+          data-testid={`cc-plant-link-${r.plantId}`}
+          className="text-brand-600 hover:underline focus-ring rounded"
+        >
+          {r.plantName}
+        </Link>
+      ),
+      // The export must carry the plant NAME, not the link markup.
+      exportValue: (r) => r.plantName,
+      sortable: true,
+      sortValue: (r) => r.plantName,
+    },
     { key: 'fitments', header: 'Fitments', align: 'right', sortable: true, sortValue: (r) => r.fitments, render: (r) => r.fitments },
     { key: 'online', header: 'Online', align: 'right', sortable: true, sortValue: (r) => r.online, render: (r) => r.online },
     { key: 'pending', header: 'Awaiting', align: 'right', sortable: true, sortValue: (r) => r.pending, render: (r) => r.pending },
@@ -339,6 +359,14 @@ export function CommissioningCohortPage() {
       </ReportGrid>
 
       <ChartCard title="By plant" className="mb-5">
+        {/* Stated once, beside the table whose numbers it explains. The cohort counts fitments; the
+            device list this links into counts devices. Measured, 6.4% of cohort devices carry more
+            than one fitment in 90 days, so the two totals legitimately differ — and a reader who has
+            not been told will read that as a bug. */}
+        <p className="mb-3 text-[11px] text-ink-muted" data-testid="commissioning-grain-note">
+          Counts are <strong>fitments</strong> — one per (device, vehicle, install date). A device
+          re-mapped twice in this window is two fitments here and one row on the device list.
+        </p>
         <DataTable
           columns={plantColumns}
           rows={report?.byPlant ?? []}
