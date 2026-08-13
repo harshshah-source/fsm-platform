@@ -12,10 +12,19 @@ const ROW_START: Record<number, string> = {
 };
 
 /**
- * Dashboard hero (docs/ui/hero-ref.jpg): the truck asset as a background layer with the KPI cards
- * floating in glass columns on both sides of it, and an optional bottom strip (Auto-Dispatch
- * efficiency) riding over the truck's lower edge. Purely presentational — the cards are the same
- * `MetricCard`s the flat strip renders (testIds, RollingNumbers and click-through included).
+ * The tiles that stay cards inside the hero. `hero` is the inverted black headline tile (Fleet
+ * Uptime on every manager dashboard); `keepCard` is the Ops-Head Fleet-directory composite, whose
+ * value slot holds its own two-up panel. Every other KPI here renders flat.
+ */
+const isCard = (m: Metric) => Boolean(m.hero || m.keepCard);
+
+/**
+ * Dashboard hero (docs/ui/hero-ref.jpg): the truck asset as a background layer with the KPI figures
+ * in columns on both sides of it, and an optional bottom strip (Auto-Dispatch efficiency) riding
+ * over the truck's lower edge. Purely presentational — the tiles are the same `MetricCard`s the
+ * strip renders (testIds, RollingNumbers and click-through included), now in their flat form:
+ * label · value · supporting line, with no panel around them. The Fleet-Uptime hero tile and the
+ * Fleet-directory composite keep their glass cards.
  *
  * Below `xl` the truck hides and every card falls back to the classic 1-col / 2-col metric grid,
  * so narrow screens see exactly the pre-hero stacking.
@@ -70,12 +79,15 @@ export function DashboardHero({
         <div className="relative grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-h-[564px] xl:grid-cols-[minmax(230px,300px)_minmax(0,1fr)_minmax(230px,300px)] xl:content-start xl:gap-x-4 xl:gap-y-20">
           {left.map((m, i) => (
             <div key={`l-${i}`} className={cn('xl:col-start-1', ROW_START[i + 1])}>
-              <MetricCard glass {...m} />
+              <MetricCard {...m} flat glass={isCard(m)} />
             </div>
           ))}
           {right.map((m, i) => (
             <div key={`r-${i}`} className={cn('xl:col-start-3', ROW_START[i + 1])}>
-              <MetricCard glass {...m} />
+              {/* Right column hangs off its right edge from `xl` up — see `FlatMetric`: the truck
+                  reaches into this column, and without a card behind them the figures would sit on
+                  its rear. Mirrored, the two columns frame the truck. */}
+              <MetricCard {...m} flat flatAlign="right-xl" glass={isCard(m)} />
             </div>
           ))}
           {bottom && (
@@ -93,7 +105,7 @@ export function DashboardHero({
               )}
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 {bottom.map((m, i) => (
-                  <MetricCard key={`b-${i}`} glass {...m} />
+                  <MetricCard key={`b-${i}`} {...m} flat glass={isCard(m)} />
                 ))}
               </div>
             </section>

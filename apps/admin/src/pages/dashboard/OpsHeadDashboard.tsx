@@ -128,6 +128,9 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
         right={[
           {
             label: 'Fleet directory',
+            // Unchanged by the flat-KPI rework: this tile is not a KPI figure but a two-up composite
+            // panel with its own chrome, so it opts out and keeps the glass card around it.
+            keepCard: true,
             value: (
               <CompanyPlantCard
                 companies={fleet ? <RollingNumber value={fleet.companies} runToken={lastRunAt} /> : '—'}

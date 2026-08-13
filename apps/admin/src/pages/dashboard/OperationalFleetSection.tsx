@@ -101,10 +101,11 @@ export function OperationalFleetSection({ fleet }: { fleet: FleetSummary | null 
           Last snapshot: <span className="tabular-nums text-ink">{formatStamp(fleet?.lastSnapshotAt)}</span>
         </p>
       </div>
-      {/* 4-up: seven cards across six columns would leave one orphaned on its own row at every
+      {/* 4-up: seven figures across six columns would leave one orphaned on its own row at every
           breakpoint. Two rows of four (the last slot empty) keeps the counts on the top row and the
-          two rates below them, which is also how they are read. */}
-      <MetricStrip metrics={metrics} cols={4} className="mb-0" />
+          two rates below them, which is also how they are read — and `flat` makes the two rows one
+          KPI grid, ruled between rows, instead of seven separate cards. */}
+      <MetricStrip metrics={metrics} cols={4} flat className="mb-0" />
       <p className="mt-2 text-xs text-ink-muted">
         Operational = Healthy + Inactive + Never Reported. Both rates are taken over devices that have
         reported at least once, so a tracker that has never sent a fix is counted beside Fleet Health
