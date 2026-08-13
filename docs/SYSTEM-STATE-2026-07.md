@@ -61,7 +61,15 @@ Section order is the resume order for future sessions.
 > Treat any local "full suite green" claim from before that issue lands as unverified; CI (#107)
 > provisions a fresh DB per run and is immune.
 
-> **2026-08-09 — currency marker.** This document is current through **2026-08-09**. It had been
+> **2026-08-13 — currency marker.** This document is current through **2026-08-13**. Reconciled this
+> session: **§3l is new** (the #232 commissioning cohort / install-quality endpoints, which existed as
+> uncommitted files with no issue, no INDEX line and no section here), and **§5's "`device_commissioning`
+> is empty" note is superseded** — master sync 117 populated it with ~24,294 rows on 2026-08-10, so
+> #223's coverage acceptance is measurable locally now and has simply not been measured. The three
+> days of work behind #229/#230/#231 are committed (`b82c5af`), including a migration that had been
+> **applied to both databases while its file was untracked**.
+>
+> **2026-08-09 — currency marker.** This document was current through **2026-08-09**. It had been
 > current only through #218b (`9c00ad6`, 2026-08-07) and carried **zero** mentions of the fleet-health
 > defects found since. Now reconciled: §2.2 records `device_states.first_reported_at` and the
 > `device_commissioning` fact table, §5 opens with the #222/#223/#226/#227/#228 callout, and §6.1's
@@ -115,28 +123,33 @@ AutoPlant MySQL (VPN, read-only)
 [c] Device-state recompute ─ set-based upsert of device_states (inactivity hrs, SLA bucket,
   │                          eligibility)                          device-state.service.ts
   ▼
-[d] Ticket creation ─ inactive + eligible → OPEN ticket + failure_cycle    [gated: eligibility_mode
-  │                                                     ='pgi' over empty pgi_history ⇒ 0 today]
+[d] Auto-recovery pre-check ─ device healthy now + ping evidence → close VERIFIED
+  │                     [#229; LLD:615 order. Inert: needs INGESTION_SCHEDULER_ENABLED]
   ▼
-[e] Recommender ─ hard filters + scoring + canonical sort → recommendations (SUGGESTED)
+[e] Ticket creation ─ inactive + eligible → OPEN ticket + failure_cycle   [NOT "0 today": dev runs
+  │                                       eligibility_mode='all-deployed', 15,696 eligible — #229 §3.3]
+  ▼
+[f] Recommender ─ hard filters + scoring + canonical sort → recommendations (SUGGESTED)
   │                                                                 recommender.service.ts
   ▼
-[f] Batch dispatch ─ SUGGESTED→DISPATCHED, work_schedules Day Plan (transactional, advisory-
+[g] Batch dispatch ─ SUGGESTED→DISPATCHED, work_schedules Day Plan (transactional, advisory-
   │                  locked, idempotent)  batch-assignment.service.ts · daily cron dispatch-
   │                  scheduler.service.ts               [BUSINESS_SWEEPS_ENABLED, default OFF]
   ▼
-[g] Field loop ─ SE soft states · troubleshoot submission · intraday CRITICAL insertion ·
+[h] Field loop ─ SE soft states · troubleshoot submission · intraday CRITICAL insertion ·
   │              ZM override/same-day · cross-zone escalation · install & recovery lifecycles ·
   │              inventory/van stock/component requests
   ▼
-[h] Verification ─ first-valid-ping GPS sweeps → CLOSED / PARTIAL_RECOVERY / failed
+[i] Verification ─ first-valid-ping GPS sweeps → CLOSED / PARTIAL_RECOVERY / failed
   ▼
-[i] Reports ─ monthly/daily aggregation cubes → fleet uptime, root cause, efficiency, ZM scorecard
+[j] Reports ─ monthly/daily aggregation cubes → fleet uptime, root cause, efficiency, ZM scorecard
 ```
 
 **Funnel status (verified 2026-07-09, `INDEX.md:124-139`, spot-checked this session):** every stage
 is code-complete and tested; activation is blocked by (1) empty `engineer_master`/`se_coverage`
-data, (2) the B7 eligibility business decision (`pgi_history` empty), and (3) the ops switches in
+data, (2) the B7 eligibility business decision (`pgi_history` empty) — **which gates the `pgi` mode
+only; the dev DB runs `all-deployed` and creation is live, corrected 2026-08-10 per #229 §3.3** —
+and (3) the ops switches in
 §6.2 — of which **`BUSINESS_SWEEPS_ENABLED` is `"true"` in `apps/backend/.env:38` and its eleven crons
 are running now**, while `INGESTION_SCHEDULER_ENABLED` (`:18`) and `PARTITION_MAINTENANCE_ENABLED`
 (`:24`) are `"false"`. See §6.
@@ -455,11 +468,24 @@ eligible AND no open cycle AND has plant+company → per device, one `$transacti
 `failure_cycle` (OPEN, or REPEAT if a VERIFIED cycle closed ≤24h prior — ADR-0021), the parented
 TROUBLESHOOT `ticket` (tier denormalised), the OPEN `ticket_event`, and the
 `has_open_failure_cycle` flip. Invariant I1 partial-unique backstops races — P2002 ⇒ silent skip.
-- **Gate**: candidates exist only if `eligible_for_uptime` is true — with `eligibility_mode='pgi'`
-  over an empty `pgi_history`, **0 tickets are created today** (blocker B7, INDEX.md:133).
-- **Auto-recovery** (`auto-recovery.service.ts` `[by module role; internals not re-read this
-  session]`) closes cycles whose device resumed pinging — `CLOSED_AUTO_RECOVERY`; repeat-escalation
-  sweep (`repeat-escalation.service.ts`) escalates repeat offenders, driven by #108's cron.
+- **Gate**: candidates exist only if `eligible_for_uptime` is true. **Corrected 2026-08-10 (#229
+  §3.3):** the long-standing "`eligibility_mode='pgi'` over an empty `pgi_history` ⇒ **0 tickets
+  created today**" framing is **wrong for the dev database as configured** — `system_settings.
+  eligibility_mode` is **`all-deployed`**, 15,696 devices carry `eligible_for_uptime = true`, and the
+  31,162 `OPEN` events prove creation has been running. B7 remains a real blocker for the *`pgi`*
+  mode; it is not what is gating ticket creation here.
+- **Auto-recovery** (`auto-recovery.service.ts`) closes a cycle whose device resumed pinging as
+  `CLOSED_AUTO_RECOVERY`. **Corrected 2026-08-10 (#229): until this date it had no production caller
+  at all** — no cron, no route, no CLI — so despite being built, documented and tested since Issue 08
+  it had never executed once (0 `CLOSED_AUTO_RECOVERY` rows in 42,955 `ticket_events`), and ~11,042
+  closable tickets accumulated. It is now the **auto-recovery pre-check** the LLD always specified
+  (`fsm-backend-low-level-design.md:615`), called by `IntegrationSyncService` between device-state
+  recompute and ticket creation on both `ingestTelemetry()` and `runPipeline()`. **It still has not
+  run**, and will not until `INGESTION_SCHEDULER_ENABLED` is turned on: enabling it is an
+  operator-gated ~9,888-closure event (#229 "Gating posture"), bounded by `AUTO_RECOVERY_MAX_PER_PASS`
+  (default 200/pass). The scan closes only devices that are healthy at the recompute that just ran, so
+  flapping devices keep their tickets. Repeat-escalation (`repeat-escalation.service.ts`) escalates
+  repeat offenders, driven by #108's cron.
 - **Known limit**: per-candidate loop (one transaction per device) — fine at current volumes;
   unbounded candidate list is a #106-family concern only if a mass outage flips thousands inactive
   at once `[INFERRED]`.
@@ -847,6 +873,40 @@ beside it.
 
 ---
 
+### 3l. Commissioning cohort & install quality (#232) — backend live, no UI
+
+`GET /api/reports/commissioning/cohort` and `/installers` (`reports.controller.ts`, both
+`@Roles(...MANAGER_ROLES)`, ZM clamped to their own zone and told so via `scopedToZoneId`), served by
+`CommissioningAggregationService` over `device_commissioning ⋈ device_states`. **No new module, no new
+table**: cohort membership is derived (`installed_at >= now() - N days`), so nothing moves a device
+between states and a device ageing out of the window requires no write.
+
+Three things a reader of these numbers has to know, all of them counter-intuitive:
+
+- **Online is `device_states.first_reported_at`, never `device_commissioning.first_reported_at`.** The
+  latter is an observation-time snapshot, populated on **0 of 24,294 rows**; a reader requiring both to
+  agree reports zero commissioned devices forever.
+- **Fitments before `COMMISSIONING_TTFR_EPOCH` count as installs but contribute no *timing* sample.**
+  The write-once column captured a last-seen value for devices already reporting when it landed —
+  15,345 of 23,086 stamped on the day it shipped, 2,138 stamped before their own `installed_at`, median
+  TTFR ~8,707 h against 17.26 h for fitments observed after. Never-online stays meaningful across the
+  whole history, because a null stamp means the device has not pinged since the epoch either.
+- **There is no commissioning tail.** 96.97% of genuine new installations report within 12–24 h and the
+  curve is flat after, so silence past the grace cutoff is `failed`, not `pending`. This is an
+  install-quality surface, not a fault queue.
+
+Request windows are capped (`COHORT_DAYS` ≤ 90, `GRACE_HOURS` ≤ 720, `LOOKBACK_DAYS` ≤ 365) as a
+**measured** performance contract, not taste: bounded shapes hold the index plan (6.8/9.7 ms today,
+62.7/172.1 ms at 4× the one-year projection), while an unbounded lookback abandons the index and spills
+the `GROUP BY` to disk at 1,078 ms. No index fixes it — the cost is the sort forced by the
+`count(DISTINCT …)` aggregates, and the best of three candidates bought 9%.
+
+**Not built: any admin surface.** Two manager-facing endpoints exist that no screen calls — the open
+parity-gate item on #232, whose deferral reason is *not* an external-integration blocker. The figures
+also have no `kpiCatalog`/`kpi-definitions.md` entries yet, and have never been run against live `fsm`.
+
+---
+
 ## 4. DOCS vs CODE RECONCILIATION
 
 Method: every issue file's `Status:` line was extracted (`grep -H -m1 "^Status:" issues/*.md`,
@@ -1045,11 +1105,18 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 > **Still true and expected:** `soft_inactive_count_history` holds denominators snapshotted under the old
 > definition, so trend charts show a **step discontinuity on the fix day** — documented, not a regression.
 >
-> **Not done, deliberately, and NOT blocking:** `device_commissioning` is **empty in the dev DB** (0 rows)
-> because no master sync has run since its migration landed, and a master sync now executes #218b's live
-> lifecycle pass — the run #218c holds under an operator gate. So #223's *coverage* acceptance
-> ("`installed_at` ≥ 99% of operational devices") and the fleet-wide 84.84% figure are **verifiable only
-> on the first gated master sync**, not locally. The code path is covered by tests; the data is not there.
+> ~~**Not done, deliberately, and NOT blocking:** `device_commissioning` is **empty in the dev DB** (0 rows)
+> because no master sync has run since its migration landed…~~ **SUPERSEDED 2026-08-13.** That state is
+> gone: master sync **117** ran on 2026-08-10 (the operator's `run-pipeline` press — see [#230]/[#231])
+> and `device_commissioning` now holds **~24,294 rows**. So #223's *coverage* acceptance
+> ("`installed_at` ≥ 99% of operational devices") and the fleet-wide 84.84% figure are measurable
+> locally now and **have not yet been measured** — the data arrived through an event nobody planned as
+> the verification run, which is why the check did not happen with it.
+>
+> One consequence worth naming, because it is not obvious from the row count: of those 24,294 rows,
+> **0 carry `first_reported_at`**. That column is an observation-time snapshot — a later first ping does
+> not retro-fill an older row — so it is provenance, never outcome. Anything asking "did this device
+> come online?" must read `device_states.first_reported_at` instead (see §3l).
 >
 > Two data-loss findings sit inside the same population: **[#226]** 15 of those 913 have live
 > telemetry at source that FSM stored NULL over (14 pinged within 24 h) — and 15 is only the slice
