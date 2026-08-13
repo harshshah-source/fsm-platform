@@ -952,10 +952,20 @@ its curve basis, so a reader reconciling against AutoPlant is not left concludin
 **456 tests / 95 files** green. Reports: `docs/progress/232-commissioning-admin-surface.md`,
 `233-commissioning-population.md`, `234-commissioning-resolution-curve.md`.
 
-**Still open:** the page has **never been opened in a browser against a live backend** — no committed
-path seeds a dev credential (#194), so every login 401s there; it is proven by tests over payload
-shapes taken from the live probe's real output. Drill-through into Device Detail is **#235**. Full
-investigation: `audit/recently-commissioned-devices-investigation-2026-08-13.md`.
+**Drill-through (#235, done 2026-08-13):** one optional `commissionedWithinDays` param on
+`GET /api/devices`, and links out of the cohort's plant rows into `/reports/device`. **No migration,
+no index, no new endpoint.** Its substance is `src/reports/commissioning-window.ts` — the cohort
+report iterates fitments (`FROM device_commissioning`) while the device list filters devices
+(`EXISTS (…)`), so the **window predicate** is shared and "recently commissioned" has exactly one
+definition; the two surfaces are one click apart and a second spelling would show two answers to one
+question. Grain differs by design and is stated on both — the cohort counts **fitments**, the list
+counts **devices**, and 6.4% of cohort devices carry more than one fitment in 90 days.
+Report: `docs/progress/235-commissioning-drillthrough.md`.
+
+**Still open:** neither page has **ever been opened in a browser against a live backend** — no
+committed path seeds a dev credential (#194), so every login 401s there; both are proven by tests over
+payload shapes taken from the live probe's real output. Full investigation:
+`audit/recently-commissioned-devices-investigation-2026-08-13.md`.
 
 ---
 

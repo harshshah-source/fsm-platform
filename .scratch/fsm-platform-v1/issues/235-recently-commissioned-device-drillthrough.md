@@ -1,6 +1,7 @@
 # 235 — Drill-through: filter the device list to recently commissioned devices
 
-Status: ready-for-agent
+Status: **done 2026-08-13** — all six ACs checked.
+Report: `docs/progress/235-commissioning-drillthrough.md`
 Type: Feature (Backend + Admin) · Devices · AFK
 Filed: 2026-08-13, from `audit/recently-commissioned-devices-investigation-2026-08-13.md` §4, §6.1
 Coordinates with: [#232](./232-commissioning-cohort-view.md) (the cohort page this is entered from) ·
