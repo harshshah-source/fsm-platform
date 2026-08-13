@@ -937,15 +937,25 @@ Request windows are capped (`COHORT_DAYS` ≤ 90, `GRACE_HOURS` ≤ 720, `LOOKBA
 the `GROUP BY` to disk at 1,078 ms. No index fixes it — the cost is the sort forced by the
 `count(DISTINCT …)` aggregates, and the best of three candidates bought 9%.
 
-**Not built: any admin surface.** Two manager-facing endpoints exist that no screen calls — the open
-parity-gate item on #232, whose deferral reason is *not* an external-integration blocker. The figures
-also have no `kpiCatalog`/`kpi-definitions.md` entries yet. ~~and have never been run against live
-`fsm`~~ — **run 2026-08-13 (#233); see the amendment above.** #232 AC-1 is now unblocked and fed by
-**#234** (the fitment-relative resolution curve — the only cohort trend derivable today, since
-`device_states` is overwritten, `raw_device_snapshots` is 7-day retained, and the `failure_cycles`
-reconstruction is distorted while 1,799 of 2,183 cohort cycles sit `OPEN` under #229's un-run
-auto-recovery); drill-through is **#235**. Full investigation:
-`audit/recently-commissioned-devices-investigation-2026-08-13.md`.
+~~**Not built: any admin surface.**~~ **Built 2026-08-13 — #232 is done and the parity-gate item is
+closed.** Route `/reports/commissioning` (Analytics nav, `MANAGER_ROLES`), built to
+`docs/ui/desktop/v2-reference/21-reports.png` and composed **entirely from existing primitives** —
+the predicted "new bucket-histogram component" turned out to be `BarList` over pre-computed
+percentages. Presentation only: nothing is recomputed in the browser, because the population
+predicate and the "came online" definition live in one SQL expression. Three rendering rules are
+correctness rather than polish and each is pinned by test — a null median renders **"—" never 0**
+with `sampleSize` on the card; installer logins are **shown and labelled, never ranked as people**;
+and the window says **"last 90 days", not "3 months"** (the ceiling is 90 and a 92-day request 400s).
+The page also states its census (`6,810 in window = 2,623 operational + 4,187 warehouse + 0 + 0`) and
+its curve basis, so a reader reconciling against AutoPlant is not left concluding the page is broken.
+`kpiCatalog` gained 6 entries and `docs/kpi-definitions.md` a §8 written from them. Admin suite
+**456 tests / 95 files** green. Reports: `docs/progress/232-commissioning-admin-surface.md`,
+`233-commissioning-population.md`, `234-commissioning-resolution-curve.md`.
+
+**Still open:** the page has **never been opened in a browser against a live backend** — no committed
+path seeds a dev credential (#194), so every login 401s there; it is proven by tests over payload
+shapes taken from the live probe's real output. Drill-through into Device Detail is **#235**. Full
+investigation: `audit/recently-commissioned-devices-investigation-2026-08-13.md`.
 
 ---
 

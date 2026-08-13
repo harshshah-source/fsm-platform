@@ -1,7 +1,9 @@
-# 232 — Commissioning cohort & install-quality view: backend shipped, admin surface unbuilt
+# 232 — Commissioning cohort & install-quality view
 
-Status: ready-for-agent
-Type: Feature (Backend done · Admin outstanding) · Reports
+Status: **done 2026-08-13** — AC-1/AC-3 shipped (report: `docs/progress/232-commissioning-admin-surface.md`);
+AC-2 executed 2026-08-13 and FAILED, producing [#233](./233-commissioning-cohort-counts-warehouse-as-failed.md), now fixed.
+Drill-through split out as [#235](./235-recently-commissioned-device-drillthrough.md).
+Type: Feature · Reports
 Filed: 2026-08-13 (retrospectively — the backend was written 2026-08-10 and sat uncommitted and
 unowned until a status review found it on disk)
 Origin: `audit/commissioning-view-feasibility.md` (2026-08-09), an operator-requested feasibility
@@ -57,15 +59,16 @@ Design decisions worth not re-litigating:
 Verified 2026-08-13 before commit: `commissioning-units` 8/8, `commissioning-cohort` 27/27 (real DI
 graph, over HTTP), `tsc --noEmit` clean.
 
-## What is NOT built — the acceptance criteria that remain
+## Acceptance criteria — all three closed
 
-1. **AC-1 — the admin surface.** Two manager-facing report endpoints exist that no screen calls.
-   Read `docs/ui/desktop/v2-reference/21-reports.png` and follow the UI-discovery steps in
-   `docs/agents/workflow.md` before building; do not redesign. This is the open parity-gate item:
-   the deferral reason is *not* an external-integration blocker, so per CLAUDE.md this issue cannot
-   be marked done while it stands.
+1. **AC-1 — the admin surface. DONE 2026-08-13.** Route `/reports/commissioning`, Analytics nav
+   group, `MANAGER_ROLES`, built against `docs/ui/desktop/v2-reference/21-reports.png` following the
+   UI-discovery steps; no redesign. **The parity-gate item is closed.** Composed entirely from
+   existing primitives — the "one new bucket-histogram component" the plan predicted turned out to be
+   `BarList` over pre-computed percentages, so no new component was needed. Report:
+   `docs/progress/232-commissioning-admin-surface.md`.
 
-   **Blocked by [#233](./233-commissioning-cohort-counts-warehouse-as-failed.md)** (population
+   Was blocked by [#233](./233-commissioning-cohort-counts-warehouse-as-failed.md)** (population
    correctness — AC-2 below) and **fed by [#234](./234-commissioning-resolution-curve.md)** (the
    trend panel). Drill-through out of the page is
    **[#235](./235-recently-commissioned-device-drillthrough.md)**.
@@ -99,8 +102,12 @@ graph, over HTTP), `tsc --noEmit` clean.
    - The `graceHours = 48` default is now confirmed on FSM's own stored data, not only on the
      AutoPlant-side survival curve: of 520 measurable TTFR samples, **97.7% fall inside 48 h and
      99.6% inside 72 h**.
-3. **AC-3 — `kpiCatalog` / `kpi-definitions.md` entries** for the cohort measures, so these figures
-   carry the same provenance every other KPI on the dashboard does.
+3. **AC-3 — `kpiCatalog` / `kpi-definitions.md` entries. DONE 2026-08-13.** Six entries in
+   `apps/admin/src/lib/kpiCatalog.ts`, rendered in-product through `KpiInfo` on every card, and
+   restated with the SQL as §8 of `docs/kpi-definitions.md`. Note the failure mode this needed a test
+   for: `KpiInfo` renders **nothing** for an unknown key, so a typo would silently drop the
+   provenance affordance and no other test would fail — `commissioning-cohort.test.tsx` asserts each
+   `kpi-info-<key>` resolves.
 
 ## Notes
 
