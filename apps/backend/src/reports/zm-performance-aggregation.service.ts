@@ -45,7 +45,9 @@ interface ZoneSlaRow {
  * zone's auto-assignment denominator (for override rate), and the zone's Fleet-Uptime inputs (for zone SLA
  * compliance). Only **native** ZM actions count (`audit_logs.actor_role = 'ZONAL_MANAGER'`) — backup-cascade
  * (acted-as) actions are another ZM's keystrokes, not the zone ZM's. Every ZM user is represented
- * (zero-filled) so the comparison is complete. On-demand (no scheduler), same posture as Fleet Uptime.
+ * (zero-filled) so the comparison is complete. **Scheduled** by the `business-zm-performance` cron
+ * (`BusinessSweepSchedulerService`, gated by `BUSINESS_SWEEPS_ENABLED`) since #108, and still
+ * recomputable on demand; job names asserted in `test/scheduler-wiring.e2e-spec.ts` (#229 §4).
  * Rebuilt per month (delete + insert in one transaction) so recompute is idempotent. Outcome-causality
  * metrics (tickets improved/delayed, manual-vs-auto success, SE-overload causality) need a
  * decision→outcome model and are a filed follow-up.

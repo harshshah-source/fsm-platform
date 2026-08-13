@@ -163,6 +163,9 @@ describe('#175 — GET /api/me/work-history (e2e)', () => {
     // 01:30 IST on the 21st, so it IS in the window's last day — but t2 was only ever assigned on the
     // 19th, so it must not count anywhere. This is the `completed ⊆ assigned` rule doing its job.
     await close(t2, '2026-06-20T20:00:00Z');
+    // #229 D6 — t4's device healed itself before any form was submitted. That is a closure, but not
+    // work this SE completed (CONTEXT §Auto-Recovery: "no SE effort is credited"), so it must stay in
+    // `assigned` and score 0 in `completed`. Counted here until 2026-08-10.
     await close(t4, '2026-06-21T05:00:00Z', 'CLOSED_AUTO_RECOVERY');
 
     const view = await history.getWorkHistory(se, { now: NOW });
@@ -172,8 +175,9 @@ describe('#175 — GET /api/me/work-history (e2e)', () => {
     ]);
     const byDate = new Map(view.days.map((d) => [d.date, d]));
     expect(byDate.get('2026-06-19')).toEqual({ date: '2026-06-19', assigned: 3, completed: 2 });
-    // t5 (removed from the plan) is excluded from assigned; t6 is assigned but never closed.
-    expect(byDate.get('2026-06-21')).toEqual({ date: '2026-06-21', assigned: 2, completed: 1 });
+    // t5 (removed from the plan) is excluded from assigned; t6 is assigned but never closed; t4 is
+    // assigned and closed, but auto-recovered — so the day reads 2 assigned, 0 completed (#229 D6).
+    expect(byDate.get('2026-06-21')).toEqual({ date: '2026-06-21', assigned: 2, completed: 0 });
     // Days with no schedule are present as zeroes, never gaps — the chart renders 7 bars regardless.
     expect(byDate.get('2026-06-20')).toEqual({ date: '2026-06-20', assigned: 0, completed: 0 });
     expect(byDate.get('2026-06-15')).toEqual({ date: '2026-06-15', assigned: 0, completed: 0 });

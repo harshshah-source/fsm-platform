@@ -6,8 +6,13 @@ import { AutoPlantMysqlClient } from './autoplant-mysql.client';
 import { IntegrationSyncService, type PipelineSummary } from './integration-sync.service';
 
 /**
- * Operations-Head manual triggers for the AutoPlant integration pipeline (first light — no scheduler
- * yet). `run-pipeline` drives master-sync → snapshot → device-state end-to-end; `sync-masters` runs
+ * Operations-Head **manual** triggers for the AutoPlant integration pipeline. Not the only path since
+ * #97 Slice 7: the `ingestion-telemetry` and `ingestion-masters` crons drive the same service, gated
+ * by `INGESTION_SCHEDULER_ENABLED` (currently `false`, so these endpoints are in practice how the
+ * pipeline runs today — which is a deployment state, not an architectural one). Job names asserted in
+ * `test/scheduler-wiring.e2e-spec.ts` (#229 §4).
+ * `run-pipeline` drives master-sync → snapshot → device-state → auto-recovery → ticket-creation
+ * end-to-end; `sync-masters` runs
  * just the org sync (useful for iterating on the zone-mapping queue without re-draining telemetry).
  * Both refuse with 503 when AutoPlant is not configured, so a misconfigured env fails loudly rather
  * than silently no-opping against the empty source.

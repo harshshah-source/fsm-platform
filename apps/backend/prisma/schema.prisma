@@ -1741,6 +1741,11 @@ enum ClosureType {
   /// System close: the device left the deployed fleet (Issue 128). Distinct from
   /// OPERATIONS_HEAD_OVERRIDE_CLOSE — no human triggered it, the master sync observed the departure.
   DEVICE_UNDEPLOYED_CLOSE
+  /// System close: the device resumed pinging before any SE form was submitted (#229, CONTEXT
+  /// §Auto-Recovery). Distinct from DEVICE_UNDEPLOYED_CLOSE — the device is still deployed and is now
+  /// healthy — and from a `CLOSED` SE repair, because **no SE effort is credited** (operator decision
+  /// 2026-08-10, reversing the 2026-08-04 unification; see `me-work-history.service.ts`).
+  AUTO_RECOVERY_CLOSE
 
   @@map("closure_type")
 }

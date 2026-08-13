@@ -15,8 +15,9 @@ export interface SystemEfficiencyAggregationResult {
  * stage-time second-sums. The report read SUMs every partial row matching the filter, so the families
  * need not be merged into one row per key — each `INSERT … SELECT … GROUP BY` populates its own metrics
  * and leaves the rest at their column default 0. Rebuilt per day (delete + insert in a transaction) so
- * recompute is idempotent. On-demand — a BullMQ daily cron wires to it when scheduling lands, same
- * posture as the other report workers.
+ * recompute is idempotent. **Scheduled** by the `business-system-efficiency` cron
+ * (`BusinessSweepSchedulerService`, gated by `BUSINESS_SWEEPS_ENABLED`) since #108, and still
+ * recomputable on demand; job names asserted in `test/scheduler-wiring.e2e-spec.ts` (#229 §4).
  *
  * Dimensions come from the ticket's plant (zone) / company / plant and the device's `device_type`. The
  * `se_id` dimension is populated only for **assignment-attributable** metrics (auto-assignments via the

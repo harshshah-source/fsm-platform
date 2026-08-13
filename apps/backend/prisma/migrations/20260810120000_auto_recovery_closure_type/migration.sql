@@ -1,0 +1,12 @@
+-- #229 — auto-recovery closures get their own `closure_type`.
+--
+-- `AutoRecoveryService.closeAsAutoRecovery` has never written `tickets.closure_type` at all, so a
+-- self-healed device would be indistinguishable from an SE repair to every report that groups on it
+-- (`nonStandardClosures()`, the Fleet Uptime closure split, PRD story 25). `status` alone cannot
+-- carry it, because the same writer also left `closed_at` NULL and that is the column
+-- `fleet_uptime_aggregation` counts closures by.
+--
+-- Additive and idempotent, exactly like DEVICE_UNDEPLOYED_CLOSE (20260717130000). Nothing is
+-- back-filled: the 11,792 historical closures are genuine departure/override closures, not
+-- mis-typed auto-recoveries (measured 2026-08-10, issue #229 §3.2).
+ALTER TYPE "closure_type" ADD VALUE IF NOT EXISTS 'AUTO_RECOVERY_CLOSE';

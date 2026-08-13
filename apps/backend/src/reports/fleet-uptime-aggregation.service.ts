@@ -35,8 +35,11 @@ interface ClosureRow {
  * an open cycle runs to the window end = `min(now, month end)` so an incomplete current month isn't
  * penalised for the future). `eligible` snapshots `device_states.eligible_for_uptime` (active PGI ≤15d
  * AND not Non-Op). Auto-recovery (`CLOSED_AUTO_RECOVERY`) and SE-repaired (`CLOSED`) closures are counted
- * separately so SE productivity is not inflated. On-demand (no scheduler) — a BullMQ month-end cron
- * wires to it when scheduling lands, same posture as `VerificationService`. Idempotent (per-device upsert).
+ * separately so SE productivity is not inflated — note this counts closures by `closed_at`, which is
+ * why #229 had to fix `AutoRecoveryService` writing NULL there. **Scheduled** by the
+ * `business-fleet-uptime` cron (`BusinessSweepSchedulerService`, gated by `BUSINESS_SWEEPS_ENABLED`)
+ * since #108, and still recomputable on demand. Idempotent (per-device upsert). Job names asserted in
+ * `test/scheduler-wiring.e2e-spec.ts` (#229 §4).
  */
 @Injectable()
 export class FleetUptimeAggregationService {

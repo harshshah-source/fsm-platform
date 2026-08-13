@@ -45,14 +45,17 @@ describe('computeHomeKpis', () => {
     expect(kpis.started).toBe(1);
   });
 
-  it('COMPLETED counts CLOSED and CLOSED_AUTO_RECOVERY, never CLOSED_NON_OPERATIONAL', () => {
+  it('COMPLETED counts CLOSED only — never CLOSED_NON_OPERATIONAL, never CLOSED_AUTO_RECOVERY', () => {
     const kpis = computeHomeKpis([
       row({ status: 'CLOSED' }),
+      // #229 D6 — a device that healed itself credits no SE effort (CONTEXT §Auto-Recovery). Counted
+      // in this tile between 2026-08-04 and 2026-08-10; removed when the mechanism was wired and the
+      // count stopped being hypothetical.
       row({ status: 'CLOSED_AUTO_RECOVERY' }),
       row({ status: 'CLOSED_NON_OPERATIONAL' }),
     ]);
 
-    expect(kpis.completed).toBe(2);
+    expect(kpis.completed).toBe(1);
   });
 
   it('VERIFIED counts only CLOSED TROUBLESHOOT tickets (the auto-verification pipeline), a subset of COMPLETED', () => {
@@ -63,7 +66,9 @@ describe('computeHomeKpis', () => {
     ]);
 
     expect(kpis.verified).toBe(1);
-    expect(kpis.completed).toBe(3);
+    // The auto-recovered TROUBLESHOOT ticket is neither VERIFIED (it never entered the three-phase
+    // pipeline) nor COMPLETED (#229 D6) — it reached a terminal status without an SE touching it.
+    expect(kpis.completed).toBe(2);
   });
 
   it('FAILED counts FAILED_VERIFICATION, FAILED_ACTIVATION, and ESCALATED', () => {

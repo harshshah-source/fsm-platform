@@ -9,7 +9,23 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * SE-repaired closures are surfaced separately.
  */
 const NS = Date.now();
-const MONTH = new Date(Date.UTC(2026, 4, 1)); // May 2026
+/**
+ * March 2026 — **a month no other spec writes**, and that is load-bearing rather than arbitrary.
+ *
+ * This suite asserts `fleet.eligibleDeviceCount` at **fleet scope, i.e. with no zone filter**, so it
+ * counts every `device_downtime_summary_monthly` row for its month regardless of which spec created
+ * it. It used May 2026 — the same month as `fleet-uptime-aggregation.e2e-spec.ts`, which calls
+ * `computeMonth(MONTH)`, a **global delete+insert across all devices** for that month. When the two
+ * interleave across vitest workers the aggregation inserts rows for its own devices into the month
+ * this suite is counting, and `expect(...).toBe(3)` sees 5.
+ *
+ * Observed on 2026-08-10 (a full run failed here while both specs passed in isolation and paired).
+ * Same class as #215: a spec whose correctness depends on what another spec left in shared state.
+ * Isolating the month is the fix an unscoped assertion actually needs — a `deleteMany` in `afterAll`
+ * cannot help, because the collision is *concurrent*, not leftover.
+ */
+const MONTH = new Date(Date.UTC(2026, 2, 1)); // March 2026
+const MONTH_PARAM = '2026-03';
 const W = 1000; // window seconds per device (round numbers for easy math)
 
 describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
@@ -69,8 +85,8 @@ describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
   const ohScope = { role: 'OPERATIONS_HEAD', zoneId: null };
 
   it('groups by zone: eligible-only denominator, time-weighted uptime, closure split', async () => {
-    const report = await service.fleetUptime(ohScope, { month: '2026-05', groupBy: 'zone' });
-    expect(report.month).toBe('2026-05-01');
+    const report = await service.fleetUptime(ohScope, { month: MONTH_PARAM, groupBy: 'zone' });
+    expect(report.month).toBe('2026-03-01');
     expect(report.groupBy).toBe('zone');
 
     const a = report.rows.find((r) => r.id === String(zoneA));
@@ -85,7 +101,7 @@ describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
   });
 
   it('computes the fleet total over all eligible devices in scope', async () => {
-    const report = await service.fleetUptime(ohScope, { month: '2026-05', groupBy: 'zone' });
+    const report = await service.fleetUptime(ohScope, { month: MONTH_PARAM, groupBy: 'zone' });
     // 3 eligible devices, Σwindow=3000, Σdowntime=600 → (1 - 600/3000)*100 = 80.0
     expect(report.fleet.eligibleDeviceCount).toBe(3);
     expect(report.fleet.uptimePct).toBe(80);
@@ -94,16 +110,16 @@ describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
   });
 
   it('groups by plant and by company', async () => {
-    const byPlant = await service.fleetUptime(ohScope, { month: '2026-05', groupBy: 'plant' });
+    const byPlant = await service.fleetUptime(ohScope, { month: MONTH_PARAM, groupBy: 'plant' });
     expect(byPlant.rows.find((r) => r.id === String(plantA))?.eligibleDeviceCount).toBe(2);
     expect(byPlant.rows.find((r) => r.id === String(plantB))?.uptimePct).toBe(50);
 
-    const byCompany = await service.fleetUptime(ohScope, { month: '2026-05', groupBy: 'company' });
+    const byCompany = await service.fleetUptime(ohScope, { month: MONTH_PARAM, groupBy: 'company' });
     expect(byCompany.rows.find((r) => r.id === String(companyId))?.eligibleDeviceCount).toBe(3);
   });
 
   it('a ZM is scoped to their own zone only', async () => {
-    const report = await service.fleetUptime({ role: 'ZONAL_MANAGER', zoneId: Number(zoneA) }, { month: '2026-05', groupBy: 'zone' });
+    const report = await service.fleetUptime({ role: 'ZONAL_MANAGER', zoneId: Number(zoneA) }, { month: MONTH_PARAM, groupBy: 'zone' });
     expect(report.rows.map((r) => r.id)).toEqual([String(zoneA)]);
     expect(report.fleet.eligibleDeviceCount).toBe(2);
   });

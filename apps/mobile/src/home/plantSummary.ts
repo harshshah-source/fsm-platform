@@ -15,8 +15,10 @@ const URGENT_BUCKETS: ReadonlySet<string> = new Set<SlaBucket>([
 ]);
 
 /** Same closure states as the KPI strip's COMPLETED tile (`homeKpi.ts`) — one definition of "done"
- *  for the whole screen, so the tile, the Plant Workload ring and the chart cannot contradict. */
-const DONE_STATUSES: ReadonlySet<string> = new Set(['CLOSED', 'CLOSED_AUTO_RECOVERY']);
+ *  for the whole screen, so the tile, the Plant Workload ring and the chart cannot contradict.
+ *  `CLOSED_AUTO_RECOVERY` left all three on 2026-08-10 together (#229 D6): a self-healed device is
+ *  not work an SE did. */
+const DONE_STATUSES: ReadonlySet<string> = new Set(['CLOSED']);
 
 export interface PlantSummary {
   /** Tickets at this plant. Every one is raised against a device that has gone silent, which is what

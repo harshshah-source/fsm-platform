@@ -10,6 +10,7 @@
     "autoplant:sync": "node -r dotenv/config dist/ingestion/autoplant/autoplant-sync.js dotenv_config_path=.env",
     "autoplant:departure-dryrun": "node -r dotenv/config dist/ingestion/autoplant/autoplant-departure-dryrun.js dotenv_config_path=.env",
     "autoplant:window-preflight": "node -r dotenv/config dist/ingestion/autoplant/autoplant-window-preflight.js dotenv_config_path=.env",
+    "autorecovery:dryrun": "node -r dotenv/config dist/ticketing/autorecovery-dryrun.js dotenv_config_path=.env",
     "runtime-lock:reset": "node -r dotenv/config dist/build-info/runtime-lock-reset.js dotenv_config_path=.env",
     "test": "node scripts/run-tests.mjs",
     "test:watch": "vitest",

@@ -7,6 +7,7 @@ import { SnapshotIngestionWorker } from '../src/ingestion/snapshot-ingestion.wor
 import { SnapshotRunService } from '../src/ingestion/snapshot-run.service';
 import { InMemorySourceReader } from '../src/ingestion/source-reader';
 import { PrismaService } from '../src/prisma/prisma.service';
+import type { AutoRecoveryService } from '../src/ticketing/auto-recovery.service';
 import type { TicketCreationService } from '../src/ticketing/ticket-creation.service';
 
 /**
@@ -22,7 +23,10 @@ describe('Issue 97 Slice 6 — IntegrationSyncService.ingestTelemetry', () => {
   const created: bigint[] = [];
 
   const masterSync = { sync: vi.fn() };
-  const deviceState = { recompute: vi.fn(async () => ({ upserted: 7 })) };
+  const deviceState = { recompute: vi.fn(async () => ({ upserted: 7, derived: true })) };
+  const autoRecovery = {
+    runAutoRecovery: vi.fn(async () => ({ closed: 0, scanned: 0, examined: 0, capped: false })),
+  };
   const ticketCreation = { createForInactiveEligible: vi.fn(async () => ({ created: 0 })) };
 
   const makeService = (): IntegrationSyncService =>
@@ -30,6 +34,7 @@ describe('Issue 97 Slice 6 — IntegrationSyncService.ingestTelemetry', () => {
       masterSync as unknown as MasterSyncService,
       new SnapshotIngestionWorker(runs, new SnapshotIngestionService(prisma), new InMemorySourceReader([]), prisma),
       deviceState as unknown as DeviceStateService,
+      autoRecovery as unknown as AutoRecoveryService,
       ticketCreation as unknown as TicketCreationService,
     );
 
@@ -62,7 +67,8 @@ describe('Issue 97 Slice 6 — IntegrationSyncService.ingestTelemetry', () => {
     expect(result.skipped).toBe(false);
     if (result.skipped) throw new Error('unreachable');
     expect(result.snapshot.status).toBe('SUCCESS'); // empty source drains to a clean run
-    expect(result.deviceState).toEqual({ upserted: 7 });
+    // `derived` (#230) distinguishes a real recompute from one skipped on an incomplete read.
+    expect(result.deviceState).toEqual({ upserted: 7, derived: true });
     expect(deviceState.recompute).toHaveBeenCalledTimes(1);
     expect(masterSync.sync).not.toHaveBeenCalled(); // telemetry tick never touches the org graph
   });
@@ -75,6 +81,7 @@ describe('Issue 97 Slice 6 — IntegrationSyncService.ingestTelemetry', () => {
 
     expect(result).toEqual({ skipped: true, reason: 'RUN_IN_PROGRESS' });
     expect(deviceState.recompute).not.toHaveBeenCalled(); // a skipped tick does no half-work
+    expect(autoRecovery.runAutoRecovery).not.toHaveBeenCalled();
     expect(ticketCreation.createForInactiveEligible).not.toHaveBeenCalled();
     const untouched = await prisma.snapshotRun.findUnique({ where: { runId: inFlight.runId } });
     expect(untouched?.status).toBe('RUNNING'); // the in-flight run is left alone
@@ -89,6 +96,7 @@ describe('Issue 97 Slice 6 — IntegrationSyncService.ingestTelemetry', () => {
         },
       } as unknown as SnapshotIngestionWorker,
       deviceState as unknown as DeviceStateService,
+      autoRecovery as unknown as AutoRecoveryService,
       ticketCreation as unknown as TicketCreationService,
     );
 

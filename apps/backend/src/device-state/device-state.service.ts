@@ -50,8 +50,43 @@ export class DeviceStateService {
     private readonly settings: SettingsService,
   ) {}
 
-  /** Recompute `device_states` for all known devices (set-based; no telemetry scan). `now` injectable. */
-  async recompute(now: Date = new Date(), trigger: RecomputeTrigger = 'api'): Promise<{ upserted: number }> {
+  /**
+   * Recompute `device_states` for all known devices (set-based; no telemetry scan). `now` injectable.
+   *
+   * **#230 — `skipDerivation` exists because aging is only honest on evidence this run actually read.**
+   * The derive pass ages every device from wall-clock time, which is correct when the telemetry read
+   * covered the fleet and *catastrophic* when it did not: on 2026-08-10 snapshot run 153 aborted after
+   * 2,610 of 27,032 devices, this pass aged the 24,422 it never saw past the inactivity threshold, and
+   * ticket creation opened 3,439 Failure Cycles on devices nobody had checked. A partial ingest must
+   * produce *less* data, never *confidently wrong* data.
+   *
+   * When set, step 1 still runs (a new device gets its row) but the derivation is skipped entirely:
+   * `inactivity_hours`, `is_inactive`, `sla_bucket` and `computed_at` keep their last-good values, so
+   * `computed_at` visibly lags — which is the correct signal that this fleet picture is not current.
+   * Deliberately all-or-nothing rather than per-device: the reader dedupes unchanged pings away
+   * (`snapshot-ingestion.service.ts` skips duplicates), so "no ping row this run" cannot distinguish
+   * *not read* from *read and silent*, and a per-device coverage filter built on it would be wrong in
+   * exactly the direction that matters. The run's own SUCCESS/PARTIAL verdict is the honest signal.
+   */
+  async recompute(
+    now: Date = new Date(),
+    trigger: RecomputeTrigger = 'api',
+    opts: { skipDerivation?: boolean } = {},
+  ): Promise<{ upserted: number; derived: boolean }> {
+    if (opts.skipDerivation) {
+      // Still guarantee a row per device — that is not a derivation and cannot be wrong.
+      await this.prisma.$executeRaw(Prisma.sql`
+        INSERT INTO device_states (device_id, computed_at)
+        SELECT d.device_id, ${now} FROM devices d
+        ON CONFLICT (device_id) DO NOTHING`);
+      this.logger.warn(
+        '[recompute] derivation SKIPPED — the telemetry read for this pass was incomplete (#230). ' +
+          'inactivity_hours / is_inactive / sla_bucket keep their previous values and computed_at ' +
+          'deliberately lags, so the dashboard shows stale-but-true rather than fresh-and-fabricated. ' +
+          'Devices that are genuinely silent will resume ageing on the next complete ingest.',
+      );
+      return { upserted: 0, derived: false };
+    }
     const threshold =
       (await this.settings.get<number>('inactivity_threshold_hours')) ??
       DEFAULT_INACTIVITY_THRESHOLD_HOURS;
@@ -169,7 +204,7 @@ export class DeviceStateService {
     // just-updated device_states in one FILTER pass.
     await this.recordRecomputeAndCanary(now, trigger);
 
-    return { upserted };
+    return { upserted, derived: true };
   }
 
   /**

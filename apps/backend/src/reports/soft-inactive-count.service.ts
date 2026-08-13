@@ -56,8 +56,10 @@ interface ZoneCountRow {
  * `recompute` snapshots every zone into
  * `soft_inactive_count_history` twice daily (morning/afternoon); `modeForZone` is the live count-driven
  * switch the Recommender reads — DEFICIT when the count exceeds `thresholdPct × eligible`, else
- * PREVENTIVE. The threshold is configurable (CONTEXT default 2%). On-demand (no scheduler), same posture
- * as the other workers.
+ * PREVENTIVE. The threshold is configurable (CONTEXT default 2%). **Scheduled** by the
+ * `business-soft-inactive` cron (`BusinessSweepSchedulerService`, gated by `BUSINESS_SWEEPS_ENABLED`)
+ * since #108, and still callable on demand; job names asserted in
+ * `test/scheduler-wiring.e2e-spec.ts` (#229 §4).
  */
 @Injectable()
 export class SoftInactiveCountService {

@@ -7,7 +7,7 @@ export interface HomeKpis {
   failed: number;
 }
 
-const COMPLETED_STATUSES = new Set(['CLOSED', 'CLOSED_AUTO_RECOVERY']);
+const COMPLETED_STATUSES = new Set(['CLOSED']);
 const FAILED_STATUSES = new Set(['FAILED_VERIFICATION', 'FAILED_ACTIVATION', 'ESCALATED']);
 
 /**
@@ -15,9 +15,12 @@ const FAILED_STATUSES = new Set(['FAILED_VERIFICATION', 'FAILED_ACTIVATION', 'ES
  * operator 2026-08-04 (this tile taxonomy has no PRD/enum source — #55's own comment):
  *
  * - STARTED: `workState === 'IN_WORK'` — the SE is actively on this ticket right now.
- * - COMPLETED: `status` is `CLOSED` or `CLOSED_AUTO_RECOVERY`. Deliberately excludes
- *   `CLOSED_NON_OPERATIONAL` (a vehicle written off, not work completed) and INSTALL's
- *   `FITTED`/`ACTIVATED` (a different lifecycle, not folded into this count).
+ * - COMPLETED: `status` is `CLOSED`. Deliberately excludes `CLOSED_NON_OPERATIONAL` (a vehicle
+ *   written off, not work completed), INSTALL's `FITTED`/`ACTIVATED` (a different lifecycle, not
+ *   folded into this count), and — since 2026-08-10, #229 D6 — `CLOSED_AUTO_RECOVERY`: a device
+ *   that healed itself before any form was submitted credits **no SE effort** (CONTEXT
+ *   §Auto-Recovery). It was counted here between 2026-08-04 and 2026-08-10; no such closure had
+ *   ever been written in that window, so no displayed figure was ever wrong.
  * - VERIFIED: `CLOSED` **and** `workType === 'TROUBLESHOOT'` — only TROUBLESHOOT tickets go
  *   through the three-phase auto-verification pipeline (CONTEXT: `OPEN -> SUBMITTED ->
  *   VERIFICATION_PENDING -> CLOSED`), so reaching `CLOSED` on that path *is* "passed

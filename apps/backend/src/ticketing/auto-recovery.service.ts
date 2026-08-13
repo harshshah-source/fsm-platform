@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { meetsRecoveryCriteria, type RecoveryThresholds } from './recovery-criteria';
+import {
+  meetsRecoveryEvidence,
+  summariseRecoveryPings,
+  type RecoveryEvidence,
+  type RecoveryThresholds,
+} from './recovery-criteria';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -12,31 +18,125 @@ export interface AutoRecoveryActor {
 
 export type ManualCloseResult = 'CLOSED' | 'NOT_FOUND' | 'NOT_OPEN';
 
+export interface AutoRecoveryOptions {
+  now?: Date;
+  thresholds?: RecoveryThresholds;
+  /**
+   * Cap on closures **per pass** — the resume point the original all-or-nothing loop never had
+   * (#229 D9). Candidates are walked oldest-cycle-first, so a capped pass is a prefix of the same
+   * ordering and the next pass continues where it stopped; nothing is skipped or revisited.
+   */
+  maxClosures?: number;
+  /** Restrict to one zone, for a staged first drain (#229 §5.4.3). */
+  zoneId?: number | bigint;
+  /** Compute the plan and write NOTHING. Backs `npm run autorecovery:dryrun`. */
+  dryRun?: boolean;
+}
+
+/** One qualifying ticket plus the evidence that qualified it — a count is not evidence (#229 gate 1). */
+export interface AutoRecoveryPlanRow extends RecoveryEvidence {
+  ticketId: string;
+  ticketNo: string;
+  deviceId: string;
+  cycleId: string;
+  cycleOpenedAt: Date;
+  plantId: string;
+  companyId: string;
+  zoneId: string | null;
+}
+
 /**
- * AutoRecoveryService (CONTEXT "Auto-Recovery", Issue 08). Scans open Troubleshoot Tickets; when a
- * device has resumed pinging (≥3 pings ≥15 min after its Failure Cycle opened) **without any SE
- * troubleshooting form**, the Ticket closes as `CLOSED_AUTO_RECOVERY` — kept distinct from a
- * SE-repaired `CLOSED` so productivity/component reports aren't inflated. The cycle goes `VERIFIED`
- * (device verified back online, no effort credited), the open-cycle flag clears, and a lifecycle
- * event is recorded — all in one transaction.
+ * Per-pass closure budget (#229 D9). Deliberately **defaulted, not opt-in**: the qualifying backlog
+ * is ~11,042 tickets whose ping evidence is already on disk, so an uncapped first pass would close
+ * all of them in one transaction storm the moment telemetry is enabled — an operational event
+ * arriving as a deploy side-effect. With the cap the first drain is a sequence of bounded, resumable
+ * passes the operator watches and can stop by changing one variable.
+ *
+ * In steady state the cap never binds (a live tick closes single to low-double digits), so this
+ * costs nothing once the backlog is gone. `AUTO_RECOVERY_MAX_PER_PASS=unlimited` removes it.
+ */
+export const DEFAULT_AUTO_RECOVERY_MAX_PER_PASS = 200;
+
+export function readAutoRecoveryMaxPerPass(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const raw = env.AUTO_RECOVERY_MAX_PER_PASS?.trim();
+  if (raw === undefined || raw === '') return DEFAULT_AUTO_RECOVERY_MAX_PER_PASS;
+  if (raw.toLowerCase() === 'unlimited') return undefined;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_AUTO_RECOVERY_MAX_PER_PASS;
+}
+
+export interface AutoRecoveryResult {
+  /** Tickets closed (or, under `dryRun`, that WOULD have been closed). */
+  closed: number;
+  /** Candidates the DB scan returned — open TROUBLESHOOT tickets on currently-healthy devices. */
+  scanned: number;
+  /** Candidates whose pings were actually evaluated. Below `scanned` only when `capped`. */
+  examined: number;
+  /** True when `maxClosures` stopped the pass with candidates still unexamined. */
+  capped: boolean;
+  /** Present only under `dryRun`. */
+  plan?: AutoRecoveryPlanRow[];
+}
+
+/**
+ * AutoRecoveryService (CONTEXT "Auto-Recovery", Issue 08). A device that resumes pinging **without
+ * any SE troubleshooting form** closes its Ticket as `CLOSED_AUTO_RECOVERY` — kept distinct from an
+ * SE-repaired `CLOSED` so productivity and component reports are not inflated by self-healing
+ * devices. The cycle goes `VERIFIED`, the open-cycle flag clears, and the closure is recorded in
+ * `ticket_events` **and** `audit_logs`, all in one transaction.
+ *
+ * **Trigger (#229).** `runAutoRecovery` is the *auto-recovery pre-check* the architecture specifies
+ * between device-state recompute and ticket creation
+ * (`fsm-backend-low-level-design.md:615`, `fsm-business-technical-workflow.md:512`). It is called
+ * from `IntegrationSyncService` on every telemetry pass — **not** from a `@Cron`. For eleven months
+ * it had no production caller at all, which is why 11,042 closable tickets accumulated; the
+ * mechanism was built, tested and unreachable.
+ *
+ * **Why the scan requires a currently-healthy device (#229 D3).** "Auto-recovery" is a claim about
+ * *now* — this device is back — not about whether some window in the past contained three pings. A
+ * flapping device satisfies the ping evidence and is still down; closing its ticket only to have
+ * ticket creation re-open a `REPEAT`-flagged cycle milliseconds later (ADR-0021) manufactures
+ * escalations for work nobody did. Filtering on `device_states.is_inactive = false` is meaningful
+ * *only* at this position in the pipeline, where recompute has just run — a standalone cron would be
+ * reading a figure up to a full cadence stale. Placement and correctness are the same decision here.
+ *
+ * The two stages are then exact complements: creation takes `is_inactive = true`, recovery takes
+ * `is_inactive = false`, so no device can be touched by both on one pass.
  */
 @Injectable()
 export class AutoRecoveryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async runAutoRecovery(
-    now: Date = new Date(),
-    thresholds: RecoveryThresholds = {},
-  ): Promise<{ closed: number }> {
-    const openTickets = await this.prisma.ticket.findMany({
-      where: { workType: 'TROUBLESHOOT', status: 'OPEN' },
-      include: { failureCycle: true },
+  async runAutoRecovery(options: AutoRecoveryOptions = {}): Promise<AutoRecoveryResult> {
+    const { now = new Date(), thresholds = {}, maxClosures, zoneId, dryRun = false } = options;
+
+    const candidates = await this.prisma.ticket.findMany({
+      where: {
+        workType: 'TROUBLESHOOT',
+        status: 'OPEN',
+        // The device must be healthy at the recompute that just ran — see the class docstring.
+        device: { state: { isInactive: false } },
+        ...(zoneId !== undefined ? { plant: { zoneId: BigInt(zoneId) } } : {}),
+      },
+      include: { failureCycle: true, plant: { select: { zoneId: true } } },
+      // Oldest failure first: the longest-stale tickets are the least ambiguous, and it makes a
+      // capped pass a deterministic prefix rather than an arbitrary sample.
+      orderBy: { failureCycle: { openedAt: 'asc' } },
     });
 
     let closed = 0;
-    for (const ticket of openTickets) {
+    let examined = 0;
+    let capped = false;
+    const plan: AutoRecoveryPlanRow[] = [];
+
+    for (const ticket of candidates) {
+      if (maxClosures !== undefined && closed >= maxClosures) {
+        capped = true;
+        break;
+      }
       const cycle = ticket.failureCycle;
       if (!cycle) continue;
+      examined++;
 
       // No SE troubleshooting form may have been submitted (CONTEXT §Auto-Recovery). Issue 16 moves a
       // ticket to VERIFICATION_PENDING on submit, so the `status: 'OPEN'` scan above already excludes
@@ -45,12 +145,35 @@ export class AutoRecoveryService {
         where: { deviceId: ticket.deviceId, gpsDatetime: { gt: cycle.openedAt } },
         select: { gpsDatetime: true },
       });
-      if (!meetsRecoveryCriteria(pings.map((p) => p.gpsDatetime), thresholds)) continue;
+      const evidence = summariseRecoveryPings(pings.map((p) => p.gpsDatetime));
+      if (!meetsRecoveryEvidence(evidence, thresholds)) continue;
 
-      await this.closeAsAutoRecovery(ticket.ticketId, ticket.status, cycle.cycleId, ticket.deviceId, now);
+      if (dryRun) {
+        plan.push({
+          ...evidence,
+          ticketId: ticket.ticketId,
+          ticketNo: ticket.ticketNo.toString(),
+          deviceId: ticket.deviceId,
+          cycleId: cycle.cycleId,
+          cycleOpenedAt: cycle.openedAt,
+          plantId: ticket.plantId.toString(),
+          companyId: ticket.companyId.toString(),
+          zoneId: ticket.plant?.zoneId?.toString() ?? null,
+        });
+      } else {
+        await this.closeAsAutoRecovery({
+          ticketId: ticket.ticketId,
+          fromStatus: ticket.status,
+          cycleId: cycle.cycleId,
+          deviceId: ticket.deviceId,
+          now,
+          evidence,
+        });
+      }
       closed++;
     }
-    return { closed };
+
+    return { closed, scanned: candidates.length, examined, capped, ...(dryRun ? { plan } : {}) };
   }
 
   /**
@@ -77,30 +200,61 @@ export class AutoRecoveryService {
     if (ticket.status !== 'OPEN' || ticket.workType !== 'TROUBLESHOOT' || !ticket.failureCycle)
       return 'NOT_OPEN';
 
-    await this.closeAsAutoRecovery(
-      ticket.ticketId,
-      ticket.status,
-      ticket.failureCycle.cycleId,
-      ticket.deviceId,
+    await this.closeAsAutoRecovery({
+      ticketId: ticket.ticketId,
+      fromStatus: ticket.status,
+      cycleId: ticket.failureCycle.cycleId,
+      deviceId: ticket.deviceId,
       now,
       actor,
-    );
+    });
     return 'CLOSED';
   }
 
-  /** Close a single Ticket as auto-recovered. `actor` null = system (the scan); set = manual close. */
-  async closeAsAutoRecovery(
-    ticketId: string,
-    fromStatus: string,
-    cycleId: string,
-    deviceId: string,
-    now: Date,
-    actor: AutoRecoveryActor | null = null,
-  ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  /**
+   * Close a single Ticket as auto-recovered. `actor` null = system (the pre-check); set = ZM manual
+   * close. Seven writes, one transaction.
+   *
+   * **#229 §5.2 — four of these were missing and each produced a wrong screen or a wrong number:**
+   *
+   * - `closed_at` + `closure_type`. `fleet-uptime-aggregation.service.ts:86-91` counts closures by
+   *   `closed_at`, so without it `autoRecoveryClosures` stayed 0 no matter how many tickets closed —
+   *   the exact metric PRD story 25 exists to produce, reading zero on the day it fired.
+   * - The `audit_logs` row every sibling system-closure writer emits (device-departure,
+   *   plant-deactivation, verification). `ticket_events` is the narrower lifecycle ledger, not an
+   *   audit trail.
+   * - Soft-state resolution. CONTEXT §Soft States names auto-recovery as an explicit resolution
+   *   event for `ON_SITE` / `TROUBLESHOOT_STARTED`; they were left dangling.
+   * - Batch detachment. `MeTicketsQueryService` builds the SE day plan from `batch_assignment_tickets`
+   *   with no status filter, so a closed ticket rendered as work-to-do on the SE's app indefinitely.
+   *   Detaching here is truer to the data model than filtering at read time, because #175's
+   *   work-history read derives from the same rows.
+   */
+  async closeAsAutoRecovery(input: {
+    ticketId: string;
+    fromStatus: string;
+    cycleId: string;
+    deviceId: string;
+    now: Date;
+    actor?: AutoRecoveryActor | null;
+    evidence?: RecoveryEvidence | null;
+  }): Promise<void> {
+    const { ticketId, fromStatus, cycleId, deviceId, now, actor = null, evidence = null } = input;
+    // `removed_by` / audit actor are UUID-shaped columns; the system pass has no user to name.
+    const actorUuid = actor && UUID_RE.test(actor.userId) ? actor.userId : null;
+
+    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.ticket.update({
         where: { ticketId },
-        data: { status: 'CLOSED_AUTO_RECOVERY', lastStateChangedAt: now },
+        data: {
+          status: 'CLOSED_AUTO_RECOVERY',
+          closureType: 'AUTO_RECOVERY_CLOSE',
+          closureReason: actor
+            ? 'MANUAL_AUTO_RECOVERY: closed by manager'
+            : 'AUTO_RECOVERY: device resumed pinging before any SE submission',
+          closedAt: now,
+          lastStateChangedAt: now,
+        },
       });
       await tx.failureCycle.update({
         where: { cycleId },
@@ -115,12 +269,42 @@ export class AutoRecoveryService {
           actorId: actor?.userId ?? null,
           actorRole: (actor?.role as never) ?? null,
           actedAsRole: (actor?.actedAsRole as never) ?? null,
-          reasonCode: actor ? 'MANUAL_AUTO_RECOVERY' : null,
+          reasonCode: actor ? 'MANUAL_AUTO_RECOVERY' : 'AUTO_RECOVERY',
         },
       });
       await tx.deviceState.updateMany({
         where: { deviceId },
         data: { hasOpenFailureCycle: false },
+      });
+      // CONTEXT §Soft States — "Ticket closes through valid system rules (… auto-recovery …)" is a
+      // resolution event. Every SE's active soft state on this ticket resolves, not just one.
+      await tx.softState.updateMany({
+        where: { ticketId, resolvedAt: null },
+        data: { resolvedAt: now, resolvedBy: 'SYSTEM', resolutionReason: 'AUTO_RECOVERY' },
+      });
+      // Take it off every SE day plan that still holds it.
+      await tx.batchAssignmentTicket.updateMany({
+        where: { ticketId, removedAt: null },
+        data: { removedAt: now, removedBy: actorUuid },
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId: actorUuid ?? 'SYSTEM',
+          actorRole: actor?.role ?? 'SYSTEM',
+          actedAsRole: actor?.actedAsRole ?? null,
+          action: 'AUTO_RECOVERY_CLOSED',
+          entityType: 'TICKET',
+          entityId: ticketId,
+          metadata: {
+            deviceId,
+            cycleId,
+            manual: actor !== null,
+            pingCount: evidence?.pingCount ?? null,
+            firstPing: evidence?.firstPing?.toISOString() ?? null,
+            lastPing: evidence?.lastPing?.toISOString() ?? null,
+            spanMinutes: evidence?.spanMinutes ?? null,
+          },
+        },
       });
     });
   }

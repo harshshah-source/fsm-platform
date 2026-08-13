@@ -144,4 +144,55 @@ describe('Issue 05 slice 3 — DeviceStateService.recompute', () => {
       await prisma.device.deleteMany({ where: { deviceId: { in: ids } } });
     }
   });
+
+  /**
+   * #230 — the guard. Ageing is a function of wall-clock time, so it is correct for a device that was
+   * READ and found silent, and fabrication for a device the read never reached. On 2026-08-10 snapshot
+   * run 153 aborted after 2,610 of 27,032 devices; this pass aged the 24,422 it never saw into
+   * `is_inactive`, and ticket creation opened 3,439 Failure Cycles on devices nobody had checked.
+   *
+   * `skipDerivation` is the refusal. It is deliberately all-or-nothing: the ingest dedupes unchanged
+   * pings away, so "no ping row this run" cannot tell *not read* from *read and silent*, and a
+   * per-device coverage filter built on that would be wrong in exactly the dangerous direction.
+   */
+  it('#230 — skipDerivation freezes the fleet picture instead of ageing devices the read never saw', async () => {
+    // Establish a real derived state first, then advance the clock a long way.
+    await service.recompute(NOW);
+    const before = await prisma.deviceState.findUniqueOrThrow({ where: { deviceId: ACTIVE_DEV } });
+    expect(before.isInactive).toBe(false); // pinged 1h ago
+
+    const muchLater = new Date(NOW.getTime() + 500 * 3_600_000); // +500h: would be LONG_PENDING
+    const result = await service.recompute(muchLater, 'api', { skipDerivation: true });
+
+    expect(result).toEqual({ upserted: 0, derived: false });
+    const after = await prisma.deviceState.findUniqueOrThrow({ where: { deviceId: ACTIVE_DEV } });
+    // The device did NOT silently become inactive on evidence nobody gathered.
+    expect(after.isInactive).toBe(false);
+    expect(after.slaBucket).toBe(before.slaBucket);
+    expect(Number(after.inactivityHours)).toBeCloseTo(Number(before.inactivityHours), 4);
+    // computed_at deliberately lags — that IS the signal the picture is not current.
+    expect(after.computedAt).toEqual(before.computedAt);
+
+    // And the same clock WITHOUT the guard does age it — proving the test isn't passing vacuously.
+    await service.recompute(muchLater);
+    const aged = await prisma.deviceState.findUniqueOrThrow({ where: { deviceId: ACTIVE_DEV } });
+    expect(aged.isInactive).toBe(true);
+
+    await service.recompute(NOW); // restore for any later assertions
+  });
+
+  it('#230 — skipDerivation still creates a row for a brand-new device (that is not a derivation)', async () => {
+    const NEW_DEV = String(9_051_099n);
+    await prisma.device.create({ data: { deviceId: NEW_DEV } });
+    try {
+      await service.recompute(NOW, 'api', { skipDerivation: true });
+      const row = await prisma.deviceState.findUnique({ where: { deviceId: NEW_DEV } });
+      expect(row).not.toBeNull();
+      // Never ping-ed and never derived: it must not be asserted inactive either.
+      expect(row!.isInactive).toBe(false);
+    } finally {
+      await prisma.deviceState.deleteMany({ where: { deviceId: NEW_DEV } });
+      await prisma.device.deleteMany({ where: { deviceId: NEW_DEV } });
+    }
+  });
 });

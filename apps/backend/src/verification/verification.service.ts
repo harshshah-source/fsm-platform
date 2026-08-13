@@ -9,8 +9,12 @@ import { evaluatePhase1, evaluatePhase2 } from './verification-criteria';
  * Phase state lives in `verification_runs` (one in-flight run per ticket), so each scan recomputes from
  * the pings — safe to run every few minutes. Terminal outcomes transition the ticket + cycle and audit.
  *
- * No scheduler here (same posture as the rest of P1–P3); `runVerification(now)` is invoked on demand /
- * by tests; a BullMQ 5-min cron wires to it when scheduling lands.
+ * **Scheduled.** `runVerification(now)` is driven by the `business-verification` cron
+ * (`BusinessSweepSchedulerService`, gated by `BUSINESS_SWEEPS_ENABLED`), and is still callable on
+ * demand and by tests. This comment claimed "no scheduler … when scheduling lands" until 2026-08-10;
+ * #108 had wired it on 2026-07-07 and the prose was never updated (#229 §4). The registered job-name
+ * set is asserted in `test/scheduler-wiring.e2e-spec.ts` — that assertion, not this sentence, is what
+ * makes "does this run?" answerable.
  */
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 

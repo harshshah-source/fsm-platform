@@ -33,6 +33,7 @@ describe('setup-env allowlist (#182)', () => {
     env.PORT = '9999';
     env.DEV_AUTH_ZONE = 'EAST';
     env.AUTOPLANT_MYSQL_HOST = 'prod-mysql.example';
+    env.AUTO_RECOVERY_MAX_PER_PASS = 'unlimited';
     env.DB_POOL_MAX = '1000';
     env.PLANT_ELIGIBILITY_REFRESH_CRON = '* * * * *';
 
@@ -43,6 +44,9 @@ describe('setup-env allowlist (#182)', () => {
     expect(env.PORT).toBeUndefined();
     expect(env.DEV_AUTH_ZONE).toBeUndefined();
     expect(env.AUTOPLANT_MYSQL_HOST).toBeUndefined();
+    // #229 — an uncapped auto-recovery pass leaking in from a developer's .env would turn the
+    // suite's bounded fixtures into a full-table drain.
+    expect(env.AUTO_RECOVERY_MAX_PER_PASS).toBeUndefined();
     expect(env.DB_POOL_MAX).toBeUndefined();
     expect(env.PLANT_ELIGIBILITY_REFRESH_CRON).toBeUndefined();
   });

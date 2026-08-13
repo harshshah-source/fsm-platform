@@ -100,6 +100,7 @@ describe('Issue 97 Slice 7 — IntegrationSchedulerService', () => {
       conflicted as unknown as MasterSyncService,
       {} as SnapshotIngestionWorker,
       {} as DeviceStateService,
+      {} as import('../src/ticketing/auto-recovery.service').AutoRecoveryService,
       {} as import('../src/ticketing/ticket-creation.service').TicketCreationService,
     );
 

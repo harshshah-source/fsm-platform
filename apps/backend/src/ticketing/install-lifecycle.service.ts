@@ -162,7 +162,10 @@ export class InstallLifecycleService {
    * first valid ping for the new `device_id` after `activated_at` closes the Ticket (CLOSED) and fires
    * the verified push — NO geofence (no prior location). If no ping has arrived and the activation
    * window has elapsed, the Ticket goes FAILED_ACTIVATION with a push. Idempotent — safe to run every
-   * few minutes; a BullMQ cron wires to it when scheduling lands (same posture as `VerificationService`).
+   * few minutes; driven by the `business-install-verification` cron (`BusinessSweepSchedulerService`,
+   * gated by `BUSINESS_SWEEPS_ENABLED`) since #108. Job names are asserted in
+   * `test/scheduler-wiring.e2e-spec.ts` (#229 §4 — this comment said "when scheduling lands" for a
+   * year after scheduling landed).
    */
   async runInstallVerification(
     now: Date = new Date(),

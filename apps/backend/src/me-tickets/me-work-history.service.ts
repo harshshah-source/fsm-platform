@@ -6,11 +6,18 @@ import { PrismaService } from '../prisma/prisma.service';
 export type { MeWorkHistoryDay, MeWorkHistoryView } from '@fsm/shared';
 
 /** The closure states that count as work completed. **Deliberately identical to the Home KPI strip's
- *  COMPLETED tile** (`apps/mobile/src/home/homeKpi.ts`, operator-confirmed 2026-08-04): a chart bar and
- *  the tile above it sit on the same screen, so a second definition would be visible as a contradiction.
- *  `CLOSED_NON_OPERATIONAL` is excluded for the same reason it is there — a vehicle written off is not
- *  work the SE completed. */
-const COMPLETED_STATES = ['CLOSED', 'CLOSED_AUTO_RECOVERY'];
+ *  COMPLETED tile** (`apps/mobile/src/home/homeKpi.ts`): a chart bar and the tile above it sit on the
+ *  same screen, so a second definition would be visible as a contradiction. `CLOSED_NON_OPERATIONAL`
+ *  is excluded because a vehicle written off is not work the SE completed.
+ *
+ *  **`CLOSED_AUTO_RECOVERY` was removed 2026-08-10 (#229 D6, operator decision).** It was added
+ *  2026-08-04 under #175 when the two surfaces were unified, and that unification was correct about
+ *  the *shape* of the definition while wrong about this member: CONTEXT §Auto-Recovery states that a
+ *  self-healed device credits **no SE effort**, and an auto-recovery closure is by construction one
+ *  where no SE submitted a form. Counting it inflated exactly the productivity figure the distinct
+ *  `CLOSED_AUTO_RECOVERY` status exists to protect (PRD story 25). Latent until now only because no
+ *  auto-recovery closure had ever been written; #229 wires the mechanism, so it stops being latent. */
+const COMPLETED_STATES = ['CLOSED'];
 
 /** Request bound. 31 days is a month of bars — far past anything the 7-bar chart asks for, and small
  *  enough that the two queries below stay index-sized however the client is called. */

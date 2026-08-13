@@ -15,8 +15,10 @@ export interface RootCauseAggregationResult {
  * **structured** `root_cause_category` falls in that bucket — the diagnosis free-text is never parsed.
  * A submission's month is its `submitted_at`; its zone is the ticket plant's zone, its company/plant the
  * ticket's, its device_type the device's. Rebuilt per month (delete + insert in one transaction) so the
- * report reads a small pre-aggregated cube and recompute is idempotent. On-demand (no scheduler) — a
- * BullMQ month-end cron wires to it when scheduling lands, same posture as the Fleet Uptime worker.
+ * report reads a small pre-aggregated cube and recompute is idempotent. **Scheduled** by the
+ * `business-root-cause` cron (`BusinessSweepSchedulerService`, gated by `BUSINESS_SWEEPS_ENABLED`)
+ * since #108, and still recomputable on demand. Job names asserted in
+ * `test/scheduler-wiring.e2e-spec.ts` (#229 §4 — this said "no scheduler" for a year after #108).
  */
 @Injectable()
 export class RootCauseAnalyticsAggregationService {

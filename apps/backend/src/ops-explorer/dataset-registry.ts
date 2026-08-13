@@ -1766,12 +1766,16 @@ const TICKETS: DatasetDefinition = {
         'OPERATIONS_HEAD_OVERRIDE_CLOSE',
         'CSM_ACTING_CLOSE',
         'DEVICE_UNDEPLOYED_CLOSE',
+        'AUTO_RECOVERY_CLOSE',
       ],
       filterable: true,
       sortable: true,
       defaultVisible: false,
       lineage: {
-        definition: 'How a RECOVERY ticket was manually closed, when it was not closed by the normal warehouse-receipt path.',
+        definition:
+          'How a ticket was closed when it was not closed by the normal path. Originally RECOVERY-only ' +
+          '(manual closes vs warehouse receipt); since #229 it also carries AUTO_RECOVERY_CLOSE on ' +
+          'TROUBLESHOOT tickets whose device resumed pinging with no SE involvement.',
         system: 'FSM_POSTGRES',
         table: 'tickets',
         refreshTrigger: 'Set on manual closure.',

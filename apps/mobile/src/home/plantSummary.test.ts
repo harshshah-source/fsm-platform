@@ -56,11 +56,13 @@ describe('summarisePlant', () => {
     const rows = [
       row({ ticketId: 'a', workState: 'IN_WORK' }),
       row({ ticketId: 'b', status: 'CLOSED' }),
+      // A self-healed device is a closure but not work completed (#229 D6) — excluded, matching
+      // `homeKpi.ts`, which is the point of sharing one definition across the screen.
       row({ ticketId: 'c', status: 'CLOSED_AUTO_RECOVERY' }),
       // A written-off vehicle is a closure but not work completed — excluded, matching `homeKpi.ts`.
       row({ ticketId: 'd', status: 'CLOSED_NON_OPERATIONAL' }),
       row({ ticketId: 'e', status: 'VERIFICATION_PENDING' }),
     ];
-    expect(summarisePlant(rows)).toEqual({ inactive: 5, urgent: 0, inWork: 1, done: 2, total: 5 });
+    expect(summarisePlant(rows)).toEqual({ inactive: 5, urgent: 0, inWork: 1, done: 1, total: 5 });
   });
 });
