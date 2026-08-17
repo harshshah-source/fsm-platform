@@ -21,8 +21,37 @@ export function BucketBadge({
  * Inline condition badges (AC#3). Renders the badges whose data exists today; PARTIAL_RECOVERY
  * (N/3 pings → Issue 18) and FRAUD FLAG (distance delta → Issue 19) appear once their data lands.
  */
-export function InlineBadges({ ticket }: { ticket: TicketRow }) {
+export function InlineBadges({
+  ticket,
+  assignmentThresholdHours,
+}: {
+  ticket: TicketRow;
+  /** #238 — the live SE-assignment threshold, when the page has it. Undefined ⇒ no badge, never a
+   *  guessed one: a wrong "held" flag is worse than no flag. */
+  assignmentThresholdHours?: number | null;
+}) {
   const badges: JSX.Element[] = [];
+  // #238 — auto-dispatch is holding this ticket back. Shown, not enforced: the threshold gates the
+  // engine, and a ZM/CSM/OH assigning intraday keeps their judgement (a Platinum customer on the phone
+  // outranks a grace window). The badge exists so that judgement is exercised knowingly rather than
+  // against a queue that silently disagrees with the dispatch run.
+  if (
+    ticket.assignmentState === 'UNASSIGNED' &&
+    assignmentThresholdHours != null &&
+    ticket.inactivityHours != null &&
+    ticket.inactivityHours < assignmentThresholdHours
+  ) {
+    badges.push(
+      <span
+        key="below-threshold"
+        data-testid="badge-BELOW_ASSIGNMENT_THRESHOLD"
+        title={`Silent ${Math.floor(ticket.inactivityHours)} h; auto-dispatch starts at ${assignmentThresholdHours} h. You can still assign it manually.`}
+        className="rounded bg-neutral-bg px-1 text-xs text-neutral"
+      >
+        HELD · {Math.floor(ticket.inactivityHours)}/{assignmentThresholdHours}h
+      </span>,
+    );
+  }
   if (ticket.repeatFailure)
     badges.push(
       <span key="repeat" data-testid="badge-REPEAT" className="rounded bg-orange-100 px-1 text-xs text-orange-800">

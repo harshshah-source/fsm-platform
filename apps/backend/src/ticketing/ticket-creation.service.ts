@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { resolveActiveOverrides, tierOverrideKey } from '../org/effective-tier';
 import { PrismaService } from '../prisma/prisma.service';
+import { readAssignmentThresholdHours } from '../settings/assignment-threshold';
 
 /** Postgres unique-violation → Prisma P2002. Here it means invariant I1 already holds (an active
  *  Failure Cycle exists for the device), so this device is silently skipped. */
@@ -14,18 +15,33 @@ const REPEAT_WINDOW_MS = 24 * 60 * 60 * 1000;
 /**
  * TicketCreationService — the raw-telemetry-to-open-Ticket step (LLD TicketCreation, schema D6).
  *
- * Scans `device_states` for devices that are newly **inactive**, **eligible**, and have **no open
- * episode**, and for each opens one `failure_cycle` (OPEN) plus its one parented `ticket`
- * (work_type=TROUBLESHOOT, status=OPEN, `company_tier` denormalised from `company_master`), then
- * flips `has_open_failure_cycle`. All three writes commit in one transaction so a device never ends
- * up with a cycle but no ticket. The active-cycle partial-unique (invariant I1) backstops the
- * `has_open_failure_cycle` filter against races/staleness — a duplicate just skips that device.
+ * Scans `device_states` for devices that have been **silent past the SE-assignment threshold**, are
+ * **eligible**, and have **no open episode**, and for each opens one `failure_cycle` (OPEN) plus its
+ * one parented `ticket` (work_type=TROUBLESHOOT, status=OPEN, `company_tier` denormalised from
+ * `company_master`), then flips `has_open_failure_cycle`. All three writes commit in one transaction
+ * so a device never ends up with a cycle but no ticket. The active-cycle partial-unique (invariant
+ * I1) backstops the `has_open_failure_cycle` filter against races/staleness — a duplicate just skips
+ * that device.
+ *
+ * **#238 — the gate is `inactivity_hours >= se_assignment_threshold_hours`, not `is_inactive`.**
+ * The two were the same predicate until the assignment threshold became configurable, and the
+ * substitution is the whole point: `is_inactive` is a *measurement* (it defines the Fleet-Uptime
+ * denominator and the Soft Inactive Count zones are graded on) while this is a *policy decision*
+ * about when silence becomes fieldwork. Reading the hours directly lets an operator open work earlier
+ * than the KPI calls a device Inactive, or hold off past it, without either choice restating a single
+ * historical number. At the shipped default (both 24) the predicate is exactly what it always was.
+ *
+ * The complement matters as much as the gate: {@link AutoRecoveryService} closes on
+ * `inactivity_hours < threshold` reading the **same** setting, so creation and recovery remain exact
+ * complements and no device can be touched by both on one pass. Changing the threshold here without
+ * changing it there would let a device be ticketed and auto-closed on the same tick, forever.
  */
 @Injectable()
 export class TicketCreationService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createForInactiveEligible(now: Date = new Date()): Promise<{ created: number }> {
+    const thresholdHours = await readAssignmentThresholdHours(this.prisma);
     // Deactivated plants (Issue 119) are excluded here so no new Troubleshoot Ticket is opened for a
     // shut plant; on reactivation the exclusion lifts and the next run re-creates for still-inactive devices.
     const deactivatedPlantIds = (
@@ -33,7 +49,10 @@ export class TicketCreationService {
     ).map((r) => r.plantId);
     const candidates = await this.prisma.deviceState.findMany({
       where: {
-        isInactive: true,
+        // #238 — the configurable SE-assignment threshold (see the class docstring). NULL hours are
+        // excluded by `gte`, which is the pre-existing behaviour: a device with neither a ping nor an
+        // install date has no measurable silence and was never ticketed (#223/#227).
+        inactivityHours: { gte: thresholdHours },
         eligibleForUptime: true,
         hasOpenFailureCycle: false,
         // Departed devices (Issue 128) are never ticketed — a device sitting in a warehouse is not a

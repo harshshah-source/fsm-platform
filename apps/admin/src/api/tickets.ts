@@ -35,6 +35,10 @@ export interface TicketRow {
   slaBucket: string | null;
   /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
   latestGpsDatetime: string | null;
+  /** #238 — measured device silence in hours, as `device_states` derived it. Compared against the live
+   *  SE-assignment threshold to badge a ticket auto-dispatch is holding back. Manual assignment is
+   *  deliberately still allowed: the threshold gates the engine, not the operator's judgement. */
+  inactivityHours?: number | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
   /** Issue 23 — latest Component Request status + the SLA-pause timestamp for the WAITING_COMPONENT flag. */

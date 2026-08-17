@@ -3,6 +3,7 @@ import { useAuth } from '../../auth/AuthProvider';
 import { DateRangeChips, PageHeader } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { cn } from '../../lib/cn';
+import { AssignmentThresholdSection } from './AssignmentThresholdSection';
 import {
   AccessMatrixGrid,
   CommonKitSection,
@@ -36,6 +37,10 @@ const TABS: Tab[] = [
   // #213 — the daily dispatch time, moved out of an environment variable into this console. Sits with
   // the rules tabs rather than the reference-data ones: it is a policy an operator tunes, not a record.
   { id: 'dispatch', label: 'Dispatch Schedule', render: () => <DispatchScheduleSection /> },
+  // #238 — sits beside Dispatch Schedule for the same reason: both are policies an operator tunes,
+  // not reference records. The identical control is also routed at /assignment-threshold, which is how
+  // the CSM (who co-owns it, and cannot open this OH-only console) reaches it.
+  { id: 'assignment-threshold', label: 'Assignment Threshold', render: () => <AssignmentThresholdSection /> },
   { id: 'access', label: 'Access', render: () => <AccessMatrixGrid /> },
 ];
 

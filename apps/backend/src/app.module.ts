@@ -59,6 +59,7 @@ import { UsersAdminController } from './org/users.controller';
 import { ZoneMappingAdminController } from './org/zone-mapping.controller';
 import { ZonesAdminController } from './org/zones.controller';
 import { PrismaModule } from './prisma/prisma.module';
+import { AssignmentThresholdController } from './settings/assignment-threshold.controller';
 import { SettingsController } from './settings/settings.controller';
 import { SettingsModule } from './settings/settings.module';
 import { RecommenderModule } from './recommender/recommender.module';
@@ -135,6 +136,14 @@ import { MediaController } from './media/media.controller';
   controllers: [
     HealthController,
     MeController,
+    // #238 — MUST precede SettingsController. Nest matches routes in controller-registration order,
+    // and `PUT /api/settings/:key` on SettingsController also matches
+    // `PUT /api/settings/assignment-threshold`. Registered after it, the governed endpoint would be
+    // dead: the write would fall through to the generic key writer, which refuses the key (it is in
+    // SPECIALISED_SETTING_WRITERS) — the threshold would be unsettable through its own endpoint while
+    // every test that calls the service directly still passed. Same static-before-parameterised rule
+    // `schedules-route-conflicts.e2e-spec.ts` pins for /api/schedules.
+    AssignmentThresholdController,
     SettingsController,
     ZonesController,
     ZonesAdminController,

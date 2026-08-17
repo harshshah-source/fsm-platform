@@ -769,6 +769,11 @@ model DispatchRun {
   ticketsDispatched Int                @default(0) @map("tickets_dispatched")
   recommended       Int                @default(0)
   unassignable      Int                @default(0)
+  /// #238 — open unassigned Troubleshoot tickets held back because the device has not yet been silent
+  /// for `se_assignment_threshold_hours`. Kept apart from `unassignable`: that column means the engine
+  /// could not find anyone (a coverage/capacity failure to act on), this one means it deliberately did
+  /// not look yet (policy working). Merging them would read every threshold rise as a dispatch outage.
+  withheldBelowThreshold Int            @default(0) @map("withheld_below_threshold")
   configSnapshot    Json               @map("config_snapshot")
   // #130 L3 — build that produced this run (nullable/additive; stamped at creation from build-info).
   buildVersion      BigInt?            @map("build_version")
@@ -800,6 +805,11 @@ model DispatchRunZone {
   recommended         Int               @default(0)
   unassignable        Int               @default(0)
   unassignableReasons Json?             @map("unassignable_reasons")
+  /// #238 — this zone's share of the run-level figure; see DispatchRun.withheldBelowThreshold.
+  withheldBelowThreshold Int            @default(0) @map("withheld_below_threshold")
+  /// #238 — the threshold (hours) actually in force when this zone was processed, so a historical
+  /// zone card can be read without inferring the config from the run's snapshot.
+  assignmentThresholdHours Int?         @map("assignment_threshold_hours")
   schedules           Int               @default(0)
   batches             Int               @default(0)
   ticketsDispatched   Int               @default(0) @map("tickets_dispatched")
@@ -1381,15 +1391,67 @@ enum LeaveRequestStatus {
   @@map("leave_request_status")
 }
 
-/// The system_settings registry — global, Operations-Head-owned configuration
-/// (inactivity threshold, soft-state warning windows, etc.). Keyed by string.
+/// The system_settings registry — global configuration (inactivity threshold, soft-state warning
+/// windows, etc.). Keyed by string. Operations-Head-owned by default; a small number of keys are
+/// co-owned with the CSM (see `SETTING_WRITE_ROLES`, `settings/setting-authority.ts`).
+///
+/// #238 — the lock columns are the "Operations Head has the final decision" mechanism. A locked
+/// setting refuses every writer except OPERATIONS_HEAD, so a co-owned key (the SE-assignment
+/// threshold) can be handed to the CSM for day-to-day tuning and taken back the moment the OH
+/// disagrees, without a deploy or a role change. Null `locked_at` = unlocked.
 model SystemSetting {
-  key         String   @id
-  value       Json     @db.JsonB
-  description String?
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  key          String    @id
+  value        Json      @db.JsonB
+  description  String?
+  lockedAt     DateTime? @map("locked_at") @db.Timestamptz(6)
+  lockedBy     String?   @map("locked_by")
+  lockedByRole String?   @map("locked_by_role")
+  lockReason   String?   @map("lock_reason")
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  changes SettingChange[]
 
   @@map("system_settings")
+}
+
+/// What a `setting_changes` row records (#238).
+enum SettingChangeType {
+  /// A plain value write.
+  SET
+  /// A value write that restores an earlier row's value; `reverted_from_id` names it.
+  REVERT
+  /// The key was locked to OPERATIONS_HEAD.
+  LOCK
+  /// The lock was released.
+  UNLOCK
+
+  @@map("setting_change_type")
+}
+
+/// #238 — the value history of a `system_settings` key: who changed it, from what, to what, and why.
+///
+/// `audit_logs` already records *that* a setting changed, but its metadata carries no previous value,
+/// so it cannot answer "what was this before Tuesday" and cannot back a revert. This table is that
+/// answer: append-only, one row per change, and the row a REVERT points at. It is deliberately a
+/// side table rather than columns on `system_settings` — the current value is one row, the decision
+/// trail is many, and the trail must survive the value being overwritten.
+model SettingChange {
+  id            BigInt            @id @default(autoincrement())
+  key           String
+  previousValue Json?             @map("previous_value") @db.JsonB
+  newValue      Json?             @map("new_value") @db.JsonB
+  changeType    SettingChangeType @map("change_type")
+  actorId       String            @map("actor_id")
+  actorRole     String            @map("actor_role")
+  reason        String?
+  /// For REVERT — the `setting_changes.id` whose value was restored.
+  revertedFromId BigInt?          @map("reverted_from_id")
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  setting SystemSetting @relation(fields: [key], references: [key], onDelete: Cascade)
+
+  @@index([key, createdAt])
+  @@map("setting_changes")
 }
 
 /// Snapshot run lifecycle (schema D4). One row per SnapshotIngestionWorker run; drives the

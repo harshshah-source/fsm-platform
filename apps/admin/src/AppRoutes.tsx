@@ -36,6 +36,7 @@ import { OpsExplorerPage } from './pages/ops-explorer/OpsExplorerPage';
 import { BulkUnassignPage } from './pages/admin/BulkUnassignPage';
 import { PlantDeactivationsPage } from './pages/admin/PlantDeactivationsPage';
 import { PlantZonesPage } from './pages/admin/PlantZonesPage';
+import { AssignmentThresholdPage } from './pages/admin/AssignmentThresholdPage';
 import { TierOverridesPage } from './pages/admin/TierOverridesPage';
 import { BuildHealthPage } from './pages/admin/BuildHealthPage';
 import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
@@ -253,6 +254,17 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <TierOverridesPage />
+              </RoleRoute>
+            }
+          />
+          {/* SE Assignment Threshold — CSM / OH (#238). Same reason Tier Overrides above has its own
+              route: the setting is co-owned with the CSM and the Settings console is OH-only, so the
+              one shared control is routed rather than the whole console widened. */}
+          <Route
+            path="/assignment-threshold"
+            element={
+              <RoleRoute roles={['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <AssignmentThresholdPage />
               </RoleRoute>
             }
           />

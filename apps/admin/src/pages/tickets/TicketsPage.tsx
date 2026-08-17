@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet, useMatch, useNavigate } from 'react-router-dom';
 import { apiTicketsList, type TicketFilters, type TicketRow } from '../../api/tickets';
+import { getAssignmentThreshold } from '../../api/assignmentThreshold';
 import { apiDeviceFilterOptions, type DeviceFilterOptions } from '../../api/devices';
 import {
   DataTable,
@@ -54,6 +55,20 @@ export function TicketsPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // #238 — the live SE-assignment threshold, used only to badge tickets auto-dispatch is holding back.
+  // Null on any failure and the badge simply does not render: this is a decoration on someone else's
+  // page, and it must never be the reason the ticket queue fails to load.
+  const [assignmentThresholdHours, setAssignmentThresholdHours] = useState<number | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    getAssignmentThreshold()
+      .then((t) => live && setAssignmentThresholdHours(t.hours))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Company + plant dropdown source (Issue 122 — replaces the free-text company-ID box). Manager-scoped
   // list of companies/plants present in the caller's fleet; failure just leaves the dropdowns empty.
@@ -197,7 +212,7 @@ export function TicketsPage() {
     {
       key: 'flags',
       header: 'Flags',
-      render: (t) => <InlineBadges ticket={t} />,
+      render: (t) => <InlineBadges ticket={t} assignmentThresholdHours={assignmentThresholdHours} />,
     },
   ];
 

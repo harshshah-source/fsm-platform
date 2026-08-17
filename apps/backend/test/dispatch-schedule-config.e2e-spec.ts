@@ -143,7 +143,10 @@ describe('#213 slice 1 — operator-configurable dispatch schedule (e2e)', () =>
       .set('Authorization', `Bearer ${token}`)
       .send({ value: '0 9 * * *' })
       .expect(400);
-    expect(res.body.code).toBe('USE_DISPATCH_SCHEDULE_ENDPOINT');
+    // #238 generalised the code — the same refusal now covers every specialised writer, and the
+    // response's `endpoint` is what names the owner.
+    expect(res.body.code).toBe('USE_SPECIALISED_SETTING_ENDPOINT');
+    expect(res.body.endpoint).toBe('PUT /api/schedules/dispatch-schedule');
 
     const row = await prisma.systemSetting.findUnique({ where: { key: DISPATCH_CRON_SETTING_KEY } });
     expect(row?.value).toBe('30 5 * * *');

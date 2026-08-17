@@ -49,6 +49,15 @@ export interface TicketView {
   slaBucket: SlaBucket | null;
   /** Device's last GPS ping (Issue 3) — the UI derives the elapsed inactive duration. Null if never seen. */
   latestGpsDatetime: string | null;
+  /**
+   * #238 — the device's measured silence in hours, as `device_states` derived it (never-reported
+   * devices are aged from install, #223). Served because the SE-assignment threshold gates only
+   * **auto**-dispatch: a ZM or CSM assigning intraday keeps their judgement, and the UI compares this
+   * against the live threshold to badge the ticket as below it rather than refusing the click. The
+   * derived figure is served rather than recomputed client-side from `latestGpsDatetime` so the badge
+   * and the dispatch gate are reading the same number.
+   */
+  inactivityHours: number | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
   /** Latest Component Request status for the ticket (Issue 23) — null when none was raised. */
@@ -146,6 +155,7 @@ const SELECT_COLUMNS = Prisma.sql`
   asg.batch_id::text AS "batchId", asg.schedule_id::text AS "scheduleId", asg.run_id::text AS "runId",
   COALESCE(asg.batch_status = 'OVERRIDDEN' OR asg.schedule_status = 'OVERRIDDEN', false) AS "overridden",
   ds.sla_bucket::text AS "slaBucket", ds.latest_gps_datetime AS "latestGpsDatetime",
+  ds.inactivity_hours AS "inactivityHours",
   t.repeat_failure AS "repeatFailure",
   fc.state::text AS "failureCycleState",
   CASE WHEN fc.state = 'WAITING_COMPONENT' THEN fc.sla_paused_at ELSE NULL END AS "waitingComponentSince",
@@ -203,6 +213,8 @@ type RawRow = {
   overridden: boolean;
   slaBucket: SlaBucket | null;
   latestGpsDatetime: Date | null;
+  // `inactivity_hours` is a Postgres DOUBLE PRECISION; the driver hands it back as a JS number.
+  inactivityHours: number | null;
   repeatFailure: boolean;
   failureCycleState: string | null;
   componentRequestStatus: string | null;
@@ -236,6 +248,7 @@ const toView = (r: RawRow): TicketView => ({
   overridden: r.overridden,
   slaBucket: r.slaBucket,
   latestGpsDatetime: r.latestGpsDatetime ? r.latestGpsDatetime.toISOString() : null,
+  inactivityHours: r.inactivityHours == null ? null : Number(r.inactivityHours),
   repeatFailure: r.repeatFailure,
   failureCycleState: r.failureCycleState,
   componentRequestStatus: r.componentRequestStatus,

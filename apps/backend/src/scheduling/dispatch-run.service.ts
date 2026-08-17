@@ -6,6 +6,7 @@ import { Prisma } from '../generated/prisma/client';
 import type { DispatchRunStatus, DispatchRunTrigger } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecommenderService, type RunSummary } from '../recommender/recommender.service';
+import { SE_ASSIGNMENT_THRESHOLD_KEY } from '../settings/assignment-threshold';
 import { BatchAssignmentService, type DispatchSummary } from './batch-assignment.service';
 import { DISPATCH_CRON_SETTING_KEY, bootstrapDispatchCron } from './dispatch-cron';
 
@@ -179,6 +180,9 @@ export class DispatchRunService {
     let batches = 0;
     let recommended = 0;
     let unassignable = 0;
+    // #238 — tickets the SE-assignment threshold held back this run, summed from the zone rows so the
+    // run total equals the sum of its cards by construction, exactly like every column beside it.
+    let withheldBelowThreshold = 0;
     // Zones that did not fully dispatch — a hard error OR a benign skip (lock contention / a residual
     // schedule conflict). Any such zone stamps its `dispatch_run_zones.error`, so this equals the list's
     // "Errors" column and drives the run status: a run with an issue is never labelled SUCCESS.
@@ -212,6 +216,7 @@ export class DispatchRunService {
       batches += out?.batches ?? 0;
       recommended += rec?.recommended ?? 0;
       unassignable += rec?.unassignable ?? 0;
+      withheldBelowThreshold += rec?.withheldBelowThreshold ?? 0;
       if (error !== null) zonesWithIssue++;
     }
 
@@ -232,6 +237,7 @@ export class DispatchRunService {
         ticketsDispatched: summary.tickets,
         recommended,
         unassignable,
+        withheldBelowThreshold,
       },
     });
     await this.audit.record({
@@ -248,6 +254,7 @@ export class DispatchRunService {
         ticketsDispatched: summary.tickets,
         recommended,
         unassignable,
+        withheldBelowThreshold,
         errorCount: summary.errors.length,
       },
     });
@@ -276,6 +283,10 @@ export class DispatchRunService {
         ticketsConsidered: rec?.ticketsConsidered ?? 0,
         recommended: rec?.recommended ?? 0,
         unassignable: rec?.unassignable ?? 0,
+        // #238 — a zone whose recommender threw has no figure to report; 0/null is honest, not a claim
+        // that nothing was withheld.
+        withheldBelowThreshold: rec?.withheldBelowThreshold ?? 0,
+        assignmentThresholdHours: rec?.assignmentThresholdHours ?? null,
         ...(rec?.unassignableReasons
           ? { unassignableReasons: rec.unassignableReasons as unknown as Prisma.InputJsonValue }
           : {}),
@@ -300,7 +311,24 @@ export class DispatchRunService {
     const [rules, settings, engineers, tierOverrides] = await Promise.all([
       this.prisma.priorityRuleConfig.findMany({ where: { active: true }, orderBy: { id: 'asc' } }),
       this.prisma.systemSetting.findMany({
-        where: { key: { in: ['plant_cluster_multiplier', 'eligibility_mode', DISPATCH_CRON_SETTING_KEY] } },
+        where: {
+          key: {
+            in: [
+              'plant_cluster_multiplier',
+              'eligibility_mode',
+              // #238 — the gate that decided which tickets this run was even allowed to look at. A run
+              // whose recommended count is low is un-interpretable without it: 40 recommended out of a
+              // 900-ticket backlog is a catastrophe at 24 h and correct at 72 h, and the two runs are
+              // otherwise identical on the ledger.
+              SE_ASSIGNMENT_THRESHOLD_KEY,
+              // Captured alongside it because the pair is only readable together (2026-07-22 audit,
+              // #124: this key was documented as missing from the snapshot). It is what `is_inactive`
+              // — and therefore every SLA bucket the run sorted on — meant at the time.
+              'inactivity_threshold_hours',
+              DISPATCH_CRON_SETTING_KEY,
+            ],
+          },
+        },
       }),
       this.prisma.engineerMaster.findMany({ select: { engineerId: true, dailyCapacity: true, isActive: true } }),
       this.prisma.companyTierOverride.findMany({

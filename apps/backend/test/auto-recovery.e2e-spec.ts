@@ -56,7 +56,14 @@ describe('Issue 08 slice 2 / #229 — AutoRecoveryService', () => {
       data: {
         deviceId,
         isInactive: opts.isInactive,
-        inactivityHours: opts.isInactive ? 2 : 0,
+        // #238 — the hours must agree with the flag. They previously did not (an `is_inactive` device
+        // was seeded at 2 h), which recompute cannot produce: it derives the flag FROM the hours, and
+        // 2 h is not inactive under any threshold — nor is it the CRITICAL bucket seeded below. The
+        // contradiction was invisible while both this service and ticket creation read only the flag.
+        // Now that they read the hours (the assignment threshold is configurable), the fixture has to
+        // describe a device that could actually exist. 30 h is inactive at the canonical 24 h and is
+        // genuinely in the CRITICAL band (24–48 h).
+        inactivityHours: opts.isInactive ? 30 : 0,
         slaBucket: opts.isInactive ? 'CRITICAL' : null,
         // #215 hygiene — `runAutoRecovery` never reads `eligible_for_uptime` (it scans open
         // TROUBLESHOOT tickets filtered on ticket status + device liveness), so seeding it `true`

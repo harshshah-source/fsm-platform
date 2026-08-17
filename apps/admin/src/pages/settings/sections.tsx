@@ -93,6 +93,10 @@ const ACCESS_FEATURES: { feature: string; roles: Role[] }[] = [
   { feature: 'Shadow Use / Warehouse', roles: ['WAREHOUSE_MANAGER'] },
   { feature: 'Reports / Analytics', roles: ['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] },
   { feature: 'Settings', roles: ['OPERATIONS_HEAD'] },
+  // #238 — the one settings surface that is not OH-only. Listed separately from "Settings" precisely
+  // because the matrix would otherwise say the CSM cannot reach any configuration, which is no longer
+  // true; the OH's exclusive control over it is the lock, not the route.
+  { feature: 'SE Assignment Threshold', roles: ['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] },
 ];
 
 /**

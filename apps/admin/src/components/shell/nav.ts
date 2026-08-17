@@ -52,6 +52,9 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
   const isManager =
     role === 'ZONAL_MANAGER' || role === 'CENTRAL_SERVICE_MANAGER' || role === 'OPERATIONS_HEAD';
   const isOpsHead = role === 'OPERATIONS_HEAD';
+  // #238 — the two roles that co-own the SE-assignment threshold. Not `isManager`: the ZM is the
+  // graded party and the threshold moves the dispatch volume they are graded on.
+  const ownsAssignmentThreshold = role === 'CENTRAL_SERVICE_MANAGER' || role === 'OPERATIONS_HEAD';
 
   // Help is reachable from the sidebar for every role (FE-26); the page itself scopes its content.
   const support: NavGroup = {
@@ -120,6 +123,16 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
     ];
     if (isOpsHead) analytics.push({ label: 'ZM Scorecard', to: '/reports/zm-scorecard', icon: IconShield });
     groups.push({ heading: 'Analytics', items: analytics });
+  }
+
+  // #238 — the co-owned engine policy. Its own group rather than a row in Admin (which the CSM never
+  // sees) or in Operations (which is per-instance execution, not configuration): this is the one
+  // platform-wide dial a CSM may move, and burying it in either list would misstate what it is.
+  if (ownsAssignmentThreshold) {
+    groups.push({
+      heading: 'Policy',
+      items: [{ label: 'SE Assignment Threshold', to: '/assignment-threshold', icon: IconClock }],
+    });
   }
 
   if (isOpsHead) {

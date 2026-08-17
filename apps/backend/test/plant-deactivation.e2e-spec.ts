@@ -45,6 +45,9 @@ describe('Plant deactivation (Issue 119, e2e)', () => {
       data: {
         deviceId: dId,
         isInactive: true,
+        // #238 — recompute derives this from `latestGpsDatetime` below (30 h ago) and ticket creation
+        // now reads it rather than the flag, so the fixture has to carry the figure it implied.
+        inactivityHours: 30,
         slaBucket: 'CRITICAL',
         eligibleForUptime: true,
         hasOpenFailureCycle: true,

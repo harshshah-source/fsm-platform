@@ -7,6 +7,7 @@ import { type CommonKitStatus, InventoryService } from '../inventory/inventory.s
 import { type ActiveOverride, resolveActiveOverrides, tierOverrideKey } from '../org/effective-tier';
 import { PrismaService } from '../prisma/prisma.service';
 import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
+import { readAssignmentThresholdHours } from '../settings/assignment-threshold';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { notDeferredOn } from '../ticketing/deferral';
 import { CandidateSelectionService } from './candidate-selection.service';
@@ -62,6 +63,16 @@ export interface RunSummary {
   /** Tickets entering the processing loop (canonical-sorted TROUBLESHOOT + PREVENTIVE installs). */
   ticketsConsidered: number;
   unassignableReasons: UnassignableReasons;
+  /** #238 — the SE-assignment threshold in force for this run (hours), stamped for explainability. */
+  assignmentThresholdHours: number;
+  /**
+   * #238 — open, unassigned Troubleshoot tickets in this zone whose device has not yet been silent
+   * long enough to dispatch. Counted separately from `unassignable` on purpose: an unassignable
+   * ticket is a **coverage or capacity failure** somebody must act on, whereas a withheld ticket is
+   * the configured policy working as intended and needs no action at all. Folding the two together
+   * would make every threshold increase look like a fleet-wide dispatch outage on the run ledger.
+   */
+  withheldBelowThreshold: number;
 }
 
 /**
@@ -109,25 +120,76 @@ export class RecommenderService {
     // reduced to the newest per company (Q-A newest-wins). Company reads below stay untouched; the
     // override (if any) simply takes precedence over the global companyTier they carry.
     const overrides = await resolveActiveOverrides(this.prisma, [zoneId], now);
+    // #238 — read per run, never cached, exactly like every other engine setting: an operator's edit
+    // takes effect on the next dispatch with no restart (audit V10, `ticket-and-assignment-review`).
+    const assignmentThresholdHours = await readAssignmentThresholdHours(this.prisma);
+
+    const ticketWhere = {
+      workType: 'TROUBLESHOOT',
+      status: 'OPEN',
+      assignmentState: 'UNASSIGNED',
+    } as const;
 
     const tickets = await this.prisma.ticket.findMany({
       where: {
-        workType: 'TROUBLESHOOT',
-        status: 'OPEN',
-        assignmentState: 'UNASSIGNED',
+        ...ticketWhere,
         // #146 — a ZM-deferred ticket is UNASSIGNED precisely so it can come back, but not before the
         // date the ZM chose. Without this it would be re-dispatched on the same run that removed it.
         ...notDeferredOn(istDate(now)),
         // Deactivated plants (Issue 119) are skipped by dispatch — no SE is sent to a shut plant.
         plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
-        // Departed devices (Issue 128) likewise — no SE is sent to a device that left the fleet.
-        // Defence in depth: the departure pass already cancels these tickets, but this closes the
-        // window between a device departing and the next sync, and any ticket raced in after it.
-        device: { departures: { none: { restoredAt: null } } },
+        device: {
+          // Departed devices (Issue 128) — no SE is sent to a device that left the fleet. Defence in
+          // depth: the departure pass already cancels these tickets, but this closes the window
+          // between a device departing and the next sync, and any ticket raced in after it.
+          departures: { none: { restoredAt: null } },
+          // #238 — the dispatch-side gate. Ticket creation already applies the same threshold, so on a
+          // steady configuration this is redundant; it is here for the case that is neither steady nor
+          // rare — an operator RAISING the threshold. Tickets opened under the old, lower value are
+          // already sitting OPEN/UNASSIGNED, and without this they would keep being dispatched at the
+          // very moment the operator declared they should not be. The gate makes the new policy apply
+          // to the existing backlog on the next run, which is what "changed the threshold" has to mean.
+          // Lowering it needs no equivalent: creation opens the newly-qualifying tickets itself.
+          //
+          // The gate withholds only on POSITIVE evidence that a device is below the threshold — the
+          // opposite burden of proof to ticket creation's (`gte` excludes NULL, so creation needs
+          // positive evidence to OPEN work). The asymmetry is deliberate: the two answer different
+          // questions and each has to fail safe in a different direction. An unmeasurable device must
+          // not manufacture work; an already-open ticket must not be withheld from dispatch forever on
+          // the strength of a figure nobody can compute.
+          //
+          // Spelled out as an explicit OR rather than the more natural
+          // `NOT: { state: { is: { inactivityHours: { lt: n } } } }`, which is WRONG here and was
+          // measured to be: Prisma renders the negated to-one relation filter such that a state row
+          // with a NULL `inactivity_hours` matches neither the filter nor its negation, so every
+          // NULL-houred device is silently dropped instead of passing. The three branches below say
+          // what is meant — measurably at or past the threshold, measurably unknown, or no state row
+          // at all — and each was verified against the database rather than reasoned about.
+          OR: [
+            { state: { inactivityHours: { gte: assignmentThresholdHours } } },
+            { state: { inactivityHours: null } },
+            { state: { is: null } },
+          ],
+        },
       },
       include: {
         company: { select: { companyTier: true, companyPriorityRank: true } },
         device: { select: { state: { select: { slaBucket: true, latestGpsDatetime: true } } } },
+      },
+    });
+
+    // #238 — how many dispatchable-but-for-the-threshold tickets this zone is holding. Same predicate
+    // as the read above with the age gate inverted, so the two cannot drift apart; counted rather than
+    // fetched because nothing downstream needs the rows, only the figure the run ledger reports.
+    const withheldBelowThreshold = await this.prisma.ticket.count({
+      where: {
+        ...ticketWhere,
+        ...notDeferredOn(istDate(now)),
+        plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
+        device: {
+          departures: { none: { restoredAt: null } },
+          state: { inactivityHours: { lt: assignmentThresholdHours } },
+        },
       },
     });
 
@@ -426,6 +488,8 @@ export class RecommenderService {
       weightSetRef,
       ticketsConsidered: runList.length,
       unassignableReasons,
+      assignmentThresholdHours,
+      withheldBelowThreshold,
     };
   }
 

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { readAssignmentThresholdHours } from '../settings/assignment-threshold';
 import {
   meetsRecoveryEvidence,
   summariseRecoveryPings,
@@ -100,8 +101,18 @@ export interface AutoRecoveryResult {
  * *only* at this position in the pipeline, where recompute has just run — a standalone cron would be
  * reading a figure up to a full cadence stale. Placement and correctness are the same decision here.
  *
- * The two stages are then exact complements: creation takes `is_inactive = true`, recovery takes
- * `is_inactive = false`, so no device can be touched by both on one pass.
+ * The two stages are then exact complements: creation takes silence **at or past** the SE-assignment
+ * threshold, recovery takes silence **below** it, so no device can be touched by both on one pass.
+ *
+ * **#238 — why this reads `se_assignment_threshold_hours` and not `is_inactive`.** The complement
+ * above is load-bearing, and it is a complement of *whatever predicate ticket creation uses*. Once
+ * that became the configurable assignment threshold, `is_inactive = false` stopped being its negation:
+ * with the threshold at 12 h, a device silent for 18 h is ticketed by creation and — on the very same
+ * pass — is not `is_inactive` (the canonical 24 h has not elapsed), so a stale `is_inactive = false`
+ * scan would hand it straight back to auto-recovery. The ticket would be opened and closed on every
+ * tick, forever, and the closure would be recorded as a self-healing device. Both stages therefore
+ * read the one setting, and `NULL` hours are included here because `gte` excludes them there —
+ * complementary down to the null case.
  */
 @Injectable()
 export class AutoRecoveryService {
@@ -109,13 +120,19 @@ export class AutoRecoveryService {
 
   async runAutoRecovery(options: AutoRecoveryOptions = {}): Promise<AutoRecoveryResult> {
     const { now = new Date(), thresholds = {}, maxClosures, zoneId, dryRun = false } = options;
+    const assignmentThresholdHours = await readAssignmentThresholdHours(this.prisma);
 
     const candidates = await this.prisma.ticket.findMany({
       where: {
         workType: 'TROUBLESHOOT',
         status: 'OPEN',
-        // The device must be healthy at the recompute that just ran — see the class docstring.
-        device: { state: { isInactive: false } },
+        // The device must be healthy at the recompute that just ran — see the class docstring. "Healthy"
+        // is the exact complement of ticket creation's gate (#238), null hours included.
+        device: {
+          state: {
+            OR: [{ inactivityHours: { lt: assignmentThresholdHours } }, { inactivityHours: null }],
+          },
+        },
         ...(zoneId !== undefined ? { plant: { zoneId: BigInt(zoneId) } } : {}),
       },
       include: { failureCycle: true, plant: { select: { zoneId: true } } },

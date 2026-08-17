@@ -2,6 +2,12 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  DEFAULT_SE_ASSIGNMENT_THRESHOLD_HOURS,
+  SE_ASSIGNMENT_THRESHOLD_DESCRIPTION,
+  SE_ASSIGNMENT_THRESHOLD_KEY,
+} from './assignment-threshold';
+import { canWriteSetting } from './setting-authority';
 
 
 /**
@@ -12,7 +18,15 @@ import { PrismaService } from '../prisma/prisma.service';
 export const SETTINGS_DEFAULTS: Record<string, { value: unknown; description: string }> = {
   inactivity_threshold_hours: {
     value: 24,
-    description: 'Device silent longer than this is Inactive (canonical 24h).',
+    description:
+      'Device silent longer than this is Inactive (canonical 24h). This is a MEASUREMENT definition — ' +
+      'it sets is_inactive, the Fleet-Uptime denominator and the Soft Inactive Count zones are graded ' +
+      'on. To change when an SE is dispatched, move se_assignment_threshold_hours instead.',
+  },
+  // #238 — the dispatch-side twin of the key above, deliberately separate. See assignment-threshold.ts.
+  [SE_ASSIGNMENT_THRESHOLD_KEY]: {
+    value: DEFAULT_SE_ASSIGNMENT_THRESHOLD_HOURS,
+    description: SE_ASSIGNMENT_THRESHOLD_DESCRIPTION,
   },
   viewed_soft_state_timeout_minutes: {
     value: 90,
@@ -53,6 +67,10 @@ export const SETTINGS_DEFAULTS: Record<string, { value: unknown; description: st
  */
 export const SPECIALISED_SETTING_WRITERS: Record<string, string> = {
   dispatch_cron: 'PUT /api/schedules/dispatch-schedule',
+  // #238 — writing this number is the smaller half of the job: it is co-owned with the CSM, it can be
+  // locked by the Operations Head, and every change has to leave a revertible trail. The generic path
+  // does none of that, so it refuses the key rather than half-applying it.
+  [SE_ASSIGNMENT_THRESHOLD_KEY]: 'PUT /api/settings/assignment-threshold',
 };
 
 @Injectable()
@@ -98,13 +116,32 @@ export class SettingsService implements OnModuleInit {
     key: string,
     value: unknown,
     actor: RequestActor,
-  ): Promise<{ key: string; value: unknown } | { result: 'DELEGATED'; key: string; endpoint: string }> {
+  ): Promise<
+    | { key: string; value: unknown }
+    | { result: 'DELEGATED'; key: string; endpoint: string }
+    | { result: 'LOCKED'; key: string; lockedByRole: string | null; lockReason: string | null }
+  > {
     // #213 — some keys have a specialised writer that does more than store a value. `dispatch_cron` is
     // validated at write time and re-registers the live cron job; writing it through this generic path
     // would accept an unparseable expression AND leave the job on the old schedule, so the setting
     // would read as changed while dispatch kept firing at the old hour. Refuse loudly instead.
     const owner = SPECIALISED_SETTING_WRITERS[key];
     if (owner) return { result: 'DELEGATED', key, endpoint: owner };
+
+    // #238 — the lock is a property of the registry, not of one endpoint. This route is
+    // Operations-Head-only today and the OH is never locked out, so the check is inert here by
+    // construction; it exists so that widening a key's write roles later cannot accidentally route
+    // around the lock, which would make "the OH has the final decision" true only on one code path.
+    const existing = await this.prisma.systemSetting.findUnique({ where: { key } });
+    const verdict = canWriteSetting(key, actor.role, existing);
+    if (!verdict.allowed && verdict.code === 'SETTING_LOCKED') {
+      return {
+        result: 'LOCKED',
+        key,
+        lockedByRole: existing?.lockedByRole ?? null,
+        lockReason: existing?.lockReason ?? null,
+      };
+    }
     return this.setUnchecked(key, value, actor);
   }
 
