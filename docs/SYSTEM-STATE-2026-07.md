@@ -515,7 +515,21 @@ vacuous truth). No column, no counter, no writer: a threshold change reclassifie
 next read and a late submission un-Specials a ticket with nothing to undo. One SQL expression
 (`ticketing/special-ticket.query.ts`) is evaluated by the queue badge, the `special=true` filter, the
 count and the Device read, so those four surfaces cannot disagree. Special is **not** a status, not a
-priority input, and never touches REPEAT/ESCALATED — pinned by an ordering test.
+priority input, and never touches REPEAT/ESCALATED — pinned by an ordering test, and since #248
+**structurally**: the comparator's candidate type has no Special input at all.
+**Canonical processing order gained one key (#248, Decision 15 / Option C):** Company Tier ↓ → Device
+Bucket ↓ → **Return Due Today ↓ (2b, only when both buckets are below CRITICAL+)** → Company Priority
+Rank ↑ → Oldest Inactive ↑ → Device ID ↑. Placement is the safety property: step 2 has already ordered
+CRITICAL+ work ahead before 2b is read, and a returning ticket that itself aged into CRITICAL+ never
+consults the key — so 2b decides only between tickets sharing a sub-CRITICAL bucket, where it outranks
+Priority Rank. `sla_bucket` is untouched (promoting it would corrupt Fleet Uptime, the Soft Inactive
+Count zones are graded on, SLA reporting and the decision traces). `returnDueToday` is derived per run
+from an OPEN vehicle report whose authoritative `expected_from` has reached the run's IST day — one
+batched read, no stored flag, no schema change. `CRITICAL_PLUS_BUCKETS` is now a single export in
+`device-state/sla-bucket.ts`, **derived from `SLA_BANDS`**, consumed by the comparator gate, cross-zone
+escalation and the dashboard. **There is no SQL mirror of the comparator** — the selection read carries
+no `orderBy` and the sort is applied once in process; the docstring that claimed otherwise was stale
+and is corrected, because believing a mirror exists invites someone to build one.
 **Unrankable tickets are dropped before any decision, and now counted** (#242): the canonical sort needs
 an SLA bucket, so a ticket whose `device_states.sla_bucket` is NULL (or whose device has no state row)
 falls out with no recommendation, no UNASSIGNABLE row and no decision trace — it used to appear nowhere
@@ -593,12 +607,32 @@ evaluation** (flag flips need a restart — `integration-scheduler.service.ts:46
 enabled/dormant gate is re-checked every tick; every handler has a per-name single-in-flight guard
 and never throws out of cron context.
 
+**Two timezone regimes, and the difference is load-bearing.** The `business-*` sweeps on
+`BusinessSweepSchedulerService` are registered **unpinned** — correct for cadences that mean "every N
+minutes" and mean nothing in wall-clock terms. Every job whose semantics are *a business hour or a
+calendar day* is pinned to `Asia/Kolkata` instead (`BUSINESS_TIMEZONE`), because no `TZ` is set in any
+compose/Dockerfile/env here and an unpinned daily cron fires in host time: #240's bug, where `0 4 * * *`
+landed at 09:30 IST — **after** the 05:00 IST dispatch it was supposed to precede. The intended daily
+chain is 03:30 → 04:00 → 04:30 → 05:00, and where it is pinned it is asserted behaviourally (absolute
+next-firing instant) rather than by reading back stored options. `scheduler-wiring.e2e-spec.ts` pins the
+**exact** registered cron-name set (18) against the real `AppModule`, so a job that stops registering is
+a test failure.
+
+**One link in that chain is still unpinned: `plant-eligibility-refresh`** (`:59` — no `timeZone`), and
+its own docstring shows the confusion, calling `30 4 * * *` "04:30 UTC … shortly before the default
+05:00 dispatch tick". 05:00 dispatch is **IST** (23:30 UTC), so on a UTC host the refresh fires at
+10:00 IST — five hours *after* the batch it exists to feed, which consumes a `plant_eligible_floating_se`
+MV up to a day stale. Same defect #240 fixed for closure, still live here → filed as **#254**.
+
 | Cron name | Default | Env override | Master switch | Calls |
 |---|---|---|---|---|
 | `ingestion-telemetry` | `*/30 * * * *` | `INGESTION_TELEMETRY_CRON` | `INGESTION_SCHEDULER_ENABLED` | `ingestTelemetry()` = snapshot→recompute→ticket-create |
 | `ingestion-masters` | `0 2 * * *` | `INGESTION_MASTERS_CRON` | `INGESTION_SCHEDULER_ENABLED` | `syncMastersTick()` |
 | partition maintenance | daily tick inside ingestion scheduler `[INFERRED — gated separately]` | — | `PARTITION_MAINTENANCE_ENABLED` | `PartitionMaintenanceService.tick()` |
-| `business-dispatch` | `0 5 * * *` | `BUSINESS_SWEEP_DISPATCH_CRON` | `BUSINESS_SWEEPS_ENABLED` | `DispatchRunService.runForActiveZones` (per active zone: runForZone → dispatchForZone, per-zone error contained) |
+| `vu-auto-resume` **(IST)** | `30 3 * * *` | `VU_AUTO_RESUME_CRON` | `BUSINESS_SWEEPS_ENABLED` | #247 `VehicleReturnResumeService.sweepReturnedVehicles` — OPEN vehicle reports whose authoritative `expected_from` has reached today's IST day: primary SLA resumed, interval folded in once, batched `VU_SLA_AUTO_RESUMED` SYSTEM audit. Reason-checked (a `WAITING_COMPONENT` pause is never touched) and idempotent through that same check. **Does not resolve the report** (Decision 16) |
+| `schedule-closure` **(IST)** | `0 4 * * *` | `SCHEDULE_CLOSURE_CRON` | `BUSINESS_SWEEPS_ENABLED` | #147 S2 + #242 — yesterday's plans to `COMPLETED`/`PARTIAL` under the per-zone dispatch lock, recycling unresolved assignments (`PLAN_EXPIRED`) |
+| `plant-eligibility-refresh` **(UNPINNED — see #254)** | `30 4 * * *` | `PLANT_ELIGIBILITY_REFRESH_CRON` | `BUSINESS_SWEEPS_ENABLED` | #138 S3 — `REFRESH … CONCURRENTLY` on `plant_eligible_floating_se`, meant to run before the morning batch consumes it. On a UTC host it fires **after** it |
+| `business-dispatch` **(IST)** | `0 5 * * *` | `BUSINESS_SWEEP_DISPATCH_CRON` (bootstrap only — `system_settings.dispatch_cron` is the source of truth, #213) | `BUSINESS_SWEEPS_ENABLED` | `DispatchRunService.runForActiveZones` (per active zone: runForZone → dispatchForZone, per-zone error contained) |
 | `business-verification` | `*/5 * * * *` | `BUSINESS_SWEEP_VERIFICATION_CRON` | `BUSINESS_SWEEPS_ENABLED` | verification sweep |
 | `business-install-verification` | `*/5 * * * *` | … | 〃 | install first-ping sweep |
 | `business-intraday-timeout` | `*/2 * * * *` | … | 〃 | `sweepTimeouts` |
@@ -611,8 +645,9 @@ and never throws out of cron context.
 | `business-root-cause` | `15 3 1 * *` | … | 〃 | previous-month cube |
 | `business-zm-performance` | `30 3 1 * *` | … | 〃 | previous-month cube |
 
-(Defaults: `business-sweep-scheduler.service.ts:27-36`, `dispatch-scheduler.service.ts:10`,
-`integration-scheduler.service.ts:21-23`.) **All three master switches default OFF.** Manual HTTP
+(Defaults: `business-sweep-scheduler.service.ts:27-36`, `dispatch-cron.ts:16-19`,
+`schedule-closure-scheduler.service.ts:18`, `plant-eligibility-refresh-scheduler.service.ts:10`,
+`vehicle-return-resume-scheduler.service.ts:19`, `integration-scheduler.service.ts:21-23`.) **All three master switches default OFF.** Manual HTTP
 triggers (`POST /api/integration/run-pipeline`, `POST /api/schedules/dispatch-run`, per-sweep
 POSTs) drive identical code paths with no cron.
 
@@ -622,6 +657,16 @@ POSTs) drive identical code paths with no cron.
   defer/reorder) commits immediately, flips batch + schedule to OVERRIDDEN with mandatory reason +
   overrider, audits in-transaction, fires a push. No approval gate. Overriding work an SE is ON_SITE
   on goes through the conflict seam (`soft-state-conflict.ts`).
+- **Return-date deferrals are overridable, never bypassable** (#249, Decision 17). `assignTicket`
+  refuses a ticket held to a future `deferred_until` with `CONFLICT_DEFERRED` (409) carrying the
+  deferral date and, when a report exists, the SE's `proposed_from` beside the authoritative
+  `expected_from`; `confirm: true` + a non-empty reason proceeds, writes `OVERRIDE_DEFERRED_ASSIGN`
+  naming what was overridden, and **spends** the deferral the way dispatch does. The VU report is left
+  untouched — overriding the hold is not deciding the return date. Move actions
+  (REASSIGN/SPLIT_BATCH/SWAP_SE) carry the same gate as defence in depth and **preserve** the deferral;
+  REMOVE/DEFER/REORDER are deliberately outside it. The rule lives in `assignTicket`, so the same-day
+  ADD leg and every other caller inherit it. Deliberately the existing `CONFLICT_ON_SITE` mechanism
+  (same 409 shape, same confirm+reason, same admin banner) rather than a second confirm vocabulary.
 - **Same-day update** (#31, `same-day-update.service.ts` header): ZM add/remove/reorder mid-shift;
   applies immediately (no SE acceptance); logged `MANUAL_ZM_UPDATE`; the **Intra-day Queue is a view
   over AuditLog** (2026-06-25 decision — no new model); reuses the #13 override engine.
@@ -646,7 +691,20 @@ POSTs) drive identical code paths with no cron.
   Ticket OPEN→VERIFICATION_PENDING, cycle OPEN→SUBMITTED, SE's active soft states resolved, audit +
   lifecycle event; idempotent on `(se_id, client_submission_id)` (duplicate returns the original,
   `duplicate=true`). `component_unavailable=true` → auto-raises a `component_request`, cycle →
-  WAITING_COMPONENT, primary SLA pauses (#22).
+  WAITING_COMPONENT, primary SLA pauses (#22). It also **resolves** any OPEN vehicle report (#245 AC5)
+  and deliberately does not resume the clock — see the stranded-pause edge under #253 below.
+- **The primary SLA clock: two pausers, two resumers, one reason check** (#247). It pauses for
+  `WAITING_COMPONENT` (the line above) or `VEHICLE_UNAVAILABLE` (filing a report), and `fileReport`
+  refuses to re-pause an already-paused cycle, so whichever reason was standing survives. Resuming now
+  mirrors that: `resumeSla` (the manual path) and `VehicleReturnResumeService` (the 03:30 IST sweep,
+  the only *automatic* resumer) both clear a pause **only when its reason is `VEHICLE_UNAVAILABLE`** —
+  before #247 the manual path cleared any pause, so resolving a vehicle report on a component-paused
+  cycle silently restarted the clock on a ticket nobody could work. The reason check is also what makes
+  the sweep idempotent: after the flip the cycle is not paused, so the next night finds nothing.
+  Auto-resume does **not** resolve the report (Decision 16). The **secondary** clock is derived from
+  `failure_cycles.opened_at`, is structurally unpausable, and is manager-only by type omission.
+  **Known edge → [#253]**: a submission that resolves a vehicle report *before* the return date leaves
+  the cycle paused with no automatic resumer left, since the sweep only looks at OPEN reports.
 - **Verification** (#18, `verification.service.ts` header): re-entrant scan of VERIFICATION_PENDING
   tickets; Phase 1 = first ping ±500 m of the SE's form GPS (skipped without fraud when
   `presence_source=NONE`), Phase 2 = continued pinging; terminal outcomes CLOSED /
@@ -1471,7 +1529,8 @@ lifecycle entry and the `docs/progress/218-*.md` completion report, which should
 | `INGESTION_SCHEDULER_ENABLED=true` | self-running pipeline: masters daily 02:00, telemetry */30 |
 | `PARTITION_MAINTENANCE_ENABLED=true` | **must flip together with the above** — else pings pile into the DEFAULT partition after the 3-day runway and retention never runs |
 | `INGESTION_STALE_RUN_MIN` | reaper threshold — set above telemetry cadence |
-| `BUSINESS_SWEEPS_ENABLED=true` | dispatch cron + 10 field-loop/aggregation sweeps (§3g) |
+| `BUSINESS_SWEEPS_ENABLED=true` | dispatch cron + the field-loop/aggregation sweeps **and** the daily chain (§3g): `vu-auto-resume` 03:30 IST, `schedule-closure` 04:00 IST, `plant-eligibility-refresh` 04:30 **unpinned — #254**, `business-dispatch` 05:00 IST |
+| `VU_AUTO_RESUME_CRON`, `SCHEDULE_CLOSURE_CRON`, `PLANT_ELIGIBILITY_REFRESH_CRON` | per-job overrides for the daily chain — `VU_AUTO_RESUME_CRON` and `SCHEDULE_CLOSURE_CRON` are read as **IST** expressions |
 | `BUSINESS_SWEEP_*_CRON`, `INGESTION_*_CRON` | per-tick overrides (§3g table) |
 | `AUTOPLANT_*` (MySQL host/creds/schemas, `AUTOPLANT_SOURCE_UTC_OFFSET_MIN`) | unset ⇒ mock/empty sources, app boots fine |
 | `JWT_ACCESS_SECRET` | **required at boot** — fail-fast validation, no fallback (#98 slice 1, `25a46d4`) |

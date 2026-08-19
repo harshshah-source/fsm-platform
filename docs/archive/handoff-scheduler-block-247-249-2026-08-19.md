@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-08-19 — consumed.** #247 (`c5af9ee`), #248 (`4a54a3f`) and #249 (`2a3ddc0`) all landed; the block is closed apart from HITL #243.
+> Historical only. Its environment facts held up and were reused; its #243 counts were already stale when written and still are — re-measure.
+
 # Handoff — the #240→#244 chain is closed; next is #247 / #248 / #249. Nothing is uncommitted.
 
 **Written 2026-08-19.** For the session that continues the scheduler/assignment block.

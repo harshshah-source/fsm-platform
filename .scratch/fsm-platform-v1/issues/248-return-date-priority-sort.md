@@ -1,6 +1,6 @@
 # 248 — Return-date priority (Option C): one new canonical-sort key below CRITICAL+
 
-Status: ready-for-agent
+Status: done (2026-08-19, `4a54a3f`)
 Type: AFK · Backend
 
 Filed 2026-08-19. Approved Decision 15: Critical/Severe → Return-Date Priority → normal backlog.
@@ -62,17 +62,26 @@ comparator/SQL divergence — is void (no SQL mirror exists) and the docstring f
 
 ## Acceptance criteria
 
-- [ ] AC1 — Among sub-CRITICAL work, return-due-today tickets sort ahead of normal backlog; they
+- [x] AC1 — Among sub-CRITICAL work, return-due-today tickets sort ahead of normal backlog; they
       never outrank CRITICAL_PLUS buckets (pinned both ways).
-- [ ] AC2 — `returnDueToday` derives from the authoritative report date at run time; no stored
+      > **Reading clarified in build (2026-08-19).** "Among sub-CRITICAL work" means *within a shared
+      > sub-CRITICAL bucket*, which is what key 2b's placement — after Device Bucket — produces:
+      > step 2 returns whenever the buckets differ, so a return-due WARNING still sorts behind a
+      > normal RISK. That is the authoritative design
+      > (`docs/audits/four-decisions-readiness-2026-08-18.md` §9: "Because step 2 already ran, a
+      > CRITICAL+ ticket has been ordered ahead before 2b is consulted"). Reading AC1 as a
+      > cross-bucket tier would require evaluating the key *before* Device Bucket and would change
+      > dispatch order materially; it is deliberately not built that way, and both directions are
+      > pinned in `return-date-priority.spec.ts`.
+- [x] AC2 — `returnDueToday` derives from the authoritative report date at run time; no stored
       flag, no schema change, no N+1.
-- [ ] AC3 — One `CRITICAL_PLUS` export; cross-zone and dashboard consume it; grep proves no other
+- [x] AC3 — One `CRITICAL_PLUS` export; cross-zone and dashboard consume it; grep proves no other
       copy.
-- [ ] AC4 — `sla_bucket` values, Fleet Uptime, Soft Inactive, and SLA reports are bit-identical
+- [x] AC4 — `sla_bucket` values, Fleet Uptime, Soft Inactive, and SLA reports are bit-identical
       before/after (no bucket was modified to achieve priority).
-- [ ] AC5 — Deterministic: same inputs → same order across runs (existing determinism test extended
+- [x] AC5 — Deterministic: same inputs → same order across runs (existing determinism test extended
       over the new key).
-- [ ] AC6 — The stale SQL-mirror docstring is corrected.
+- [x] AC6 — The stale SQL-mirror docstring is corrected.
 
 ## UI surfaces
 

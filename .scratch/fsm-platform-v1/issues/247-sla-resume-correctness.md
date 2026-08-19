@@ -1,6 +1,6 @@
 # 247 — SLA resume correctness: reason-checked resume + auto-resume on the return date
 
-Status: ready-for-agent
+Status: done (2026-08-19, `c5af9ee`)
 Type: AFK · Backend
 
 Filed 2026-08-19. Approved Decision 16. Two halves: fix the existing `resumeSla` safety hole, and
@@ -37,6 +37,15 @@ so a returned ticket is never dispatchable with a frozen primary clock.
    existing `@@index([status, expectedFrom])`. Registered under the `BUSINESS_SWEEPS_ENABLED`
    family with the standard single-in-flight guard. Idempotent: an already-resumed cycle is
    skipped by the reason check.
+
+   > **Corrected in build (2026-08-19).** It shares the `BUSINESS_SWEEPS_ENABLED` master switch and
+   > the guard shape as written, but is a **standalone** `VehicleReturnResumeScheduler` beside the
+   > #108 sweeps rather than a twelfth collaborator on `BusinessSweepSchedulerService`, following
+   > `ScheduleClosureScheduler` / `PlantEligibilityRefreshScheduler`. Reason: every cron on that
+   > scheduler is registered **unpinned**, which is right for its wall-clock-agnostic sweeps (every
+   > 2/5/15 min) and wrong here — this sweep's whole semantics are "the IST calendar day arrived",
+   > and AC4 needs it to fire before the IST-pinned 05:00 dispatch. Default `30 3 * * *` IST
+   > (`VU_AUTO_RESUME_CRON`), first in the daily chain ahead of closure/eligibility/dispatch.
 3. **Interaction pins:** auto-resume does NOT resolve the report (Decision 16: the report stays
    open until superseded or resolved by a submission — the SE may arrive and find the vehicle absent
    again, filing the next report/attempt); a cycle that was component-paused during the wait is
@@ -64,16 +73,16 @@ with the master switch. Rollback: disable the sweep; manual `resumeSla` still wo
 
 ## Acceptance criteria
 
-- [ ] AC1 — `resumeSla` never clears a non-VU pause; the component-pause scenario is pinned in both
+- [x] AC1 — `resumeSla` never clears a non-VU pause; the component-pause scenario is pinned in both
       directions (file-then-component, component-then-file).
-- [ ] AC2 — On the authoritative return date, the primary SLA resumes automatically with pause time
+- [x] AC2 — On the authoritative return date, the primary SLA resumes automatically with pause time
       accumulated exactly once; the sweep is idempotent.
-- [ ] AC3 — Auto-resume leaves the report OPEN; a subsequent submission or supersession resolves it
+- [x] AC3 — Auto-resume leaves the report OPEN; a subsequent submission or supersession resolves it
       (#245/#246 integration).
-- [ ] AC4 — No ticket can be selected by the recommender while its cycle is VU-paused **and** its
+- [x] AC4 — No ticket can be selected by the recommender while its cycle is VU-paused **and** its
       authoritative date has passed — the sweep runs before dispatch in the daily order (cron
       sequencing stated and tested at the config level).
-- [ ] AC5 — Secondary SLA behaviour is bit-identical before/after.
+- [x] AC5 — Secondary SLA behaviour is bit-identical before/after.
 
 ## UI surfaces
 

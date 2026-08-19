@@ -1,6 +1,6 @@
 # 249 — Explicit override of return-date deferral: confirm + reason, no silent bypass
 
-Status: ready-for-agent
+Status: done (2026-08-19, `2a3ddc0`)
 Type: AFK · Backend + Admin touchpoint
 
 Filed 2026-08-19. Approved Decision 17: manual assignment may override a vehicle-return-date
@@ -70,21 +70,36 @@ stale-deferral edge rather than creating one.
 
 ## Acceptance criteria
 
-- [ ] AC1 — No code path can formally assign a ticket deferred to a future date without
+- [x] AC1 — No code path can formally assign a ticket deferred to a future date without
       `confirm: true` and a `reasonCode`; every such override leaves an audit row naming the
       deferral it overrode.
-- [ ] AC2 — A confirmed override clears the spent deferral, matching dispatch semantics; the VU
+- [x] AC2 — A confirmed override clears the spent deferral, matching dispatch semantics; the VU
       report (if any) is untouched — overriding the hold is not deciding the return date.
-- [ ] AC3 — `assignPlants` bulk behaviour is unchanged (deferred tickets excluded at selection).
-- [ ] AC4 — REASSIGN/SPLIT_BATCH/SWAP_SE require confirm+reason when a moved ticket carries a
+- [x] AC3 — `assignPlants` bulk behaviour is unchanged (deferred tickets excluded at selection).
+- [x] AC4 — REASSIGN/SPLIT_BATCH/SWAP_SE require confirm+reason when a moved ticket carries a
       future deferral, and preserve the deferral.
-- [ ] AC5 — Admin assign surfaces show the return-date context in the confirm dialog and refuse an
-      empty reason.
+- [x] AC5 — Admin assign surfaces show the return-date context in the confirm dialog and refuse an
+      empty reason. **Landed on the Critical Work Queue** (`DeferralConfirm`, shared component).
+      See the two corrections below for the other two surfaces this AC named.
 
 ## UI surfaces
 
 Admin: Critical Work Queue assign, Device Detail assign, ZM same-day ADD (confirm dialog, modified).
 Mobile: n/a.
+
+> **Corrected in build (2026-08-19)** — two of the three named surfaces are not what the issue
+> assumed:
+>
+> - **"Device Detail assign" is the bulk `assign-plants` panel** (`AssignSePanel`), which excludes
+>   deferred tickets *at selection* (#146) and so can never reach the branch — AC3 pins exactly that.
+>   No dialog belongs there. The second **per-ticket** admin assign is the Commissioning Cohort
+>   per-device control; it is wired to the same `DeferralConfirm` in the working tree, but that
+>   control **does not exist at HEAD** (it is part of the uncommitted #236 work), so the wiring lands
+>   when #236 does rather than in `2a3ddc0`.
+> - **There is no admin control for the ZM same-day ADD.** `IntradayQueuePage` is a read-only view
+>   over the audit log; `apiIntradayUpdates` exposes the list and nothing else. The backend leg
+>   (`POST /api/intraday-updates/add`) *is* plumbed and refuses/accepts identically, so AC1's "no code
+>   path" holds; there is simply no dialog to add until that surface is built.
 
 ## Reference
 
