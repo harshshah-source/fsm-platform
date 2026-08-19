@@ -342,7 +342,13 @@ supersedes, no role rank) live in the plan doc and
 `docs/audits/four-decisions-final-analysis-2026-08-18.md`. **Implementation approved and under way 2026-08-19** — #240 and #241 landed
 (`eb80645`, `ada87b8`); #243 remains separately HITL-gated on its own execution approval.
 
-**Handoff consumed and archived 2026-08-19** → `docs/archive/handoff-242-243-option-b-2026-08-19.md`
+**Live handoff:** `docs/audits/handoff-scheduler-block-247-249-2026-08-19.md` — written after #244
+landed, for the session picking up **#247 / #248 / #249**. Nothing is uncommitted; it carries the
+next-up reasoning, the measured environment facts (notably: the #184 crash is *probabilistic* — measure
+a rate, never a single control run), and the open items. Archive it with the ARCHIVED banner once
+consumed.
+
+**Previous handoff consumed and archived 2026-08-19** → `docs/archive/handoff-242-243-option-b-2026-08-19.md`
 (historical only; **its #243 counts are stale — re-measure**). It existed because an **operator decision
 reversed the ordering written into #243's issue file**; that decision is recorded below and in both issue
 files, so nothing depends on the handoff any more. Note for the record: the tracked copy was already in
