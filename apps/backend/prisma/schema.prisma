@@ -781,6 +781,12 @@ model DispatchRun {
   /// could not find anyone (a coverage/capacity failure to act on), this one means it deliberately did
   /// not look yet (policy working). Merging them would read every threshold rise as a dispatch outage.
   withheldBelowThreshold Int            @default(0) @map("withheld_below_threshold")
+  /// #242 — tickets the recommender dropped before deciding anything, because their device carried no
+  /// computed `sla_bucket` to rank on. Counted apart from both columns above: `unassignable` means the
+  /// engine looked and found nobody (Ops), this means it never looked (a data gap). NULLABLE on
+  /// purpose — the drop predates the counter, so 0 on a historical run would claim a measurement
+  /// nobody took; NULL reads as "not recorded".
+  bucketlessDropped Int?               @map("bucketless_dropped")
   configSnapshot    Json               @map("config_snapshot")
   // #130 L3 — build that produced this run (nullable/additive; stamped at creation from build-info).
   buildVersion      BigInt?            @map("build_version")
@@ -817,6 +823,9 @@ model DispatchRunZone {
   /// #238 — the threshold (hours) actually in force when this zone was processed, so a historical
   /// zone card can be read without inferring the config from the run's snapshot.
   assignmentThresholdHours Int?         @map("assignment_threshold_hours")
+  /// #242 — this zone's share of the run-level figure; see DispatchRun.bucketlessDropped. NULL when the
+  /// zone's recommender never reported (it threw), which is not the same as "it dropped none".
+  bucketlessDropped   Int?              @map("bucketless_dropped")
   schedules           Int               @default(0)
   batches             Int               @default(0)
   ticketsDispatched   Int               @default(0) @map("tickets_dispatched")

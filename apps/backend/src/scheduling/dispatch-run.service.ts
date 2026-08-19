@@ -253,6 +253,10 @@ export class DispatchRunService {
     // #238 — tickets the SE-assignment threshold held back this run, summed from the zone rows so the
     // run total equals the sum of its cards by construction, exactly like every column beside it.
     let withheldBelowThreshold = 0;
+    // #242 — tickets the recommender could not rank (no computed SLA bucket) and therefore dropped
+    // before deciding anything. `null` until some zone actually reports one, so a run in which no zone's
+    // recommender ever got that far records "not measured" rather than a fabricated 0.
+    let bucketlessDropped: number | null = null;
     // Zones that did not fully dispatch — a hard error OR a benign skip (lock contention / a residual
     // schedule conflict). Any such zone stamps its `dispatch_run_zones.error`, so this equals the list's
     // "Errors" column and drives the run status: a run with an issue is never labelled SUCCESS.
@@ -287,6 +291,7 @@ export class DispatchRunService {
       recommended += rec?.recommended ?? 0;
       unassignable += rec?.unassignable ?? 0;
       withheldBelowThreshold += rec?.withheldBelowThreshold ?? 0;
+      if (rec) bucketlessDropped = (bucketlessDropped ?? 0) + rec.bucketlessDropped;
       if (error !== null) zonesWithIssue++;
     }
 
@@ -308,6 +313,7 @@ export class DispatchRunService {
         recommended,
         unassignable,
         withheldBelowThreshold,
+        bucketlessDropped,
       },
     });
     await this.audit.record({
@@ -325,6 +331,7 @@ export class DispatchRunService {
         recommended,
         unassignable,
         withheldBelowThreshold,
+        bucketlessDropped,
         errorCount: summary.errors.length,
       },
     });
@@ -356,6 +363,9 @@ export class DispatchRunService {
         // #238 — a zone whose recommender threw has no figure to report; 0/null is honest, not a claim
         // that nothing was withheld.
         withheldBelowThreshold: rec?.withheldBelowThreshold ?? 0,
+        // #242 - `null` rather than 0 for a zone whose recommender threw: "no figure" and "dropped
+        // none" are different answers, and this column exists because the second used to be assumed.
+        bucketlessDropped: rec?.bucketlessDropped ?? null,
         assignmentThresholdHours: rec?.assignmentThresholdHours ?? null,
         ...(rec?.unassignableReasons
           ? { unassignableReasons: rec.unassignableReasons as unknown as Prisma.InputJsonValue }

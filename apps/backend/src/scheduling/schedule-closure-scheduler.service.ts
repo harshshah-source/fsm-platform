@@ -5,6 +5,7 @@ import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { BUSINESS_TIMEZONE } from './dispatch-cron';
 import { dispatchZoneLockKey } from './dispatch-zone-lock';
+import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
 
 /**
@@ -30,10 +31,23 @@ export function readScheduleClosureConfig(env: NodeJS.ProcessEnv = process.env):
   };
 }
 
-/** What the tick reports — a cron body NEVER throws out of the cron context. */
+/**
+ * What the tick reports — a cron body NEVER throws out of the cron context.
+ *
+ * `recycled` is #242's release volume: how many dispatched-but-unworked tickets this tick handed back
+ * to the pool. It is reported rather than merely logged because it is the one figure that makes the new
+ * lifecycle auditable from outside — a night that releases an order of magnitude more than usual is a
+ * signal, and a silent recycler would have nowhere to show it.
+ */
 export type ScheduleClosureOutcome =
-  | { ran: true; closed: number; zonesSkipped: number }
+  | { ran: true; closed: number; zonesSkipped: number; recycled: number }
   | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'ERROR' };
+
+/** What one zone's closure did — `null` for the whole result when the zone's dispatch holds the lock. */
+interface ZoneClosure {
+  closed: number;
+  recycled: number;
+}
 
 /**
  * Ticket statuses that mean the day's work on that ticket is over — the same resolved set
@@ -102,7 +116,8 @@ export class ScheduleClosureScheduler {
     }
     this.inFlight = true;
     try {
-      const today = istDate(opts.now ?? new Date());
+      const now = opts.now ?? new Date();
+      const today = istDate(now);
 
       // Zone-at-a-time, because the lock is per zone: one zone mid-dispatch must not hold up the rest.
       const zones = await this.prisma.workSchedule.findMany({
@@ -113,15 +128,21 @@ export class ScheduleClosureScheduler {
 
       let closed = 0;
       let zonesSkipped = 0;
+      let recycled = 0;
       for (const { zoneId } of zones) {
-        const count = await this.closeZone(zoneId, today);
-        if (count === null) zonesSkipped++;
-        else closed += count;
+        const outcome = await this.closeZone(zoneId, today, now);
+        if (outcome === null) zonesSkipped++;
+        else {
+          closed += outcome.closed;
+          recycled += outcome.recycled;
+        }
       }
       if (closed || zonesSkipped) {
-        this.logger.log(`schedule closure — ${closed} schedule(s) closed, ${zonesSkipped} zone(s) skipped (locked)`);
+        this.logger.log(
+          `schedule closure — ${closed} schedule(s) closed, ${recycled} ticket(s) recycled, ${zonesSkipped} zone(s) skipped (locked)`,
+        );
       }
-      return { ran: true, closed, zonesSkipped };
+      return { ran: true, closed, zonesSkipped, recycled };
     } catch (e) {
       this.logger.error(`schedule closure failed: ${e instanceof Error ? e.message : String(e)}`);
       return { ran: false, reason: 'ERROR' };
@@ -131,7 +152,7 @@ export class ScheduleClosureScheduler {
   }
 
   /** Closes one zone's past-dated schedules. `null` = the zone's dispatch holds the lock; try next tick. */
-  private async closeZone(zoneId: bigint, today: Date): Promise<number | null> {
+  private async closeZone(zoneId: bigint, today: Date, now: Date): Promise<ZoneClosure | null> {
     return this.prisma.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<{ locked: boolean }[]>`
         SELECT pg_try_advisory_xact_lock(hashtext(${dispatchZoneLockKey(zoneId)})) AS locked`;
@@ -145,7 +166,7 @@ export class ScheduleClosureScheduler {
         where: { zoneId, dateTo: { lt: today }, ...liveScheduleFilter() },
         select: { scheduleId: true },
       });
-      if (stale.length === 0) return 0;
+      if (stale.length === 0) return { closed: 0, recycled: 0 };
       const staleIds = stale.map((s) => s.scheduleId);
 
       // A schedule is PARTIAL if any still-assigned ticket was left unresolved; removed tickets
@@ -172,7 +193,97 @@ export class ScheduleClosureScheduler {
           data: { status: 'COMPLETED' },
         });
       }
-      return staleIds.length;
+
+      const recycled = await this.recycle(tx, staleIds, now);
+      return { closed: staleIds.length, recycled };
     });
+  }
+
+  /**
+   * #242 — the closing transition the *assignment* lifecycle never had, and the reason a ticket could
+   * never be dispatched a third time.
+   *
+   * Flipping the schedule terminal (above) left the batch row live and the ticket `FORMALLY_ASSIGNED`,
+   * which put an unworked ticket in a **double limbo**: the recommender selects `OPEN` + `UNASSIGNED`
+   * only, so it could not see the ticket; and every day-plan read requires a *live* schedule, so
+   * neither could the SE. The ticket belonged to nobody, permanently. 4,983 OPEN tickets were sitting
+   * that way in the dev mirror when this was measured, and the maximum assignment attempts any ticket
+   * had ever reached was 2 — every one of those via a human bulk-unassign.
+   *
+   * Two writes, in this order, both set-based:
+   *
+   *  1. **Recycle** — end the assignment window on every still-live row whose ticket is unresolved, and
+   *     hand the ticket back to the pool. `removed_by` is NULL and the reason is `PLAN_EXPIRED`: with
+   *     #241's column, "the system did this" and "because the day ended" are separately recorded, which
+   *     is what lets #244 count this window as an *attempt that was never reached* rather than as an
+   *     administrative withdrawal.
+   *  2. **Backstop** — a row still live on an *already-resolved* ticket is stamped `RESOLVED_AT_CLOSURE`
+   *     and the ticket is left alone. #241 gave every resolving path its own departure stamp, so this
+   *     should be rare; it exists because the leak it covers is the #241 class — a live row on a closed
+   *     ticket keeps rendering on day plans as work to do — and a backstop that only fires on the cases
+   *     nobody anticipated is exactly the one worth having. Resolved work is never unassigned: returning
+   *     finished tickets to the pool is the one thing a recycler must not do.
+   *
+   * **Why the ticket ids are read first.** `updateMany` returns a count, not rows, and write 1's second
+   * half needs the very tickets its first half stamped. One read + two writes stays inside the lock
+   * budget (see the class docstring — a fan-out here costs some zone its day plan tomorrow), and the
+   * read is the same shape the PARTIAL computation above already performs.
+   *
+   * **Why nothing here touches `deferred_until`.** A ticket may be both recycled and waiting on a
+   * vehicle (#246): `UNASSIGNED` says *something* may re-plan it, `deferred_until` says *not yet*. The
+   * sweep writes only the first, so the wait survives the plan expiring.
+   *
+   * Idempotent by construction: the second pass matches nothing, because `removed_at IS NULL` is the
+   * filter. Under concurrency the partial unique `batch_assignment_tickets_one_active_per_ticket` is
+   * the backstop — this method can only ever *remove* liveness, never create a second live row.
+   */
+  private async recycle(
+    tx: Pick<PrismaService, 'batchAssignmentTicket' | 'ticket'>,
+    staleIds: bigint[],
+    now: Date,
+  ): Promise<number> {
+    const live = await tx.batchAssignmentTicket.findMany({
+      where: { removedAt: null, batch: { scheduleId: { in: staleIds } } },
+      select: { id: true, ticketId: true, ticket: { select: { status: true } } },
+    });
+    if (live.length === 0) return 0;
+
+    const resolved = new Set<string>(RESOLVED_TICKET_STATUSES);
+    const unresolved = live.filter((r) => !resolved.has(r.ticket.status));
+    const stragglers = live.filter((r) => resolved.has(r.ticket.status));
+
+    // `removedAt: null` is repeated in both writes even though the read already filtered on it, and
+    // that is not redundancy. `OverrideService` takes **no** advisory lock, so a ZM withdrawing a
+    // ticket at 04:00 can commit between this method's read and its writes; keying only on `id` would
+    // then overwrite their actor and reason with a system stamp — and #244 reads that reason as a
+    // predicate, so the mistake would be an operational reclassification rather than a visible one.
+    // With the predicate, a row somebody else has already closed is simply left alone.
+    if (stragglers.length) {
+      await tx.batchAssignmentTicket.updateMany({
+        where: { id: { in: stragglers.map((r) => r.id) }, removedAt: null },
+        data: { removedAt: now, removedBy: null, removalReason: REMOVAL_REASONS.RESOLVED_AT_CLOSURE },
+      });
+    }
+    if (unresolved.length === 0) return 0;
+
+    const recycled = await tx.batchAssignmentTicket.updateMany({
+      where: { id: { in: unresolved.map((r) => r.id) }, removedAt: null },
+      data: { removedAt: now, removedBy: null, removalReason: REMOVAL_REASONS.PLAN_EXPIRED },
+    });
+    // Scoped to tickets that have no live assignment **left**, which after the statement above is the
+    // set this sweep just released. The partial unique makes a second live row impossible, so this can
+    // only ever exclude a ticket some concurrent path re-assigned — and unassigning one of those would
+    // manufacture the exact `FORMALLY_ASSIGNED`-with-no-live-row inconsistency #243 exists to clean.
+    await tx.ticket.updateMany({
+      where: {
+        ticketId: { in: unresolved.map((r) => r.ticketId) },
+        batchTickets: { none: { removedAt: null } },
+      },
+      data: { assignmentState: 'UNASSIGNED' },
+    });
+    // The statement's own count, not `unresolved.length`: they differ by exactly the rows a concurrent
+    // writer closed first, and reporting a release that did not happen is the failure mode this figure
+    // exists to prevent.
+    return recycled.count;
   }
 }

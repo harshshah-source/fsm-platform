@@ -74,6 +74,19 @@ export interface RunSummary {
    */
   withheldBelowThreshold: number;
   /**
+   * #242 — open, unassigned tickets this run dropped **before deciding anything**, because their device
+   * carried no computed `sla_bucket` for the canonical sort to rank on (a state row with a NULL bucket,
+   * or no state row at all).
+   *
+   * These tickets have always fallen out silently: no recommendation, no UNASSIGNABLE row, no decision
+   * trace — on the run report they did not exist. Recycling (#242) makes that grow rather than sit
+   * still, because an unworked ticket now returns to `UNASSIGNED` every night, so one with an
+   * un-recomputed device state cycles back into the gap indefinitely. Reported separately from both
+   * `unassignable` (the engine looked and found nobody — Ops) and `withheldBelowThreshold` (it
+   * deliberately did not look yet — policy): this one means it *could not* look, which is a data fault.
+   */
+  bucketlessDropped: number;
+  /**
    * #250 — populated **only** on a dry run. The real path leaves it undefined, so its type and every
    * existing caller are untouched.
    */
@@ -325,6 +338,11 @@ export class RecommenderService {
 
     // Build the canonical-sort candidate list (skip tickets with no computed bucket — unrankable).
     const rankable = tickets.filter((t) => t.device.state?.slaBucket != null);
+    // #242 — how many the line above just dropped. Until this figure existed the drop was invisible on
+    // every surface: these tickets get no recommendation, no UNASSIGNABLE row and no trace, so a run
+    // report showed no trace of them at all. Recycling grows this population's exposure, so it is
+    // counted at the point of loss rather than reconstructed later from the tickets that survived.
+    const bucketlessDropped = tickets.length - rankable.length;
     // #250 — the projection's staleness watermark, taken from the rows that were actually ranked, so
     // it costs nothing and describes precisely the inputs the ordering came from.
     const bucketsAsOf = rankable.reduce<Date | null>((max, t) => {
@@ -696,6 +714,7 @@ export class RecommenderService {
       unassignableReasons,
       assignmentThresholdHours,
       withheldBelowThreshold,
+      bucketlessDropped,
     };
   }
 
