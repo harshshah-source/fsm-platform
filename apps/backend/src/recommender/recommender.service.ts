@@ -586,9 +586,15 @@ export class RecommenderService {
     });
   }
 
-  /** SE Planner entries for the run date, as plant_id → planned se_ids (soft bias, ADR-0022). */
+  /**
+   * SE Planner entries for the run date, as plant_id → planned se_ids (soft bias, ADR-0022).
+   *
+   * The run date is the **IST** calendar day (#240; CONTEXT.md Decisions §19) — `planned_date` is a
+   * `@db.Date`, and deriving it from UTC components read the *previous* day's rows for every run
+   * between 00:00 and 05:29 IST, dropping the bias with nothing logged.
+   */
   private async plannerForDate(zoneId: bigint, now: Date): Promise<Map<string, Set<string>>> {
-    const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const day = istDate(now);
     const entries = await this.prisma.sePlanner.findMany({
       where: { plannedDate: day, plant: { zoneId } },
       select: { seId: true, plantId: true },

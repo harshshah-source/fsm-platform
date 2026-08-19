@@ -3,13 +3,16 @@ import { Cron } from '@nestjs/schedule';
 import { type TicketStatus } from '../generated/prisma/enums';
 import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
+import { BUSINESS_TIMEZONE } from './dispatch-cron';
 import { dispatchZoneLockKey } from './dispatch-zone-lock';
 import { liveScheduleFilter } from './schedule-status';
 
 /**
- * Default cron for the schedule-closure backstop — daily at 04:00 UTC, i.e. ahead of the 04:30
- * eligibility refresh and the 05:00 dispatch tick, so yesterday's plans are terminal before today's are
- * built. Overridable via `SCHEDULE_CLOSURE_CRON`.
+ * Default cron for the schedule-closure backstop — daily at 04:00 **IST** (#240), i.e. ahead of the
+ * 04:30 eligibility refresh and the 05:00 IST dispatch tick, so yesterday's plans are terminal before
+ * today's are built. Overridable via `SCHEDULE_CLOSURE_CRON`, which is likewise read as an **IST**
+ * expression — the job is registered with `timeZone: BUSINESS_TIMEZONE`, so an operator writing "4"
+ * gets 04:00 in the business timezone on any host.
  */
 export const DEFAULT_SCHEDULE_CLOSURE_CRON = '0 4 * * *';
 
@@ -70,10 +73,12 @@ const RESOLVED_TICKET_STATUSES: readonly TicketStatus[] = [
  *
  * Contention runs both ways, and the other direction is the costly one: a dispatch that finds the lock
  * held records `LOCK_CONTENDED` and skips the zone for that run, leaving its SEs without a plan for the
- * day. Two things keep that off the table rather than one — the crons are an hour apart (04:00 vs
- * 05:00), and each zone is closed in its own short transaction, so the lock is held for a few queries
- * rather than for the length of the tick. Anything added here that widens that window (a per-schedule
- * fan-out, an unbounded scan under one lock) trades a stale plan for a missing one.
+ * day. Two things keep that off the table rather than one — the crons are an hour apart **in the same
+ * timezone** (04:00 vs 05:00 IST; #240 pinned `timeZone` here, which is what makes that hour real
+ * rather than host-dependent), and each zone is closed in its own short transaction, so the lock is
+ * held for a few queries rather than for the length of the tick. Anything added here that widens that
+ * window (a per-schedule fan-out, an unbounded scan under one lock) trades a stale plan for a missing
+ * one.
  */
 @Injectable()
 export class ScheduleClosureScheduler {
@@ -88,7 +93,7 @@ export class ScheduleClosureScheduler {
     this.config = { ...readScheduleClosureConfig(), ...config };
   }
 
-  @Cron(readScheduleClosureConfig().closureCron, { name: 'schedule-closure' })
+  @Cron(readScheduleClosureConfig().closureCron, { name: 'schedule-closure', timeZone: BUSINESS_TIMEZONE })
   async closeTick(opts: { now?: Date } = {}): Promise<ScheduleClosureOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     if (this.inFlight) {

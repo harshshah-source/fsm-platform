@@ -279,7 +279,10 @@ export class OverrideService {
     const target = await this.prisma.engineerMaster.findUnique({ where: { engineerId: seId } });
     if (!target) return { result: 'NOT_FOUND' };
 
-    const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    // The **IST** calendar day (#240; CONTEXT.md Decisions §19) — `date_from`/`date_to` are `@db.Date`,
+    // and a UTC-derived day put a 00:00–05:29 IST manual assign on *yesterday's* schedule: a different
+    // row from the one `dispatchForZone` builds and the Day Plan reads for the same instant.
+    const day = istDate(now);
     const ids = await this.audit.withAudit(
       {
         actorId: actor.userId,
