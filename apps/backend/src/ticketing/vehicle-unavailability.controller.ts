@@ -25,6 +25,7 @@ import {
   VehicleUnavailabilityService,
   type VehicleUnavailRow,
   type VuDecisionOutcome,
+  type VuFileOutcome,
   type VuOutcome,
 } from './vehicle-unavailability.service';
 
@@ -72,7 +73,7 @@ export class VehicleUnavailabilityController {
 
   @Post()
   @Roles('SERVICE_ENGINEER', ...MANAGER_ROLES)
-  async file(@CurrentUser() user: AccessTokenClaims, @Body() body: FileBody): Promise<VuOutcome> {
+  async file(@CurrentUser() user: AccessTokenClaims, @Body() body: FileBody): Promise<Extract<VuFileOutcome, { result: 'OK' }>> {
     if (!body.ticketId || !body.seId) throw new BadRequestException({ code: 'TICKET_AND_SE_REQUIRED' });
     if (!REASONS.includes(body.reasonCode)) throw new BadRequestException({ code: 'INVALID_REASON' });
     const expectedFrom = new Date(body.expectedFrom);
@@ -180,7 +181,12 @@ export class VehicleUnavailabilityController {
     return this.map(await this.vu.resumeSla(id, { userId: user.user_id, role: user.role, zoneId: user.zone_id }));
   }
 
-  private map(outcome: VuDecisionOutcome): VuOutcome {
+  /**
+   * The one place a service outcome becomes an HTTP status. Generic so filing — whose OK variant
+   * carries the derived `deferredUntil` (#246) — keeps that field instead of being widened away by a
+   * shared return type.
+   */
+  private map<T extends VuDecisionOutcome | VuFileOutcome>(outcome: T): Extract<T, { result: 'OK' }> {
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'VU_NOT_FOUND' });
     if (outcome.result === 'FORBIDDEN') throw new ForbiddenException({ code: 'VU_FORBIDDEN' });
     if (outcome.result === 'REASON_REQUIRED') throw new BadRequestException({ code: 'VU_OVERRIDE_REASON_REQUIRED' });
@@ -189,6 +195,7 @@ export class VehicleUnavailabilityController {
     if (outcome.result === 'NOT_DECIDABLE') {
       throw new ConflictException({ code: 'VU_NOT_DECIDABLE', status: outcome.status });
     }
-    return outcome;
+    // Narrowed by the four throws above; TS cannot see that through the generic.
+    return outcome as Extract<T, { result: 'OK' }>;
   }
 }

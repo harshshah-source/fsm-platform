@@ -121,6 +121,7 @@ function detail(overrides: Partial<MeTicketDetailView>): MeTicketDetailView {
     waitingComponentSince: null,
     readinessHint: 'UNKNOWN',
     technicalHealth: { hints: [], rawTelemetry: null, dataAsOf: null, available: false },
+    deferredUntil: null,
     ...overrides,
   };
 }
@@ -142,6 +143,31 @@ describe('TicketDetailScreen', () => {
     expect(screen.getByText('L&T - Bengaluru Plant')).toBeTruthy();
     expect(screen.getByText(/Rapid Fleet/)).toBeTruthy();
     expect(mockGetVerification).not.toHaveBeenCalled();
+  });
+
+  // #246 — filing a vehicle-unavailability report now defers the ticket, so the ticket itself has to
+  // say when it comes back. Without this the SE sees the return date once, in the moment after
+  // submitting, and never again.
+  it('shows the return-date banner while the ticket is deferred', async () => {
+    mockGetAccessToken.mockResolvedValue('token');
+    mockGetDetail.mockResolvedValue(detail({ deferredUntil: '2026-06-27T00:00:00.000Z' }));
+    mockSetSoftState.mockResolvedValue({ result: 'OK', softState: {} as never });
+
+    render(<TicketDetailScreen ticketId="t-1" />);
+
+    await waitFor(() => expect(screen.getByTestId('ticket-deferred-banner')).toBeTruthy());
+    expect(screen.getByText(/returns to scheduling on 27 Jun 2026/i)).toBeTruthy();
+  });
+
+  it('shows no return-date banner on a ticket that is not waiting', async () => {
+    mockGetAccessToken.mockResolvedValue('token');
+    mockGetDetail.mockResolvedValue(detail({}));
+    mockSetSoftState.mockResolvedValue({ result: 'OK', softState: {} as never });
+
+    render(<TicketDetailScreen ticketId="t-1" />);
+
+    await waitFor(() => expect(screen.getByText('KA05 CD 8845')).toBeTruthy());
+    expect(screen.queryByTestId('ticket-deferred-banner')).toBeNull();
   });
 
   it('renders the verification-pending state and fetches the verification view', async () => {

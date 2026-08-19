@@ -1,6 +1,6 @@
 # 246 — Return-date deferral wiring: filing ends the attempt, the ticket waits, re-entry is automatic
 
-Status: ready-for-agent
+Status: done (2026-08-19)
 Type: AFK · Backend + Mobile
 
 Filed 2026-08-19. Approved Decisions 4/9/10/14 + gate answer Q1(a) (provisional deferral — recorded
@@ -76,21 +76,21 @@ reports remain, deferrals are just dates.
 
 ## Acceptance criteria
 
-- [ ] AC1 — Filing a VU report removes the ticket from the live batch (`VEHICLE_UNAVAILABLE`),
+- [x] AC1 — Filing a VU report removes the ticket from the live batch (`VEHICLE_UNAVAILABLE`),
       returns it to `UNASSIGNED`, and (future-IST-day dates only) defers it to the authoritative
       date.
-- [ ] AC2 — Same-day/sub-day returns create no deferral; the four Decision-14 examples are pinned
+- [x] AC2 — Same-day/sub-day returns create no deferral; the four Decision-14 examples are pinned
       as tests.
-- [ ] AC3 — No maximum-date or deferral-count validation exists on any write path (pinned: a
+- [x] AC3 — No maximum-date or deferral-count validation exists on any write path (pinned: a
       +90-day date is accepted end-to-end).
-- [ ] AC4 — Approve/override/supersession re-derives the deferral atomically; the ticket's wait
+- [x] AC4 — Approve/override/supersession re-derives the deferral atomically; the ticket's wait
       always reflects the current authoritative date.
-- [ ] AC5 — The ticket re-enters the selectable set on exactly the authoritative IST day via the
+- [x] AC5 — The ticket re-enters the selectable set on exactly the authoritative IST day via the
       existing predicate — no new sweep; the `se-ticket-access` inline copy is folded into
       `notDeferredOn`.
-- [ ] AC6 — Mobile: any future date is enterable; the SE sees the return date after filing and on
+- [x] AC6 — Mobile: any future date is enterable; the SE sees the return date after filing and on
       the deferred ticket.
-- [ ] AC7 — A VU-ended window counts as one unsuccessful reached attempt in #244's derivation
+- [x] AC7 — A VU-ended window counts as one unsuccessful reached attempt in #244's derivation
       (integration-tested across the two slices).
 
 ## UI surfaces
@@ -100,8 +100,16 @@ banner, modified). Admin: n/a (covered by #245).
 
 ## Reference
 
-`docs/ui/mobile/` vehicle-unavailability screen image (extend the existing form layout — picker
-replaces the preset row; no redesign).
+**Correction (2026-08-19, at execution time).** This section names a `docs/ui/mobile/`
+vehicle-unavailability screen image. **There is none** — the directory holds ten screens and no VU
+one. Third mis-filed Reference section in this block, and the first in the opposite direction:
+#245 and #251 claimed no image existed when one did; this one claims one that does not.
+
+Built accordingly: the existing form layout is kept and the preset row is swapped in place, which is
+what "no redesign" meant anyway. Note also that the issue asks for a *picker* — no date-picker
+component exists in this project and adding one is a native Expo dependency, so entry follows the
+in-repo precedent (the leave form's plain `YYYY-MM-DD` text input, server authoritative on parsing).
+A native picker is a follow-up dependency decision, not a design gap.
 
 ## Blocked by
 

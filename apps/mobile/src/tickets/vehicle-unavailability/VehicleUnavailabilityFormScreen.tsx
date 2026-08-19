@@ -7,7 +7,7 @@ import { getAccessToken } from '../../auth/tokenStore';
 import { TilePicker } from '../../components/kit/TilePicker';
 import { color, radius, spacing, typeScale } from '../../theme/tokens';
 import { captureLocation } from '../detail/captureLocation';
-import { EXPECTED_FROM_OPTIONS, formatReasonLabel } from './vehicleUnavailabilityDisplay';
+import { formatReasonLabel, formatReturnDay, istInstantFromEntry } from './vehicleUnavailabilityDisplay';
 
 const REASON_OPTIONS = VEHICLE_UNAVAIL_REASONS.map((value) => ({ value, label: formatReasonLabel(value) }));
 
@@ -27,9 +27,19 @@ export interface VehicleUnavailabilityFormScreenProps {
  * (`seId` = the caller's own id). Pauses the primary SLA server-side; this screen never renders
  * the manager-only Secondary SLA Clock (PRD §299) — there is simply no field for it here.
  *
- * `expectedFrom` uses quick relative presets (`vehicleUnavailabilityDisplay.ts`) rather than a
- * native date/time picker — no reference mockup specifies that input's UX, and an SE in the field
- * knows "roughly when", not a exact minute. `expectedTo` (optional) is not built.
+ * `expectedFrom` was four relative presets until #246. They capped at roughly tomorrow 2 PM, which
+ * made "next week" — the commonest real answer for a vehicle on a long trip — literally inexpressible
+ * on the one screen whose job is saying when the vehicle comes back. It is now free date entry
+ * (`YYYY-MM-DD`, optional `HH:MM`), read as IST by `istInstantFromEntry` so client and server agree on
+ * which operating day was meant. There is no native date-picker component in this project and adding
+ * one is a native dependency, so this follows the same plain-text pattern the leave form uses and the
+ * server stays authoritative on parsing. `expectedTo` (optional) is not built.
+ *
+ * After a successful submit the screen holds on a confirmation instead of closing straight back to
+ * Ticket Detail: filing now *defers* the ticket (#246), and the SE has to be told which day it comes
+ * back — reported as missing in the service docstring before this slice. The day shown is the one the
+ * **server** derived, never the date typed, because the same-day rule (Decision 14) makes those two
+ * different whenever the vehicle is back before midnight.
  */
 export function VehicleUnavailabilityFormScreen({
   ticketId,
@@ -43,41 +53,62 @@ export function VehicleUnavailabilityFormScreen({
   const [transporterContacted, setTransporterContacted] = useState(false);
   const [reportedName, setReportedName] = useState(transporterName ?? '');
   const [reportedContact, setReportedContact] = useState(transporterContact ?? '');
-  const [expectedFromKey, setExpectedFromKey] = useState<string | null>(null);
+  const [expectedDate, setExpectedDate] = useState('');
+  const [expectedTime, setExpectedTime] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Set once the server has answered; `deferredUntil` is its verdict, `null` meaning "no wait". */
+  const [filed, setFiled] = useState<{ deferredUntil: string | null } | null>(null);
 
-  const canSubmit = reason !== null && expectedFromKey !== null && !submitting;
+  const expectedFrom = istInstantFromEntry(expectedDate, expectedTime);
+  const canSubmit = reason !== null && expectedFrom !== null && !submitting;
 
   const handleSubmit = async () => {
-    if (!reason || !expectedFromKey || !session) return;
-    const option = EXPECTED_FROM_OPTIONS.find((o) => o.key === expectedFromKey);
-    if (!option) return;
+    if (!reason || !expectedFrom || !session) return;
     setSubmitting(true);
     setError(null);
     try {
       const token = await getAccessToken();
       if (!token) throw new Error('UNAUTHORIZED');
       const location = await captureLocation();
-      await apiFileVehicleUnavailability(token, {
+      const response = await apiFileVehicleUnavailability(token, {
         ticketId,
         seId: session.user_id,
         reasonCode: reason,
         transporterContacted,
         transporterName: reportedName || undefined,
         transporterContact: reportedContact || undefined,
-        expectedFrom: option.compute(new Date()).toISOString(),
+        expectedFrom,
         notes: notes || undefined,
         ...(location ? { gpsLat: location.lat, gpsLng: location.lng } : {}),
       });
-      onSubmitted();
+      setFiled({ deferredUntil: response.deferredUntil });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'SUBMIT_FAILED');
     } finally {
       setSubmitting(false);
     }
   };
+
+  if (filed) {
+    const returnDay = formatReturnDay(filed.deferredUntil);
+    return (
+      <ScrollView testID="vu-confirmation" style={styles.container}>
+        <Text style={styles.pageTitle}>Report Filed</Text>
+        <View style={styles.section}>
+          <Text style={styles.confirmationBody}>
+            {returnDay
+              ? `This ticket will return to scheduling on ${returnDay}.`
+              : 'The vehicle is expected back today, so this ticket stays available today.'}
+          </Text>
+        </View>
+        <Pressable testID="vu-confirmation-done" onPress={onSubmitted} style={styles.submitButton}>
+          <Text style={styles.submitLabel}>Done</Text>
+        </Pressable>
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView testID="screen-vehicle-unavailability-form" style={styles.container}>
@@ -121,11 +152,23 @@ export function VehicleUnavailabilityFormScreen({
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Expected Back</Text>
-        <TilePicker
-          options={EXPECTED_FROM_OPTIONS.map((o) => ({ value: o.key, label: o.label }))}
-          value={expectedFromKey}
-          onChange={setExpectedFromKey}
-          testIDPrefix="vu-expected-from"
+        <Text style={styles.fieldLabel}>Date (YYYY-MM-DD)</Text>
+        <TextInput
+          testID="vu-expected-date"
+          style={styles.textInput}
+          placeholder="2026-06-27"
+          value={expectedDate}
+          onChangeText={setExpectedDate}
+          autoCapitalize="none"
+        />
+        <Text style={styles.fieldLabel}>Time (optional, HH:MM)</Text>
+        <TextInput
+          testID="vu-expected-time"
+          style={styles.textInput}
+          placeholder="14:30"
+          value={expectedTime}
+          onChangeText={setExpectedTime}
+          autoCapitalize="none"
         />
       </View>
 
@@ -247,5 +290,9 @@ const styles = StyleSheet.create({
     ...typeScale.body,
     fontWeight: '700',
     color: color.onColor,
+  },
+  confirmationBody: {
+    ...typeScale.body,
+    color: color.ink,
   },
 });

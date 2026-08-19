@@ -97,6 +97,8 @@ export class MeTicketDetailService {
       // state is honest rather than implying a computation that does not exist.
       readinessHint: 'UNKNOWN',
       technicalHealth,
+      // `@db.Date`, so this is UTC midnight of the IST day — rendered as-is, never shifted to local.
+      deferredUntil: ticket.deferredUntil ? ticket.deferredUntil.toISOString() : null,
     };
   }
 

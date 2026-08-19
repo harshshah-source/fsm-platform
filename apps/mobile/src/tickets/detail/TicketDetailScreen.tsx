@@ -20,6 +20,7 @@ import { formatRecoveryStatusLabel } from '../recovery/recoveryDisplay';
 import { UnableToCollectScreen } from '../recovery/UnableToCollectScreen';
 import { TroubleshootFormScreen } from '../troubleshoot/TroubleshootFormScreen';
 import { VehicleUnavailabilityFormScreen } from '../vehicle-unavailability/VehicleUnavailabilityFormScreen';
+import { formatReturnDay } from '../vehicle-unavailability/vehicleUnavailabilityDisplay';
 import { VerificationScreen } from '../verification/VerificationScreen';
 import { captureLocation } from './captureLocation';
 import { formatInactiveDuration } from './ticketDetailDisplay';
@@ -284,6 +285,10 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
   const priorityStatus = slaBucketToStatus(detail.slaBucket);
   const priorityLabel = formatSlaBucketLabel(detail.slaBucket);
   const inactiveDuration = formatInactiveDuration(detail.technicalHealth.dataAsOf);
+  // #246 — a deferred ticket is waiting on a vehicle that is not there. Saying so on the ticket keeps
+  // the return date readable after the filing confirmation is gone, so an SE looking at their list
+  // can tell "nothing to do yet" from "I have not got to this".
+  const returnDay = formatReturnDay(detail.deferredUntil);
 
   return (
     <ScrollView testID="screen-ticket-detail" style={styles.container}>
@@ -303,6 +308,12 @@ export function TicketDetailScreen({ ticketId, onBack }: TicketDetailScreenProps
         <Text style={styles.metaText}>{detail.deviceId}</Text>
         {inactiveDuration ? <Text style={styles.metaText}>{inactiveDuration} inactive</Text> : null}
       </View>
+
+      {returnDay ? (
+        <View testID="ticket-deferred-banner" style={styles.deferredBanner}>
+          <Text style={styles.deferredText}>Vehicle unavailable — returns to scheduling on {returnDay}.</Text>
+        </View>
+      ) : null}
 
       {conflict ? (
         <View testID="soft-state-conflict" style={styles.conflictBanner}>
@@ -572,6 +583,17 @@ const styles = StyleSheet.create({
     backgroundColor: color.warningBg,
   },
   conflictText: {
+    ...typeScale.cellSecondary,
+    color: color.warning,
+  },
+  deferredBanner: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: color.warningBg,
+  },
+  deferredText: {
     ...typeScale.cellSecondary,
     color: color.warning,
   },

@@ -1,3 +1,5 @@
+import { istDate } from '../common/ist-day';
+
 /**
  * #146 B1 slice 3 — the one definition of "is this Ticket's deferral still holding it back?".
  *
@@ -23,4 +25,38 @@ export function notDeferredOn(day: Date): {
   OR: [{ deferredUntil: null }, { deferredUntil: { lte: Date } }];
 } {
   return { OR: [{ deferredUntil: null }, { deferredUntil: { lte: day } }] };
+}
+
+/**
+ * The in-memory twin of {@link notDeferredOn}, for the one caller that holds a Ticket in hand rather
+ * than building a query (`se-ticket-access.ts`). It lived there as its own inline expression until
+ * #246 folded it back here — which is the entire point of this file: #153 is the cautionary tale of
+ * six copies of a liveness filter drifting apart and blanking every SE's day plan, and a seventh copy
+ * of *this* filter would strand deferred tickets in exactly one read while the other six agreed.
+ */
+export function isNotDeferredOn(deferredUntil: Date | null, day: Date): boolean {
+  return deferredUntil === null || deferredUntil <= day;
+}
+
+/**
+ * The deferral a vehicle's return date implies — #246, Decision 14.
+ *
+ * The unit is an **IST calendar day**, not an instant, because that is the unit the whole scheduling
+ * side already speaks: `deferred_until` is a `@db.Date`, dispatch plans a day at a time, and
+ * {@link notDeferredOn} compares days. So a return that lands on *today* is not a short wait — it is
+ * no wait at all, and the ticket is simply eligible again. Writing an hour-level deferral for it
+ * would invent machinery nothing reads: no reader could honour "back at 4pm", and the ticket would
+ * either be excluded for the whole day or included immediately regardless.
+ *
+ * `null` therefore means "nothing to wait for", and callers write it straight through — which is also
+ * what makes a manager moving the date *backwards* onto today clear the wait instead of leaving a
+ * stale future date stranding the ticket after the vehicle is provably back.
+ *
+ * There is deliberately no upper bound (Decision 10): a +90-day return is accepted, and consecutive
+ * absences are not counted or capped here. Management approval is the control, and each cycle still
+ * increments the Special attempt count, so a never-returning vehicle surfaces rather than disappears.
+ */
+export function deferralDateFor(authoritativeReturn: Date, now: Date): Date | null {
+  const returnDay = istDate(authoritativeReturn);
+  return returnDay.getTime() > istDate(now).getTime() ? returnDay : null;
 }

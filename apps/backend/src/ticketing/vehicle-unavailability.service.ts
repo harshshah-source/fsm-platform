@@ -3,6 +3,8 @@ import { AuditService } from '../audit/audit.service';
 import { Prisma } from '../generated/prisma/client';
 import { type VehicleUnavailReason } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { REMOVAL_REASONS } from '../scheduling/removal-reason';
+import { deferralDateFor } from './deferral';
 
 export interface VuActor {
   userId: string;
@@ -28,6 +30,16 @@ export interface FileReportInput {
 
 export type VuOutcome =
   | { result: 'OK'; id: string }
+  | { result: 'FORBIDDEN' }
+  | { result: 'NOT_FOUND' };
+
+/**
+ * Filing's outcome (#246). Carries the deferral the service derived, so the SE is told what actually
+ * happened — "back on the 27th" or "still on today's list" — rather than being shown the date they
+ * typed and left to guess whether it had any effect.
+ */
+export type VuFileOutcome =
+  | { result: 'OK'; id: string; deferredUntil: string | null }
   | { result: 'FORBIDDEN' }
   | { result: 'NOT_FOUND' };
 
@@ -114,12 +126,13 @@ export class VehicleUnavailabilityService {
     private readonly audit: AuditService,
   ) {}
 
-  async fileReport(input: FileReportInput, actor: VuActor, now: Date = new Date()): Promise<VuOutcome> {
+  async fileReport(input: FileReportInput, actor: VuActor, now: Date = new Date()): Promise<VuFileOutcome> {
     const ticket = await this.prisma.ticket.findUnique({ where: { ticketId: input.ticketId } });
     if (!ticket) return { result: 'NOT_FOUND' };
     const isManager = MANAGER_ROLES.includes(actor.role);
     if (!(isManager || actor.userId === input.seId)) return { result: 'FORBIDDEN' };
 
+    const deferred = deferralDateFor(input.expectedFrom, now);
     const write = () =>
       this.prisma.$transaction(async (tx) => {
         // A new absence retires the old account of it (#245 AC1). Superseded rows stay readable —
@@ -146,6 +159,30 @@ export class VehicleUnavailabilityService {
             gpsLng: input.gpsLng ?? null,
           },
         });
+        // #246 — the filing ends the attempt window. Until this slice the ticket stayed
+        // FORMALLY_ASSIGNED on today's batch and the next run planned it again as if the vehicle were
+        // there; the date the SE typed had no consequence anywhere. Same three-write shape as
+        // `OverrideService.deferTicket`, system-flavoured: the SE is the remover, and the reason is
+        // what makes this countable by #244 as a *reached but unsuccessful* attempt rather than an
+        // administrative withdrawal.
+        //
+        // `updateMany` rather than find-then-update: a ticket has at most one live row, and a ticket
+        // with none — shared-pool work, or already recycled — is an ordinary case, not an error.
+        await tx.batchAssignmentTicket.updateMany({
+          where: { ticketId: input.ticketId, removedAt: null },
+          data: { removedAt: now, removedBy: input.seId, removalReason: REMOVAL_REASONS.VEHICLE_UNAVAILABLE },
+        });
+        await tx.ticket.update({
+          where: { ticketId: input.ticketId },
+          data: {
+            // UNASSIGNED and the deferral are a pair. Without the first nothing can ever re-plan the
+            // ticket (the permanent-stranding bug #146 fixed for ZM defers); without the second it is
+            // re-planned within the hour, which is the opposite of waiting for a vehicle.
+            assignmentState: 'UNASSIGNED',
+            deferredUntil: deferred,
+          },
+        });
+
         // Pause the primary SLA (only if not already paused for another reason).
         if (ticket.failureCycleId) {
           const cycle = await tx.failureCycle.findUnique({ where: { cycleId: ticket.failureCycleId } });
@@ -162,7 +199,7 @@ export class VehicleUnavailabilityService {
           }
           await tx.ticket.update({ where: { ticketId: input.ticketId }, data: { lastStateChangedAt: now } });
         }
-        return { result: 'OK' as const, id: String(created.id) };
+        return { result: 'OK' as const, id: String(created.id), deferredUntil: deferred ? deferred.toISOString() : null };
       });
 
     try {
@@ -348,6 +385,14 @@ export class VehicleUnavailabilityService {
             decidedAt: now,
             overrideReason,
           },
+        });
+        // #246 AC4 — the wait is derived, not stored twice, so it is re-derived here in the same
+        // transaction. This can clear the deferral outright: a manager moving the date back onto today
+        // means the vehicle is back, and a stale future date would strand the ticket for days after
+        // the person with the authority to say so has said it.
+        await tx.ticket.update({
+          where: { ticketId: report.ticketId },
+          data: { deferredUntil: deferralDateFor(authoritative, now) },
         });
       },
     );

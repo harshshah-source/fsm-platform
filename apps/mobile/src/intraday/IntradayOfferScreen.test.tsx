@@ -63,6 +63,7 @@ function detail(overrides: Partial<MeTicketDetailView>): MeTicketDetailView {
     waitingComponentSince: null,
     readinessHint: 'UNKNOWN',
     technicalHealth: { hints: [], rawTelemetry: null, dataAsOf: null, available: false },
+    deferredUntil: null,
     ...overrides,
   };
 }

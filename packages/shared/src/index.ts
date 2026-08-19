@@ -292,6 +292,13 @@ export interface MeTicketDetailView {
   waitingComponentSince: string | null;
   readinessHint: 'READY' | 'ON_TRIP' | 'STALE' | 'UNKNOWN';
   technicalHealth: TechnicalHealth;
+  /**
+   * #246 — the IST calendar day this ticket is waiting for, or `null` when it is not waiting. Set by
+   * a vehicle-unavailability filing (and re-derived when a manager decides the return date), so the
+   * SE who filed can see the consequence on the ticket itself rather than only in the moment after
+   * submitting the form.
+   */
+  deferredUntil: string | null;
 }
 
 /** Auto-verification phase (Decisions §9/§677). */
@@ -741,6 +748,13 @@ export interface FileVehicleUnavailabilityRequest {
 export interface VehicleUnavailabilityResponse {
   result: 'OK';
   id: string;
+  /**
+   * #246 — the IST calendar day this ticket now waits for, or `null` when the vehicle is back today
+   * and there is nothing to wait for. Returned rather than derived client-side because the same-day
+   * rule (Decision 14) is the server's to apply: a client recomputing it from the date it just sent
+   * would be a second implementation of the deferral semantics, and the two would drift.
+   */
+  deferredUntil: string | null;
 }
 
 // ---------------------------------------------------------------------------------------------
