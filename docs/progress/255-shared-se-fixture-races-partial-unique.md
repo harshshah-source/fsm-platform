@@ -1,6 +1,6 @@
 # #255 — five specs claimed an exclusivity none of them held
 
-**Done 2026-08-19.** Test infrastructure only; no `src/` behaviour changed. The one non-test edit is a
+**Done 2026-08-19**, commit `def334b`. Test infrastructure only; no `src/` behaviour changed. The one non-test edit is a
 doc comment on `SeCoverage` in `prisma/schema.prisma`.
 
 ## What this closes
