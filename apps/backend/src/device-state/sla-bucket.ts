@@ -19,6 +19,46 @@ export type { SlaBucket };
 const BANDS: ReadonlyArray<readonly [number, SlaBucket]> = SLA_BANDS;
 
 /**
+ * The lower bound of the CRITICAL band, taken from the bands themselves rather than written down
+ * again. Everything at or above it is "CRITICAL and more severe".
+ */
+const CRITICAL_LOWER_BOUND = BANDS.find(([, bucket]) => bucket === 'CRITICAL')![0];
+
+/**
+ * CRITICAL and every band above it, in CONTEXT's severity order — **the one definition** (#248 AC3).
+ *
+ * It existed twice before this: `cross-zone-escalation.service.ts` (a `SlaBucket[]` for a `.includes`
+ * membership test) and `dashboard.service.ts` (a `readonly` tuple interpolated into a raw `IN (…)`).
+ * Two hand-written copies of a band boundary is the shape of the #153 failure, and #248 was about to
+ * add a third — the comparator gate that keeps return-date priority *below* SLA severity — which is
+ * the copy that would matter most: a drift there silently changes what the dispatcher does, not what
+ * a report says.
+ *
+ * Derived from `SLA_BANDS` rather than listed, so adding a band above CRITICAL joins it automatically
+ * and moving CRITICAL's boundary cannot leave this stale. `SLA_BANDS` is ordered highest-first, so the
+ * derived list is reversed to read in ascending severity, matching how both former copies were written
+ * and how CONTEXT states the order.
+ */
+export const CRITICAL_PLUS_BUCKETS: readonly SlaBucket[] = BANDS.filter(
+  ([lowerBound]) => lowerBound >= CRITICAL_LOWER_BOUND,
+)
+  .map(([, bucket]) => bucket)
+  .reverse();
+
+const CRITICAL_PLUS_SET: ReadonlySet<string> = new Set(CRITICAL_PLUS_BUCKETS);
+
+/**
+ * Membership test for {@link CRITICAL_PLUS_BUCKETS}, tolerant of a missing bucket.
+ *
+ * `null` is deliberately **not** CRITICAL+: it is the ACTIVE band or an unclassified device, and the
+ * one caller that can see a null bucket (#248's comparator gate) must treat it as ordinary work
+ * rather than accidentally shielding it from the return-date key.
+ */
+export function isCriticalPlus(bucket: string | null | undefined): boolean {
+  return bucket != null && CRITICAL_PLUS_SET.has(bucket);
+}
+
+/**
  * Returns the device's SLA bucket, or `null` for the 0–4h ACTIVE band (including a negative age
  * from clock skew — treated as ACTIVE rather than throwing, since the DB clamps `inactivity_hours
  * >= 0` upstream).

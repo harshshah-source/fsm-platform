@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { CRITICAL_PLUS_BUCKETS } from '../device-state/sla-bucket';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -344,14 +345,6 @@ export interface ZoneOperationsSummary {
   engineersEngaged: number;
 }
 
-/** CRITICAL and above, in the SLA severity order (CONTEXT "SLA Bucket"). */
-const CRITICAL_PLUS_BUCKETS = [
-  'CRITICAL',
-  'HIGH_CRITICAL',
-  'SEVERE',
-  'VERY_SEVERE',
-  'LONG_PENDING',
-] as const;
 
 interface ZoneScope {
   role: string;

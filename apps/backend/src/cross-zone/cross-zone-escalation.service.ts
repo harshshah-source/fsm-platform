@@ -1,4 +1,5 @@
 import { istDate } from '../common/ist-day';
+import { CRITICAL_PLUS_BUCKETS } from '../device-state/sla-bucket';
 import { notDeferredOn } from '../ticketing/deferral';
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
@@ -14,8 +15,6 @@ export const AUTO_CRITICAL_UNASSIGNED_MIN = 60;
 /** A Platinum Ticket still OPEN+unassigned this long auto-escalates regardless of bucket. */
 export const AUTO_OPEN_UNASSIGNED_MIN = 240;
 
-/** CRITICAL and more severe buckets (CONTEXT severity order). */
-const CRITICAL_PLUS: SlaBucket[] = ['CRITICAL', 'HIGH_CRITICAL', 'SEVERE', 'VERY_SEVERE', 'LONG_PENDING'];
 
 export interface CrossZoneActor extends ActorContext {
   zoneId: number | null;
@@ -93,7 +92,7 @@ export class CrossZoneEscalationService {
       const ageMin = (now.getTime() - anchor.getTime()) / 60_000;
       const bucket = t.device.state?.slaBucket ?? null;
       const qualifies =
-        (bucket !== null && CRITICAL_PLUS.includes(bucket) && ageMin >= AUTO_CRITICAL_UNASSIGNED_MIN) ||
+        (bucket !== null && CRITICAL_PLUS_BUCKETS.includes(bucket) && ageMin >= AUTO_CRITICAL_UNASSIGNED_MIN) ||
         ageMin >= AUTO_OPEN_UNASSIGNED_MIN;
       if (!qualifies) continue;
 

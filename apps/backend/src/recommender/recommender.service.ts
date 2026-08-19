@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
 import { readAssignmentThresholdHours } from '../settings/assignment-threshold';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
-import { notDeferredOn } from '../ticketing/deferral';
+import { notDeferredOn, returnDateArrivedBefore } from '../ticketing/deferral';
 import { CandidateSelectionService } from './candidate-selection.service';
 import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
@@ -349,6 +349,13 @@ export class RecommenderService {
       const at = t.device.state!.computedAt;
       return max === null || at > max ? at : max;
     }, null);
+    // #248 — Option C's input, read once for the whole run. `returnDueToday` is derived, never stored:
+    // it is a pure function of one column and the run's day, and a stored flag would need writing on
+    // filing, rewriting on a manager's date change, and clearing on dispatch or supersession — four
+    // writers for one derived fact, any of which going missing leaves a ticket jumping the queue for
+    // good. Evaluated against `asOf` rather than `now` so a D+1 preview (#250) asks the same question
+    // about the day it is previewing, exactly as `notDeferredOn(targetDay)` does above.
+    const returnDue = await this.returnDueTickets(rankable.map((t) => t.ticketId), asOf);
     const candidateTickets: (CandidateTicket & {
       plantId: bigint;
       repeatFailure: boolean;
@@ -361,6 +368,7 @@ export class RecommenderService {
         deviceBucket: t.device.state!.slaBucket as DeviceBucket,
         companyPriorityRank: t.company.companyPriorityRank,
         latestGpsDatetime: t.device.state!.latestGpsDatetime,
+        returnDueToday: returnDue.has(t.ticketId),
         deviceId: t.deviceId,
         plantId: t.plantId,
         repeatFailure: t.repeatFailure,
@@ -758,6 +766,30 @@ export class RecommenderService {
    * under the PREVENTIVE aged-bias term. The recommender only *suggests* — the ZM override path (Issue 13)
    * remains the human approval/reorder step, so an install is never double-scheduled here.
    */
+  /**
+   * #248 — which of this run's candidates have a vehicle **due back** (Option C's only new input).
+   *
+   * True when the ticket carries an OPEN vehicle-unavailability report whose *authoritative*
+   * `expected_from` has reached the run's IST day — the #245 date, not the SE's proposal, so a
+   * manager's override moves the priority with it. The bound comes from `returnDateArrivedBefore`,
+   * which is `deferralDateFor`'s complement: the ticket becomes return-due at exactly the moment its
+   * deferral stops holding it back, because those are the same event seen from two sides.
+   *
+   * One query per run, not per ticket (AC2). `distinct` because a ticket's supersession chain can hold
+   * more than one row and only OPEN membership matters — the set is a membership test, not a count.
+   * Nothing clears the flag on dispatch: assignment removes the ticket from the selectable set
+   * entirely, so the question stops being asked rather than needing a different answer.
+   */
+  private async returnDueTickets(ticketIds: string[], asOf: Date): Promise<Set<string>> {
+    if (ticketIds.length === 0) return new Set();
+    const rows = await this.prisma.vehicleUnavailabilityReport.findMany({
+      where: { ticketId: { in: ticketIds }, status: 'OPEN', expectedFrom: { lt: returnDateArrivedBefore(asOf) } },
+      select: { ticketId: true },
+      distinct: ['ticketId'],
+    });
+    return new Set(rows.map((r) => r.ticketId));
+  }
+
   private async installBacklog(
     zoneId: bigint,
     day: Date,
