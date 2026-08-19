@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { AuditService } from '../src/audit/audit.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { VehicleUnavailabilityService } from '../src/ticketing/vehicle-unavailability.service';
 
@@ -6,7 +7,8 @@ import { VehicleUnavailabilityService } from '../src/ticketing/vehicle-unavailab
  * Issue 28 slice 2 — Vehicle Unavailability Report + dual SLA clocks. Filing pauses the primary SLA
  * (pause_reason = VEHICLE_UNAVAILABLE) and stores the expected-availability date. The ZM list exposes
  * BOTH clocks: the primary (pausable, effective) and the secondary (true elapsed from opened_at, never
- * pauses). The ZM can confirm/edit the date and manually resume the SLA.
+ * pauses). The ZM can decide the date (#245 replaced `confirmDate` with audited approve/override —
+ * pinned in full by `vu-approval-lifecycle.e2e-spec.ts`) and manually resume the SLA.
  */
 const NS = Date.now();
 const NOW = new Date('2026-06-25T12:00:00Z');
@@ -28,7 +30,7 @@ describe('Issue 28 slice 2 — Vehicle Unavailability service', () => {
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
-    svc = new VehicleUnavailabilityService(prisma);
+    svc = new VehicleUnavailabilityService(prisma, new AuditService(prisma));
 
     zoneA = (await prisma.zone.create({ data: { name: 'Z-vuA-' + NS } })).zoneId;
     companyId = (await prisma.company.create({ data: { name: 'Co-vu-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
@@ -107,11 +109,19 @@ describe('Issue 28 slice 2 — Vehicle Unavailability service', () => {
     expect(row.primarySlaSeconds).toBeLessThan(row.secondarySlaSeconds);
   });
 
-  it('the ZM confirms a new expected date', async () => {
-    const out = await svc.confirmDate(reportId, new Date('2026-06-27T09:00:00Z'), { userId: 'zm', role: 'ZONAL_MANAGER', zoneId: Number(zoneA) });
+  // #245 — the ZM no longer edits the date in place; overriding it is an audited decision that
+  // leaves the SE's own proposal standing beside the new authoritative date.
+  it('the ZM overrides the expected date, keeping the SE proposal', async () => {
+    const out = await svc.override(
+      reportId,
+      { expectedFrom: new Date('2026-06-27T09:00:00Z'), reason: 'transporter re-confirmed' },
+      { userId: 'zm', role: 'ZONAL_MANAGER', zoneId: Number(zoneA) },
+    );
     expect(out.result).toBe('OK');
     const row = await prisma.vehicleUnavailabilityReport.findUniqueOrThrow({ where: { id: BigInt(reportId) } });
     expect(row.expectedFrom.toISOString()).toBe('2026-06-27T09:00:00.000Z');
+    expect(row.proposedFrom.toISOString()).toBe('2026-06-26T09:00:00.000Z');
+    expect(row.decision).toBe('OVERRIDDEN');
   });
 
   it('the ZM manually resumes the SLA and the report resolves', async () => {

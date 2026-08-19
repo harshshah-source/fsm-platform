@@ -7,8 +7,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
  * Issue 28 slice 3 — Vehicle Unavailability HTTP. A manager files a report; managers read the zone
- * list (with both SLA clocks); confirm-date + resume-sla; an SE is gated out of the manager list
- * (so the secondary clock never reaches the SE). Service logic proven in vehicle-unavailability-service.
+ * list (with both SLA clocks); approve / override / history / resume-sla; an SE is gated out of the
+ * manager list (so the secondary clock never reaches the SE). Service logic proven in
+ * vehicle-unavailability-service and, for the #245 decision legs, vu-approval-lifecycle.
  */
 const NS = Date.now();
 
@@ -75,10 +76,35 @@ describe('Issue 28 slice 3 — Vehicle Unavailability HTTP (e2e)', () => {
     expect(typeof row.primarySlaSeconds).toBe('number');
   });
 
-  it('confirm-date and resume-sla (200)', async () => {
+  // #245 — the retired leg answers 410 rather than 404, so a stale client can tell "this endpoint is
+  // gone" from "that id does not exist" and stop retrying.
+  it('confirm-date is retired (410)', async () => {
     const token = await login('zm.north@fsm.test');
-    await request(app.getHttpServer()).post(`/api/vehicle-unavailability/${reportId}/confirm-date`).set('Authorization', `Bearer ${token}`).send({ expectedFrom: '2026-06-27T09:00:00Z' }).expect(200);
-    await request(app.getHttpServer()).post(`/api/vehicle-unavailability/${reportId}/resume-sla`).set('Authorization', `Bearer ${token}`).expect(200);
+    const res = await request(app.getHttpServer())
+      .post(`/api/vehicle-unavailability/${reportId}/confirm-date`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ expectedFrom: '2026-06-27T09:00:00Z' })
+      .expect(410);
+    expect(res.body.code).toBe('VU_CONFIRM_DATE_RETIRED');
+  });
+
+  it('override requires a reason (400), then approve/history/resume-sla (200)', async () => {
+    const token = await login('zm.north@fsm.test');
+    const auth = (r: request.Test) => r.set('Authorization', `Bearer ${token}`);
+
+    await auth(request(app.getHttpServer()).post(`/api/vehicle-unavailability/${reportId}/override`))
+      .send({ expectedFrom: '2026-06-27T09:00:00Z', reason: '  ' })
+      .expect(400);
+
+    await auth(request(app.getHttpServer()).post(`/api/vehicle-unavailability/${reportId}/approve`)).expect(200);
+
+    const hist = await auth(request(app.getHttpServer()).get(`/api/vehicle-unavailability/${reportId}/history`)).expect(200);
+    expect(hist.body.some((r: { id: string }) => r.id === reportId)).toBe(true);
+
+    await auth(request(app.getHttpServer()).post(`/api/vehicle-unavailability/${reportId}/resume-sla`)).expect(200);
+
+    // …and once it is resumed it is no longer the live report, so a further decision is a 409.
+    await auth(request(app.getHttpServer()).post(`/api/vehicle-unavailability/${reportId}/approve`)).expect(409);
   });
 
   it('forbids an SE from the manager list (403, secondary clock never reaches SE) and rejects bad reason (400)', async () => {

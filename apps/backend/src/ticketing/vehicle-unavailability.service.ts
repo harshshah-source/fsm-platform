@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import type { Prisma } from '../generated/prisma/client';
+import { AuditService } from '../audit/audit.service';
+import { Prisma } from '../generated/prisma/client';
 import { type VehicleUnavailReason } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -7,6 +8,7 @@ export interface VuActor {
   userId: string;
   role: string;
   zoneId: number | null;
+  actedAsRole?: string | null;
 }
 
 export interface FileReportInput {
@@ -29,6 +31,16 @@ export type VuOutcome =
   | { result: 'FORBIDDEN' }
   | { result: 'NOT_FOUND' };
 
+/**
+ * A decision leg's outcome (#245). Two failures beyond the read/scope pair the other legs share:
+ * the report is no longer the live one (someone resumed or superseded it while the manager was
+ * looking at it — a business 409, not a missing row), and an override with no reason.
+ */
+export type VuDecisionOutcome =
+  | VuOutcome
+  | { result: 'NOT_DECIDABLE'; status: string }
+  | { result: 'REASON_REQUIRED' };
+
 export interface VuScope {
   role: string;
   zoneId: number | null;
@@ -41,15 +53,25 @@ export interface VehicleUnavailRow {
   plantName: string;
   reasonCode: VehicleUnavailReason;
   transporterContacted: boolean;
+  /** The SE's entry, immutable (#245). Never rewritten by a manager decision. */
+  proposedFrom: string;
+  /** The **authoritative** return date — the one every consumer reads (#245/#246). */
   expectedFrom: string;
   expectedTo: string | null;
   notes: string | null;
   status: string;
+  /** `APPROVED` | `OVERRIDDEN` | null while nobody has decided yet (#245). */
+  decision: string | null;
+  decidedBy: string | null;
+  decidedByRole: string | null;
+  decidedAt: string | null;
+  overrideReason: string | null;
   slaPaused: boolean;
   /** Effective (pausable) SLA elapsed seconds. */
   primarySlaSeconds: number;
   /** True elapsed seconds from the Failure Cycle's opened_at — never pauses (ZM/CSM/OH only). */
   secondarySlaSeconds: number;
+  resolvedAt: string | null;
   createdAt: string;
 }
 
@@ -60,14 +82,37 @@ export type MeVehicleUnavailRow = Omit<VehicleUnavailRow, 'secondarySlaSeconds'>
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'];
 
 /**
- * Vehicle Unavailability Report + dual SLA clocks (Issue 28). Filing pauses the primary SLA on the
- * ticket's Failure Cycle (pause_reason = VEHICLE_UNAVAILABLE) and stores the expected-availability
- * date. The ZM list derives BOTH clocks from the cycle; the secondary (true elapsed) is manager-only.
- * The ZM may confirm/edit the date or manually resume the SLA (which resolves the report).
+ * How many resolved reports the manager queue carries behind the live ones. A display cap, not a
+ * business rule: the reference queue (v2-reference/11) shows RESUMED rows alongside OPEN ones, and
+ * without a bound that tail grows without limit for the life of the zone.
+ */
+const RESOLVED_TAIL = 100;
+
+/** `decided_by` is a UUID column; the older `resolved_by` guard is kept for the same reason. */
+const asUuid = (userId: string): string | null => (userId.length === 36 ? userId : null);
+
+/**
+ * Vehicle Unavailability Report + dual SLA clocks (Issue 28), and — since #245 — the system of record
+ * for the vehicle's return date. Filing pauses the primary SLA on the ticket's Failure Cycle
+ * (pause_reason = VEHICLE_UNAVAILABLE) and records the SE's proposed date. The ZM list derives BOTH
+ * clocks from the cycle; the secondary (true elapsed) is manager-only.
+ *
+ * #245 replaced the single mutable date with a proposal/decision pair. `proposed_from` is what the SE
+ * reported and never changes; `expected_from` is the authoritative date, which starts equal to the
+ * proposal (Q1(a): the SE's date takes effect immediately as a provisional deferral, so review can
+ * only *change* the wait, never invent one) and afterwards moves only through {@link approve} or
+ * {@link override} — both audited. `confirmDate`, which rewrote the date in place with no audit row
+ * and no memory of what the SE said, is gone.
+ *
+ * A ticket has at most one OPEN report, enforced by a partial unique index. Filing again supersedes
+ * the previous one rather than racing it (Decision 16: a new absence is a new report).
  */
 @Injectable()
 export class VehicleUnavailabilityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async fileReport(input: FileReportInput, actor: VuActor, now: Date = new Date()): Promise<VuOutcome> {
     const ticket = await this.prisma.ticket.findUnique({ where: { ticketId: input.ticketId } });
@@ -75,54 +120,98 @@ export class VehicleUnavailabilityService {
     const isManager = MANAGER_ROLES.includes(actor.role);
     if (!(isManager || actor.userId === input.seId)) return { result: 'FORBIDDEN' };
 
-    return this.prisma.$transaction(async (tx) => {
-      const created = await tx.vehicleUnavailabilityReport.create({
-        data: {
-          ticketId: input.ticketId,
-          failureCycleId: ticket.failureCycleId,
-          seId: input.seId,
-          reasonCode: input.reasonCode,
-          transporterContacted: input.transporterContacted,
-          transporterName: input.transporterName ?? null,
-          transporterContact: input.transporterContact ?? null,
-          expectedFrom: input.expectedFrom,
-          expectedTo: input.expectedTo ?? null,
-          notes: input.notes ?? null,
-          gpsLat: input.gpsLat ?? null,
-          gpsLng: input.gpsLng ?? null,
-        },
-      });
-      // Pause the primary SLA (only if not already paused for another reason).
-      if (ticket.failureCycleId) {
-        const cycle = await tx.failureCycle.findUnique({ where: { cycleId: ticket.failureCycleId } });
-        if (cycle && !cycle.slaPaused) {
-          await tx.failureCycle.update({
-            where: { cycleId: ticket.failureCycleId },
-            data: {
-              slaPaused: true,
-              slaPauseReason: 'VEHICLE_UNAVAILABLE',
-              slaPausedAt: now,
-              slaPauseSource: 'SE_VEHICLE_UNAVAILABLE',
-            },
-          });
+    const write = () =>
+      this.prisma.$transaction(async (tx) => {
+        // A new absence retires the old account of it (#245 AC1). Superseded rows stay readable —
+        // the ticket's history is the reason this is not a delete.
+        await tx.vehicleUnavailabilityReport.updateMany({
+          where: { ticketId: input.ticketId, status: 'OPEN' },
+          data: { status: 'SUPERSEDED' },
+        });
+        const created = await tx.vehicleUnavailabilityReport.create({
+          data: {
+            ticketId: input.ticketId,
+            failureCycleId: ticket.failureCycleId,
+            seId: input.seId,
+            reasonCode: input.reasonCode,
+            transporterContacted: input.transporterContacted,
+            transporterName: input.transporterName ?? null,
+            transporterContact: input.transporterContact ?? null,
+            // Q1(a) — provisional-authoritative on arrival. The two are equal until a manager decides.
+            proposedFrom: input.expectedFrom,
+            expectedFrom: input.expectedFrom,
+            expectedTo: input.expectedTo ?? null,
+            notes: input.notes ?? null,
+            gpsLat: input.gpsLat ?? null,
+            gpsLng: input.gpsLng ?? null,
+          },
+        });
+        // Pause the primary SLA (only if not already paused for another reason).
+        if (ticket.failureCycleId) {
+          const cycle = await tx.failureCycle.findUnique({ where: { cycleId: ticket.failureCycleId } });
+          if (cycle && !cycle.slaPaused) {
+            await tx.failureCycle.update({
+              where: { cycleId: ticket.failureCycleId },
+              data: {
+                slaPaused: true,
+                slaPauseReason: 'VEHICLE_UNAVAILABLE',
+                slaPausedAt: now,
+                slaPauseSource: 'SE_VEHICLE_UNAVAILABLE',
+              },
+            });
+          }
+          await tx.ticket.update({ where: { ticketId: input.ticketId }, data: { lastStateChangedAt: now } });
         }
-        await tx.ticket.update({ where: { ticketId: input.ticketId }, data: { lastStateChangedAt: now } });
-      }
-      return { result: 'OK', id: String(created.id) };
-    });
+        return { result: 'OK' as const, id: String(created.id) };
+      });
+
+    try {
+      return await write();
+    } catch (e) {
+      // Two filings for one ticket that interleaved between the supersede and the insert: both saw
+      // no live row, both inserted, and the partial unique index rejected the loser. Replaying it is
+      // correct — the invariant held, and the later filing is meant to supersede whatever now sits
+      // there. One retry only; a second collision is a real problem, not a race.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return write();
+      throw e;
+    }
   }
 
-  /** ZM-scoped open reports with both SLA clocks. A ZONAL_MANAGER sees only their own zone. */
+  /**
+   * The manager queue. Every live report, plus a bounded tail of resolved ones so the queue can show
+   * what was resumed (reference 11's RESUMED rows) — superseded reports are deliberately absent:
+   * they are history for one ticket, not work, and {@link historyForTicket} is where they belong.
+   * A ZONAL_MANAGER sees only their own zone.
+   */
   async listForZone(scope: VuScope, now: Date = new Date()): Promise<VehicleUnavailRow[]> {
-    const reports = await this.findReports(
-      {
-        status: 'OPEN',
-        ...(scope.role === 'ZONAL_MANAGER' && scope.zoneId != null
-          ? { ticket: { plant: { zoneId: BigInt(scope.zoneId) } } }
-          : {}),
-      },
-    );
+    const zoneClamp =
+      scope.role === 'ZONAL_MANAGER' && scope.zoneId != null
+        ? { ticket: { plant: { zoneId: BigInt(scope.zoneId) } } }
+        : {};
+    const open = await this.findReports({ status: 'OPEN', ...zoneClamp });
+    const resolved = await this.findReports({ status: 'RESOLVED', ...zoneClamp }, RESOLVED_TAIL);
+    return [...open, ...resolved].map((r) => this.toRow(r, now));
+  }
+
+  /** Every report ever filed for a ticket, newest first — the supersession chain (#245 AC1). */
+  async historyForTicket(ticketId: string, now: Date = new Date()): Promise<VehicleUnavailRow[]> {
+    const reports = await this.findReports({ ticketId });
     return reports.map((r) => this.toRow(r, now));
+  }
+
+  /**
+   * The same chain, reached from a report the caller can already see, and scoped like every other
+   * manager leg — a ZM must not read another zone's history just because they know a report id.
+   */
+  async historyForReport(
+    reportId: string,
+    actor: VuActor,
+    now: Date = new Date(),
+  ): Promise<{ result: 'OK'; rows: VehicleUnavailRow[] } | { result: 'NOT_FOUND' } | { result: 'FORBIDDEN' }> {
+    const report = await this.prisma.vehicleUnavailabilityReport.findUnique({ where: { id: BigInt(reportId) } });
+    if (!report) return { result: 'NOT_FOUND' };
+    if (!(await this.isManagerForTicket(report.ticketId, actor))) return { result: 'FORBIDDEN' };
+    return { result: 'OK', rows: await this.historyForTicket(report.ticketId, now) };
   }
 
   /** #163 item 6 — `GET /api/me/vehicle-unavailability`. The caller's own reports, every status (not
@@ -138,11 +227,12 @@ export class VehicleUnavailabilityService {
     });
   }
 
-  private async findReports(where: Prisma.VehicleUnavailabilityReportWhereInput) {
+  private async findReports(where: Prisma.VehicleUnavailabilityReportWhereInput, take?: number) {
     return this.prisma.vehicleUnavailabilityReport.findMany({
       where,
       include: { ticket: { include: { plant: { select: { name: true } }, failureCycle: true } } },
       orderBy: { createdAt: 'desc' },
+      ...(take != null ? { take } : {}),
     });
   }
 
@@ -163,23 +253,104 @@ export class VehicleUnavailabilityService {
       plantName: r.ticket.plant.name,
       reasonCode: r.reasonCode,
       transporterContacted: r.transporterContacted,
+      proposedFrom: r.proposedFrom.toISOString(),
       expectedFrom: r.expectedFrom.toISOString(),
       expectedTo: r.expectedTo ? r.expectedTo.toISOString() : null,
       notes: r.notes,
       status: r.status,
+      decision: r.decision,
+      decidedBy: r.decidedBy,
+      decidedByRole: r.decidedByRole,
+      decidedAt: r.decidedAt ? r.decidedAt.toISOString() : null,
+      overrideReason: r.overrideReason,
       slaPaused: cycle?.slaPaused ?? false,
       primarySlaSeconds: primary,
       secondarySlaSeconds: secondary,
+      resolvedAt: r.resolvedAt ? r.resolvedAt.toISOString() : null,
       createdAt: r.createdAt.toISOString(),
     };
   }
 
-  /** ZM edits/confirms the expected-availability date. */
-  async confirmDate(reportId: string, expectedFrom: Date, actor: VuActor): Promise<VuOutcome> {
+  /**
+   * The manager agrees with the SE: the authoritative date becomes (stays) the proposal, and the
+   * decision is stamped and audited. Replaces half of the retired `confirmDate` — the half that
+   * meant "yes, that date" rather than "no, this one".
+   */
+  approve(reportId: string, actor: VuActor, now: Date = new Date()): Promise<VuDecisionOutcome> {
+    return this.decide(reportId, 'APPROVED', null, null, actor, now);
+  }
+
+  /**
+   * The manager replaces the SE's date. The reason is required and stored: an override is the one
+   * action that overrules what the person standing at the plant reported, so "why" is the whole
+   * accountability record (Q2(a) — there is no role rank to appeal to).
+   */
+  override(
+    reportId: string,
+    input: { expectedFrom: Date; reason: string },
+    actor: VuActor,
+    now: Date = new Date(),
+  ): Promise<VuDecisionOutcome> {
+    if (!input.reason || input.reason.trim() === '') return Promise.resolve({ result: 'REASON_REQUIRED' });
+    return this.decide(reportId, 'OVERRIDDEN', input.expectedFrom, input.reason.trim(), actor, now);
+  }
+
+  /**
+   * The one writer of the decision columns and of `expected_from` after creation. Last valid in-scope
+   * action wins outright (Q2(a)): the columns are overwritten, not appended to, because the row
+   * answers "what is the return date and who last said so" — the sequence of everyone who ever said
+   * anything is what `audit_logs` is for, and it is written in the same transaction as the change.
+   */
+  private async decide(
+    reportId: string,
+    decision: 'APPROVED' | 'OVERRIDDEN',
+    expectedFrom: Date | null,
+    overrideReason: string | null,
+    actor: VuActor,
+    now: Date,
+  ): Promise<VuDecisionOutcome> {
     const report = await this.prisma.vehicleUnavailabilityReport.findUnique({ where: { id: BigInt(reportId) } });
     if (!report) return { result: 'NOT_FOUND' };
     if (!(await this.isManagerForTicket(report.ticketId, actor))) return { result: 'FORBIDDEN' };
-    await this.prisma.vehicleUnavailabilityReport.update({ where: { id: BigInt(reportId) }, data: { expectedFrom } });
+    // Deciding a report that has been resumed or superseded would move a date nothing reads any
+    // more, while looking to the manager like it took effect.
+    if (report.status !== 'OPEN') return { result: 'NOT_DECIDABLE', status: report.status };
+
+    const authoritative = decision === 'APPROVED' ? report.proposedFrom : expectedFrom!;
+
+    await this.audit.withAudit(
+      {
+        actorId: actor.userId,
+        actorRole: actor.role,
+        actedAsRole: actor.actedAsRole ?? null,
+        actingZone: actor.zoneId,
+        action: decision === 'APPROVED' ? 'VU_DATE_APPROVED' : 'VU_DATE_OVERRIDDEN',
+        entityType: 'vehicle_unavailability_reports',
+        entityId: reportId,
+        metadata: {
+          ticketId: report.ticketId,
+          proposedFrom: report.proposedFrom.toISOString(),
+          previousExpectedFrom: report.expectedFrom.toISOString(),
+          expectedFrom: authoritative.toISOString(),
+          overrideReason,
+          previousDecision: report.decision,
+          previousDecidedBy: report.decidedBy,
+        },
+      },
+      async (tx) => {
+        await tx.vehicleUnavailabilityReport.update({
+          where: { id: BigInt(reportId) },
+          data: {
+            expectedFrom: authoritative,
+            decision,
+            decidedBy: asUuid(actor.userId),
+            decidedByRole: actor.role,
+            decidedAt: now,
+            overrideReason,
+          },
+        });
+      },
+    );
     return { result: 'OK', id: reportId };
   }
 
@@ -208,7 +379,7 @@ export class VehicleUnavailabilityService {
       }
       await tx.vehicleUnavailabilityReport.update({
         where: { id: BigInt(reportId) },
-        data: { status: 'RESOLVED', resolvedBy: actor.userId.length === 36 ? actor.userId : null, resolvedByRole: actor.role, resolvedAt: now },
+        data: { status: 'RESOLVED', resolvedBy: asUuid(actor.userId), resolvedByRole: actor.role, resolvedAt: now },
       });
     });
     return { result: 'OK', id: reportId };

@@ -206,6 +206,8 @@ describe('#251 — scheduler preview + pre-run holds', () => {
         ticketId: ticketA,
         seId: se,
         reasonCode: 'VEHICLE_ON_TRIP',
+        // #245 — the SE's proposal and the authoritative date, equal on arrival (Q1(a)).
+        proposedFrom: D2,
         expectedFrom: D2,
         status: 'OPEN',
       },

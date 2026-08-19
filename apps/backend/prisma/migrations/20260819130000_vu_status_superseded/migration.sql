@@ -1,0 +1,14 @@
+-- #245 — a vehicle-unavailability report can now be superseded.
+--
+-- Filing has always been an unguarded `create`, so a ticket could carry N OPEN reports at once and
+-- nothing said which one the scheduler should believe. #245 makes "one OPEN report per ticket" a
+-- database invariant; a second filing for the same ticket retires the first rather than racing it.
+-- `RESOLVED` cannot express that — the absence did not end, it was replaced by a newer account of
+-- itself, and the two must stay distinguishable in the ticket's history.
+--
+-- Alone in its own migration on purpose: Postgres refuses to *use* an enum value added by
+-- `ALTER TYPE … ADD VALUE` inside the transaction that added it, and the companion migration
+-- (`20260819130100_vu_approval_lifecycle`) both writes and indexes on this value. Same shape as
+-- `20260810120000_auto_recovery_closure_type`. Idempotent; rollback is dropping nothing (an unused
+-- enum member is inert).
+ALTER TYPE "vehicle_unavail_status" ADD VALUE IF NOT EXISTS 'SUPERSEDED';

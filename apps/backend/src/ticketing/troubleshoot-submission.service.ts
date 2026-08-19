@@ -158,6 +158,22 @@ export class TroubleshootSubmissionService {
         data: { resolvedAt: now, resolvedBy: 'SE', resolutionReason: 'FORM_SUBMITTED' },
       });
 
+      // …and it ends the vehicle's absence (#245 AC5, Decision 16). Someone worked the vehicle, so a
+      // report still saying "expect it back on <date>" is now describing a wait that has been
+      // overtaken by events — and #246 is about to read that date to defer real dispatch. Applies to
+      // the component-unavailable path too: the SE reached the vehicle either way. The paused SLA is
+      // deliberately NOT resumed here — pause-reason-aware resumption is #247's slice, and guessing
+      // at it from this writer would resume clocks paused for a different reason entirely.
+      await tx.vehicleUnavailabilityReport.updateMany({
+        where: { ticketId: input.ticketId, status: 'OPEN' },
+        data: {
+          status: 'RESOLVED',
+          resolvedBy: input.seId.length === 36 ? input.seId : null,
+          resolvedByRole: input.actor.role,
+          resolvedAt: now,
+        },
+      });
+
       if (input.componentUnavailable) {
         // Component-unavailable path (ADR-0008, CONTEXT §8): the Ticket stays OPEN, the Failure Cycle
         // enters WAITING_COMPONENT, the primary SLA pauses, and a Component Request routes to the

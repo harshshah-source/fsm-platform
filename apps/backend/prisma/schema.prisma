@@ -2260,10 +2260,18 @@ model FailureCycle {
   @@map("failure_cycles")
 }
 
-/// Vehicle Unavailability Report (Issue 28). The SE files this when a vehicle can't be worked; on
-/// submit the primary SLA pauses (`pause_reason = VEHICLE_UNAVAILABLE`) and the Ticket resurfaces at
-/// the expected-availability date. The Secondary SLA Clock (true elapsed, never pauses) is derived
-/// from the Failure Cycle's `opened_at` and shown only to ZM/CSM/Operations Head.
+/// Vehicle Unavailability Report (Issue 28; the return-date decision record since #245). The SE files
+/// this when a vehicle can't be worked; on submit the primary SLA pauses
+/// (`pause_reason = VEHICLE_UNAVAILABLE`) and the SE's proposed return date is recorded. The
+/// Secondary SLA Clock (true elapsed, never pauses) is derived from the Failure Cycle's `opened_at`
+/// and shown only to ZM/CSM/Operations Head.
+///
+/// This comment used to claim "the Ticket resurfaces at the expected-availability date". It never
+/// did — nothing read `expected_from` at all; #246 is the slice that makes it true. What #245 adds is
+/// something worth reading: `proposed_from` is the SE's entry and is immutable, `expected_from` is the
+/// **authoritative** date (equal to the proposal on arrival, per Q1(a)), and it moves only through an
+/// audited approve/override that stamps the decision columns. A ticket has at most one OPEN report —
+/// a partial unique index — and filing again SUPERSEDES the previous one rather than racing it.
 model VehicleUnavailabilityReport {
   id                   BigInt               @id @default(autoincrement())
   ticketId             String               @map("ticket_id") @db.Uuid
@@ -2276,12 +2284,26 @@ model VehicleUnavailabilityReport {
   /// nullable -- not every report involves contacting a transporter (e.g. reasonCode OTHER).
   transporterName      String?              @map("transporter_name")
   transporterContact   String?              @map("transporter_contact")
+  /// #245 — the SE's entry, immutable after creation. `expectedFrom` is the authoritative date and
+  /// the only one consumers should read; this exists so an override can never silently rewrite what
+  /// the field actually reported.
+  proposedFrom         DateTime             @map("proposed_from") @db.Timestamptz(6)
   expectedFrom         DateTime             @map("expected_from") @db.Timestamptz(6)
   expectedTo           DateTime?            @map("expected_to") @db.Timestamptz(6)
   notes                String?
   gpsLat               Float?               @map("gps_lat")
   gpsLng               Float?               @map("gps_lng")
   status               VehicleUnavailStatus @default(OPEN)
+  /// #245 decision columns — last valid in-scope managerial action wins (Q2(a): no role rank, no
+  /// lock). They are overwritten, not appended to; the sequence of everyone who ever decided lives in
+  /// `audit_logs`, written in the same transaction as the change. `decision` is `APPROVED` |
+  /// `OVERRIDDEN`, enforced by a CHECK alongside "a decision is who + when + what, or nothing" and
+  /// "an override states a reason".
+  decidedBy            String?              @map("decided_by") @db.Uuid
+  decidedByRole        String?              @map("decided_by_role")
+  decidedAt            DateTime?            @map("decided_at") @db.Timestamptz(6)
+  decision             String?
+  overrideReason       String?              @map("override_reason")
   resolvedBy           String?              @map("resolved_by") @db.Uuid
   resolvedByRole       String?              @map("resolved_by_role")
   resolvedAt           DateTime?            @map("resolved_at") @db.Timestamptz(6)
@@ -2308,6 +2330,9 @@ enum VehicleUnavailReason {
 enum VehicleUnavailStatus {
   OPEN
   RESOLVED
+  /// #245 — replaced by a newer report for the same ticket. Not an outcome: the absence did not end,
+  /// it was re-described. Kept readable as the ticket's history rather than deleted.
+  SUPERSEDED
 
   @@map("vehicle_unavail_status")
 }

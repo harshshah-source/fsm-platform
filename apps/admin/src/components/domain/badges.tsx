@@ -108,6 +108,11 @@ const STATUS_TONE: Record<string, BadgeTone> = {
   // assignment
   UNASSIGNED: 'neutral',
   FORMALLY_ASSIGNED: 'info',
+  // vehicle-unavailability decision states (#245) — display values derived on the page, not row
+  // statuses: an OPEN report a manager has ruled on reads CONFIRMED, a RESOLVED one reads RESUMED.
+  CONFIRMED: 'verified',
+  RESUMED: 'success',
+  SUPERSEDED: 'neutral',
 };
 
 function humanize(s: string): string {

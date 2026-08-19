@@ -1,6 +1,6 @@
 # 245 — Vehicle-unavailability lifecycle: one open report, supersession, audited proposal → approval / override
 
-Status: ready-for-agent
+Status: done (2026-08-19)
 Type: AFK · Backend + Admin
 
 Filed 2026-08-19. Approved Decisions 11/12/13 with the two gate answers recorded below
@@ -82,19 +82,19 @@ verified).
 
 ## Acceptance criteria
 
-- [ ] AC1 — Exactly one OPEN report per ticket is possible; a new filing supersedes the old in one
+- [x] AC1 — Exactly one OPEN report per ticket is possible; a new filing supersedes the old in one
       transaction and both remain readable as history.
-- [ ] AC2 — The SE's `proposed_from` is immutable; the authoritative `expected_from` starts equal to
+- [x] AC2 — The SE's `proposed_from` is immutable; the authoritative `expected_from` starts equal to
       it (Q1(a)) and changes only through audited approve/override actions.
-- [ ] AC3 — Approve/override record decider, role, timestamp, decision, and (for override) a
+- [x] AC3 — Approve/override record decider, role, timestamp, decision, and (for override) a
       required reason — in the row and in `audit_logs`.
-- [ ] AC4 — Latest valid in-scope action supersedes regardless of role (Q2(a)); ZM actions are
+- [x] AC4 — Latest valid in-scope action supersedes regardless of role (Q2(a)); ZM actions are
       zone-clamped; CSM/OH are global — all pinned by tests.
-- [ ] AC5 — A troubleshooting submission resolves the ticket's OPEN report.
-- [ ] AC6 — `confirmDate` is retired; no unaudited path can change the authoritative date.
-- [ ] AC7 — The false "resurfaces at the expected-availability date" doc comments are corrected
+- [x] AC5 — A troubleshooting submission resolves the ticket's OPEN report.
+- [x] AC6 — `confirmDate` is retired; no unaudited path can change the authoritative date.
+- [x] AC7 — The false "resurfaces at the expected-availability date" doc comments are corrected
       (made true by #246, but this slice must not leave the claim dangling on its own columns).
-- [ ] AC8 — Admin review queue shows proposed vs authoritative vs decision state and supports both
+- [x] AC8 — Admin review queue shows proposed vs authoritative vs decision state and supports both
       actions for the three manager roles per scope.
 
 ## UI surfaces
@@ -104,8 +104,19 @@ slice.
 
 ## Reference
 
-The existing `VehicleUnavailabilityPage` (built without a v2-reference image — same posture;
-extend its table/drawer patterns, no redesign).
+**Correction (2026-08-19, at execution time).** This section originally claimed the page was "built
+without a v2-reference image". It was wrong — the second such mis-filing in this block, after #251's.
+`docs/ui/desktop/v2-reference/11-vehicle-unavailability.png` exists and is directly authoritative:
+
+- KPI strip: Open Reports ("awaiting window confirmation") · SLA Paused · Vehicle On-Trip · Resumed
+- search box + a `STATUS` filter + an "N / N results" counter
+- columns `REPORT / TICKET` · `VEHICLE / PLANT` · `REASON` · `FILED BY` · `EXPECTED BACK` ·
+  `PRIMARY SLA` · `STATUS`, with two-line cells (e.g. `VUR-10393` over `TKT-TS-10393`)
+
+Crucially the reference **already shows a `CONFIRMED` status** beside `OPEN` and `RESUMED`. So this
+slice's decision state belongs in the existing Status column, and proposed-vs-authoritative dates
+belong as a two-line cell in the existing Expected Back column — **extend the reference, do not add
+columns to it.**
 
 ## Blocked by
 
