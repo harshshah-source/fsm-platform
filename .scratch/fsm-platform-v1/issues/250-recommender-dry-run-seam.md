@@ -1,6 +1,6 @@
 # 250 — Recommender dry-run seam + target-date parameters (preview foundation)
 
-Status: ready-for-agent
+Status: done (2026-08-19)
 Type: AFK · Backend
 
 Filed 2026-08-19. Approved Decisions 1/18: the preview must project the **real** recommender —
@@ -72,14 +72,14 @@ Flag-gated; absent flags = current behaviour (pinned by the parity test). Rollba
 
 ## Acceptance criteria
 
-- [ ] AC1 — Dry run writes nothing (all six mutations + the four dispatch tables + the ledger — 
+- [x] AC1 — Dry run writes nothing (all six mutations + the four dispatch tables + the ledger — 
       proven by count assertions) and takes no lock or in-flight slot.
-- [ ] AC2 — `targetDate` moves deferral, planner, capacity, availability, mode, and tier-override
+- [x] AC2 — `targetDate` moves deferral, planner, capacity, availability, mode, and tier-override
       evaluation to the target IST day; wall-clock terms stay on `now`.
-- [ ] AC3 — The projection carries `bucketsAsOf` and per-ticket decision detail sufficient for
+- [x] AC3 — The projection carries `bucketsAsOf` and per-ticket decision detail sufficient for
       #251 to render the plan and its caveat.
-- [ ] AC4 — Today-parity: dry-run decisions equal real-run decisions on identical fixtures.
-- [ ] AC5 — The real dispatch path refuses a future `now`; preview is the only future-date entry.
+- [x] AC4 — Today-parity: dry-run decisions equal real-run decisions on identical fixtures.
+- [x] AC5 — The real dispatch path refuses a future `now`; preview is the only future-date entry.
 
 ## UI surfaces
 

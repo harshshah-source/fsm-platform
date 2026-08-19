@@ -73,6 +73,93 @@ export interface RunSummary {
    * would make every threshold increase look like a fleet-wide dispatch outage on the run ledger.
    */
   withheldBelowThreshold: number;
+  /**
+   * #250 — populated **only** on a dry run. The real path leaves it undefined, so its type and every
+   * existing caller are untouched.
+   */
+  projection?: ZoneProjection;
+}
+
+/**
+ * One ticket's decision as the run reached it (#250) — the same substance the run would have written
+ * to `recommendations` + `dispatch_decision_traces`, carried in memory instead. Deliberately mirrors
+ * the persisted trace shape rather than inventing a preview-only vocabulary: #251 renders "why this
+ * SE" from this, and two different explanations of the same decision is exactly the drift the
+ * "project the real recommender" decision exists to prevent.
+ */
+export interface PreviewDecision {
+  ticketId: string;
+  plantId: string;
+  processingRank: number;
+  companyTier: CompanyTier;
+  deviceBucket: DeviceBucket | null;
+  tierOverrideId: string | null;
+  /** null ⟺ unassignable; `poolEmptyReason` then says which kind. */
+  seId: string | null;
+  coverageType: string | null;
+  score: number | null;
+  candidatesTotal: number;
+  passedCount: number;
+  dropCounts: Record<string, number>;
+  poolEmptyReason: PoolEmptyReason | null;
+  /** True only when the SE Planner soft bias actually changed the pick (ADR-0022). */
+  plannerBias: boolean;
+  clusterSeed: boolean;
+  capacityAtDecision: { used: number; cap: number | null } | null;
+}
+
+/** The projected day plan: SE → plant stop → tickets, in the order the run decided them. */
+export interface PreviewPlanStop {
+  plantId: string;
+  ticketIds: string[];
+}
+export interface PreviewPlanEntry {
+  seId: string;
+  plants: PreviewPlanStop[];
+}
+
+export interface ZoneProjection {
+  zoneId: string;
+  /** The IST calendar day the projection is *for*, `YYYY-MM-DD`. */
+  targetDate: string;
+  /**
+   * How current the ranking inputs are — the newest `device_states.computed_at` among the devices
+   * this run actually ranked, or null when nothing was ranked.
+   *
+   * This is the projection's honest limit and #251 must display it. `slaBucket` and `inactivityHours`
+   * are **materialised** as of the last recompute; no as-of-date variant exists and none is being
+   * built. So a D+1 preview moves the deferral/planner/capacity/availability reads to tomorrow but
+   * still ranks on today's buckets. A preview that hid this would look authoritative about an
+   * ordering it cannot know.
+   */
+  bucketsAsOf: string | null;
+  decisions: PreviewDecision[];
+  plan: PreviewPlanEntry[];
+}
+
+/**
+ * Group decided tickets into the projected day plan (#250).
+ *
+ * Mirrors what `BatchAssignmentService.dispatchForZone` would build — SE, then a plant stop per
+ * distinct plant, tickets in decision order — but derives it from the decisions rather than calling
+ * the dispatcher, because the dispatcher is transactional and consumes recommendation rows a dry run
+ * deliberately never wrote. Insertion order is preserved throughout, so the projected stop order
+ * matches the processing order the real run would have dispatched in.
+ */
+function buildPreviewPlan(decisions: PreviewDecision[]): PreviewPlanEntry[] {
+  const bySe = new Map<string, Map<string, string[]>>();
+  for (const d of decisions) {
+    if (d.seId === null) continue;
+    const plants = bySe.get(d.seId) ?? new Map<string, string[]>();
+    const tickets = plants.get(d.plantId) ?? [];
+    tickets.push(d.ticketId);
+    plants.set(d.plantId, tickets);
+    bySe.set(d.seId, plants);
+  }
+  return [...bySe].map(([seId, plants]) => ({
+    seId,
+    plants: [...plants].map(([plantId, ticketIds]) => ({ plantId, ticketIds })),
+  }));
 }
 
 /**
@@ -111,15 +198,40 @@ export class RecommenderService {
     private readonly softInactive: SoftInactiveCountService = new SoftInactiveCountService(prisma),
   ) {}
 
-  async runForZone(zoneId: bigint, opts: { now?: Date; runId?: bigint } = {}): Promise<RunSummary> {
+  async runForZone(
+    zoneId: bigint,
+    opts: { now?: Date; runId?: bigint; dryRun?: boolean; targetDate?: Date } = {},
+  ): Promise<RunSummary> {
     const now = opts.now ?? new Date();
+    // #250 — the preview seam. `dryRun` suppresses every write and returns the projection instead;
+    // `targetDate` moves the date-bound reads onto another IST day. Both default off/today, so the
+    // real path below is bit-identical to before (pinned by the today-parity test).
+    const dryRun = opts.dryRun === true;
+    const today = istDate(now);
+    const targetDay = opts.targetDate ? istDate(opts.targetDate) : today;
+    /**
+     * The instant at which "is this window active right now" predicates are evaluated for the target
+     * day: the same time-of-day as `now`, shifted onto the target IST day.
+     *
+     * For a preview of **today** this is exactly `now`, which is what makes the today-parity
+     * guarantee hold *by construction* rather than by coincidence — the alternative (probing at the
+     * target day's midnight) would silently disagree with the real run for every availability window
+     * that opens during the working day. For D+1 it reads as "this time tomorrow".
+     */
+    const asOf = new Date(now.getTime() + (targetDay.getTime() - today.getTime()));
+
     // Soft Inactive Count drives the deficit/preventive switch (Issue 40, CONTEXT §5). Recorded on the
     // run + each recommendation's breakdown; full preventive-mode scoring re-prioritisation → follow-up.
-    const mode = await this.softInactive.modeForZone(zoneId, now);
+    //
+    // Threaded with `asOf` for intent, but note honestly: `modeForZone` ignores its date argument
+    // (`soft-inactive-count.service.ts:74` — the parameter is `_now`), because the count is read from
+    // materialised `device_states`. The mode is therefore as-of-last-recompute for exactly the same
+    // reason the buckets are, and `bucketsAsOf` is the caveat that covers both.
+    const mode = await this.softInactive.modeForZone(zoneId, asOf);
     // Issue 157 AC-4 — one batched lookup per run: every ACTIVE, unexpired override in THIS zone,
     // reduced to the newest per company (Q-A newest-wins). Company reads below stay untouched; the
     // override (if any) simply takes precedence over the global companyTier they carry.
-    const overrides = await resolveActiveOverrides(this.prisma, [zoneId], now);
+    const overrides = await resolveActiveOverrides(this.prisma, [zoneId], asOf);
     // #238 — read per run, never cached, exactly like every other engine setting: an operator's edit
     // takes effect on the next dispatch with no restart (audit V10, `ticket-and-assignment-review`).
     const assignmentThresholdHours = await readAssignmentThresholdHours(this.prisma);
@@ -135,7 +247,7 @@ export class RecommenderService {
         ...ticketWhere,
         // #146 — a ZM-deferred ticket is UNASSIGNED precisely so it can come back, but not before the
         // date the ZM chose. Without this it would be re-dispatched on the same run that removed it.
-        ...notDeferredOn(istDate(now)),
+        ...notDeferredOn(targetDay),
         // Deactivated plants (Issue 119) are skipped by dispatch — no SE is sent to a shut plant.
         plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
         device: {
@@ -174,7 +286,9 @@ export class RecommenderService {
       },
       include: {
         company: { select: { companyTier: true, companyPriorityRank: true } },
-        device: { select: { state: { select: { slaBucket: true, latestGpsDatetime: true } } } },
+        // `computedAt` rides along for the projection's `bucketsAsOf` watermark (#250) — the
+        // ranking inputs' staleness, taken from the very rows that were ranked, at no extra query.
+        device: { select: { state: { select: { slaBucket: true, latestGpsDatetime: true, computedAt: true } } } },
       },
     });
 
@@ -184,7 +298,7 @@ export class RecommenderService {
     const withheldBelowThreshold = await this.prisma.ticket.count({
       where: {
         ...ticketWhere,
-        ...notDeferredOn(istDate(now)),
+        ...notDeferredOn(targetDay),
         plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
         device: {
           departures: { none: { restoredAt: null } },
@@ -195,6 +309,12 @@ export class RecommenderService {
 
     // Build the canonical-sort candidate list (skip tickets with no computed bucket — unrankable).
     const rankable = tickets.filter((t) => t.device.state?.slaBucket != null);
+    // #250 — the projection's staleness watermark, taken from the rows that were actually ranked, so
+    // it costs nothing and describes precisely the inputs the ordering came from.
+    const bucketsAsOf = rankable.reduce<Date | null>((max, t) => {
+      const at = t.device.state!.computedAt;
+      return max === null || at > max ? at : max;
+    }, null);
     const candidateTickets: (CandidateTicket & {
       plantId: bigint;
       repeatFailure: boolean;
@@ -229,7 +349,7 @@ export class RecommenderService {
     }));
     const runList: RunCandidate[] = [
       ...tsRun,
-      ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId, istDate(now), overrides) : []),
+      ...(mode === 'PREVENTIVE' ? await this.installBacklog(zoneId, targetDay, overrides) : []),
     ];
 
     const { weights, weightSetRef } = await this.activeWeights(mode);
@@ -241,9 +361,9 @@ export class RecommenderService {
     // isolation. Without this a cross-zone floating/multi-plant SE is dispatched up to capacity in every
     // zone the daily loop visits (each `runForZone` started the map at 0). The in-run increments below add
     // this zone's suggestions on top, giving a running whole-day total to check against the cap.
-    const assigned = await this.committedDayLoad(istDate(now)); // se_id → tickets on the SE's day plan
+    const assigned = await this.committedDayLoad(targetDay); // se_id → tickets on the SE's day plan
     const seededPlants = new Set<string>(); // plant_id → already has a cluster seed this run
-    const plannerByPlant = await this.plannerForDate(zoneId, now); // plant_id → planned se_ids (soft bias)
+    const plannerByPlant = await this.plannerForDate(zoneId, targetDay); // plant_id → planned se_ids (soft bias)
     const kitStatusBySe = new Map<string, CommonKitStatus>(); // memoised Common-Kit status per SE
     const availabilityBySe = new Map<string, SeAvailabilityStatus>(); // memoised current availability per SE
 
@@ -253,6 +373,11 @@ export class RecommenderService {
     // dispatch-run ledger id is supplied. Selection/scoring above and below is untouched.
     const traceRows: Prisma.DispatchDecisionTraceCreateManyInput[] = [];
     const unassignableReasons: UnassignableReasons = { NO_COVERAGE: 0, ALL_DROPPED: 0, dropBuckets: {} };
+    // #250 — the dry run's output. Accumulated on every path (cheap: one object per ticket) and
+    // returned only when `dryRun`, so the real run pays a negligible cost and its result shape is
+    // unchanged. Collected here rather than reconstructed afterwards because several inputs
+    // (drop counts, the capacity counter at the moment of decision) exist only inside the loop.
+    const decisions: PreviewDecision[] = [];
 
     // #126 — clear crash-window orphan SUGGESTED recs before (re)suggesting this zone. A live
     // SUGGESTED whose owning dispatch_run is already finalized (or is null / pre-ledger) is a leftover
@@ -261,7 +386,10 @@ export class RecommenderService {
     // this run re-evaluate the ticket fresh — a stale decision (prior availability/capacity) is never
     // consumed. Recs owned by a still-RUNNING run (a concurrent live dispatch) are deliberately left
     // alone; the per-create guard below skips those tickets instead. Trace rows cascade on delete.
-    await this.clearFinalizedOrphans(zoneId);
+    // #250 — suppressed on a dry run, and this is the mutation that most needs it: the delete is
+    // ZONE-WIDE, so a preview that ran it would silently destroy a concurrent live run's SUGGESTED
+    // rows. Skipping it is also why a dry run cannot hit the P2002 path below — it never creates.
+    if (!dryRun) await this.clearFinalizedOrphans(zoneId);
 
     for (let i = 0; i < runList.length; i++) {
       const t = runList[i];
@@ -273,7 +401,7 @@ export class RecommenderService {
       // (SE_UNAVAILABLE). Vehicle readiness remains a seam (Issue 28); the expected-component leg is
       // deferred until `expected_components` lands (Issue 22).
       await Promise.all(ordered.map((c) => this.ensureKitStatus(c.seId, kitStatusBySe)));
-      await this.ensureAvailability(ordered.map((c) => c.seId), availabilityBySe, now);
+      await this.ensureAvailability(ordered.map((c) => c.seId), availabilityBySe, asOf);
 
       const readiness: (SeCandidateReadiness & { seId: string })[] = ordered.map((c) => {
         const cap = capacity.get(c.seId);
@@ -306,7 +434,7 @@ export class RecommenderService {
       const passedSet = new Set(passed.map((c) => c.seId));
 
       if (chosen === null) {
-        const rec = await this.prisma.recommendation.create({
+        const rec = dryRun ? null : await this.prisma.recommendation.create({
           data: {
             ticketId: t.ticketId,
             seId: null,
@@ -331,7 +459,7 @@ export class RecommenderService {
         unassignableReasons[poolEmptyReason]++;
         for (const [reason, n] of Object.entries(dropCounts))
           unassignableReasons.dropBuckets[reason] = (unassignableReasons.dropBuckets[reason] ?? 0) + n;
-        if (opts.runId !== undefined) {
+        if (opts.runId !== undefined && rec !== null) {
           traceRows.push({
             runId: opts.runId,
             recommendationId: rec.recommendationId,
@@ -360,16 +488,34 @@ export class RecommenderService {
         // Component-Blocked Queue (Issue 21): if a candidate was dropped because their Common Kit is
         // incomplete, record the ticket with the missing parts so the ZM sees an operational reason.
         const kitDrop = filtered.dropped.find((d) => d.reason === 'COMMON_KIT_INCOMPLETE');
-        if (kitDrop) {
+        if (kitDrop && !dryRun) {
           const missing = kitStatusBySe.get(kitDrop.candidate.seId)?.missing ?? [];
           await this.inventory.recordComponentBlock(t.ticketId, kitDrop.candidate.seId, missing);
         }
+        decisions.push({
+          ticketId: t.ticketId,
+          plantId: String(t.plantId),
+          processingRank,
+          companyTier: t.companyTier,
+          deviceBucket: t.deviceBucket,
+          tierOverrideId: t.tierOverrideId,
+          seId: null,
+          coverageType: null,
+          score: null,
+          candidatesTotal: ordered.length,
+          passedCount: 0,
+          dropCounts,
+          poolEmptyReason,
+          plannerBias: false,
+          clusterSeed: isSeed,
+          capacityAtDecision: null,
+        });
         unassignable++;
         continue;
       }
 
       // The ticket is assignable now — clear any stale Component-Blocked row for it.
-      await this.inventory.resolveComponentBlock(t.ticketId, now);
+      if (!dryRun) await this.inventory.resolveComponentBlock(t.ticketId, now);
 
       const coverageType = ordered.find((c) => c.seId === chosen.seId)!.coverageType;
       const features = {
@@ -388,9 +534,9 @@ export class RecommenderService {
       // loop, so a one-SUGGESTED-per-ticket collision surviving to here can only be a concurrent,
       // still-RUNNING dispatch run that already holds a live SUGGESTED for this ticket. That run owns
       // it → skip rather than throw and wedge the whole zone. Capacity is credited only on success.
-      let recommendationId: bigint;
+      let recommendationId: bigint | null = null;
       try {
-        const created = await this.prisma.recommendation.create({
+        const created = dryRun ? null : await this.prisma.recommendation.create({
           data: {
             ticketId: t.ticketId,
             seId: chosen.seId,
@@ -413,8 +559,13 @@ export class RecommenderService {
             runId: opts.runId ?? null,
           },
         });
-        recommendationId = created.recommendationId;
+        recommendationId = created?.recommendationId ?? null;
       } catch (e) {
+        // A dry run never creates, so it can never land here — the collision this absorbs is a
+        // concurrent still-RUNNING dispatch that already owns this ticket's SUGGESTED row. That is a
+        // real (if narrow) divergence: under concurrency the preview shows a ticket the live run has
+        // already claimed. It cannot be closed without reading the other run's state, and reading it
+        // would make the preview's answer depend on when it was asked.
         if ((e as { code?: string }).code === 'P2002') continue;
         throw e;
       }
@@ -422,7 +573,30 @@ export class RecommenderService {
       assigned.set(chosen.seId, (assigned.get(chosen.seId) ?? 0) + 1);
       recommended++;
 
-      if (opts.runId !== undefined) {
+      const plannerPlannedChosen = planned?.has(chosen.seId) ?? false;
+      decisions.push({
+        ticketId: t.ticketId,
+        plantId: String(t.plantId),
+        processingRank,
+        companyTier: t.companyTier,
+        deviceBucket: t.deviceBucket,
+        tierOverrideId: t.tierOverrideId,
+        seId: chosen.seId,
+        coverageType,
+        score: scored.score,
+        candidatesTotal: ordered.length,
+        passedCount: passed.length,
+        dropCounts,
+        poolEmptyReason: null,
+        plannerBias: plannerPlannedChosen && passed[0]?.seId !== chosen.seId,
+        clusterSeed: isSeed,
+        capacityAtDecision: {
+          used: assigned.get(chosen.seId) ?? 1,
+          cap: capacity.get(chosen.seId)?.dailyCapacity ?? null,
+        },
+      });
+
+      if (opts.runId !== undefined && recommendationId !== null) {
         // Distance-from-previous-stop is the only per-SE score component and is deferred-null, so all
         // of a ticket's candidates score identically — precedence decides, and the trace says so.
         const scoreDegenerate = features.distanceFromPrevStopKm === null || (weights['distance'] ?? 0) === 0;
@@ -477,11 +651,22 @@ export class RecommenderService {
       }
     }
 
-    if (opts.runId !== undefined && traceRows.length > 0) {
+    if (opts.runId !== undefined && traceRows.length > 0 && !dryRun) {
       await this.prisma.dispatchDecisionTrace.createMany({ data: traceRows });
     }
 
     return {
+      ...(dryRun
+        ? {
+            projection: {
+              zoneId: String(zoneId),
+              targetDate: targetDay.toISOString().slice(0, 10),
+              bucketsAsOf: bucketsAsOf?.toISOString() ?? null,
+              decisions,
+              plan: buildPreviewPlan(decisions),
+            },
+          }
+        : {}),
       recommended,
       unassignable,
       mode,
@@ -593,8 +778,7 @@ export class RecommenderService {
    * `@db.Date`, and deriving it from UTC components read the *previous* day's rows for every run
    * between 00:00 and 05:29 IST, dropping the bias with nothing logged.
    */
-  private async plannerForDate(zoneId: bigint, now: Date): Promise<Map<string, Set<string>>> {
-    const day = istDate(now);
+  private async plannerForDate(zoneId: bigint, day: Date): Promise<Map<string, Set<string>>> {
     const entries = await this.prisma.sePlanner.findMany({
       where: { plannedDate: day, plant: { zoneId } },
       select: { seId: true, plantId: true },

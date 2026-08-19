@@ -5,7 +5,7 @@ import { buildStampFields } from '../build-info/run-stamp';
 import { Prisma } from '../generated/prisma/client';
 import type { DispatchRunStatus, DispatchRunTrigger } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import { RecommenderService, type RunSummary } from '../recommender/recommender.service';
+import { RecommenderService, type RunSummary, type ZoneProjection } from '../recommender/recommender.service';
 import { SE_ASSIGNMENT_THRESHOLD_KEY } from '../settings/assignment-threshold';
 import { BatchAssignmentService, type DispatchSummary } from './batch-assignment.service';
 import { DISPATCH_CRON_SETTING_KEY, bootstrapDispatchCron } from './dispatch-cron';
@@ -13,6 +13,23 @@ import { DISPATCH_CRON_SETTING_KEY, bootstrapDispatchCron } from './dispatch-cro
 export interface DispatchRunError {
   zoneId: string;
   message: string;
+}
+
+/**
+ * #250 — how far ahead of the real clock an injected `now` may sit before the real dispatch path
+ * treats it as a *future day* and refuses. Purely a clock-skew allowance: hosts drift, and a run
+ * legitimately fired seconds before IST midnight must not be rejected because the process clock is a
+ * little ahead. It is not a window in which future-dating is permitted.
+ */
+const FUTURE_DAY_SKEW_MS = 15 * 60 * 1000;
+
+/** What a preview answers with: the projected plan per zone, and nothing persisted (#250). */
+export interface DispatchPreview {
+  /** The IST calendar day previewed, `YYYY-MM-DD`. */
+  targetDate: string;
+  zones: ZoneProjection[];
+  /** Zones whose projection failed — contained exactly like a real run's, never fatal. */
+  errors: DispatchRunError[];
 }
 
 /** Who/what started the run — CRON (default, system actor) or the manual HTTP trigger. */
@@ -116,6 +133,18 @@ export class DispatchRunService {
     const actorId = opts.actorUserId ?? 'SYSTEM';
     const actorRole = opts.actorRole ?? 'SYSTEM';
     const day = istDate(now);
+    // #250 — the real path builds `work_schedules` dated `day` and dispatches them to real SEs.
+    // Nothing validated `now`, so a future date silently produced real future-dated day plans; the
+    // only thing preventing it was that both live callers hardcode `new Date()` — an accident of the
+    // call sites rather than a property of this function. Asking about tomorrow is now the preview's
+    // job ({@link previewActiveZones}), so this refuses rather than quietly obliging.
+    const latestAllowedDay = istDate(new Date(Date.now() + FUTURE_DAY_SKEW_MS));
+    if (day.getTime() > latestAllowedDay.getTime()) {
+      throw new Error(
+        `Refusing to dispatch for a future day (${day.toISOString().slice(0, 10)} IST): a real run ` +
+          `would create future-dated day plans. Use previewActiveZones() to project a future date.`,
+      );
+    }
     const zoneIds = opts.zoneId != null ? [opts.zoneId] : await this.activeZoneIds();
 
     // #213 — the single in-flight guard, taken before the ledger row is opened so a refused caller
@@ -139,6 +168,47 @@ export class DispatchRunService {
       // Released in a `finally`: a run that throws must not wedge its zones permanently refusing.
       for (const h of held) this.inFlight.delete(h.zoneId);
     }
+  }
+
+  /**
+   * #250 — project what a run would do, writing nothing. The non-mutating twin of
+   * {@link runForActiveZones}, and deliberately *not* a second scheduling implementation: it drives
+   * the same `RecommenderService.runForZone`, only with the writes suppressed (Decision 1/18).
+   *
+   * Three things it pointedly does not do, and each is the reason an operator can open the page
+   * during a live dispatch without consequence:
+   *  - **no in-flight slot** — it never touches {@link inFlight}, so it can neither be refused by a
+   *    running dispatch nor refuse one;
+   *  - **no advisory lock** — `BatchAssignmentService.dispatchForZone` is never reached, so the
+   *    per-zone lock a real run holds is never contended for;
+   *  - **no `dispatch_runs` row** — the ledger records runs that happened; a preview in it would
+   *    corrupt every run-history read, and the trigger enum has no honest value for one.
+   *
+   * A zone that throws is contained exactly as in a real run: recorded in `errors`, the rest continue.
+   */
+  async previewActiveZones(
+    targetDate: Date,
+    opts: { zoneId?: bigint; now?: Date } = {},
+  ): Promise<DispatchPreview> {
+    const now = opts.now ?? new Date();
+    const zoneIds = opts.zoneId != null ? [opts.zoneId] : await this.activeZoneIds();
+    const zones: ZoneProjection[] = [];
+    const errors: DispatchRunError[] = [];
+
+    for (const zoneId of zoneIds) {
+      try {
+        const summary = await this.recommender.runForZone(zoneId, { now, dryRun: true, targetDate });
+        // `projection` is present by construction on a dry run; the guard keeps the type honest
+        // rather than asserting non-null.
+        if (summary.projection) zones.push(summary.projection);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        this.logger.warn(`preview failed for zone ${zoneId}: ${message}`);
+        errors.push({ zoneId: zoneId.toString(), message });
+      }
+    }
+
+    return { targetDate: istDate(targetDate).toISOString().slice(0, 10), zones, errors };
   }
 
   /** Every zone currently held by a run, for the admin's pre-emptive disabled state (#213 AC-9). */
