@@ -52,6 +52,27 @@ export function InlineBadges({
       </span>,
     );
   }
+  // #244 — Special: repeatedly dispatched, reached in the app, never successfully worked. Rendered
+  // from the row's own verdict, never re-derived here — the rule has exactly one implementation and it
+  // is the SQL the filter also uses. The attempt count travels with the badge because "SPECIAL" alone
+  // is an assertion, while "SPECIAL · 3" is a claim a manager can go and check in the attempt history.
+  //
+  // Visually distinct from REPEAT (device fact, orange) and ESCALATED (cycle state, red) on purpose:
+  // three concepts that share a colour would be read as three shades of the same alarm.
+  if (ticket.isSpecial)
+    badges.push(
+      <span
+        key="special"
+        data-testid="badge-SPECIAL"
+        title={
+          `Reached by an SE ${ticket.specialAttempts ?? 0} time(s) and still unresolved. ` +
+          'Identification only — this does not change dispatch order.'
+        }
+        className="rounded bg-violet-100 px-1 text-xs font-medium text-violet-800"
+      >
+        SPECIAL · {ticket.specialAttempts ?? 0}
+      </span>,
+    );
   if (ticket.repeatFailure)
     badges.push(
       <span key="repeat" data-testid="badge-REPEAT" className="rounded bg-orange-100 px-1 text-xs text-orange-800">

@@ -44,6 +44,17 @@ export class SettingsController {
           lockReason: outcome.lockReason,
         });
       }
+      // #244 — the value is outside the key's declared domain. The allowed list travels with the
+      // refusal: the operator cannot discover the bound anywhere else, and a reader that coerces an
+      // illegal stored value to its default would otherwise show them their number while the engine
+      // used another.
+      if (outcome.result === 'INVALID') {
+        throw new BadRequestException({
+          code: 'SETTING_VALUE_INVALID',
+          key: outcome.key,
+          allowed: outcome.allowed,
+        });
+      }
       // #213 — a key with a specialised writer (validation + live re-registration) is refused here
       // rather than half-applied. The response names the endpoint that owns it.
       throw new BadRequestException({

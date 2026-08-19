@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet, useMatch, useNavigate } from 'react-router-dom';
-import { apiTicketsList, type TicketFilters, type TicketRow } from '../../api/tickets';
+import { apiSpecialTicketCount, apiTicketsList, type TicketFilters, type TicketRow } from '../../api/tickets';
 import { getAssignmentThreshold } from '../../api/assignmentThreshold';
 import { apiDeviceFilterOptions, type DeviceFilterOptions } from '../../api/devices';
 import {
@@ -59,6 +59,10 @@ export function TicketsPage() {
   // Null on any failure and the badge simply does not render: this is a decoration on someone else's
   // page, and it must never be the reason the ticket queue fails to load.
   const [assignmentThresholdHours, setAssignmentThresholdHours] = useState<number | null>(null);
+  // #244 — how many Special tickets the caller has, from the server. Never counted from `rows`: the
+  // list is a page, and a page count on a filter chip would understate the queue the moment it
+  // paginates. Null on any failure and the chip renders without a number rather than with a wrong one.
+  const [specialCount, setSpecialCount] = useState<number | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -69,6 +73,18 @@ export function TicketsPage() {
       live = false;
     };
   }, []);
+
+  // Re-read whenever the filters change: a Special verdict is derived, so the figure moves when the
+  // threshold moves or an SE finally submits — a count fetched once at mount would go stale on screen.
+  useEffect(() => {
+    let live = true;
+    apiSpecialTicketCount()
+      .then((s) => live && setSpecialCount(s.count))
+      .catch(() => live && setSpecialCount(null));
+    return () => {
+      live = false;
+    };
+  }, [filters]);
 
   // Company + plant dropdown source (Issue 122 — replaces the free-text company-ID box). Manager-scoped
   // list of companies/plants present in the caller's fleet; failure just leaves the dropdowns empty.
@@ -242,6 +258,25 @@ export function TicketsPage() {
                 onChange={set('q')}
                 className="w-64"
               />
+              {/* #244 — a toggle, not a dropdown: Special is a single property a manager either wants
+                  narrowed to or does not, and the count is what makes it worth clicking. Server-side,
+                  like every other filter here — the badge and the filter share one definition. */}
+              <Button
+                variant={filters.special === 'true' ? 'primary' : 'secondary'}
+                size="sm"
+                data-testid="special-filter"
+                aria-pressed={filters.special === 'true'}
+                onClick={() =>
+                  setFilters((f) => ({ ...f, special: f.special === 'true' ? undefined : 'true' }))
+                }
+              >
+                Special
+                {specialCount !== null && (
+                  <span data-testid="special-count" className="ml-1 font-semibold">
+                    {specialCount}
+                  </span>
+                )}
+              </Button>
               <FilterSelect aria-label="Work type" value={filters.workType ?? ''} onChange={set('workType')}>
                 <option value="">All work types</option>
                 {WORK_TYPES.map((w) => (

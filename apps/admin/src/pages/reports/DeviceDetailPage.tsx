@@ -544,6 +544,18 @@ export function DeviceDetailPage() {
                       <span className="text-ink-muted">Schedule:</span> #{selected.scheduleId}
                     </span>
                   )}
+                  {/* #244 — the identification travels with the link; the attempt history behind it
+                      lives in the ticket drawer this opens, rather than being duplicated onto a panel
+                      that represents the ticket as a single line. */}
+                  {selected.openTicketId && selected.openTicketIsSpecial && (
+                    <span
+                      data-testid="device-special-badge"
+                      title="Reached by an SE repeatedly and still unresolved. See the ticket's Assignment History."
+                      className="rounded bg-violet-100 px-1.5 py-0.5 text-xs font-medium text-violet-800"
+                    >
+                      SPECIAL
+                    </span>
+                  )}
                   {selected.openTicketId && (
                     <Link
                       to={`/tickets/${selected.openTicketId}`}

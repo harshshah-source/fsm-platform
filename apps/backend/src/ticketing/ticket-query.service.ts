@@ -8,6 +8,8 @@ import type {
   WorkType,
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { readSpecialAttemptThreshold } from '../settings/special-threshold';
+import { countableAttemptsSql, specialPredicateSql } from './special-ticket.query';
 
 /**
  * A ticket as the manager surfaces see it. Bigint ids are serialised to strings (Nest cannot
@@ -64,6 +66,16 @@ export interface TicketView {
   componentRequestStatus: string | null;
   /** SLA-pause timestamp while WAITING_COMPONENT (Issue 23); the UI derives "days elapsed". Null otherwise. */
   waitingComponentSince: string | null;
+  /**
+   * #244 — Special: repeatedly dispatched, actually reached in the mobile workflow, never
+   * successfully worked. Derived per read (there is no column) from the same SQL expression the
+   * `special` filter and the count evaluate, so a badged row and a filtered row cannot disagree.
+   * Deliberately apart from `repeatFailure` / ESCALATED, which are failure-cycle facts about the
+   * *device*; this is an observation about *attempts*.
+   */
+  isSpecial: boolean;
+  /** Countable unsuccessful reached attempts behind {@link isSpecial} — the badge's "3/3". */
+  specialAttempts: number;
   createdAt: string;
   lastStateChangedAt: string;
 }
@@ -120,6 +132,10 @@ export interface TicketListFilters {
   q?: string;
   assignmentState?: string;
   bucket?: string;
+  /** #244 — `'true'` narrows the list to Special tickets. Any other value is ignored, not treated as
+   *  `false`: "special=0" meaning "only non-Special" is a filter nobody asked for and the queue has
+   *  no control that would produce it. */
+  special?: string;
   limit?: number;
   offset?: number;
 }
@@ -219,6 +235,8 @@ type RawRow = {
   failureCycleState: string | null;
   componentRequestStatus: string | null;
   waitingComponentSince: Date | null;
+  isSpecial: boolean;
+  specialAttempts: number | bigint;
   createdAt: Date;
   lastStateChangedAt: Date;
 };
@@ -253,6 +271,8 @@ const toView = (r: RawRow): TicketView => ({
   failureCycleState: r.failureCycleState,
   componentRequestStatus: r.componentRequestStatus,
   waitingComponentSince: r.waitingComponentSince ? r.waitingComponentSince.toISOString() : null,
+  isSpecial: r.isSpecial,
+  specialAttempts: Number(r.specialAttempts),
   createdAt: r.createdAt.toISOString(),
   lastStateChangedAt: r.lastStateChangedAt.toISOString(),
 });
@@ -262,8 +282,28 @@ const toView = (r: RawRow): TicketView => ({
 export class TicketQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * #244 — the two derived columns every ticket row carries, at the threshold in force **right now**.
+   * Read per call, never cached: moving the key reclassifies the queue on the next refresh, which is
+   * the whole point of Special being derived rather than stored.
+   *
+   * The countable-attempts expression is evaluated twice per row (once for the number, once inside
+   * the predicate) rather than being computed once and re-used. That is deliberate: one definition in
+   * one place is worth more here than one subquery fewer, the page is at most 500 rows, and #241's
+   * `(ticket_id)` index is what the whole expression rides on.
+   */
+  private specialColumns(threshold: number): Prisma.Sql {
+    return Prisma.sql`,
+      ${countableAttemptsSql}::int AS "specialAttempts",
+      ${specialPredicateSql(threshold)} AS "isSpecial"`;
+  }
+
   async list(scope: TicketScope, filters: TicketListFilters = {}): Promise<TicketView[]> {
+    const threshold = await readSpecialAttemptThreshold(this.prisma);
     const conds: Prisma.Sql[] = [];
+    // #244 — the filter reuses the predicate the badge column renders, so the queue cannot show a
+    // SPECIAL row that the Special filter then hides.
+    if (filters.special === 'true') conds.push(Prisma.sql`AND ${specialPredicateSql(threshold)}`);
     if (scope.role === 'ZONAL_MANAGER' && scope.zoneId !== null)
       conds.push(Prisma.sql`AND p.zone_id = ${BigInt(scope.zoneId)}`);
     if (filters.status && TICKET_STATUSES.includes(filters.status))
@@ -312,11 +352,34 @@ export class TicketQueryService {
     const offset = filters.offset && filters.offset > 0 ? filters.offset : 0;
 
     const rows = await this.prisma.$queryRaw<RawRow[]>(Prisma.sql`
-      SELECT ${SELECT_COLUMNS} ${FROM_JOINS}
+      SELECT ${SELECT_COLUMNS} ${this.specialColumns(threshold)} ${FROM_JOINS}
       WHERE true ${where}
       ORDER BY ${SEVERITY_RANK} DESC, t.created_at DESC
       LIMIT ${limit} OFFSET ${offset}`);
     return rows.map(toView);
+  }
+
+  /**
+   * #244 — how many Special tickets the caller has, and the threshold that decided it.
+   *
+   * A separate read rather than a field on the list response, for two reasons: the list is a *page*
+   * and a count over a page is not a count; and the queue shows the figure on a filter chip that must
+   * be right before anybody clicks it. Zone-scoped exactly like the list — a ZM is told how many are
+   * theirs, never a platform total they cannot open.
+   */
+  async countSpecial(scope: TicketScope): Promise<{ count: number; threshold: number }> {
+    const threshold = await readSpecialAttemptThreshold(this.prisma);
+    const zoneCond =
+      scope.role === 'ZONAL_MANAGER' && scope.zoneId !== null
+        ? Prisma.sql`AND p.zone_id = ${BigInt(scope.zoneId)}`
+        : Prisma.empty;
+
+    const rows = await this.prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
+      SELECT count(*) AS count
+        FROM tickets t
+        JOIN plants p ON p.plant_id = t.plant_id
+       WHERE ${specialPredicateSql(threshold)} ${zoneCond}`);
+    return { count: Number(rows[0]?.count ?? 0), threshold };
   }
 
   async getById(ticketId: string, scope: TicketScope): Promise<TicketDetailView | null> {
@@ -326,8 +389,9 @@ export class TicketQueryService {
         ? Prisma.sql`AND p.zone_id = ${BigInt(scope.zoneId)}`
         : Prisma.empty;
 
+    const threshold = await readSpecialAttemptThreshold(this.prisma);
     const rows = await this.prisma.$queryRaw<RawRow[]>(Prisma.sql`
-      SELECT ${SELECT_COLUMNS} ${FROM_JOINS}
+      SELECT ${SELECT_COLUMNS} ${this.specialColumns(threshold)} ${FROM_JOINS}
       WHERE t.ticket_id = ${ticketId}::uuid ${zoneCond}
       LIMIT 1`);
     if (rows.length === 0) return null;

@@ -33,6 +33,9 @@ export interface DeviceListRow {
   /** The device's latest live ticket, if any — the assignment context (Issue 122). */
   openTicketId?: string | null;
   openTicketStatus?: string | null;
+  /** #244 — whether that open ticket is Special. Served by the same predicate the ticket queue uses,
+   *  so the two surfaces cannot disagree about one ticket. Undefined on reads that predate the field. */
+  openTicketIsSpecial?: boolean | null;
   /** UNASSIGNED | FORMALLY_ASSIGNED for the open ticket; null when the device has no live ticket. */
   assignmentState?: string | null;
   assignedSeName?: string | null;

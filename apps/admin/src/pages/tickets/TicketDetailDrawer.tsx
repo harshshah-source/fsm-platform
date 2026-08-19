@@ -3,7 +3,14 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthProvider';
 import { apiComponentRequestsByTicket, type ComponentRequestRow } from '../../api/componentRequests';
 import { apiManualCloseRecovery } from '../../api/recovery';
-import { apiTicketDetail, apiTicketForms, type TicketDetail, type TicketForm } from '../../api/tickets';
+import {
+  apiTicketAttempts,
+  apiTicketDetail,
+  apiTicketForms,
+  type TicketAttemptHistory,
+  type TicketDetail,
+  type TicketForm,
+} from '../../api/tickets';
 import { apiTicketVerification, type TicketVerification } from '../../api/verification';
 import { Badge, Button, type BadgeTone } from '../../components/ui';
 import { IconClose } from '../../components/ui/icons';
@@ -66,6 +73,8 @@ export function TicketDetailDrawer() {
   const [forms, setForms] = useState<TicketForm[] | null>(null);
   // Verification state: null = not loaded; { run } once fetched (run null = no verification run yet).
   const [verification, setVerification] = useState<{ run: TicketVerification | null } | null>(null);
+  // #244 — the assignment windows behind the Special verdict. Lazy, like every other tab's data.
+  const [attempts, setAttempts] = useState<TicketAttemptHistory | null>(null);
   const [recoveryCloseOpen, setRecoveryCloseOpen] = useState(false);
   const [recoveryReason, setRecoveryReason] = useState('');
   // The Verification Review page (Issue 19) deep-links to a specific tab via `?tab=Verification`.
@@ -96,6 +105,20 @@ export function TicketDetailDrawer() {
       alive = false;
     };
   }, [ticketId, tab, components]);
+
+  // #244 — lazy-load the attempt history when the Assignment History tab is opened. This tab used to
+  // show only lifecycle *events*; the windows are the substance it was missing, and the thing a
+  // SPECIAL badge has to be checkable against.
+  useEffect(() => {
+    if (!ticketId || tab !== 'Assignment History' || attempts !== null) return;
+    let alive = true;
+    apiTicketAttempts(ticketId)
+      .then((h) => alive && setAttempts(h))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [ticketId, tab, attempts]);
 
   // Lazy-load the ticket's SE troubleshoot-form submissions when the Forms tab is opened (Issue 70).
   useEffect(() => {
@@ -394,6 +417,57 @@ export function TicketDetailDrawer() {
 
             {tab === 'Assignment History' && (
               <div data-testid="assignment-history-panel" className="text-sm">
+                {/* #244 — the attempt windows, above the event timeline. The verdict is stated against
+                    the live threshold because "SPECIAL" without the number it was judged against is
+                    not checkable, and every window is listed (withdrawals and the live one included)
+                    so the count can be reconciled against the ledger rather than taken on trust. */}
+                {attempts && (
+                  <div data-testid="attempt-history" className="mb-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                        Assignment attempts
+                      </h4>
+                      <span
+                        data-testid="special-verdict"
+                        className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                          attempts.isSpecial ? 'bg-violet-100 text-violet-800' : 'bg-neutral-bg text-neutral'
+                        }`}
+                      >
+                        {attempts.isSpecial ? 'SPECIAL' : 'Not special'} · {attempts.countableAttempts}/
+                        {attempts.threshold} reached and unresolved
+                      </span>
+                    </div>
+                    {attempts.attempts.length === 0 && (
+                      <p className="text-ink-muted">This ticket has never been dispatched.</p>
+                    )}
+                    <ul className="flex flex-col gap-1">
+                      {attempts.attempts.map((a) => (
+                        <li
+                          key={a.attemptId}
+                          data-testid={`attempt-row-${a.attemptId}`}
+                          className="flex flex-wrap items-baseline gap-x-2 rounded border border-line px-2 py-1"
+                        >
+                          <span className="text-ink-strong">{new Date(a.openedAt).toLocaleDateString()}</span>
+                          <span className="text-xs text-ink-muted">{a.seName ?? a.seId ?? 'unassigned'}</span>
+                          {/* A live window is in progress, not a failed attempt — saying so is the
+                              difference between a history and an accusation. */}
+                          {a.closedAt === null ? (
+                            <span className="text-xs text-ink">in progress</span>
+                          ) : (
+                            <span className="font-mono text-xs text-ink">{a.removalReason}</span>
+                          )}
+                          <span className="text-xs text-ink-muted">
+                            {a.reached ? 'reached' : 'never opened'}
+                            {a.submitted ? ' · submitted' : ''}
+                          </span>
+                          {a.countable && (
+                            <span className="rounded bg-violet-100 px-1 text-xs text-violet-800">counted</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {assignmentEvents.length === 0 && (
                   <p className="text-ink-muted">No assignment or override actions recorded.</p>
                 )}

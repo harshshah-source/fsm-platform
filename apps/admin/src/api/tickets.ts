@@ -44,6 +44,15 @@ export interface TicketRow {
   /** Issue 23 — latest Component Request status + the SLA-pause timestamp for the WAITING_COMPONENT flag. */
   componentRequestStatus?: string | null;
   waitingComponentSince?: string | null;
+  /**
+   * #244 — Special: repeatedly dispatched, actually reached in the app, never successfully worked.
+   * Served per row and **never re-derived here**: the rule lives in one SQL expression that the badge,
+   * the filter and the count all share, and a second copy in TypeScript is how a queue starts
+   * disagreeing with the filter that populated it (the #238 `HELD` precedent).
+   */
+  isSpecial?: boolean;
+  /** Countable unsuccessful reached attempts behind `isSpecial` — what makes the badge checkable. */
+  specialAttempts?: number;
   createdAt: string;
 }
 
@@ -75,6 +84,8 @@ export interface TicketFilters {
   q?: string;
   assignmentState?: string;
   bucket?: string;
+  /** #244 — `'true'` narrows the list to Special tickets; omitted means "all". */
+  special?: string;
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -119,5 +130,37 @@ export interface TicketForm {
 
 export const apiTicketForms = (id: string) =>
   get<{ ticketId: string; forms: TicketForm[] }>(`/tickets/${encodeURIComponent(id)}/forms`);
+
+/** One assignment window in a ticket's history (#244), with the evidence that decided it. */
+export interface TicketAttempt {
+  attemptId: string;
+  seId: string | null;
+  seName: string | null;
+  openedAt: string;
+  /** null ⟺ the window is still live — in progress, not a failed attempt. */
+  closedAt: string | null;
+  removalReason: string | null;
+  reached: boolean;
+  submitted: boolean;
+  countable: boolean;
+}
+
+/** The Special verdict plus the evidence behind it, as the detail drawer renders it (#244). */
+export interface TicketAttemptHistory {
+  ticketId: string;
+  /** The live threshold at read time — displayed, because the verdict is meaningless without it. */
+  threshold: number;
+  countableAttempts: number;
+  hasSubmission: boolean;
+  isSpecial: boolean;
+  attempts: TicketAttempt[];
+}
+
+export const apiTicketAttempts = (id: string) =>
+  get<TicketAttemptHistory>(`/tickets/${encodeURIComponent(id)}/attempts`);
+
+/** #244 — how many Special tickets the caller has, and the threshold that decided it. Server-side and
+ *  zone-scoped: counting the loaded page would report a page, not a queue. */
+export const apiSpecialTicketCount = () => get<{ count: number; threshold: number }>('/tickets/special-count');
 
 export const apiTicketsByPlant = (plantId: string) => apiTicketsList({ plantId });

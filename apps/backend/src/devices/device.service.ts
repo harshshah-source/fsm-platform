@@ -3,6 +3,8 @@ import { AuditService } from '../audit/audit.service';
 import { Prisma } from '../generated/prisma/client';
 import { type DealType, type SlaBucket } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { readSpecialAttemptThreshold } from '../settings/special-threshold';
+import { specialPredicateSql } from '../ticketing/special-ticket.query';
 import { cohortWindowStart, deviceCommissionedWithin } from '../reports/commissioning-window';
 
 export interface DeviceView {
@@ -207,6 +209,9 @@ export class DeviceService {
    * filter values are whitelisted/typed before they reach SQL — no raw interpolation.
    */
   async listDevices(scope: DeviceListScope, opts: DeviceListFilters = {}): Promise<DeviceListPage> {
+    // #244 — read per call, never cached: Special is derived, so moving the key reclassifies this read
+    // on the next refresh exactly as it does the ticket queue.
+    const specialThreshold = await readSpecialAttemptThreshold(this.prisma);
     const conds = this.buildConds(scope, opts);
     const where = conds.length ? Prisma.join(conds, ' ') : Prisma.empty;
     const orderBy = ORDER_BY[opts.sort ?? 'LONGEST_INACTIVE'] ?? ORDER_BY.LONGEST_INACTIVE;
@@ -242,6 +247,7 @@ export class DeviceService {
           isInactive: boolean;
           openTicketId: string | null;
           openTicketStatus: string | null;
+          openTicketIsSpecial: boolean | null;
           assignmentState: string | null;
           assignedSeName: string | null;
           batchId: string | null;
@@ -251,6 +257,7 @@ export class DeviceService {
       >(Prisma.sql`
       SELECT page.*, d.device_type AS "deviceType", d.imsi_no AS "imsiNo", d.deal_type AS "dealType",
              ot.ticket_id::text AS "openTicketId", ot.status::text AS "openTicketStatus",
+             ot.is_special AS "openTicketIsSpecial",
              ot.assignment_state::text AS "assignmentState",
              asg.se_name AS "assignedSeName", asg.batch_id::text AS "batchId",
              asg.batch_status::text AS "batchStatus", asg.schedule_id::text AS "scheduleId"
@@ -266,7 +273,11 @@ export class DeviceService {
       ) page
       JOIN devices d ON d.device_id = page."deviceId"
       LEFT JOIN LATERAL (
-        SELECT t.ticket_id, t.status, t.assignment_state
+        SELECT t.ticket_id, t.status, t.assignment_state,
+               -- #244 — the Special verdict, from the one shared predicate the ticket queue and the
+               -- special=true filter also evaluate. Computed here rather than fetched separately so
+               -- a device can never disagree with the ticket queue about its own open ticket.
+               ${specialPredicateSql(specialThreshold)} AS is_special
         FROM tickets t
         WHERE t.device_id = page."deviceId"
           AND t.status NOT IN ('CLOSED', 'CLOSED_AUTO_RECOVERY', 'CLOSED_NON_OPERATIONAL',

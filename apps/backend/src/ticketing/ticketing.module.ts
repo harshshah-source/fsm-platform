@@ -17,6 +17,7 @@ import { RecoveryService } from './recovery.service';
 import { RepeatEscalationService } from './repeat-escalation.service';
 import { TicketCreationService } from './ticket-creation.service';
 import { TicketQueryService } from './ticket-query.service';
+import { SpecialTicketQueryService } from './special-ticket.query';
 import { TroubleshootSubmissionService } from './troubleshoot-submission.service';
 import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
 
@@ -32,6 +33,7 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
   providers: [
     TicketCreationService,
     TicketQueryService,
+    SpecialTicketQueryService,
     AutoRecoveryService,
     RepeatEscalationService,
     TroubleshootSubmissionService,
@@ -52,6 +54,10 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
   exports: [
     TicketCreationService,
     TicketQueryService,
+    // Exported although only this module's own controller injects it today — the #251 failure was the
+    // mirror image (a provider left out of `exports` that another module consumed, which resolved
+    // when the module booted alone and killed 122 specs the moment the real app assembled).
+    SpecialTicketQueryService,
     AutoRecoveryService,
     RepeatEscalationService,
     TroubleshootSubmissionService,

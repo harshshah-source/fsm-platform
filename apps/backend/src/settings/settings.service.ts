@@ -8,6 +8,13 @@ import {
   SE_ASSIGNMENT_THRESHOLD_KEY,
 } from './assignment-threshold';
 import { canWriteSetting } from './setting-authority';
+import {
+  DEFAULT_SPECIAL_ATTEMPT_THRESHOLD,
+  SPECIAL_ATTEMPT_THRESHOLD_DESCRIPTION,
+  SPECIAL_ATTEMPT_THRESHOLD_KEY,
+  SPECIAL_ATTEMPT_THRESHOLD_OPTIONS,
+  parseSpecialAttemptThreshold,
+} from './special-threshold';
 
 
 /**
@@ -27,6 +34,12 @@ export const SETTINGS_DEFAULTS: Record<string, { value: unknown; description: st
   [SE_ASSIGNMENT_THRESHOLD_KEY]: {
     value: DEFAULT_SE_ASSIGNMENT_THRESHOLD_HOURS,
     description: SE_ASSIGNMENT_THRESHOLD_DESCRIPTION,
+  },
+  // #244 — how many unsuccessful *reached* attempts identify a ticket as Special. Validated on write
+  // (see SETTING_VALIDATORS below); see special-threshold.ts for why the ladder floor is 2.
+  [SPECIAL_ATTEMPT_THRESHOLD_KEY]: {
+    value: DEFAULT_SPECIAL_ATTEMPT_THRESHOLD,
+    description: SPECIAL_ATTEMPT_THRESHOLD_DESCRIPTION,
   },
   viewed_soft_state_timeout_minutes: {
     value: 90,
@@ -71,6 +84,33 @@ export const SPECIALISED_SETTING_WRITERS: Record<string, string> = {
   // locked by the Operations Head, and every change has to leave a revertible trail. The generic path
   // does none of that, so it refuses the key rather than half-applying it.
   [SE_ASSIGNMENT_THRESHOLD_KEY]: 'PUT /api/settings/assignment-threshold',
+};
+
+/**
+ * Keys the generic writer VALIDATES before storing, and the allowed values it names when it refuses.
+ *
+ * #244 — the gap this closes. `SPECIALISED_SETTING_WRITERS` above is for keys where storing the value
+ * is only half the job; a key can be perfectly happy on the generic path and still have a *domain* of
+ * legal values. Without this, `PUT /api/settings/:key` accepted anything JSON-shaped, and a reader
+ * that defends itself with a coerce-to-default (the #238 pattern, which #244's threshold follows)
+ * turns that into the worst outcome available: the settings page reads back the number the operator
+ * typed while the engine quietly uses a different one. Refusing at the boundary — naming the allowed
+ * list, because a bare "invalid" leaves the bound undiscoverable — is the honest half of that pattern.
+ *
+ * A validator here is a *pure* function. Anything needing I/O, a lock or a history row belongs in a
+ * specialised writer instead.
+ */
+export const SETTING_VALIDATORS: Record<
+  string,
+  { validate(raw: unknown): { ok: true; value: unknown } | { ok: false }; allowed: readonly unknown[] }
+> = {
+  [SPECIAL_ATTEMPT_THRESHOLD_KEY]: {
+    validate: (raw) => {
+      const parsed = parseSpecialAttemptThreshold(raw);
+      return parsed.ok ? { ok: true, value: parsed.attempts } : { ok: false };
+    },
+    allowed: SPECIAL_ATTEMPT_THRESHOLD_OPTIONS,
+  },
 };
 
 @Injectable()
@@ -120,6 +160,7 @@ export class SettingsService implements OnModuleInit {
     | { key: string; value: unknown }
     | { result: 'DELEGATED'; key: string; endpoint: string }
     | { result: 'LOCKED'; key: string; lockedByRole: string | null; lockReason: string | null }
+    | { result: 'INVALID'; key: string; allowed: readonly unknown[] }
   > {
     // #213 — some keys have a specialised writer that does more than store a value. `dispatch_cron` is
     // validated at write time and re-registers the live cron job; writing it through this generic path
@@ -141,6 +182,15 @@ export class SettingsService implements OnModuleInit {
         lockedByRole: existing?.lockedByRole ?? null,
         lockReason: existing?.lockReason ?? null,
       };
+    }
+    // #244 — a key with a declared domain is validated before it is stored, and the coerced value is
+    // what lands in the column: `"3"` from a form body becomes the number 3, so a later strict read
+    // never has to guess whether a string meant an integer.
+    const validator = SETTING_VALIDATORS[key];
+    if (validator) {
+      const parsed = validator.validate(value);
+      if (!parsed.ok) return { result: 'INVALID', key, allowed: validator.allowed };
+      return this.setUnchecked(key, parsed.value, actor);
     }
     return this.setUnchecked(key, value, actor);
   }
