@@ -1,6 +1,6 @@
 # 242 — Unresolved assignments recycle at schedule closure (`PLAN_EXPIRED`)
 
-Status: ready-for-agent
+Status: done (2026-08-19)
 Type: AFK · Backend
 
 Filed 2026-08-19. **The load-bearing lifecycle change of the approved design** (Decisions 6/8): a
@@ -77,21 +77,35 @@ counted, never silent. Lock window: two `updateMany` statements. Rollback: disab
 
 ## Acceptance criteria
 
-- [ ] AC1 — An unresolved ticket on a closing schedule ends the day `UNASSIGNED` with its row
+- [x] AC1 — An unresolved ticket on a closing schedule ends the day `UNASSIGNED` with its row
       stamped `PLAN_EXPIRED` (`removed_by NULL`), and the next dispatch run can assign it again.
-- [ ] AC2 — All seven protected classes above are pinned by tests and untouched.
-- [ ] AC3 — Recycling is idempotent and runs entirely inside the existing per-zone lock as set-based
-      statements.
-- [ ] AC4 — `deferredUntil` is never written by the sweep; a deferred-then-recycled history keeps
+      *Asserted through the real recommender + dispatcher across two days, not a hand-built fixture:
+      attempt #2 is the thing that had never happened on this platform.*
+- [x] AC2 — All seven protected classes above are pinned by tests and untouched.
+- [x] AC3 — Recycling is idempotent and runs entirely inside the existing per-zone lock as set-based
+      statements. *Set-based-ness is asserted as a fact about the data — every row a zone stamps
+      carries the **identical** `removed_at`, which a per-ticket fan-out could not produce.*
+- [x] AC4 — `deferredUntil` is never written by the sweep; a deferred-then-recycled history keeps
       its dates intact.
-- [ ] AC5 — Closure outcome reports the recycled count; the dispatch-run ledger counts
-      bucket-less-dropped tickets.
-- [ ] AC6 — The SE-facing effect is verified: a recycled ticket reappears via the shared-pool branch
+- [x] AC5 — Closure outcome reports the recycled count; the dispatch-run ledger counts
+      bucket-less-dropped tickets (`dispatch_runs`/`dispatch_run_zones.bucketless_dropped`,
+      **nullable** — the drop predates the counter, so 0 on a historical row would be a claim
+      nobody measured).
+- [x] AC6 — The SE-facing effect is verified: a recycled ticket reappears via the shared-pool branch
       of `/me/tickets` (coverage permitting) instead of being invisible to both sides.
 
 ## UI surfaces
 
-n/a (ledger counts surface through the existing dispatch transparency page without layout change)
+n/a — no surface is created or modified by this slice.
+
+**Corrected in place 2026-08-19 (build session).** This line previously read "*ledger counts surface
+through the existing dispatch transparency page without layout change*". That is **false**:
+`DispatchRunZoneCard` (`dispatch-transparency-query.service.ts:26`) projects neither the new
+`bucketless_dropped` nor #238's `withheld_below_threshold`, so neither reaches the admin page and no
+amount of "without layout change" would show them. AC5 is a **ledger** requirement (the
+`dispatch_runs` / `dispatch_run_zones` columns) and is met as written; the rendering gap is real,
+pre-dates this slice, and is owned by follow-up **#252** — filed rather than silently absorbed, per
+the accepted-with-follow-up rule.
 
 ## Reference
 
@@ -99,5 +113,13 @@ n/a
 
 ## Blocked by
 
-#240 (closure must precede dispatch in IST), #241 (reason column). **Enablement gate:** #243
-executed first (approved Decision 9 — clean state before the new lifecycle).
+#240 (closure must precede dispatch in IST) ✅, #241 (reason column) ✅.
+
+**The enablement gate is gone.** This file previously read "#243 executed first (approved Decision 9
+— clean state before the new lifecycle)". The operator reversed that ordering on 2026-08-19
+(**Option B**): `closeZone` selects only still-live schedules, so this sweep structurally cannot reach
+the historical backlog, while that backlog grew ~300 rows a night for as long as this slice stayed
+unbuilt. Cleaning first would therefore have guaranteed cleaning twice. #243 now runs *after* this, on
+a frozen set, and remains separately HITL-gated on its own execution approval with freshly re-measured
+counts. No config change was needed to enable this: `BUSINESS_SWEEPS_ENABLED` is already `true`, so the
+recycler is live from the moment the code ships.

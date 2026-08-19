@@ -106,4 +106,12 @@ n/a
 ## Blocked by
 
 #241 (needs `removal_reason`) ✅, and — per the Option B supersession above — **#242, built and
-enabled**. It no longer gates #242; #242 gates it.
+enabled** ✅ **(done 2026-08-19; no config change was needed, `BUSINESS_SWEEPS_ENABLED` was already
+`true`, so the recycler went live with the commit and the ~300-a-night growth has stopped)**. It no
+longer gates #242; #242 gates it.
+
+**Both prerequisites are therefore met and this is the next HITL item.** What remains before execution
+is unchanged and non-negotiable: **re-measure every count** (the figures in this file and in
+`docs/archive/handoff-242-243-option-b-2026-08-19.md` are stale — the 08-19 re-measure already moved C2
+by +299 in one night, and the first #242 run releases another 198), then obtain explicit execution
+approval. Nothing is to be dumped or run before that.

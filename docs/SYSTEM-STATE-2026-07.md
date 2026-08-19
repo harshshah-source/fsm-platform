@@ -201,7 +201,7 @@ silently public).
 dual-confirm, recovery lifecycle, install create+lifecycle | 8 controllers |
 | `devices` | Device list read + per-device cycles/downtime-trend + deal-type tag | `DeviceService`, `DeviceDetailService` |
 | `recommender` | Candidate selection, hard filters, scoring, canonical sort → `recommendations` | consumed by SchedulingModule |
-| `scheduling` | Batch dispatch, day-plan/schedule queries, ZM override, same-day update, dispatch-run + daily dispatch cron, **daily work-schedule closure cron** (#147) | `SchedulingModule` imports `RecommenderModule` (#113) |
+| `scheduling` | Batch dispatch, day-plan/schedule queries, ZM override, same-day update, dispatch-run + daily dispatch cron, **daily work-schedule closure cron** (#147, recycling unresolved assignments since #242) | `SchedulingModule` imports `RecommenderModule` (#113) |
 | `business-sweep-scheduler` (in `scheduling/`) | 11 env-gated `@Cron` sweeps: verification, install-verification, intraday-timeout, cross-zone, repeat-escalation, tier-override-expiry, soft-inactive, system-efficiency, 3 month-start cubes | leaf module (#108) |
 | `intraday` | CRITICAL insertion offer state machine, accept/decline/timeout | #29/#30/#101 |
 | `cross-zone` | Platinum auto-escalation + manual flag, approve/deny/defer/re-escalate | #32 |
@@ -293,8 +293,8 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 | Table | Purpose | Constraints |
 |---|---|---|
 | `recommendations` | Append-only "why suggested" explainability (scoreBreakdown JSONB, canonical `processing_rank`) | partial unique `recommendations_one_suggested_per_ticket WHERE status='SUGGESTED'` (#100, `20260708120000`) |
-| `work_schedules` | Per-SE Day-Plan container (no approval gate — ADR-0007/0019 superseded). **Lifecycle now terminates** (#147): `ScheduleClosureScheduler` writes `COMPLETED`/`PARTIAL` onto past-dated rows under the zone's dispatch advisory lock, so schedules stop accreting as permanently live; the day-plan read is date-bounded independently of it | partial unique `work_schedules_one_active_per_se_zone_day (se_id, zone_id, date_from) WHERE ACTIVE` — **zone_id deliberately in the key** vs the #100 spec, to allow cross-zone plans (INDEX.md:97) |
-| `plant_batch_assignments` / `batch_assignment_tickets` | Plant-stop batches + per-ticket rows with override history (`removed_at`, `deferred_to_date`, **`removal_reason`** — #241: why the row stopped being live, closed vocabulary in `scheduling/removal-reason.ts`, NULL ⟺ still live; `removed_by IS NULL` is auto-recovery's signature and must **not** be read as "system" generally) | partial unique `batch_assignment_tickets_one_active_per_ticket WHERE removed_at IS NULL` (`20260621180000:78`); plain `(ticket_id)` for the per-ticket history read (#241) |
+| `work_schedules` | Per-SE Day-Plan container (no approval gate — ADR-0007/0019 superseded). **Lifecycle now terminates** (#147): `ScheduleClosureScheduler` writes `COMPLETED`/`PARTIAL` onto past-dated rows under the zone's dispatch advisory lock, so schedules stop accreting as permanently live; the day-plan read is date-bounded independently of it. **Closure also ends the day's *assignments*** (#242): unresolved rows on the closing schedules are stamped `PLAN_EXPIRED` and their tickets returned to `UNASSIGNED`, so a terminal schedule no longer strands live work | partial unique `work_schedules_one_active_per_se_zone_day (se_id, zone_id, date_from) WHERE ACTIVE` — **zone_id deliberately in the key** vs the #100 spec, to allow cross-zone plans (INDEX.md:97) |
+| `plant_batch_assignments` / `batch_assignment_tickets` | Plant-stop batches + per-ticket rows with override history (`removed_at`, `deferred_to_date`, **`removal_reason`** — #241: why the row stopped being live, closed vocabulary in `scheduling/removal-reason.ts`, NULL ⟺ still live; `removed_by IS NULL` is auto-recovery's signature and must **not** be read as "system" generally) | partial unique `batch_assignment_tickets_one_active_per_ticket WHERE removed_at IS NULL` (`20260621180000:78`); plain `(ticket_id)` for the per-ticket history read (#241). #242's nightly recycle writes `PLAN_EXPIRED` (unresolved, ticket also flipped to `UNASSIGNED`) and `RESOLVED_AT_CLOSURE` (a straggler row on an already-resolved ticket — stamped, never unassigned) |
 | `se_planner` | ZM plant-visit intent; **soft bias** to the recommender, never a constraint | unique `(se_id, plant_id, planned_date)` |
 | `intraday_insertions` | Mutable CRITICAL-insertion offer state machine + `retry_chain` JSONB | partial unique `intraday_insertions_one_live_offer_per_ticket WHERE PENDING_ACCEPTANCE` (#101, `20260709120000`) |
 | `cross_zone_escalations` | Parallel escalation record — ticket never leaves home queue | indexes on `(status, escalation_type)`, `home_zone_id` |
@@ -505,6 +505,17 @@ TROUBLESHOOT `ticket` (tier denormalised), the OPEN `ticket_event`, and the
 
 **Entry**: `RecommenderService.runForZone(zoneId)` (`recommender.service.ts:76`) — no own cron;
 called by the dispatch run (#113) or HTTP.
+**Unrankable tickets are dropped before any decision, and now counted** (#242): the canonical sort needs
+an SLA bucket, so a ticket whose `device_states.sla_bucket` is NULL (or whose device has no state row)
+falls out with no recommendation, no UNASSIGNABLE row and no decision trace — it used to appear nowhere
+on the run report at all. **5,127 of 6,464** OPEN+UNASSIGNED Troubleshoot tickets were in that class on
+the dev mirror (2026-08-19), i.e. the majority of the pool. Now stamped as
+`dispatch_runs.bucketless_dropped` + `dispatch_run_zones.bucketless_dropped`, **nullable** (the drop
+predates the counter, so 0 on a historical row would claim a measurement nobody took). Kept apart from
+its two neighbours because they route to different teams: `unassignable` = the engine looked and found
+nobody (Ops), `withheld_below_threshold` = it deliberately did not look yet (policy), `bucketless_dropped`
+= it could not look (data). **Neither of the last two is rendered anywhere yet — the transparency zone
+card projects neither → #252.**
 **Mode switch**: `SoftInactiveCountService.modeForZone` — soft-inactive count > threshold% ⇒
 DEFICIT, else PREVENTIVE (#40); PREVENTIVE appends the INSTALL backlog (REQUESTED+UNASSIGNED,
 `installSort`: tier → rank → oldest backlog) after TROUBLESHOOT candidates (#75).
