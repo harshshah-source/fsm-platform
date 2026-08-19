@@ -1,4 +1,4 @@
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { buildStampFields } from '../build-info/run-stamp';
@@ -6,6 +6,7 @@ import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { signPreviewToken, verifyPreviewToken } from './preview-token';
 import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
 import { SOFT_STATE_CONFLICT, type SoftStateConflictPort } from './soft-state-conflict';
@@ -79,55 +80,17 @@ export interface BulkUnassignHistoryRow {
   createdAt: string;
 }
 
-/** #179 preview-token TTL — short enough that a stale click is refused rather than acted on blind. */
-const PREVIEW_TOKEN_TTL_SEC = 10 * 60;
-
+/**
+ * The snapshot #179 signs: the counts the operator was shown, so `execute` can tell "you are acting
+ * on the figures you saw" from "the world moved under you". The envelope (`iat`/`exp`), the HMAC and
+ * the constant-time compare live in the shared module — extracted there by #251 so the scheduler
+ * preview could reuse them rather than grow a second copy that drifts.
+ */
 interface PreviewTokenPayload {
   operationId: string;
   scope: 'ZONE' | 'PAN_INDIA';
   targetDate: string;
   countsByZone: Record<string, ZoneClassCounts>;
-  iat: number;
-  exp: number;
-}
-
-/**
- * Reuses the auth slice's boot-validated HS256 secret (`token.service.ts`) rather than adding a
- * second env var — same trust boundary (a server-only signing secret), different payload shape.
- */
-function requirePreviewTokenSecret(): string {
-  const secret = process.env.JWT_ACCESS_SECRET;
-  if (!secret) {
-    throw new Error('JWT_ACCESS_SECRET is not set — refusing to sign a preview token.');
-  }
-  return secret;
-}
-
-function signPreviewToken(payload: Omit<PreviewTokenPayload, 'iat' | 'exp'>, now: Date): string {
-  const iat = Math.floor(now.getTime() / 1000);
-  const full: PreviewTokenPayload = { ...payload, iat, exp: iat + PREVIEW_TOKEN_TTL_SEC };
-  const body = Buffer.from(JSON.stringify(full), 'utf8').toString('base64url');
-  const sig = createHmac('sha256', requirePreviewTokenSecret()).update(body).digest('base64url');
-  return `${body}.${sig}`;
-}
-
-function verifyPreviewToken(token: string, now: Date): PreviewTokenPayload | null {
-  const parts = token.split('.');
-  if (parts.length !== 2) return null;
-  const [body, sig] = parts;
-  const expected = createHmac('sha256', requirePreviewTokenSecret()).update(body).digest('base64url');
-  const given = Buffer.from(sig);
-  const want = Buffer.from(expected);
-  if (given.length !== want.length || !timingSafeEqual(given, want)) return null;
-  let decoded: PreviewTokenPayload;
-  try {
-    decoded = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-  } catch {
-    return null;
-  }
-  const nowSec = Math.floor(now.getTime() / 1000);
-  if (typeof decoded.exp !== 'number' || decoded.exp < nowSec) return null;
-  return decoded;
 }
 
 interface ZoneClassification {
@@ -167,7 +130,7 @@ export class BulkUnassignService {
     }
 
     const operationId = randomUUID();
-    const previewToken = signPreviewToken(
+    const previewToken = signPreviewToken<PreviewTokenPayload>(
       { operationId, scope: req.scope, targetDate: targetDate.toISOString().slice(0, 10), countsByZone },
       now,
     );
@@ -217,7 +180,7 @@ export class BulkUnassignService {
 
     let operationId: string = randomUUID();
     if (req.previewToken) {
-      const decoded = verifyPreviewToken(req.previewToken, now);
+      const decoded = verifyPreviewToken<PreviewTokenPayload>(req.previewToken, now);
       if (!decoded) return { result: 'TOKEN_INVALID' };
       if (await this.tokenIsStale(decoded, targetDate)) {
         const freshPreview = await this.preview({ scope: req.scope, zoneId: req.zoneId, reasonCode: req.reasonCode }, now);

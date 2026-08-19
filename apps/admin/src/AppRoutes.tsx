@@ -27,6 +27,7 @@ import { SeManagementDirectoryPage } from './pages/engineers/SeManagementDirecto
 import { LeaveRequestsPage } from './pages/engineers/LeaveRequestsPage';
 import { IntradayQueuePage } from './pages/schedules/IntradayQueuePage';
 import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
+import { SchedulerPreviewPage } from './pages/schedules/SchedulerPreviewPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { CommissioningCohortPage } from './pages/reports/CommissioningCohortPage';
@@ -81,6 +82,16 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <SchedulesPage />
+              </RoleRoute>
+            }
+          />
+          {/* #251 — Scheduler Preview. Declared before `:engineerId` so the literal path is not
+              captured by the param route, mirroring the server-side ordering constraint. */}
+          <Route
+            path="/schedules/preview"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <SchedulerPreviewPage />
               </RoleRoute>
             }
           />

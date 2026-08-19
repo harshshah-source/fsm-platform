@@ -85,6 +85,9 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
     operations.push(
       { label: 'Create Install', to: '/install', icon: IconTruck },
       { label: 'Schedules', to: '/schedules', icon: IconCalendar },
+      // #251 — the pre-run twin of Schedules (which shows what WAS dispatched). Same manager roles;
+      // a ZM's projection is zone-clamped server-side, so no extra nav gating is needed here.
+      { label: 'Scheduler Preview', to: '/schedules/preview', icon: IconCalendar },
       { label: 'Dispatch Runs', to: '/dispatch-runs', icon: IconClipboard },
       { label: 'Intra-day Queue', to: '/intraday', icon: IconClock },
       { label: 'SE Activity', to: '/engineers', icon: IconActivity },

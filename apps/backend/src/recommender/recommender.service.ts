@@ -133,6 +133,22 @@ export interface ZoneProjection {
    * ordering it cannot know.
    */
   bucketsAsOf: string | null;
+  /**
+   * The run-level tallies, carried on the projection rather than left on `RunSummary` (#251).
+   *
+   * `previewActiveZones` returns projections, not summaries, so without these the preview would have
+   * to re-derive the figures client-side — and two of them cannot be re-derived at all:
+   * `withheldBelowThreshold` is a separate count with no per-ticket decision behind it (that is the
+   * point of #238's distinction — withheld means the engine deliberately did not look), and `mode`
+   * decides whether the Install backlog appears at all. The staleness token signs these numbers, so
+   * "has the world moved" is defined in exactly the terms the operator was shown.
+   */
+  mode: RecommenderMode;
+  recommended: number;
+  unassignable: number;
+  withheldBelowThreshold: number;
+  /** Why the unassignable ones were unassignable — coverage gap vs filters emptying the pool. */
+  unassignableReasons: UnassignableReasons;
   decisions: PreviewDecision[];
   plan: PreviewPlanEntry[];
 }
@@ -662,6 +678,11 @@ export class RecommenderService {
               zoneId: String(zoneId),
               targetDate: targetDay.toISOString().slice(0, 10),
               bucketsAsOf: bucketsAsOf?.toISOString() ?? null,
+              mode,
+              recommended,
+              unassignable,
+              withheldBelowThreshold,
+              unassignableReasons,
               decisions,
               plan: buildPreviewPlan(decisions),
             },

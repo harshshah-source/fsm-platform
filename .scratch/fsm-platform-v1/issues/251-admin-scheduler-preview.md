@@ -1,6 +1,6 @@
 # 251 — Admin scheduler preview: non-blocking plan projection, stale-token safety, pre-run holds
 
-Status: ready-for-agent
+Status: done (2026-08-19)
 Type: AFK · Backend + Admin
 
 Filed 2026-08-19. Approved Decision 1/18: Admin sees tomorrow's proposed plan and may place holds;
@@ -77,17 +77,17 @@ page if staged. Rollback: remove endpoint + page; holds are just dates, releasab
 
 ## Acceptance criteria
 
-- [ ] AC1 — An OH/CSM (and zone-scoped ZM) can view the projected plan for today or a future date
+- [x] AC1 — An OH/CSM (and zone-scoped ZM) can view the projected plan for today or a future date
       without any write occurring anywhere (count-pinned via #250).
-- [ ] AC2 — Holds placed from the preview exclude the ticket from the target day's run through the
+- [x] AC2 — Holds placed from the preview exclude the ticket from the target day's run through the
       existing predicate; releasing restores it; both audited with reason.
-- [ ] AC3 — Admin inaction changes nothing: the 05:00 and manual runs are byte-equivalent to the
+- [x] AC3 — Admin inaction changes nothing: the 05:00 and manual runs are byte-equivalent to the
       no-preview control (pinned).
-- [ ] AC4 — A hold can never silently overwrite a vehicle-return deferral (refusal + confirm
+- [x] AC4 — A hold can never silently overwrite a vehicle-return deferral (refusal + confirm
       branch, Decision 13).
-- [ ] AC5 — Stale previews are detected and refreshed via the shared token module; bulk-unassign's
+- [x] AC5 — Stale previews are detected and refreshed via the shared token module; bulk-unassign's
       behaviour is unchanged by the extraction.
-- [ ] AC6 — The as-of-recompute caveat is displayed with the actual watermark; no UI claim implies
+- [x] AC6 — The as-of-recompute caveat is displayed with the actual watermark; no UI claim implies
       future-date severity is being predicted.
 
 ## UI surfaces

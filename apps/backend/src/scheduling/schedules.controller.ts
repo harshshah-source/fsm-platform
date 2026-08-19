@@ -9,9 +9,11 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { istWindowStart } from '../common/ist-day';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -31,6 +33,12 @@ import { BUSINESS_TIMEZONE } from './dispatch-cron';
 import { DispatchRunService, type DispatchInFlight, type DispatchRunSummary } from './dispatch-run.service';
 import { DispatchScheduleService, type DispatchScheduleView } from './dispatch-schedule.service';
 import { OverrideService, type AssignOutcome, type PlantAssignSummary } from './override.service';
+import {
+  SchedulerPreviewService,
+  type HoldOutcome,
+  type ReleaseOutcome,
+  type SchedulerPreviewResult,
+} from './scheduler-preview.service';
 import {
   ZmScheduleQueryService,
   type ZmScheduleDetail,
@@ -84,6 +92,7 @@ export class SchedulesController {
     private readonly dispatchRun: DispatchRunService,
     private readonly bulkUnassign: BulkUnassignService,
     private readonly dispatchSchedule: DispatchScheduleService,
+    private readonly schedulerPreview: SchedulerPreviewService,
   ) {}
 
   /**
@@ -197,6 +206,90 @@ export class SchedulesController {
   @Roles('OPERATIONS_HEAD')
   bulkUnassignHistory(): Promise<BulkUnassignHistoryRow[]> {
     return this.bulkUnassign.history();
+  }
+
+  /**
+   * #251 — the Scheduler Preview: what the next run would do for an IST calendar date.
+   *
+   * Declared before `:engineerId` so the static path is not captured by the param route — the same
+   * ordering constraint `dispatch-schedule` and `bulk-unassign/history` above are placed for, and the
+   * one `schedules-route-conflicts.e2e-spec.ts` pins.
+   *
+   * Writes nothing: it runs the real recommender with #250's dry-run flag, which is count-pinned to
+   * write zero rows. Read scope is server-side — ZM sees their own zone, CSM/OH every active zone.
+   */
+  @Get('preview')
+  @Roles(...MANAGER_ROLES)
+  schedulerPreviewGet(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('date') date?: string,
+  ): Promise<SchedulerPreviewResult> {
+    // A bare `YYYY-MM-DD` means an IST calendar day; `istWindowStart` is the one parser for that, and
+    // it returns Invalid Date rather than rolling a nonexistent date over silently.
+    const target = date ? istWindowStart(date) : new Date();
+    if (Number.isNaN(target.getTime())) {
+      throw new BadRequestException({ code: 'INVALID_DATE', message: 'date must be YYYY-MM-DD.' });
+    }
+    return this.schedulerPreview.preview(target, { role: user.role, zoneId: user.zone_id });
+  }
+
+  /**
+   * #251 — hold an OPEN + UNASSIGNED ticket out of the runs before `heldUntil`.
+   *
+   * The one genuinely new write path in this slice: the existing hold writer (`DEFER_TICKET`) needs a
+   * live batch row, so an undispatched ticket could not be held at all before now. `heldUntil` is the
+   * day the ticket **returns** — `notDeferredOn` is inclusive — so holding it off tomorrow means
+   * naming the day after.
+   */
+  @Post('holds')
+  @HttpCode(200)
+  @Roles(...MANAGER_ROLES)
+  async placeHold(
+    @CurrentUser() user: AccessTokenClaims,
+    @Body() body: { ticketId?: string; heldUntil?: string; reasonCode?: string; confirm?: boolean },
+  ): Promise<HoldOutcome> {
+    if (!body?.ticketId || !body?.heldUntil || !body?.reasonCode?.trim()) {
+      throw new BadRequestException({ code: 'INVALID_HOLD', message: 'ticketId, heldUntil and reasonCode are required.' });
+    }
+    const heldUntil = istWindowStart(body.heldUntil);
+    if (Number.isNaN(heldUntil.getTime())) {
+      throw new BadRequestException({ code: 'INVALID_DATE', message: 'heldUntil must be YYYY-MM-DD.' });
+    }
+
+    const outcome = await this.schedulerPreview.placeHold(
+      body.ticketId,
+      heldUntil,
+      body.reasonCode.trim(),
+      { role: user.role, zoneId: user.zone_id },
+      { userId: user.user_id, role: user.role, actedAsRole: null },
+      { confirm: body.confirm === true },
+    );
+    if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
+    // Returned as a 409 body rather than thrown away: the client needs the return-date context to
+    // show the operator what they would be overwriting before offering the confirm.
+    if (outcome.result === 'NOT_HOLDABLE') throw new ConflictException({ code: 'TICKET_NOT_HOLDABLE', ...outcome });
+    if (outcome.result === 'CONFLICT_VEHICLE_UNAVAILABLE') {
+      throw new ConflictException({ code: 'CONFLICT_VEHICLE_UNAVAILABLE', ...outcome });
+    }
+    return outcome;
+  }
+
+  /** #251 — release a hold; the ticket re-enters the very next run. */
+  @Post('holds/release')
+  @HttpCode(200)
+  @Roles(...MANAGER_ROLES)
+  async releaseHold(
+    @CurrentUser() user: AccessTokenClaims,
+    @Body() body: { ticketId?: string },
+  ): Promise<ReleaseOutcome> {
+    if (!body?.ticketId) throw new BadRequestException({ code: 'INVALID_RELEASE', message: 'ticketId is required.' });
+    const outcome = await this.schedulerPreview.releaseHold(
+      body.ticketId,
+      { role: user.role, zoneId: user.zone_id },
+      { userId: user.user_id, role: user.role, actedAsRole: null },
+    );
+    if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
+    return outcome;
   }
 
   @Get('me')

@@ -8,6 +8,7 @@ import { DayPlanQueryService } from '../src/scheduling/day-plan-query.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
 import { DispatchScheduleService } from '../src/scheduling/dispatch-schedule.service';
 import { OverrideService } from '../src/scheduling/override.service';
+import { SchedulerPreviewService } from '../src/scheduling/scheduler-preview.service';
 import { SchedulesController } from '../src/scheduling/schedules.controller';
 import { ZmScheduleQueryService } from '../src/scheduling/zm-schedule-query.service';
 
@@ -44,6 +45,13 @@ describe('Schedules route matching (e2e)', () => {
         { provide: DispatchRunService, useValue: { runForActiveZones: vi.fn() } },
         { provide: BulkUnassignService, useValue: { preview: vi.fn(), execute: vi.fn() } },
         { provide: DispatchScheduleService, useValue: dispatchSchedule },
+        // #251 — stubbed like the other collaborators: this spec pins *route matching*, so the
+        // controller only has to construct. `preview` is the one route added below the param-route
+        // boundary check, and it must resolve for the module to compile at all.
+        {
+          provide: SchedulerPreviewService,
+          useValue: { preview: vi.fn(), placeHold: vi.fn(), releaseHold: vi.fn() },
+        },
       ],
     })
       .overrideGuard(AuthGuard)

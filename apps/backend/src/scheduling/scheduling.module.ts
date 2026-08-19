@@ -18,6 +18,7 @@ import { SameDayUpdateService } from './same-day-update.service';
 import { SOFT_STATE_CONFLICT } from './soft-state-conflict';
 import { PrismaSoftStateConflictPort } from '../soft-state/soft-state-conflict.adapter';
 import { ZmScheduleQueryService } from './zm-schedule-query.service';
+import { SchedulerPreviewService } from './scheduler-preview.service';
 
 /**
  * Scheduling / dispatch (Issue 11). The BatchAssignmentWorker turns Recommender output into
@@ -28,6 +29,10 @@ import { ZmScheduleQueryService } from './zm-schedule-query.service';
   imports: [PrismaModule, AuditModule, RecommenderModule, NotificationsModule],
   providers: [
     BatchAssignmentService,
+    // #251 — the Scheduler Preview's read + the two hold writes. Plain DI: it composes
+    // DispatchRunService (for #250's dry-run orchestration), Prisma and AuditService, and has no
+    // env-driven config of its own, so none of the factory shapes below apply to it.
+    SchedulerPreviewService,
     DayPlanQueryService,
     ZmScheduleQueryService,
     DispatchTransparencyQueryService,
@@ -59,6 +64,10 @@ import { ZmScheduleQueryService } from './zm-schedule-query.service';
     // Issue 15 AC#7 — the real soft_states-backed conflict source replaces the 13a no-conflict seam.
     { provide: SOFT_STATE_CONFLICT, useClass: PrismaSoftStateConflictPort },
   ],
-  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService],
+  // Every service `SchedulesController` injects must be EXPORTED, not merely provided: the
+  // controller is registered in `AppModule`, so a provider that is only visible inside this module
+  // resolves at `SchedulingModule` boot and then fails at AppModule boot — which is every e2e that
+  // stands up the real app, and none of the ones that construct services by hand.
+  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService],
 })
 export class SchedulingModule {}
