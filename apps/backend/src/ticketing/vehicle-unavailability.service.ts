@@ -53,6 +53,16 @@ export type VuDecisionOutcome =
   | { result: 'NOT_DECIDABLE'; status: string }
   | { result: 'REASON_REQUIRED' };
 
+/**
+ * A manual resume's outcome (#247 AC1). `slaResumed` is the honest half: the manager's action always
+ * resolves the report, but it clears the pause only when the pause was *this* report's — so the caller
+ * is told which of the two happened rather than being left to assume the clock restarted.
+ */
+export type VuResumeOutcome =
+  | { result: 'OK'; id: string; slaResumed: boolean }
+  | { result: 'FORBIDDEN' }
+  | { result: 'NOT_FOUND' };
+
 export interface VuScope {
   role: string;
   zoneId: number | null;
@@ -183,7 +193,12 @@ export class VehicleUnavailabilityService {
           },
         });
 
-        // Pause the primary SLA (only if not already paused for another reason).
+        // Pause the primary SLA — but only if the cycle is not already paused. #247's other half:
+        // this guard is deliberate and stays. A cycle already waiting on a component is already not
+        // running its primary clock, and re-stamping the reason here would both lose the component
+        // interval's start and mislabel *why* the ticket is stopped. The report is still recorded in
+        // full; the earlier pause reason simply stands, and {@link resumeSla} now mirrors that by
+        // refusing to clear a pause this report did not cause.
         if (ticket.failureCycleId) {
           const cycle = await tx.failureCycle.findUnique({ where: { cycleId: ticket.failureCycleId } });
           if (cycle && !cycle.slaPaused) {
@@ -399,16 +414,32 @@ export class VehicleUnavailabilityService {
     return { result: 'OK', id: reportId };
   }
 
-  /** ZM manually resumes the primary SLA and resolves the report. */
-  async resumeSla(reportId: string, actor: VuActor, now: Date = new Date()): Promise<VuOutcome> {
+  /**
+   * ZM manually resumes the primary SLA and resolves the report — the manual path, and since #247 the
+   * only one that resolves a report at all (the auto-resume sweep deliberately leaves it OPEN).
+   *
+   * **It resumes only a pause it owns.** The guard used to be `slaPaused && slaPausedAt`, which is true
+   * of a cycle waiting for a *component* just as much as one waiting for a vehicle — so resolving a
+   * vehicle report on a component-paused cycle restarted the primary clock on a ticket nobody could
+   * work, silently and with no trace but the missing pause. The asymmetry is what hid it: `fileReport`
+   * refuses to re-pause an already-paused cycle (`!cycle.slaPaused`, :189), so the standing reason
+   * survives filing and is then cleared by the resume, and which pause you end up with depends only on
+   * the order the two events happened in.
+   *
+   * The report still resolves either way — the manager did act on it, and leaving it open would put the
+   * queue permanently at odds with what the manager just did. `slaResumed` in the outcome is how the
+   * caller learns which of the two happened.
+   */
+  async resumeSla(reportId: string, actor: VuActor, now: Date = new Date()): Promise<VuResumeOutcome> {
     const report = await this.prisma.vehicleUnavailabilityReport.findUnique({ where: { id: BigInt(reportId) } });
     if (!report) return { result: 'NOT_FOUND' };
     if (!(await this.isManagerForTicket(report.ticketId, actor))) return { result: 'FORBIDDEN' };
 
+    let slaResumed = false;
     await this.prisma.$transaction(async (tx) => {
       if (report.failureCycleId) {
         const cycle = await tx.failureCycle.findUnique({ where: { cycleId: report.failureCycleId } });
-        if (cycle?.slaPaused && cycle.slaPausedAt) {
+        if (cycle?.slaPaused && cycle.slaPausedAt && cycle.slaPauseReason === 'VEHICLE_UNAVAILABLE') {
           const addSeconds = Math.floor((now.getTime() - cycle.slaPausedAt.getTime()) / 1000);
           await tx.failureCycle.update({
             where: { cycleId: report.failureCycleId },
@@ -420,6 +451,7 @@ export class VehicleUnavailabilityService {
               slaAccumulatedPauseSeconds: cycle.slaAccumulatedPauseSeconds + BigInt(addSeconds),
             },
           });
+          slaResumed = true;
         }
       }
       await tx.vehicleUnavailabilityReport.update({
@@ -427,7 +459,7 @@ export class VehicleUnavailabilityService {
         data: { status: 'RESOLVED', resolvedBy: asUuid(actor.userId), resolvedByRole: actor.role, resolvedAt: now },
       });
     });
-    return { result: 'OK', id: reportId };
+    return { result: 'OK', id: reportId, slaResumed };
   }
 
   private async isManagerForTicket(ticketId: string, actor: VuActor): Promise<boolean> {

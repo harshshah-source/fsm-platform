@@ -1,4 +1,4 @@
-import { istDate } from '../common/ist-day';
+import { istDate, istDayStartInstant } from '../common/ist-day';
 
 /**
  * #146 B1 slice 3 — the one definition of "is this Ticket's deferral still holding it back?".
@@ -59,4 +59,23 @@ export function isNotDeferredOn(deferredUntil: Date | null, day: Date): boolean 
 export function deferralDateFor(authoritativeReturn: Date, now: Date): Date | null {
   const returnDay = istDate(authoritativeReturn);
   return returnDay.getTime() > istDate(now).getTime() ? returnDay : null;
+}
+
+/**
+ * The exclusive upper bound an OPEN report's authoritative `expected_from` must fall under for its
+ * return date to have **arrived** — #247's sweep and #248's ordering key, one definition.
+ *
+ * This is {@link deferralDateFor}'s complement, and it has to stay that way: a report has arrived
+ * exactly when it no longer produces a deferral, i.e. `istDate(expectedFrom) <= istDate(now)`. Written
+ * as one end-exclusive instant rather than the obvious `istDate(expectedFrom) <= istDate(now)` because
+ * `expected_from` is a `@db.Timestamptz`, not a `@db.Date` — wrapping the column in a day-truncating
+ * expression would compare the right thing and use none of `@@index([status, expectedFrom])`, on a
+ * predicate that runs per dispatch run.
+ *
+ * The boundary is IST midnight, not UTC: 2026-06-25T19:00Z is already the 26th in IST, and bucketing
+ * it by UTC day would hold a returned vehicle's ticket back a further day (the same trap #204 removed
+ * from ~15 services and `vu-deferral-wiring.e2e-spec.ts` pins for filing).
+ */
+export function returnDateArrivedBefore(now: Date): Date {
+  return new Date(istDayStartInstant(now).getTime() + 24 * 60 * 60 * 1000);
 }

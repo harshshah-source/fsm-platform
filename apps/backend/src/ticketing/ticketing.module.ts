@@ -19,6 +19,8 @@ import { TicketCreationService } from './ticket-creation.service';
 import { TicketQueryService } from './ticket-query.service';
 import { SpecialTicketQueryService } from './special-ticket.query';
 import { TroubleshootSubmissionService } from './troubleshoot-submission.service';
+import { VehicleReturnResumeService } from './vehicle-return-resume.service';
+import { VehicleReturnResumeScheduler } from './vehicle-return-resume-scheduler.service';
 import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
 
 /**
@@ -38,6 +40,15 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
     RepeatEscalationService,
     TroubleshootSubmissionService,
     VehicleUnavailabilityService,
+    // #247 — the date-driven half of SLA-resume correctness. The sweep is plain DI (Prisma only); the
+    // scheduler is factory-provided, mirroring the ingestion / business-sweep / closure schedulers, so
+    // its optional `config` param reads the environment rather than being DI-resolved.
+    VehicleReturnResumeService,
+    {
+      provide: VehicleReturnResumeScheduler,
+      useFactory: (resume: VehicleReturnResumeService) => new VehicleReturnResumeScheduler(resume),
+      inject: [VehicleReturnResumeService],
+    },
     NonOperationalService,
     // #76 — the customer confirmation link has no internal recipient User row (external party, no
     // account), so it structurally can't route through NotificationService.notify's
@@ -62,6 +73,7 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
     RepeatEscalationService,
     TroubleshootSubmissionService,
     VehicleUnavailabilityService,
+    VehicleReturnResumeService,
     NonOperationalService,
     RecoveryService,
     InstallService,

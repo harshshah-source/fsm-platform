@@ -48,6 +48,7 @@ const EXPECTED_CRON_JOBS = [
   'partition-maintenance',
   'plant-eligibility-refresh',
   'schedule-closure',
+  'vu-auto-resume',
 ];
 
 describe('#229 AC-2 — scheduled-work wiring, asserted on the real AppModule', () => {
@@ -73,11 +74,11 @@ describe('#229 AC-2 — scheduled-work wiring, asserted on the real AppModule', 
     await app.close();
   });
 
-  it('registers exactly the 17 expected cron jobs — no more, no fewer', () => {
+  it('registers exactly the 18 expected cron jobs — no more, no fewer', () => {
     const registered = [...app.get(SchedulerRegistry).getCronJobs().keys()].sort();
 
     expect(registered).toEqual(EXPECTED_CRON_JOBS);
-    expect(registered).toHaveLength(17);
+    expect(registered).toHaveLength(18);
   });
 
   it('reaches the auto-recovery pre-check from the telemetry tick, and surfaces its result', async () => {

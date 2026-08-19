@@ -27,6 +27,7 @@ import {
   type VuDecisionOutcome,
   type VuFileOutcome,
   type VuOutcome,
+  type VuResumeOutcome,
 } from './vehicle-unavailability.service';
 
 const REASONS: readonly VehicleUnavailReason[] = [
@@ -177,7 +178,7 @@ export class VehicleUnavailabilityController {
   @Post(':id/resume-sla')
   @HttpCode(200)
   @Roles(...MANAGER_ROLES)
-  async resume(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string): Promise<VuOutcome> {
+  async resume(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string): Promise<VuResumeOutcome> {
     return this.map(await this.vu.resumeSla(id, { userId: user.user_id, role: user.role, zoneId: user.zone_id }));
   }
 
@@ -186,7 +187,7 @@ export class VehicleUnavailabilityController {
    * carries the derived `deferredUntil` (#246) — keeps that field instead of being widened away by a
    * shared return type.
    */
-  private map<T extends VuDecisionOutcome | VuFileOutcome>(outcome: T): Extract<T, { result: 'OK' }> {
+  private map<T extends VuDecisionOutcome | VuFileOutcome | VuResumeOutcome>(outcome: T): Extract<T, { result: 'OK' }> {
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'VU_NOT_FOUND' });
     if (outcome.result === 'FORBIDDEN') throw new ForbiddenException({ code: 'VU_FORBIDDEN' });
     if (outcome.result === 'REASON_REQUIRED') throw new BadRequestException({ code: 'VU_OVERRIDE_REASON_REQUIRED' });
