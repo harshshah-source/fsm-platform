@@ -6,6 +6,7 @@ import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { OverrideService } from '../src/scheduling/override.service';
 import type { DayPlanNotifier } from '../src/scheduling/day-plan-notifier';
+import { REMOVAL_REASONS } from '../src/scheduling/removal-reason';
 
 /**
  * Issue 13a, slice 2 — override engine + REMOVE_TICKET (AC#3/#4). Removing a ticket from a batch:
@@ -145,6 +146,9 @@ describe('Issue 13a slice 2 — OverrideService REMOVE_TICKET', () => {
   it('marks the removed ticket removed and returns it to UNASSIGNED (Shared Pool)', async () => {
     const bat = await prisma.batchAssignmentTicket.findFirstOrThrow({ where: { batchId, ticketId: removedTicket } });
     expect(bat.removedAt).not.toBeNull();
+    // #241 — the row records WHY it stopped being live, not just when. `removed_by` cannot carry this:
+    // a NULL there already means auto-recovery, and #244 counts attempts by end cause.
+    expect(bat.removalReason).toBe(REMOVAL_REASONS.ZM_WITHDRAWN);
     expect(bat.removedBy).toBe(ZM.userId);
     const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: removedTicket } });
     expect(ticket.assignmentState).toBe('UNASSIGNED');

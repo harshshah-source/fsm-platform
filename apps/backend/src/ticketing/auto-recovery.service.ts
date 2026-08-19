@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 import { readAssignmentThresholdHours } from '../settings/assignment-threshold';
 import {
   meetsRecoveryEvidence,
@@ -299,10 +300,13 @@ export class AutoRecoveryService {
         where: { ticketId, resolvedAt: null },
         data: { resolvedAt: now, resolvedBy: 'SYSTEM', resolutionReason: 'AUTO_RECOVERY' },
       });
-      // Take it off every SE day plan that still holds it.
+      // Take it off every SE day plan that still holds it. `removedBy` stays NULL for the unattended
+      // sweep, which is exactly why #241 exists: that NULL was the *only* signal this path left, so
+      // nothing could tell an auto-recovery removal from any other system removal. The reason column
+      // now carries it explicitly, and no reader should infer "system" from a NULL actor any more.
       await tx.batchAssignmentTicket.updateMany({
         where: { ticketId, removedAt: null },
-        data: { removedAt: now, removedBy: actorUuid },
+        data: { removedAt: now, removedBy: actorUuid, removalReason: REMOVAL_REASONS.AUTO_RECOVERY },
       });
       await tx.auditLog.create({
         data: {

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { type ComponentRequestStatus, type CoverageType, type DeliveryDestination } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 
 /**
  * Component Request — the Warehouse Manager flow (ADR-0008, CONTEXT §Component Request, Issue 22).
@@ -254,6 +255,14 @@ export class ComponentRequestService {
         await tx.ticket.update({
           where: { ticketId: existing.ticketId },
           data: { assignmentState: 'UNASSIGNED', lastStateChangedAt: now },
+        });
+        // #241 — returning the ticket to the pool has to end its assignment as well. Flipping only
+        // `assignment_state` left a live batch row behind, which both keeps the ticket on the old
+        // SE's day plan and violates the "FORMALLY_ASSIGNED ⟺ exactly one live row" invariant from
+        // the other side. `removed_by` is NULL — the component's arrival did this, not a person.
+        await tx.batchAssignmentTicket.updateMany({
+          where: { ticketId: existing.ticketId, removedAt: null },
+          data: { removedAt: now, removedBy: null, removalReason: REMOVAL_REASONS.COMPONENT_WAIT },
         });
       }
       await tx.auditLog.create({

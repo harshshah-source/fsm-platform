@@ -286,7 +286,7 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 | `non_operational_markings` | Dual-confirmation Non-Op lifecycle + customer token + recovery-ticket back-ref | **I13**: partial unique one-active-per-device `WHERE state IN (CONFIRMED, ACTIVE)`; `customer_token` unique |
 | `troubleshooting_submissions` | SE form: structured root cause (analytics source), GPS anchor, idempotency | unique `(se_id, client_submission_id)`; CHECK restricts `submission_type` to the two form types |
 | `verification_runs` | Three-phase GPS verification per submission | partial unique `ux_vr_active (ticket_id) WHERE outcome IS NULL` |
-| `soft_states` | VIEWED/ON_SITE/TROUBLESHOOT_STARTED field progress | partial unique `ux_ss_active (ticket_id, se_id, type) WHERE resolved_at IS NULL` + 3 raw CHECKs |
+| `soft_states` | VIEWED/ON_SITE/TROUBLESHOOT_STARTED field progress | partial unique `ux_ss_active (ticket_id, se_id, type) WHERE resolved_at IS NULL` + 3 raw CHECKs; `(ticket_id, set_at)` for the assignment-window join (#241) |
 
 ### 2.4 Scheduling & recommendations
 
@@ -294,7 +294,7 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 |---|---|---|
 | `recommendations` | Append-only "why suggested" explainability (scoreBreakdown JSONB, canonical `processing_rank`) | partial unique `recommendations_one_suggested_per_ticket WHERE status='SUGGESTED'` (#100, `20260708120000`) |
 | `work_schedules` | Per-SE Day-Plan container (no approval gate — ADR-0007/0019 superseded). **Lifecycle now terminates** (#147): `ScheduleClosureScheduler` writes `COMPLETED`/`PARTIAL` onto past-dated rows under the zone's dispatch advisory lock, so schedules stop accreting as permanently live; the day-plan read is date-bounded independently of it | partial unique `work_schedules_one_active_per_se_zone_day (se_id, zone_id, date_from) WHERE ACTIVE` — **zone_id deliberately in the key** vs the #100 spec, to allow cross-zone plans (INDEX.md:97) |
-| `plant_batch_assignments` / `batch_assignment_tickets` | Plant-stop batches + per-ticket rows with override history (`removed_at`, `deferred_to_date`) | partial unique `batch_assignment_tickets_one_active_per_ticket WHERE removed_at IS NULL` (`20260621180000:78`) |
+| `plant_batch_assignments` / `batch_assignment_tickets` | Plant-stop batches + per-ticket rows with override history (`removed_at`, `deferred_to_date`, **`removal_reason`** — #241: why the row stopped being live, closed vocabulary in `scheduling/removal-reason.ts`, NULL ⟺ still live; `removed_by IS NULL` is auto-recovery's signature and must **not** be read as "system" generally) | partial unique `batch_assignment_tickets_one_active_per_ticket WHERE removed_at IS NULL` (`20260621180000:78`); plain `(ticket_id)` for the per-ticket history read (#241) |
 | `se_planner` | ZM plant-visit intent; **soft bias** to the recommender, never a constraint | unique `(se_id, plant_id, planned_date)` |
 | `intraday_insertions` | Mutable CRITICAL-insertion offer state machine + `retry_chain` JSONB | partial unique `intraday_insertions_one_live_offer_per_ticket WHERE PENDING_ACCEPTANCE` (#101, `20260709120000`) |
 | `cross_zone_escalations` | Parallel escalation record — ticket never leaves home queue | indexes on `(status, escalation_type)`, `home_zone_id` |

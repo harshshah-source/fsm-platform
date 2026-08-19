@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import type { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 import { AuditService, auditActor } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 
@@ -200,6 +201,16 @@ export class PlantDeactivationService {
           data: { state: 'FAILED', closedAt: now },
         });
       }
+    }
+    // #241 — end the assignments too, in the same transaction. Day-plan reads filter on
+    // `removed_at IS NULL` and not on ticket status, so a cancelled ticket whose batch row stayed
+    // live kept appearing as work to do on an SE's plan. Symmetric with the device-departure path.
+    // `removed_by` is NULL: the OH deactivated the *plant*, nobody withdrew these tickets by hand.
+    if (open.length > 0) {
+      await tx.batchAssignmentTicket.updateMany({
+        where: { ticketId: { in: open.map((t) => t.ticketId) }, removedAt: null },
+        data: { removedAt: now, removedBy: null, removalReason: REMOVAL_REASONS.TICKET_CANCELLED },
+      });
     }
     // Clear the hot-state open-cycle flag for the plant's devices — the ticket-creation gate keys on it.
     await tx.deviceState.updateMany({ where: { plantId }, data: { hasOpenFailureCycle: false } });

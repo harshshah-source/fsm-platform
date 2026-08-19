@@ -5,6 +5,7 @@ import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { notDeferredOn } from '../ticketing/deferral';
 import { DAY_PLAN_NOTIFIER, DayPlanNotifier } from './day-plan-notifier';
+import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
 import {
   NoConflictSoftStatePort,
@@ -146,7 +147,7 @@ export class OverrideService {
       async (tx) => {
         await tx.batchAssignmentTicket.update({
           where: { id: bat.id },
-          data: { removedAt: now, removedBy: actor.userId },
+          data: { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.ZM_WITHDRAWN },
         });
         // Returned to the Shared Pool — no longer a Formal Assignment.
         await tx.ticket.update({ where: { ticketId: cmd.ticketId }, data: { assignmentState: 'UNASSIGNED' } });
@@ -189,7 +190,12 @@ export class OverrideService {
         //
         await tx.batchAssignmentTicket.update({
           where: { id: bat.id },
-          data: { deferredToDate: new Date(cmd.deferredToDate), removedAt: now, removedBy: actor.userId },
+          data: {
+            deferredToDate: new Date(cmd.deferredToDate),
+            removedAt: now,
+            removedBy: actor.userId,
+            removalReason: REMOVAL_REASONS.ZM_DEFERRED,
+          },
         });
         // Slice 3 — the second clause of the workflow's definition: "pushed to a specific future
         // date". The ticket returns to `UNASSIGNED` so it CAN be re-planned (leaving it
@@ -441,7 +447,10 @@ export class OverrideService {
         let sort = await this.nextSortOrder(tx, targetBatch.batchId);
         for (const r of rows) {
           // Update (mark removed) before insert so the one-active-batch-per-ticket partial unique holds.
-          await tx.batchAssignmentTicket.update({ where: { id: r.id }, data: { removedAt: now, removedBy: actor.userId } });
+          await tx.batchAssignmentTicket.update({
+            where: { id: r.id },
+            data: { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.REASSIGNED },
+          });
           await tx.batchAssignmentTicket.create({ data: { batchId: targetBatch.batchId, ticketId: r.ticketId, sortOrder: sort++ } });
         }
         await this.flagOverridden(tx, batch.batchId, batch.scheduleId, reasonCode, actor, now);

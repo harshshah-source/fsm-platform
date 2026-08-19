@@ -692,12 +692,19 @@ model BatchAssignmentTicket {
   deferredToDate DateTime? @map("deferred_to_date") @db.Date
   removedAt      DateTime? @map("removed_at") @db.Timestamptz(6)
   removedBy      String?   @map("removed_by") @db.Uuid
+  /// Why the row stopped being live (#241). NULL ⟺ still live; every removed row carries one of
+  /// `REMOVAL_REASONS` (`scheduling/removal-reason.ts`). TEXT rather than an enum so #242/#243/#246
+  /// add members without a schema migration — the closed set is enforced in TypeScript.
+  removalReason  String?   @map("removal_reason")
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   batch  PlantBatchAssignment @relation(fields: [batchId], references: [batchId])
   ticket Ticket               @relation(fields: [ticketId], references: [ticketId])
 
   @@index([batchId])
+  /// #241 — the per-ticket assignment history read (#244 counts attempt windows per ticket). Without
+  /// it that query seq-scans the whole table; only `(batch_id)` and the live-row partial unique existed.
+  @@index([ticketId])
   @@map("batch_assignment_tickets")
 }
 
@@ -892,6 +899,9 @@ model SoftState {
   engineer EngineerMaster @relation(fields: [seId], references: [engineerId])
 
   @@index([seId, resolvedAt])
+  /// #241 — joins a soft state to the assignment window that contains it (`set_at` between the row's
+  /// `created_at` and `removed_at`), which is how #244 decides an attempt was *reached*.
+  @@index([ticketId, setAt])
   @@map("soft_states")
 }
 

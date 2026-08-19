@@ -6,6 +6,7 @@ import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { LoggingDayPlanNotifier } from '../src/scheduling/day-plan-notifier';
 import { OverrideService } from '../src/scheduling/override.service';
+import { REMOVAL_REASONS } from '../src/scheduling/removal-reason';
 
 /**
  * Issue 13a, slice 3 — DEFER_TICKET + REORDER (AC#3). Defer stamps a ticket's deferred-to date and
@@ -143,6 +144,9 @@ describe('Issue 13a slice 3 — DEFER_TICKET + REORDER', () => {
   it('DEFER_TICKET stamps the deferred-to date and flips the batch OVERRIDDEN', async () => {
     const bat = await prisma.batchAssignmentTicket.findFirstOrThrow({ where: { batchId: batchA, ticketId: ticketA } });
     expect(bat.deferredToDate?.toISOString().slice(0, 10)).toBe('2026-06-25');
+    // #241 — a deferral is a distinct end cause from a withdrawal, and #244 excludes both from attempt
+    // counting for different reasons. Recorded explicitly rather than inferred from `deferred_to_date`.
+    expect(bat.removalReason).toBe(REMOVAL_REASONS.ZM_DEFERRED);
     const batch = await prisma.plantBatchAssignment.findUniqueOrThrow({ where: { batchId: batchA } });
     expect(batch.status).toBe('OVERRIDDEN');
   });

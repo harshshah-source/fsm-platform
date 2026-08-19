@@ -6,6 +6,7 @@ import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
 import { SOFT_STATE_CONFLICT, type SoftStateConflictPort } from './soft-state-conflict';
 
@@ -269,7 +270,7 @@ export class BulkUnassignService {
       if (classified.ticketIds.length > 0) {
         await tx.batchAssignmentTicket.updateMany({
           where: { id: { in: classified.batchTicketRowIds } },
-          data: { removedAt: now, removedBy: actor.userId },
+          data: { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.BULK_UNASSIGNED },
         });
         await tx.ticket.updateMany({
           where: { ticketId: { in: classified.ticketIds } },

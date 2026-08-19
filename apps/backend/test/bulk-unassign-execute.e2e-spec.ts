@@ -7,6 +7,7 @@ import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { BulkUnassignService } from '../src/scheduling/bulk-unassign.service';
 import { PrismaSoftStateConflictPort } from '../src/soft-state/soft-state-conflict.adapter';
+import { REMOVAL_REASONS } from '../src/scheduling/removal-reason';
 
 /**
  * #179 Slice 1 — execute(). Design settled in
@@ -216,6 +217,9 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
       const stampedRows = await prisma.batchAssignmentTicket.findMany({ where: { ticketId: { in: [eligible, onSite, blocked] } } });
       expect(stampedRows).toHaveLength(3);
       expect(stampedRows.every((r) => r.removedAt !== null && r.removedBy === OH_ACTOR.userId)).toBe(true);
+      // #241 — every removed row carries its cause; a bulk clear is its own, distinct from a per-ticket
+      // withdrawal even though both are human-actioned.
+      expect(stampedRows.every((r) => r.removalReason === REMOVAL_REASONS.BULK_UNASSIGNED)).toBe(true);
 
       // Excluded classes' batch rows are still live.
       const excludedRows = await prisma.batchAssignmentTicket.findMany({ where: { ticketId: { in: [closed, install] } } });

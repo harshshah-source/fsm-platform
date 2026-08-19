@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { AutoRecoveryService } from '../src/ticketing/auto-recovery.service';
+import { REMOVAL_REASONS } from '../src/scheduling/removal-reason';
 
 /**
  * Issue 08 slice 2 + **#229** — the auto-recovery pre-check.
@@ -245,6 +246,11 @@ describe('Issue 08 slice 2 / #229 — AutoRecoveryService', () => {
     // Off the SE's day plan — otherwise it renders as work-to-do indefinitely (#229 §3.4 #3).
     const planRow = await prisma.batchAssignmentTicket.findFirstOrThrow({ where: { ticketId } });
     expect(planRow.removedAt).toEqual(NOW);
+    // #241 AC-6 — auto-recovery leaves `removed_by` NULL, which used to be its ONLY signal and was
+    // therefore overloaded to mean "the system did it" generally. The reason column carries it now, so
+    // nothing downstream has to infer a system removal from a missing actor.
+    expect(planRow.removedBy).toBeNull();
+    expect(planRow.removalReason).toBe(REMOVAL_REASONS.AUTO_RECOVERY);
   });
 
   it('closes the deferred remainder on the next pass, and reports not-capped once drained', async () => {

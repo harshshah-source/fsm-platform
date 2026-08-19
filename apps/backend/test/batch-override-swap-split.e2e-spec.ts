@@ -6,6 +6,7 @@ import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { LoggingDayPlanNotifier } from '../src/scheduling/day-plan-notifier';
 import { OverrideService } from '../src/scheduling/override.service';
+import { REMOVAL_REASONS } from '../src/scheduling/removal-reason';
 
 /**
  * Issue 13a, slice 4 — SWAP_SE / REASSIGN / SPLIT_BATCH (AC#3/#4). The SE-moving overrides: swap a
@@ -171,6 +172,9 @@ describe('Issue 13a slice 4 — SWAP_SE / REASSIGN / SPLIT_BATCH', () => {
   it('REASSIGN moves one ticket to a batch under the target SE; ticket stays assigned', async () => {
     const oldRow = await prisma.batchAssignmentTicket.findFirstOrThrow({ where: { batchId: batchReassign, ticketId: reassignTicket } });
     expect(oldRow.removedAt).not.toBeNull();
+    // #241 — the source row of a move ended because the work moved, not because it was abandoned. The
+    // new row on the destination batch is the continuation; this reason is what tells them apart later.
+    expect(oldRow.removalReason).toBe(REMOVAL_REASONS.REASSIGNED);
     const newRows = await prisma.batchAssignmentTicket.findMany({
       where: { ticketId: reassignTicket, removedAt: null },
       include: { batch: true },

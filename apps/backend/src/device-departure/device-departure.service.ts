@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client';
 import type { $Enums } from '../generated/prisma/client';
 import { isOperationalStatus } from '../ingestion/autoplant/master-mapping';
 import { PrismaService } from '../prisma/prisma.service';
+import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 
 /**
  * FSM-owned device deployment lifecycle (Issue 128) — the device-grain twin of
@@ -301,6 +302,15 @@ export class DeviceDepartureService {
           reasonCode: 'DEVICE_UNDEPLOYED',
           at: now,
         })),
+      });
+      // #241 — end the assignment too, in the same transaction that closes the ticket. Closing a
+      // ticket while leaving its batch row live is not a bookkeeping detail: every day-plan read
+      // filters on `removed_at IS NULL` and *not* on ticket status, so a departed device's cancelled
+      // ticket kept rendering on the SE's day plan as work to do. 3,310 such rows exist in the dev
+      // mirror, 20 of them on ACTIVE schedules. `removed_by` is NULL because no human did this.
+      await tx.batchAssignmentTicket.updateMany({
+        where: { ticketId: { in: open.map((t) => t.ticketId) }, removedAt: null },
+        data: { removedAt: now, removedBy: null, removalReason: REMOVAL_REASONS.TICKET_CANCELLED },
       });
       // Terminate the parent Failure Cycle → FAILED so it leaves the one-active-per-device set: a
       // returned device can open a fresh cycle, and FAILED (not VERIFIED) keeps the re-created ticket
