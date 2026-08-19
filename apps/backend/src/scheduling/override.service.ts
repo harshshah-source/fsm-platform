@@ -3,7 +3,7 @@ import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { notDeferredOn } from '../ticketing/deferral';
+import { isNotDeferredOn, notDeferredOn } from '../ticketing/deferral';
 import { DAY_PLAN_NOTIFIER, DayPlanNotifier } from './day-plan-notifier';
 import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
@@ -31,12 +31,39 @@ export type OverrideCommand =
 export type OverrideOutcome =
   | { result: 'OK'; batchId: string; scheduleId: string; seId: string; status: string }
   | { result: 'NOT_FOUND' }
-  | { result: 'CONFLICT_ON_SITE'; ticketIds: string[]; seId: string };
+  | { result: 'CONFLICT_ON_SITE'; ticketIds: string[]; seId: string }
+  /** #249 — one or more moved tickets carry a future return-date deferral; resend with `confirm`. */
+  | { result: 'CONFLICT_DEFERRED'; ticketIds: string[]; seId: string };
+
+/** Override actions that create work for a *different* SE, and so must not move a held ticket blind. */
+const MOVE_ACTIONS: ReadonlySet<OverrideCommand['action']> = new Set(['SWAP_SE', 'REASSIGN', 'SPLIT_BATCH']);
+
+/**
+ * The vehicle wait behind a deferral, when there is one (#249). Carried on the refusal so the confirm
+ * dialog can state *why* the ticket is held rather than only *until when* — and can show the pair
+ * #245 separated, since an override may have moved the authoritative date away from what the SE
+ * reported. A ZM deferral has no report; the field is then null and the date stands alone.
+ */
+export interface DeferralVuContext {
+  id: string;
+  proposedFrom: string;
+  expectedFrom: string;
+}
 
 export type AssignOutcome =
   | { result: 'OK'; scheduleId: string; batchId: string; ticketId: string; seId: string }
   | { result: 'NOT_FOUND' }
-  | { result: 'ALREADY_ASSIGNED' };
+  | { result: 'ALREADY_ASSIGNED' }
+  /** #249 — the ticket is held to a future return date; resend with `confirm` + a reason. */
+  | { result: 'CONFLICT_DEFERRED'; ticketId: string; deferredUntil: string; vuReport: DeferralVuContext | null }
+  /** #249 — confirmed, but with no reason. An override with no stated why is not an override. */
+  | { result: 'REASON_REQUIRED' };
+
+/** #249 — a caller's explicit decision to override a return-date deferral. */
+export interface DeferralOverrideInput {
+  confirm?: boolean;
+  reasonCode?: string;
+}
 
 /** Result of the multi-plant manual assign (Issue 122b): per-plant tallies + the overall totals. */
 export interface PlantAssignSummary {
@@ -103,6 +130,33 @@ export class OverrideService {
           metadata: { action: cmd.action, ticketIds: [...onSite], reasonCode: cmd.reasonCode } as Prisma.InputJsonValue,
         },
       });
+    }
+
+    // #249 AC4, defence in depth — a move must not carry a held ticket onto another SE's plan without
+    // somebody saying so. Structurally this is near-vacuous (a deferred ticket has no live batch row to
+    // move) and is reachable only through the verified edge #249 also closes: an `assignTicket` that
+    // left a future `deferred_until` standing on assigned work. It is gated anyway, because "you can
+    // only get here through a bug we just fixed" is not a guarantee.
+    //
+    // REMOVE / DEFER / REORDER are deliberately outside the gate: none of them creates an assignment,
+    // and refusing to *withdraw* or re-order a held ticket would obstruct the very actions that respect
+    // the hold. The deferral is preserved on a confirmed move — only an assignment spends one.
+    if (MOVE_ACTIONS.has(cmd.action)) {
+      const heldIds = await this.deferredTicketIds(affected, istDate(now));
+      if (heldIds.length > 0) {
+        if (!cmd.confirm) return { result: 'CONFLICT_DEFERRED', ticketIds: heldIds, seId: batch.seId };
+        await this.prisma.auditLog.create({
+          data: {
+            actorId: actor.userId,
+            actorRole: actor.role,
+            actedAsRole: actor.actedAsRole ?? null,
+            action: 'OVERRIDE_DEFERRED_MOVE',
+            entityType: 'plant_batch_assignment',
+            entityId: String(batch.batchId),
+            metadata: { action: cmd.action, ticketIds: heldIds, reasonCode: cmd.reasonCode } as Prisma.InputJsonValue,
+          },
+        });
+      }
     }
 
     switch (cmd.action) {
@@ -278,6 +332,12 @@ export class OverrideService {
      * the SE's Day Plan (stopSequence 1) so the urgent ticket leads the day — the rest keep their order.
      */
     insertAtTop = false,
+    /**
+     * #249 — the caller's explicit decision to assign a ticket that is deferred to a future return
+     * date. Absent (the default) means the deferral is honoured and a held ticket is refused, so every
+     * existing caller keeps its behaviour unless it deliberately opts in.
+     */
+    deferral: DeferralOverrideInput = {},
   ): Promise<AssignOutcome> {
     const ticket = await this.prisma.ticket.findUnique({ where: { ticketId }, include: { plant: true } });
     if (!ticket || !this.inScope(ticket.plant.zoneId, scope)) return { result: 'NOT_FOUND' };
@@ -289,6 +349,49 @@ export class OverrideService {
     // and a UTC-derived day put a 00:00–05:29 IST manual assign on *yesterday's* schedule: a different
     // row from the one `dispatchForZone` builds and the Day Plan reads for the same instant.
     const day = istDate(now);
+
+    // #249 / Decision 17 — a return-date deferral may be overridden, never bypassed.
+    //
+    // This method checked existence, scope and ALREADY_ASSIGNED and never consulted the deferral, so a
+    // one-click assign put a ticket whose vehicle is away until Friday straight onto today's plan, with
+    // nothing in the trail naming the hold it walked through. The bulk path already filtered at
+    // selection (#146), which is exactly what hid this: the gap is only reachable by handing a ticket
+    // to this primitive directly. Boundary is `isNotDeferredOn`, the same predicate every reader of
+    // unassigned work spreads in — inclusive on the deferred day itself, so a lapsed deferral is not a
+    // hold and the normal path gains no friction at all.
+    const held = !isNotDeferredOn(ticket.deferredUntil, day);
+    if (held) {
+      const vuReport = await this.openVuContext(ticketId);
+      if (deferral.confirm !== true) {
+        return {
+          result: 'CONFLICT_DEFERRED',
+          ticketId,
+          deferredUntil: ticket.deferredUntil!.toISOString(),
+          vuReport,
+        };
+      }
+      // Mirrors the ON_SITE gate: confirming is not enough on its own. Overruling a hold somebody
+      // placed for a stated reason is the one action whose "why" is the entire accountability record.
+      if (!deferral.reasonCode || deferral.reasonCode.trim() === '') return { result: 'REASON_REQUIRED' };
+      await this.prisma.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          actorRole: actor.role,
+          actedAsRole: actor.actedAsRole ?? null,
+          action: 'OVERRIDE_DEFERRED_ASSIGN',
+          entityType: 'ticket',
+          entityId: ticketId,
+          metadata: {
+            seId,
+            deferredUntil: ticket.deferredUntil!.toISOString(),
+            reasonCode: deferral.reasonCode.trim(),
+            // Named, not decided: the report itself is untouched. Overriding the hold says "assign it
+            // anyway", not "the vehicle is back" — only #245's decide path may move the return date.
+            vuReportId: vuReport?.id ?? null,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    }
     const ids = await this.audit.withAudit(
       {
         actorId: actor.userId,
@@ -320,7 +423,14 @@ export class OverrideService {
         await tx.batchAssignmentTicket.create({
           data: { batchId: batch.batchId, ticketId, sortOrder: await this.nextSortOrder(tx, batch.batchId) },
         });
-        await tx.ticket.update({ where: { ticketId }, data: { assignmentState: 'FORMALLY_ASSIGNED' } });
+        // #249 AC2 — the deferral is spent by the assignment, exactly as `dispatchForZone` spends it.
+        // Leaving a future date on a FORMALLY_ASSIGNED ticket is the verified stale-deferral edge this
+        // closes: the batch row and the audit trail are the durable record of what was overridden, and
+        // a live `deferred_until` on assigned work only misleads whatever reads it next.
+        await tx.ticket.update({
+          where: { ticketId },
+          data: { assignmentState: 'FORMALLY_ASSIGNED', deferredUntil: null },
+        });
         if (insertAtTop) await this.moveBatchToTop(tx, sched.scheduleId, batch.batchId);
         return { scheduleId: sched.scheduleId, batchId: batch.batchId };
       },
@@ -554,6 +664,42 @@ export class OverrideService {
 
   /** Tickets an override disturbs — used for the ON_SITE conflict check. Ticket-scoped actions name
    *  their ticket(s); batch-scoped actions (SWAP_SE / REORDER) disturb the batch's active tickets. */
+  /**
+   * The live vehicle wait behind a ticket's deferral, or null (#249).
+   *
+   * Read for the refusal and for the audit row, never written: the deferral is the hold, the report is
+   * the explanation, and a ticket can be deferred by a ZM with no report at all. `findFirst` on OPEN is
+   * exact — the partial unique index allows at most one per ticket.
+   */
+  /**
+   * Which of these tickets are still held by a deferral on `day` (#249) — the negation of
+   * `notDeferredOn`, run as one batched read so the gate costs a single query however many tickets a
+   * SPLIT_BATCH touches. Order follows `ticketIds` so the refusal reads the same way twice.
+   */
+  private async deferredTicketIds(ticketIds: string[], day: Date): Promise<string[]> {
+    if (ticketIds.length === 0) return [];
+    const rows = await this.prisma.ticket.findMany({
+      where: { ticketId: { in: ticketIds }, deferredUntil: { gt: day } },
+      select: { ticketId: true },
+    });
+    const held = new Set(rows.map((r) => r.ticketId));
+    return ticketIds.filter((id) => held.has(id));
+  }
+
+  private async openVuContext(ticketId: string): Promise<DeferralVuContext | null> {
+    const report = await this.prisma.vehicleUnavailabilityReport.findFirst({
+      where: { ticketId, status: 'OPEN' },
+      select: { id: true, proposedFrom: true, expectedFrom: true },
+    });
+    return report
+      ? {
+          id: String(report.id),
+          proposedFrom: report.proposedFrom.toISOString(),
+          expectedFrom: report.expectedFrom.toISOString(),
+        }
+      : null;
+  }
+
   private async affectedTicketIds(batch: BatchWithSchedule, cmd: OverrideCommand): Promise<string[]> {
     switch (cmd.action) {
       case 'REMOVE_TICKET':

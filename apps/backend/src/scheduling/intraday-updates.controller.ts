@@ -41,7 +41,7 @@ export class IntradayUpdatesController {
   @Roles(...MANAGER_ROLES)
   async add(
     @CurrentUser() user: AccessTokenClaims,
-    @Body() body: { ticketId: string; seId: string },
+    @Body() body: { ticketId: string; seId: string; confirm?: boolean; reasonCode?: string },
   ): Promise<AssignOutcome> {
     if (!body.ticketId || !body.seId) throw new BadRequestException({ code: 'TICKET_AND_SE_REQUIRED' });
     const out = await this.sameDay.addTicket(
@@ -49,9 +49,25 @@ export class IntradayUpdatesController {
       body.seId,
       { role: user.role, zoneId: user.zone_id },
       { userId: user.user_id, role: user.role, actedAsRole: null },
+      new Date(),
+      { confirm: body?.confirm, reasonCode: body?.reasonCode },
     );
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_OR_SE_NOT_FOUND' });
     if (out.result === 'ALREADY_ASSIGNED') throw new ConflictException({ code: 'TICKET_ALREADY_ASSIGNED' });
+    // #249 — same refusal and same vocabulary as `POST /schedules/assign`. Adding work mid-shift is
+    // still creating a Formal Assignment, so a held ticket needs the same explicit decision here.
+    if (out.result === 'CONFLICT_DEFERRED') {
+      throw new ConflictException({
+        code: 'CONFLICT_DEFERRED',
+        message: 'Ticket is held to a future vehicle-return date — resend with confirm=true and a reason.',
+        ticketId: out.ticketId,
+        deferredUntil: out.deferredUntil,
+        vuReport: out.vuReport,
+      });
+    }
+    if (out.result === 'REASON_REQUIRED') {
+      throw new BadRequestException({ code: 'DEFERRAL_OVERRIDE_REASON_REQUIRED' });
+    }
     return out;
   }
 
@@ -100,6 +116,16 @@ export class IntradayUpdatesController {
       throw new ConflictException({
         code: 'UPDATE_ON_SITE_CONFLICT',
         message: 'SE holds ON_SITE on affected work — resend with confirm=true and a reason code.',
+        ticketIds: out.ticketIds,
+      });
+    }
+    // #249 — unreachable from `remove`/`reorder` (neither is a move action), mapped anyway: an
+    // outcome variant returned as a 200 body because nobody translated it is the failure mode this
+    // switch exists to prevent.
+    if (out.result === 'CONFLICT_DEFERRED') {
+      throw new ConflictException({
+        code: 'CONFLICT_DEFERRED',
+        message: 'Affected work is held to a future vehicle-return date — resend with confirm=true and a reason code.',
         ticketIds: out.ticketIds,
       });
     }

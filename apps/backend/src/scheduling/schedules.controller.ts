@@ -303,16 +303,34 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async assign(
     @CurrentUser() user: AccessTokenClaims,
-    @Body() body: { ticketId: string; seId: string },
+    @Body() body: { ticketId: string; seId: string; confirm?: boolean; reasonCode?: string },
   ): Promise<AssignOutcome> {
     const outcome = await this.override.assignTicket(
       body.ticketId,
       body.seId,
       { role: user.role, zoneId: user.zone_id },
       { userId: user.user_id, role: user.role, actedAsRole: null },
+      new Date(),
+      'CRITICAL_ASSIGN',
+      false,
+      { confirm: body?.confirm, reasonCode: body?.reasonCode },
     );
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_OR_SE_NOT_FOUND' });
     if (outcome.result === 'ALREADY_ASSIGNED') throw new ConflictException({ code: 'TICKET_ALREADY_ASSIGNED' });
+    // #249 — the ticket is held to a future vehicle-return date. A business 409 carrying the dates the
+    // confirm dialog has to show, mirroring the ON_SITE conflict the client already knows how to answer.
+    if (outcome.result === 'CONFLICT_DEFERRED') {
+      throw new ConflictException({
+        code: 'CONFLICT_DEFERRED',
+        message: 'Ticket is held to a future vehicle-return date — resend with confirm=true and a reason.',
+        ticketId: outcome.ticketId,
+        deferredUntil: outcome.deferredUntil,
+        vuReport: outcome.vuReport,
+      });
+    }
+    if (outcome.result === 'REASON_REQUIRED') {
+      throw new BadRequestException({ code: 'DEFERRAL_OVERRIDE_REASON_REQUIRED' });
+    }
     return outcome;
   }
 

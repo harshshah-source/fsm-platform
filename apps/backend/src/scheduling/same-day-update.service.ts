@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ActorContext, AssignOutcome, OverrideOutcome, OverrideService } from './override.service';
+import { ActorContext, AssignOutcome, DeferralOverrideInput, OverrideOutcome, OverrideService } from './override.service';
 import { ZmScope } from './zm-schedule-query.service';
 
 /**
@@ -34,15 +34,23 @@ export class SameDayUpdateService {
     private readonly override: OverrideService,
   ) {}
 
-  /** Add an open Ticket to the SE's current Day Plan, logged as a MANUAL_ZM_UPDATE/ADD intra-day row. */
+  /**
+   * Add an open Ticket to the SE's current Day Plan, logged as a MANUAL_ZM_UPDATE/ADD intra-day row.
+   *
+   * #249 — the return-date gate is the engine's, exactly like the ON_SITE gate on the remove leg
+   * below: this passes the caller's decision through rather than deciding anything itself, so
+   * "no code path can formally assign a deferred ticket without confirm + reason" stays a property of
+   * `assignTicket` and not a rule three call sites each have to remember.
+   */
   addTicket(
     ticketId: string,
     seId: string,
     scope: ZmScope,
     actor: ActorContext,
     now: Date = new Date(),
+    deferral: DeferralOverrideInput = {},
   ): Promise<AssignOutcome> {
-    return this.override.assignTicket(ticketId, seId, scope, actor, now, MANUAL_ZM_UPDATE);
+    return this.override.assignTicket(ticketId, seId, scope, actor, now, MANUAL_ZM_UPDATE, false, deferral);
   }
 
   /** Remove a Ticket from the SE's current Day Plan (returns it to the Shared Pool), logged as a

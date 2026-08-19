@@ -73,6 +73,15 @@ export class BatchesController {
         ticketIds: outcome.ticketIds,
       });
     }
+    // #249 — mirrors the ON_SITE mapping exactly, deliberately: one confirm vocabulary for every
+    // override, so a client that already handles one handles the other without new machinery.
+    if (outcome.result === 'CONFLICT_DEFERRED') {
+      throw new ConflictException({
+        code: 'CONFLICT_DEFERRED',
+        message: 'Affected work is held to a future vehicle-return date — resend with confirm=true and a reason code.',
+        ticketIds: outcome.ticketIds,
+      });
+    }
     return outcome;
   }
 }

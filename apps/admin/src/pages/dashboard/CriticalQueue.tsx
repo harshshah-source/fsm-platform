@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import type { CriticalQueueGroup } from '../../api/dashboard';
-import { apiAssignTicket, type ZoneEngineer } from '../../api/schedules';
-import { DurationBadge, PlantName, TierBadge } from '../../components/domain';
+import {
+  apiAssignTicket,
+  DeferralConflictError,
+  type DeferralConflict,
+  type DeferralOverride,
+  type ZoneEngineer,
+} from '../../api/schedules';
+import { DeferralConfirm, DurationBadge, PlantName, TierBadge } from '../../components/domain';
 import { FilterSelect } from '../../components/data';
 import { Badge, Button } from '../../components/ui';
 
@@ -88,39 +94,76 @@ function AssignControl({
 }) {
   const [seId, setSeId] = useState('');
   const [busy, setBusy] = useState(false);
+  // #249 — an assign the backend refused because the ticket is held to a future vehicle-return date,
+  // parked here until the manager either states a reason or backs out. Held per cluster: the rest of
+  // the group is already assigned by then, and re-running them would double-assign.
+  const [conflict, setConflict] = useState<DeferralConflict | null>(null);
+  /** The remainder of the cluster, from the held ticket onward — what a confirm resumes. */
+  const [pending, setPending] = useState<{ ticketId: string }[] | null>(null);
 
-  const assign = async () => {
+  /** Assign each ticket in the cluster, stopping at the first return-date hold. */
+  const assignFrom = async (tickets: { ticketId: string }[], deferral?: DeferralOverride) => {
     setBusy(true);
     try {
-      for (const t of group.tickets) {
-        await apiAssignTicket(t.ticketId, seId);
+      for (let i = 0; i < tickets.length; i += 1) {
+        try {
+          // The confirm applies to the ticket that raised it, never to the rest of the cluster: a
+          // manager who overrode one hold has said nothing about any other.
+          await apiAssignTicket(tickets[i].ticketId, seId, i === 0 ? deferral : undefined);
+        } catch (e) {
+          if (e instanceof DeferralConflictError) {
+            setPending(tickets.slice(i));
+            setConflict(e.conflict);
+            return;
+          }
+          throw e;
+        }
       }
+      setConflict(null);
+      setPending(null);
       onAssigned?.();
     } finally {
       setBusy(false);
     }
   };
 
+  const assign = () => assignFrom(group.tickets);
+
   return (
-    <div className="flex items-center justify-end gap-2">
-      <label className="flex items-center gap-1.5 text-xs text-ink-muted">
-        Assign to
-        <FilterSelect
-          value={seId}
-          onChange={(e) => setSeId(e.target.value)}
-          className="h-8 text-xs"
-        >
-          <option value="">Select SE…</option>
-          {engineers.map((e) => (
-            <option key={e.engineerId} value={e.engineerId}>
-              {e.name ?? e.engineerId}
-            </option>
-          ))}
-        </FilterSelect>
-      </label>
-      <Button size="sm" disabled={seId === '' || busy} loading={busy} onClick={assign}>
-        Assign
-      </Button>
+    <div className="flex flex-col items-end gap-2">
+      {conflict && (
+        <DeferralConfirm
+          conflict={conflict}
+          busy={busy}
+          onConfirm={(reasonCode) => {
+            void assignFrom(pending ?? [], { confirm: true, reasonCode });
+          }}
+          onCancel={() => {
+            setConflict(null);
+            setPending(null);
+          }}
+        />
+      )}
+      <div className="flex items-center justify-end gap-2">
+        <label className="flex items-center gap-1.5 text-xs text-ink-muted">
+          Assign to
+          <FilterSelect
+            value={seId}
+            onChange={(e) => setSeId(e.target.value)}
+            className="h-8 text-xs"
+          >
+            <option value="">Select SE…</option>
+            {engineers.map((e) => (
+              <option key={e.engineerId} value={e.engineerId}>
+                {e.name ?? e.engineerId}
+              </option>
+            ))}
+          </FilterSelect>
+        </label>
+        <Button size="sm" disabled={seId === '' || busy} loading={busy} onClick={assign}>
+          Assign
+        </Button>
+      </div>
     </div>
   );
 }

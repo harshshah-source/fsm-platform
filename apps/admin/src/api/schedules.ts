@@ -98,13 +98,57 @@ export interface AssignOk {
   seId: string;
 }
 
+/** The vehicle wait behind a hold (#249/#245) — the SE's proposal beside the authoritative date. */
+export interface DeferralVuContext {
+  id: string;
+  proposedFrom: string;
+  expectedFrom: string;
+}
+
+/** 409 payload when an assign targets a ticket held to a future vehicle-return date (#249). */
+export interface DeferralConflict {
+  code: 'CONFLICT_DEFERRED';
+  message: string;
+  ticketId: string;
+  deferredUntil: string;
+  vuReport: DeferralVuContext | null;
+}
+
+/**
+ * Thrown on the #249 409 so the caller can show what it is about to override and re-submit with
+ * `confirm` + a reason — the same shape as {@link OverrideConflictError}, deliberately: one confirm
+ * vocabulary across every override means a surface that handles one handles the other.
+ */
+export class DeferralConflictError extends Error {
+  constructor(public readonly conflict: DeferralConflict) {
+    super(conflict.message);
+    this.name = 'DeferralConflictError';
+  }
+}
+
+/** A manager's explicit decision to assign over a return-date hold (#249). */
+export interface DeferralOverride {
+  confirm?: boolean;
+  reasonCode?: string;
+}
+
 /** Grouped Critical Work Queue one-click assign — creates a Formal Assignment (Issue 13b AC#6). */
-export async function apiAssignTicket(ticketId: string, seId: string): Promise<AssignOk> {
+export async function apiAssignTicket(
+  ticketId: string,
+  seId: string,
+  deferral: DeferralOverride = {},
+): Promise<AssignOk> {
   const res = await fetch(`${BASE_URL}/schedules/assign`, {
     method: 'POST',
     headers: authHeaders(true),
-    body: JSON.stringify({ ticketId, seId }),
+    body: JSON.stringify({ ticketId, seId, ...deferral }),
   });
+  if (res.status === 409) {
+    const body = (await res.json()) as DeferralConflict | { code?: string };
+    // 409 also carries TICKET_ALREADY_ASSIGNED; only the deferral conflict is answerable by a confirm.
+    if (body?.code === 'CONFLICT_DEFERRED') throw new DeferralConflictError(body as DeferralConflict);
+    throw new Error(`REQUEST_FAILED_${res.status}`);
+  }
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as AssignOk;
 }
