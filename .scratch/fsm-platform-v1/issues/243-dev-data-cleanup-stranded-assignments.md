@@ -4,9 +4,28 @@ Status: ready-for-human
 Type: HITL · Data operation (no application code)
 
 Filed 2026-08-19. Approved scope (operator, 2026-08-19 brief §19) — **described here; execution
-requires the separate implementation approval and happens before #242 is enabled.** Counts are from
-the 2026-08-18 snapshot of `fsm` @ 5433 and MUST be re-measured at execution time (ingestion was
-off; the DB is a dev mirror).
+requires the separate implementation approval.** Counts are from the 2026-08-18 snapshot of
+`fsm` @ 5433 and MUST be re-measured at execution time (ingestion was off; the DB is a dev mirror).
+
+> **ORDERING SUPERSEDED — Option B (operator, 2026-08-19).** This issue originally said it executes
+> *before* #242 is enabled. It now runs **after**. Two measured reasons: `closeZone`
+> (`schedule-closure-scheduler.service.ts:145`) selects only schedules still live, so a PARTIAL
+> schedule is never revisited and **#242 can never reach this backlog** — while the backlog accrues
+> **~300 rows a night** until #242 ships, so cleaning first guarantees cleaning twice. Neither order
+> changes what #242 touches: C1/C2 sit on already-closed schedules and C3 tickets have no live row.
+> The original ordering's purpose (keep `DEV_CLEANUP` out of #244's countable set) holds either way,
+> since #242 can only stamp `PLAN_EXPIRED` on schedules closing that night.
+>
+> **This is an ordering decision, not execution approval.** The HITL gate stands.
+>
+> Also settled: "explicitly untouched — the 299 live rows on ACTIVE schedules" means **current work
+> at execution time**, not those specific rows. They aged ACTIVE→PARTIAL overnight and are now inside
+> C2; the literal reading cannot satisfy V1.
+>
+> Re-measured 2026-08-19 (already stale — measure again): C1 **3,310** · C2 **4,983** · C3 **1,092** ·
+> `DEV_CLEANUP` total **8,293** · untouched live-on-ACTIVE **198** · C1-on-ACTIVE **0** (was 20, the
+> symptom that made this urgent). `soft_states` = 17 rows in the whole DB and 0 OPEN tickets carry
+> ≥2 removed windows, so attempt-history exposure is nil under either reason code.
 
 ## What to build
 
@@ -67,8 +86,9 @@ row has a `soft_states` row — 17 exist in the whole DB).
 
 ## Acceptance criteria
 
-- [ ] AC1 — Executed only after explicit operator approval, after #241's column exists, and before
-      #242 is enabled; counts re-measured and recorded at execution time.
+- [ ] AC1 — Executed only after explicit operator approval, after #241's column exists, and — per
+      the Option B supersession above — **after #242 is built and enabled**, not before; counts
+      re-measured and recorded at execution time.
 - [ ] AC2 — `pg_dump` taken and its location recorded before the transaction.
 - [ ] AC3 — V1–V5 all pass and their outputs are recorded in this issue's progress doc.
 - [ ] AC4 — Nothing in the untouched list changed (row counts compared before/after).
@@ -85,4 +105,5 @@ n/a
 
 ## Blocked by
 
-#241 (needs `removal_reason`). Gates the enablement of #242.
+#241 (needs `removal_reason`) ✅, and — per the Option B supersession above — **#242, built and
+enabled**. It no longer gates #242; #242 gates it.

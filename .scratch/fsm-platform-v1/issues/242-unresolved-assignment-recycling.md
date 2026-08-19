@@ -16,8 +16,10 @@ operations) and Special (#244) can never fire.
 past-dated live schedules to `PARTIAL`/`COMPLETED` — **and nothing else**. The batch row keeps
 `removed_at NULL`, the ticket keeps `FORMALLY_ASSIGNED`, the recommender selects `UNASSIGNED` only,
 and `MeTicketsQueryService` reads live schedules only — so the ticket is invisible to the scheduler
-*and* to the SE ("double limbo"). 4,684 OPEN tickets sit stranded this way in the dev DB (cleaned by
-#243 before this slice is enabled).
+*and* to the SE ("double limbo"). 4,983 OPEN tickets sit stranded this way in the dev DB (re-measured 2026-08-19). **They are NOT
+cleaned before this slice** — Option B reversed that ordering: `closeZone` only ever selects
+still-live schedules, so this sweep can never reach them, and the backlog grows ~300 a night
+until this slice ships. Build and enable this first; #243 then cleans a frozen set once.
 
 ### Required change
 
