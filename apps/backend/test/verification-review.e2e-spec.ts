@@ -6,6 +6,7 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-submission.service';
 import { VerificationService } from '../src/verification/verification.service';
+import { SHARED_AUTH_SE_ID, ensureSharedSeCoversPlant, releaseSharedSePlantCoverage } from './fixtures/shared-auth-se';
 
 /**
  * Issue 19 — the ZM Verification Review surface. GET /api/verification/review lists runs, zone-scoped,
@@ -18,7 +19,7 @@ const at = (min: number) => new Date(T0.getTime() + min * 60_000);
 const ANCHOR = { lat: 12.9716, lon: 77.5946 };
 const NEAR = { lat: 12.9721, lon: 77.5946 };
 const FAR = { lat: 13.4716, lon: 77.5946 };
-const SE_ID = '22222222-2222-2222-2222-222222222222';
+const SE_ID = SHARED_AUTH_SE_ID; // se.north@fsm.test — shared across 16 specs, see fixtures/shared-auth-se.ts
 
 describe('verification review controller (e2e)', () => {
   let app: INestApplication;
@@ -67,17 +68,11 @@ describe('verification review controller (e2e)', () => {
     companyId = (await prisma.company.create({ data: { name: 'Co-vrev-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-vrev-' + NS, zoneId } })).plantId;
     snapshotRunId = (await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: T0 } })).runId;
-    await prisma.user.upsert({ where: { userId: SE_ID }, create: { userId: SE_ID, name: 'SE North', role: 'SERVICE_ENGINEER', phone: 'ph-vrev-' + NS, email: `se-vrev-${NS}@x.test`, zoneId }, update: {} });
-    await prisma.engineerMaster.upsert({ where: { engineerId: SE_ID }, create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 }, update: {} });
-    await prisma.seCoverage.upsert({
-      where: { seId_plantId: { seId: SE_ID, plantId } },
-      create: { seId: SE_ID, plantId, coverageType: 'DEDICATED' },
-      update: {},
-    });
+    await ensureSharedSeCoversPlant(prisma, { zoneId, plantId, tag: `vrev-${NS}` });
   });
 
   afterAll(async () => {
-    await prisma.seCoverage.deleteMany({ where: { seId: SE_ID, plantId } });
+    await releaseSharedSePlantCoverage(prisma, plantId);
     await prisma.verificationRun.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.rawDeviceSnapshot.deleteMany({ where: { deviceId: { in: deviceIds } } });

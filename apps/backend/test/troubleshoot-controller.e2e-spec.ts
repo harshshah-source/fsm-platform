@@ -5,6 +5,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { TokenService } from '../src/auth/token.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SHARED_AUTH_SE_ID, ensureSharedSeCoversPlant, releaseSharedSePlantCoverage } from './fixtures/shared-auth-se';
 
 /**
  * Issue 16, slice 4 — the troubleshoot HTTP surface. POST /api/tickets/:id/troubleshoot submits the
@@ -12,7 +13,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * VERIFICATION_PENDING, a duplicate client_submission_id is a 200 no-op. SE-only.
  */
 const NS = Date.now();
-const SE_ID = '22222222-2222-2222-2222-222222222222'; // se.north@fsm.test (in-memory auth seed)
+const SE_ID = SHARED_AUTH_SE_ID; // se.north@fsm.test — shared across 16 specs, see fixtures/shared-auth-se.ts
 
 describe('SE troubleshoot controller (e2e)', () => {
   let app: INestApplication;
@@ -60,21 +61,7 @@ describe('SE troubleshoot controller (e2e)', () => {
       await prisma.company.create({ data: { name: 'Co-tc-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })
     ).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-tc-' + NS, zoneId } })).plantId;
-    await prisma.user.upsert({
-      where: { userId: SE_ID },
-      create: { userId: SE_ID, name: 'SE North', role: 'SERVICE_ENGINEER', phone: 'ph-tc-' + NS, email: `se-tc-${NS}@x.test`, zoneId },
-      update: {},
-    });
-    await prisma.engineerMaster.upsert({
-      where: { engineerId: SE_ID },
-      create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 },
-      update: {},
-    });
-    await prisma.seCoverage.upsert({
-      where: { seId_plantId: { seId: SE_ID, plantId } },
-      create: { seId: SE_ID, plantId, coverageType: 'DEDICATED' },
-      update: {},
-    });
+    await ensureSharedSeCoversPlant(prisma, { zoneId, plantId, tag: `tc-${NS}` });
 
     // A second, real SE with no coverage of `plantId` at all — the #162 wrong-SE regression case.
     const otherTag = randomUUID().slice(0, 8);
@@ -86,9 +73,14 @@ describe('SE troubleshoot controller (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.engineerMaster.deleteMany({ where: { engineerId: otherSeId } });
-    await prisma.user.deleteMany({ where: { userId: otherSeId } });
-    await prisma.seCoverage.deleteMany({ where: { seId: SE_ID, plantId } });
+    // se_coverage first: se_coverage_se_id_fkey is ON DELETE RESTRICT (#255 AC-3). And guard on
+    // `otherSeId` — if beforeAll threw before it was assigned, an undefined filter is dropped by
+    // Prisma and `deleteMany` would clear engineer_master wholesale.
+    await releaseSharedSePlantCoverage(prisma, plantId);
+    if (otherSeId) {
+      await prisma.engineerMaster.deleteMany({ where: { engineerId: otherSeId } });
+      await prisma.user.deleteMany({ where: { userId: otherSeId } });
+    }
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: ticketIds } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });

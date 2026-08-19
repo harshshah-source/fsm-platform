@@ -4,13 +4,14 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SHARED_AUTH_SE_ID, ensureSharedSeCoversPlant, releaseSharedSePlantCoverage } from './fixtures/shared-auth-se';
 
 /**
  * Issue 70 — per-ticket troubleshoot form read (`GET /api/tickets/:id/forms`). Manager read surface
  * (ZM own-zone / CSM / OH all zones), mirroring the ticket detail scope. Unblocks the FE-09 Forms tab.
  */
 const NS = Date.now();
-const SE_ID = '22222222-2222-2222-2222-222222222222'; // se.north@fsm.test (in-memory auth seed)
+const SE_ID = SHARED_AUTH_SE_ID; // se.north@fsm.test — shared across 16 specs, see fixtures/shared-auth-se.ts
 
 describe('Ticket forms read (Issue 70, e2e)', () => {
   let app: INestApplication;
@@ -66,25 +67,11 @@ describe('Ticket forms read (Issue 70, e2e)', () => {
     zoneId = (await prisma.zone.create({ data: { name: 'Z-fr-' + NS } })).zoneId;
     companyId = (await prisma.company.create({ data: { name: 'Co-fr-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-fr-' + NS, zoneId } })).plantId;
-    await prisma.user.upsert({
-      where: { userId: SE_ID },
-      create: { userId: SE_ID, name: 'SE North', role: 'SERVICE_ENGINEER', phone: 'ph-fr-' + NS, email: `se-fr-${NS}@x.test`, zoneId },
-      update: {},
-    });
-    await prisma.engineerMaster.upsert({
-      where: { engineerId: SE_ID },
-      create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 },
-      update: {},
-    });
-    await prisma.seCoverage.upsert({
-      where: { seId_plantId: { seId: SE_ID, plantId } },
-      create: { seId: SE_ID, plantId, coverageType: 'DEDICATED' },
-      update: {},
-    });
+    await ensureSharedSeCoversPlant(prisma, { zoneId, plantId, tag: `fr-${NS}` });
   });
 
   afterAll(async () => {
-    await prisma.seCoverage.deleteMany({ where: { seId: SE_ID, plantId } });
+    await releaseSharedSePlantCoverage(prisma, plantId);
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.componentRequest.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: ticketIds } } });

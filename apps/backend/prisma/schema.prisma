@@ -283,6 +283,19 @@ model EngineerMaster {
 /// Plant coverage for DEDICATED / MULTI_PLANT SEs — the responsibility assignment, not the
 /// geography (schema D3). FLOATING never appears here (territory polygon table instead); enforced
 /// by a CHECK added in the migration. Partial-unique on a DEDICATED SE = one row.
+///
+/// WRITING AN UPSERT AGAINST THIS MODEL? READ THIS FIRST (#255). Two uniques govern this table and
+/// Prisma can only see one of them:
+///   - `@@unique([seId, plantId])` below — visible, and the only conflict target `upsert` can use.
+///   - `se_coverage_dedicated_se_key` — `UNIQUE (se_id) WHERE coverage_type = 'DEDICATED'`, declared
+///     as raw SQL in `migrations/20260618121101_add_engineer_se_coverage/migration.sql:60` because a
+///     partial predicate is not expressible here. The generated client has no idea it exists.
+/// So `upsert({ where: { seId_plantId } })` carrying a DEDICATED payload will happily INSERT a second
+/// DEDICATED row for an SE that already has one at another plant, and Postgres rejects it at write
+/// time — as a `P2002` naming `se_id` alone, not `(se_id, plant_id)`. Either write MULTI_PLANT, or
+/// check for that SE's existing DEDICATED row yourself. Pinned by
+/// `test/se-coverage-dedicated-unique.e2e-spec.ts`; the test-fixture side is
+/// `test/fixtures/shared-auth-se.ts`.
 model SeCoverage {
   id           BigInt       @id @default(autoincrement())
   seId         String       @map("se_id") @db.Uuid

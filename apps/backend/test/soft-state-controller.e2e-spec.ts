@@ -5,6 +5,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { TokenService } from '../src/auth/token.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SHARED_AUTH_SE_ID, ensureSharedSeCoversPlant, releaseSharedSePlantCoverage } from './fixtures/shared-auth-se';
 
 /**
  * Issue 15 — the SE soft-state HTTP surface. POST /api/tickets/:id/soft-state drives the field-progress
@@ -12,7 +13,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * activity ping. SE-only; an out-of-order transition is a 409. Exercises auth + role + status mapping.
  */
 const NS = Date.now();
-const SE_ID = '22222222-2222-2222-2222-222222222222'; // se.north@fsm.test (in-memory auth seed)
+const SE_ID = SHARED_AUTH_SE_ID; // se.north@fsm.test — shared across 16 specs, see fixtures/shared-auth-se.ts
 
 describe('SE soft-state controller (e2e)', () => {
   let app: INestApplication;
@@ -61,22 +62,9 @@ describe('SE soft-state controller (e2e)', () => {
     ).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-sc-' + NS, zoneId } })).plantId;
 
-    // The auth SE must exist as a users + engineer_master row (soft_states FK target). Upsert idempotently.
-    await prisma.user.upsert({
-      where: { userId: SE_ID },
-      create: { userId: SE_ID, name: 'SE North', role: 'SERVICE_ENGINEER', phone: 'ph-sc-' + NS, email: `se-sc-${NS}@x.test`, zoneId },
-      update: {},
-    });
-    await prisma.engineerMaster.upsert({
-      where: { engineerId: SE_ID },
-      create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 },
-      update: {},
-    });
-    await prisma.seCoverage.upsert({
-      where: { seId_plantId: { seId: SE_ID, plantId } },
-      create: { seId: SE_ID, plantId, coverageType: 'DEDICATED' },
-      update: {},
-    });
+    // The auth SE must exist as a users + engineer_master row (soft_states FK target) and must cover
+    // this spec's plant. Idempotent, and MULTI_PLANT so it cannot race the partial unique (#255).
+    await ensureSharedSeCoversPlant(prisma, { zoneId, plantId, tag: `sc-${NS}` });
 
     // A second, real SE with no coverage of `plantId` at all — the #162 wrong-SE regression case.
     const otherTag = randomUUID().slice(0, 8);
@@ -88,9 +76,14 @@ describe('SE soft-state controller (e2e)', () => {
   });
 
   afterAll(async () => {
-    await prisma.engineerMaster.deleteMany({ where: { engineerId: otherSeId } });
-    await prisma.user.deleteMany({ where: { userId: otherSeId } });
-    await prisma.seCoverage.deleteMany({ where: { seId: SE_ID, plantId } });
+    // se_coverage first: se_coverage_se_id_fkey is ON DELETE RESTRICT (#255 AC-3). And guard on
+    // `otherSeId` — if beforeAll threw before it was assigned, an undefined filter is dropped by
+    // Prisma and `deleteMany` would clear engineer_master wholesale.
+    await releaseSharedSePlantCoverage(prisma, plantId);
+    if (otherSeId) {
+      await prisma.engineerMaster.deleteMany({ where: { engineerId: otherSeId } });
+      await prisma.user.deleteMany({ where: { userId: otherSeId } });
+    }
     await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });

@@ -60,6 +60,20 @@ Section order is the resume order for future sessions.
 > exit 0 / 494 s") therefore **no longer reproduces, and #153 is not the reason**. → **#156**.
 > Treat any local "full suite green" claim from before that issue lands as unverified; CI (#107)
 > provisions a fresh DB per run and is immune.
+>
+> **2026-08-19/20 update — two of the three causes above are closed; the signal is usable again, with
+> one time-of-day caveat.** `test/global-setup.ts` **does** truncate now (`truncateTestDatabase`, #180
+> R2), so the "never truncates / leaks fixtures permanently" sentence above no longer describes this
+> repo — it is kept for the history it explains. The shared-fixture collision that made a red run need
+> hand-triage is closed by **#255** (`test/fixtures/shared-auth-se.ts` — the shared auth SE's coverage
+> is written MULTI_PLANT, so the `se_coverage_dedicated_se_key` partial unique cannot be raced). The
+> **#184** Windows worker crash remains, but `scripts/run-tests.mjs` detects and retries it, and both
+> runs below recovered every file. **Two full suites on one tree, 2026-08-19:** 388 files both times —
+> 18:03 IST 1890 passed / 2 failed, 23:33 IST 1889 passed / 3 failed, **zero suite-level `beforeAll`
+> failures in either**. **The current known-pre-existing failure list is 2 at any hour**
+> (`voucher-controller`, #187/#215) **and 3 between 00:00 and 05:30 IST** — plus
+> `plant-zone-change-impact`, whose fixture states a **UTC** day against an **IST**-day read (**#256**).
+> Anything beyond that list on a local run is worth treating as real.
 
 > **2026-08-13 — currency marker.** This document is current through **2026-08-13**. Reconciled this
 > session: **§3l is new** (the #232 commissioning cohort / install-quality endpoints, which existed as
