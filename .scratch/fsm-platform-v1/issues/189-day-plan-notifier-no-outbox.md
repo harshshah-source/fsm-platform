@@ -1,6 +1,6 @@
 # 189 — Day-plan dispatch notifier fires post-commit with no durable outbox — a crash silently loses the event
 
-Status: ready-for-agent
+Status: superseded → [#264](./264-day-plan-notification-outbox.md) (2026-08-20, #258 Part 7 ratified the outbox). This file stays as the defect record.
 Type: AFK · Backend defect (latent today, data-loss once real channels exist)
 
 Filed 2026-08-03 by operator directive (moved out of #76's 2026-07-28 comment — "memos get

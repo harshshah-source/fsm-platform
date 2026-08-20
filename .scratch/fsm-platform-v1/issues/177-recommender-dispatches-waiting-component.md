@@ -1,6 +1,6 @@
 # 177 — Recommender dispatches WAITING_COMPONENT tickets
 
-Status: ready-for-agent
+Status: ready-for-agent — **sequenced into P8 as a hard prerequisite of [#266](./266-score-selects-within-tier.md)** (2026-08-20 pre-implementation review). Two reasons: a selection rewrite belongs over a correct candidate pool, and [#268](./268-critical-direct-assignment.md)'s automatic CRITICAL direct assignment inherits this gap through the shared chooser — without the fix, component-blocked CRITICAL work would be pushed to SEs automatically and routinely rather than only via a manual path.
 Type: AFK · Backend
 
 Filed 2026-07-29 (found during the #179 bulk-unassign design investigation; companion to

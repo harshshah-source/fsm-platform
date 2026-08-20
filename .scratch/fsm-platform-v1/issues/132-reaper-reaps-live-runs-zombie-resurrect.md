@@ -1,5 +1,5 @@
 # 132 — Stale-run reaper reaps still-alive runs → concurrent double-drain + zombie `finishRun` resurrect
-Status: ready-for-agent
+Status: folded into [#261](./261-dispatch-run-heartbeat-reaper.md) item 5 (2026-08-20, #258 Q8.8): heartbeat-based liveness + conditional finishRun for the ingestion ledgers, alongside the new dispatch-run reaper. Evidence and ACs here remain the reference; execution happens under #261.
 Type: AFK
 
 > Source: pipeline risk audit 2026-07-16 (`docs/audits/pipeline-risk-audit-2026-07-16.md`, finding

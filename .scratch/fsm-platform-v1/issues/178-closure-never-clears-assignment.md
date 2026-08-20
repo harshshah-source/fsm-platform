@@ -1,6 +1,6 @@
 # 178 — Ticket closure never clears assignment state (351 closed tickets burn phantom capacity)
 
-Status: ready-for-agent
+Status: ready-for-agent — **sequenced into P8 as a hard prerequisite of [#269](./269-capacity-overload-visibility.md)** (2026-08-20 pre-implementation review). `committedDayLoad` has no ticket-status filter, so until this lands the capacity figure overcounts closed work until the 04:00 recycle — #269 would display that inflated number as fact, and [#268](./268-critical-direct-assignment.md) reads the same figure for its Q-B escalation decision. Fix the source before surfacing or escalating on it.
 Type: AFK · Backend
 
 Filed 2026-07-29 (found during the #179 bulk-unassign design investigation; independent companion —

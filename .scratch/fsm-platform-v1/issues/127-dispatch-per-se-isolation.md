@@ -1,5 +1,5 @@
 # 127 — Per-SE isolation in dispatchForZone (one SE's conflict must not fail the whole zone)
-Status: ready-for-agent
+Status: superseded → [#262](./262-per-se-dispatch-transactions.md) (2026-08-20, #258 Q8/Part 4). The APPEND half landed 2026-07-21; the isolation half (whole-zone tx rollback) is now #262 AC-1. No work happens under this number.
 Type: AFK
 
 > Source: #126 fix-design review (2026-07-16). Split out so #126 stays scoped to the no-wedge

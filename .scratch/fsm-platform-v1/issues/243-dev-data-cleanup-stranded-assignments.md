@@ -1,6 +1,7 @@
 # 243 — Development-data cleanup: stranded and dead assignment state
 
 Status: ready-for-human
+Ratified 2026-08-20 (#258 Part 10): C1/C2/C3 scope confirmed by the operator as part of the scheduler production-readiness decision set. Still HITL-gated — NOT executed; counts re-measured at execution time; runs only after explicit execution approval.
 Type: HITL · Data operation (no application code)
 
 Filed 2026-08-19. Approved scope (operator, 2026-08-19 brief §19) — **described here; execution

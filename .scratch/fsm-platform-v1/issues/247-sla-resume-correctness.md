@@ -1,6 +1,6 @@
 # 247 — SLA resume correctness: reason-checked resume + auto-resume on the return date
 
-Status: done (2026-08-19, `c5af9ee`)
+Status: done (2026-08-19, `c5af9ee`) — **AC2 ("sweep is the single automatic resumer") re-ruled 2026-08-20 by #258 Q7 → [#271](./271-sla-resume-outcome-boundary.md)**: resumption follows ticket outcome; the sweep keeps the vehicle-returned-no-submission case. Everything else here stands.
 Type: AFK · Backend
 
 Filed 2026-08-19. Approved Decision 16. Two halves: fix the existing `resumeSla` safety hole, and

@@ -1,6 +1,6 @@
 # 253 — A submission before the return date strands the primary SLA paused forever
 
-Status: ready-for-agent
+Status: superseded → [#271](./271-sla-resume-outcome-boundary.md) (2026-08-20). #258 Q7 ruled the re-ruling this issue said it needed: SLA resume branches on ticket outcome at the submission boundary. The scenario recorded here is #271 AC-1.
 Type: AFK · Backend
 
 Filed 2026-08-19 as a #247 follow-up (found while building it; deliberately **not** folded in, because
