@@ -1,6 +1,6 @@
 # 269 — Capacity overload visibility (no gate — Q2 ruled manual overload an administrative right)
 
-Status: **DONE 2026-08-20** (`docs/progress/269-capacity-overload-visibility.md`) — one shared predicate `src/scheduling/committed-day-load.ts` now serves the recommender's enforcement *and* every manager read; **three** counters collapsed, not the one the issue expected. Unblocks [#274](./274-assign-console-candidates.md) (P9), which consumes `{committed, dailyCapacity}` and defines no second counter.
+Status: **DONE 2026-08-20** (`178392e`, `docs/progress/269-capacity-overload-visibility.md`) — one shared predicate `src/scheduling/committed-day-load.ts` now serves the recommender's enforcement *and* every manager read; **three** counters collapsed, not the one the issue expected. Unblocks [#274](./274-assign-console-candidates.md) (P9), which consumes `{committed, dailyCapacity}` and defines no second counter.
 Type: AFK · Backend + Admin
 Decision: #258 Q2. Explicitly NOT a blocking/confirmation feature — visibility only.
 Consumed by: **#274** (Assign Work Console, P9) — this issue owns the **one** `{committed,
