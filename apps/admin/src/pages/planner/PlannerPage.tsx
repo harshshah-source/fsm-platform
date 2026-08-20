@@ -9,7 +9,8 @@ import {
 } from '../../api/planner';
 import { apiListSchedules, apiZoneEngineers, type ScheduleRow, type ZoneEngineer } from '../../api/schedules';
 import { DateRangeChips, FilterSelect, MetricStrip, PageHeader, type Metric } from '../../components/data';
-import { Badge } from '../../components/ui';
+import { Badge, LoadBadge } from '../../components/ui';
+import { isOverCapacity } from '../../lib/capacity';
 import { cn } from '../../lib/cn';
 import { addIsoDays, istIsoDate } from '../../lib/datetime';
 import { formatPlantDisplayName } from '../../lib/plantNames';
@@ -119,11 +120,22 @@ export function PlannerPage() {
 
   const metrics: Metric[] = useMemo(() => {
     const plannedSes = new Set(entries.map((e) => e.seId)).size;
+    // #269 — reference 16's `OVER SOFT CAP` tile. "Soft" is the point: it counts engineers the engine
+    // will not add to automatically, and every one of them can still be assigned to by hand (Q2).
+    const overCapacity = engineers.filter((e) =>
+      isOverCapacity({ committed: e.committed ?? 0, dailyCapacity: e.dailyCapacity }),
+    ).length;
     return [
       { label: 'Engineers', value: engineers.length, hint: 'in zone scope', tone: 'info' },
       { label: 'Plant Intents', value: entries.length, hint: `${dateFrom} – ${dateTo}`, tone: 'success' },
       { label: 'Planned SEs', value: plannedSes, hint: 'with ≥1 intent', tone: 'brand' },
-      { label: 'Window', value: `${WINDOW_DAYS}d`, hint: 'schedule cadence', tone: 'neutral' },
+      {
+        label: 'Over Capacity',
+        value: overCapacity,
+        hint: 'SEs at or above cap today',
+        tone: overCapacity > 0 ? 'critical' : 'neutral',
+        testId: 'planner-over-capacity',
+      },
     ];
   }, [engineers, entries, dateFrom, dateTo]);
 
@@ -189,6 +201,10 @@ export function PlannerPage() {
                     {d}
                   </th>
                 ))}
+                {/* #269 · reference 16 — the rightmost `LOAD / CAP` column. Today's committed day
+                    load over the SE's cap; the day columns hold plant *intent*, which is a soft bias
+                    rather than committed work, so the load belongs beside them, not inside them. */}
+                <th className={cn(th, 'text-right')}>Load / Cap</th>
               </tr>
             </thead>
             <tbody>
@@ -253,6 +269,13 @@ export function PlannerPage() {
                         </div>
                       </td>
                     ))}
+                    <td className="border-l border-line px-3 py-2.5 text-right">
+                      <LoadBadge
+                        seId={eng.engineerId}
+                        committed={eng.committed ?? 0}
+                        dailyCapacity={eng.dailyCapacity}
+                      />
+                    </td>
                   </tr>
                 );
               })}

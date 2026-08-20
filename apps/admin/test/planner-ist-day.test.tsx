@@ -83,8 +83,11 @@ describe('#204 — the planner window agrees with the backend at 00:15 IST', () 
   it('opens the grid on the IST date and spans seven IST days', async () => {
     render(<PlannerPage />);
     await waitFor(() => expect(screen.getByLabelText('SE Planner grid')).toBeInTheDocument());
+    // The day columns sit between the three identity columns and the trailing `Load / Cap` column
+    // (#269), so the window is asserted as its own slice — this test is about which IST days appear,
+    // not about how many columns the grid has.
     const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
-    expect(headers.slice(3)).toEqual([
+    expect(headers.slice(3, -1)).toEqual([
       '2026-08-10',
       '2026-08-11',
       '2026-08-12',

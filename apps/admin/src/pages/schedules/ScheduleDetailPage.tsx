@@ -15,6 +15,7 @@ import {
 import { Badge, Button } from '../../components/ui';
 import type { BadgeTone } from '../../components/ui/Badge';
 import { PlantName } from '../../components/domain';
+import { engineerOptionLabel } from '../../lib/capacity';
 
 /**
  * ZM Schedule detail (Issue 13b AC#2/#3/#4 · FE-12 parity, reference 12). The ordered stop list for one
@@ -441,9 +442,11 @@ function SePicker({
         className="rounded-md border border-line px-2 py-1 text-xs"
       >
         <option value="">Select…</option>
+        {/* #269 — the Swap / Reassign / Split target picker carries the same `n/cap` label as every
+            other assign surface, and marks over-capacity without ever disabling it (#258 Q2). */}
         {targets.map((e) => (
           <option key={e.engineerId} value={e.engineerId}>
-            {e.name ?? e.engineerId}
+            {engineerOptionLabel(e)}
           </option>
         ))}
       </select>

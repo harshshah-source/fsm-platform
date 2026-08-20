@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiListSchedules, type ScheduleRow } from '../../api/schedules';
+import { apiListSchedules, apiZoneEngineers, type ScheduleRow, type ZoneEngineer } from '../../api/schedules';
 import {
   DataTable,
   EmptyState,
@@ -9,7 +9,7 @@ import {
   type Column,
   type Metric,
 } from '../../components/data';
-import { Badge } from '../../components/ui';
+import { Badge, LoadBadge } from '../../components/ui';
 import type { BadgeTone } from '../../components/ui/Badge';
 import { IconCalendar } from '../../components/ui/icons';
 
@@ -34,6 +34,16 @@ const STATUS_TONE: Record<string, BadgeTone> = {
 export function SchedulesPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<ScheduleRow[]>([]);
+  /**
+   * #269 — the SEs' committed day load, keyed by seId. Joined from `/schedules/engineers` rather than
+   * derived from `ScheduleRow.ticketCount`, which counts one *schedule*: a floating SE working two
+   * zones has two of them, so that figure beside a whole-day cap would understate the load on exactly
+   * the engineers most at risk of being overloaded. One definition, everywhere.
+   *
+   * A failure here is deliberately not a page error — the schedule list is the primary content and
+   * still reads correctly without the column.
+   */
+  const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +55,9 @@ export function SchedulesPage() {
       .then((r) => alive && setRows(r))
       .catch(() => alive && setError('Failed to load schedules'))
       .finally(() => alive && setLoading(false));
+    apiZoneEngineers()
+      .then((e) => alive && setEngineers(e))
+      .catch(() => alive && setEngineers([]));
     return () => {
       alive = false;
     };
@@ -108,6 +121,19 @@ export function SchedulesPage() {
       render: (r) => <span className="tabular-nums">{r.ticketCount}</span>,
       sortable: true,
       sortValue: (r) => r.ticketCount,
+    },
+    {
+      key: 'load',
+      header: 'Load / Cap',
+      align: 'right',
+      render: (r) => {
+        const eng = engineers.find((e) => e.engineerId === r.seId);
+        return eng ? (
+          <LoadBadge seId={r.seId} committed={eng.committed ?? 0} dailyCapacity={eng.dailyCapacity} />
+        ) : (
+          <span className="text-ink-muted">—</span>
+        );
+      },
     },
     {
       key: 'status',

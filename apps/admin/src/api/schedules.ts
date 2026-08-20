@@ -84,6 +84,15 @@ export interface ZoneEngineer {
   name?: string | null;
   coverageType: string;
   zoneId: string;
+  /**
+   * #269 — live day-plan stops the SE already carries today, from the one backend definition the
+   * recommender enforces against. `dailyCapacity` shipped without this and was therefore rendered
+   * nowhere; every picker fed by this type now shows `committed / dailyCapacity`.
+   *
+   * Optional on the client only so a surface reading a cached or older payload degrades to showing
+   * the name alone rather than "undefined/6".
+   */
+  committed?: number;
   dailyCapacity: number;
   isActive: boolean;
 }

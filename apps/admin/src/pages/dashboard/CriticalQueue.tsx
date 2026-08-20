@@ -10,6 +10,7 @@ import {
 import { DeferralConfirm, DurationBadge, PlantName, TierBadge } from '../../components/domain';
 import { FilterSelect } from '../../components/data';
 import { Badge, Button } from '../../components/ui';
+import { engineerOptionLabel } from '../../lib/capacity';
 
 /**
  * Grouped Critical Work Queue (Issue 06 AC#4 + Issue 13b AC#6 · FE-06). CRITICAL+ open tickets grouped
@@ -153,9 +154,11 @@ function AssignControl({
             className="h-8 text-xs"
           >
             <option value="">Select SE…</option>
+            {/* #269 — `name — n/cap · over capacity`. An `<option>` cannot carry a badge, so the
+                marking is words; the option stays selectable either way (#258 Q2 — no gate). */}
             {engineers.map((e) => (
               <option key={e.engineerId} value={e.engineerId}>
-                {e.name ?? e.engineerId}
+                {engineerOptionLabel(e)}
               </option>
             ))}
           </FilterSelect>

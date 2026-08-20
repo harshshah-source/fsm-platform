@@ -8,7 +8,7 @@ import { type ActiveOverride, resolveActiveOverrides, tierOverrideKey } from '..
 import { PrismaService } from '../prisma/prisma.service';
 import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
 import { readAssignmentThresholdHours } from '../settings/assignment-threshold';
-import { liveScheduleFilter } from '../scheduling/schedule-status';
+import { committedDayLoad } from '../scheduling/committed-day-load';
 import { notDeferredOn, returnDateArrivedBefore } from '../ticketing/deferral';
 import { CandidateSelectionService } from './candidate-selection.service';
 import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
@@ -915,25 +915,22 @@ export class RecommenderService {
   /**
    * NEW-A1 — an SE's already-committed workload for `day`, counted as active batch stops across ALL their
    * live work schedules covering that date (every zone, every prior run today, plus intraday inserts —
-   * all of which land as day-plan stops). This is the same "used" unit the transparency ledger displays
-   * (`capacityUsed.used` = the SE's non-removed batch tickets), so enforcement and display agree. It is
-   * read once at run start and used to seed the per-run `assigned` counter; the current zone's own
-   * suggestions are not yet dispatched (they add via the in-run increment), so there is no double count.
+   * all of which land as day-plan stops). Read once at run start to seed the per-run `assigned`
+   * counter; the current zone's own suggestions are not yet dispatched (they add via the in-run
+   * increment), so there is no double count.
+   *
+   * **#269 moved the predicate out of this class** to `scheduling/committed-day-load.ts`. Enforcement
+   * used to agree with display by coincidence — three services counted "committed" three different
+   * ways and nothing rendered any of them beside `daily_capacity`, so the disagreement never showed.
+   * #269 renders it on every manager picker, so the two must now be the *same* function, and
+   * `capacity-overload-visibility.e2e-spec.ts` asserts they stay that way through both public seams.
+   * Keep delegating: a private re-implementation here is the exact drift that test exists to catch.
    *
    * #153 — "live" includes OVERRIDDEN. A ZM adjusting a day plan does not un-commit the work still on
    * it; counting only ACTIVE zeroed the SE's load and let the next run hand them a whole second day.
    */
-  private async committedDayLoad(day: Date): Promise<Map<string, number>> {
-    const rows = await this.prisma.batchAssignmentTicket.findMany({
-      where: {
-        removedAt: null,
-        batch: { schedule: { ...liveScheduleFilter(), dateFrom: { lte: day }, dateTo: { gte: day } } },
-      },
-      select: { batch: { select: { seId: true } } },
-    });
-    const load = new Map<string, number>();
-    for (const r of rows) load.set(r.batch.seId, (load.get(r.batch.seId) ?? 0) + 1);
-    return load;
+  private committedDayLoad(day: Date): Promise<Map<string, number>> {
+    return committedDayLoad(this.prisma, day);
   }
 }
 

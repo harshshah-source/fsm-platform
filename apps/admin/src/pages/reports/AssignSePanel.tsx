@@ -5,6 +5,7 @@ import type { DeviceFilterOptions } from '../../api/devices';
 import { FilterSelect, SearchInput, useToastOptional } from '../../components/data';
 import { Badge, Button } from '../../components/ui';
 import { IconClose, IconPlus } from '../../components/ui/icons';
+import { formatLoad, isOverCapacity } from '../../lib/capacity';
 import { cn } from '../../lib/cn';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 
@@ -188,8 +189,14 @@ export function AssignSePanel({
                   />
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-ink-strong">{e.name}</span>
+                    {/* #269 — the roster line now answers "can they carry it?": today's committed
+                        load over the cap, in the same `n/cap` vocabulary as every other assign
+                        surface. Marked over capacity, never disabled (#258 Q2 — no gate). */}
                     <span className="block text-[11px] text-ink-muted">
-                      {e.coverageType} · {e.activeTicketCount} active ticket{e.activeTicketCount === 1 ? '' : 's'}
+                      {e.coverageType} · {formatLoad({ committed: e.activeTicketCount, dailyCapacity: e.dailyCapacity })}
+                      {isOverCapacity({ committed: e.activeTicketCount, dailyCapacity: e.dailyCapacity }) && (
+                        <span className="ml-1 font-semibold text-critical">over capacity</span>
+                      )}
                     </span>
                   </span>
                   <Badge tone={ACTIVITY_TONE[e.activityStatus] ?? 'neutral'} className="ml-auto shrink-0">

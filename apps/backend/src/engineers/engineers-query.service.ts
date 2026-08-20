@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client';
 import { type CoverageType } from '../generated/prisma/enums';
 import { type CommonKitMissing, InventoryService, type VanStockItem } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { committedDayLoad } from '../scheduling/committed-day-load';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 import { type ActivityStatus, deriveActivityStatus, resolveShiftEnd } from '../soft-state/activity-status';
 import { type AvailabilityRow, SeAvailabilityService } from './se-availability.service';
@@ -23,7 +24,16 @@ export interface EngineerListRow {
   activityStatus: ActivityStatus;
   /** Stored planning flag (the active window's status, else AVAILABLE). */
   availabilityStatus: string;
-  /** Open tickets in the SE's current (active) day-plan batches. */
+  /**
+   * The SE's **committed day load** for the requested day — live day-plan stops, from the one
+   * {@link committedDayLoad} definition (#269).
+   *
+   * Read it against `dailyCapacity`: the directory renders `activeTicketCount / dailyCapacity` and
+   * marks the over-capacity case, which is visibility only — assignment is never blocked (#258 Q2).
+   * Until #269 this counted every live batch the SE had, with **no date filter**, so a plan from an
+   * earlier day that nothing had closed counted against today. The field name and the response shape
+   * are unchanged; what changed is that the number is now the one the recommender enforces against.
+   */
   activeTicketCount: number;
   kitComplete: boolean;
   missingKit: CommonKitMissing[];
@@ -97,7 +107,7 @@ export class EngineersQueryService {
 
     const availabilityBySe = await this.availability.currentStatusMany(seIds, now);
     const softStatesBySe = await this.activeSoftStatesBySe(seIds);
-    const ticketCountBySe = await this.activeTicketCountBySe(seIds);
+    const ticketCountBySe = await committedDayLoad(this.prisma, now, { seIds });
     const kitBySe = new Map(
       await Promise.all(seIds.map(async (id) => [id, await this.inventory.commonKitStatus(id)] as const)),
     );
@@ -283,23 +293,6 @@ export class EngineersQueryService {
       const list = map.get(r.seId) ?? [];
       list.push(r.type);
       map.set(r.seId, list);
-    }
-    return map;
-  }
-
-  /** Count of OPEN tickets in each SE's active day-plan batches. */
-  private async activeTicketCountBySe(seIds: string[]): Promise<Map<string, number>> {
-    const batches = await this.prisma.plantBatchAssignment.findMany({
-      where: {
-        seId: { in: seIds },
-        status: { in: ['AUTO_ASSIGNED', 'OVERRIDDEN'] },
-        schedule: liveScheduleFilter(),
-      },
-      include: { tickets: { where: { removedAt: null }, select: { ticketId: true } } },
-    });
-    const map = new Map<string, number>();
-    for (const b of batches) {
-      map.set(b.seId, (map.get(b.seId) ?? 0) + b.tickets.length);
     }
     return map;
   }

@@ -15,7 +15,7 @@ import {
   PageHeader,
   type Column,
 } from '../../components/data';
-import { Badge, Button, Field, Input } from '../../components/ui';
+import { Badge, Button, Field, Input, LoadBadge } from '../../components/ui';
 import { FilterSelect } from '../../components/data';
 import { istWindowEndDate, istWindowStartDate } from '../../lib/datetime';
 import { PlantName, SLABadge } from '../../components/domain';
@@ -134,10 +134,14 @@ export function SeManagementPage() {
       render: (r) => <span className="text-ink-muted">{r.availabilityStatus}</span>,
     },
     {
+      // #269 — the count had no reference point: "4" says nothing until you know the cap is 6 or 3,
+      // and `dailyCapacity` was already on this very row, unused. Now `n/cap`, marked at or above cap.
       key: 'tickets',
-      header: 'Active Tickets',
+      header: 'Load / Cap',
       align: 'right',
-      render: (r) => <span className="tabular-nums">{r.activeTicketCount}</span>,
+      render: (r) => (
+        <LoadBadge seId={r.seId} committed={r.activeTicketCount} dailyCapacity={r.dailyCapacity} />
+      ),
     },
     {
       key: 'kit',

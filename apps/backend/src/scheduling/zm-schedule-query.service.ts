@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { committedDayLoad } from './committed-day-load';
 import { LIVE_SCHEDULE_STATUSES } from './schedule-status';
 
 export interface ZmScope {
@@ -27,6 +28,14 @@ export interface ZoneEngineerRow {
   name: string | null;
   coverageType: string;
   zoneId: string;
+  /**
+   * #269 — live day-plan stops the SE is already carrying for the requested day, from the one
+   * {@link committedDayLoad} definition the recommender enforces against. The numerator
+   * `dailyCapacity` never had: every picker fed by this row shows `committed / dailyCapacity`, and
+   * `committed >= dailyCapacity` is marked but **never blocked** (#258 Q2 — overload is an
+   * administrative right, so it is a seen decision rather than a refused one).
+   */
+  committed: number;
   dailyCapacity: number;
   isActive: boolean;
 }
@@ -177,17 +186,22 @@ export class ZmScheduleQueryService {
    * zone; cross-zone roles (CSM / Operations Head) see all. Distinct from the Ops-Head-only
    * `/api/org/engineers`, which a ZM cannot read.
    */
-  async listZoneEngineers(scope: ZmScope): Promise<ZoneEngineerRow[]> {
+  async listZoneEngineers(scope: ZmScope, now: Date = new Date()): Promise<ZoneEngineerRow[]> {
     const engineers = await this.prisma.engineerMaster.findMany({
       where: { isActive: true, ...this.zoneFilter(scope) },
       orderBy: { engineerId: 'asc' },
       include: { user: { select: { name: true } } },
     });
+    // #269 — one extra query for the whole picker, scoped to the SEs actually being returned. The
+    // load is deliberately NOT zone-filtered: `daily_capacity` caps the engineer's day, and a
+    // floating SE's work in a neighbouring zone is still work they have to do.
+    const load = await committedDayLoad(this.prisma, now, { seIds: engineers.map((e) => e.engineerId) });
     return engineers.map((e) => ({
       engineerId: e.engineerId,
       name: e.user?.name ?? null,
       coverageType: e.coverageType,
       zoneId: String(e.zoneId),
+      committed: load.get(e.engineerId) ?? 0,
       dailyCapacity: e.dailyCapacity,
       isActive: e.isActive,
     }));

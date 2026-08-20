@@ -595,7 +595,7 @@ plant's open-ticket companies, surfaced in the Plant Zones confirm dialog (AC-9)
 |---|---|---|
 | VEHICLE_ON_TRIP | readiness = ON_TRIP | **Stubbed `'UNKNOWN'` constant** (`:152`) — Issue 28 VU is a ZM review flow, not wired as a feed; this filter can never fire in production |
 | SE_UNAVAILABLE | not (`engineer_master.is_active` AND current `se_availability` window = AVAILABLE) | real (`se-availability.service.ts`) |
-| OVER_CAPACITY | assigned-today count ≥ `engineer_master.daily_capacity` | real — **whole-day** count (NEW-A1 fix 2026-07-21): the per-run `assigned` map is seeded from `committedDayLoad(day)` (non-removed `batch_assignment_tickets` across ALL the SE's ACTIVE `work_schedules` for the run day), so cap is enforced across zones + prior runs + intraday inserts, not just this zone-run |
+| OVER_CAPACITY | assigned-today count ≥ `engineer_master.daily_capacity` | real — **whole-day** count (NEW-A1 fix 2026-07-21): the per-run `assigned` map is seeded from `committedDayLoad(day)` (non-removed `batch_assignment_tickets` across ALL the SE's ACTIVE `work_schedules` for the run day), so cap is enforced across zones + prior runs + intraday inserts, not just this zone-run. **#269 (2026-08-20) moved that predicate to `src/scheduling/committed-day-load.ts` as the ONE definition** — the recommender delegates to it and so does every manager read, so what a dispatcher is shown is what this filter enforces (pinned by `capacity-overload-visibility.e2e-spec.ts`, which runs a dry-run of the real recommender against the picker payload). It had forked twice before: `EngineersQueryService` counted the same thing with **no date filter**, `ZmScheduleRow.ticketCount` counted one schedule rather than one day; both are retired. Since #178, `removed_at IS NULL` also excludes work that has finished. |
 | COMMON_KIT_INCOMPLETE | `se_van_stock` fails `common_kit_definition` min quantities | real (`InventoryService.commonKitStatus`) |
 | COMPONENT_UNAVAILABLE | expected components OOS | **Stubbed `true`** — expected-component leg is open #51 |
 
@@ -808,6 +808,24 @@ pages consume real API clients; remaining gated placeholders are *documented omi
 missing backend endpoints (#90 work-type mix, #94 ticket chrome, #74 scorecard causality).
 Known FE gaps: `window.prompt` reason legs (#80), Playwright visual baseline (FE-00 partial),
 `components/data/` untracked by git (#114).
+
+**#269 capacity is visible on the admin (done, 2026-08-20):** `daily_capacity` shipped with Issue 13b
+and was rendered in **zero** places — it had no numerator, so an overload today was discoverable only
+by counting an SE's batch rows by hand. The backend now supplies `committed` from the one
+`committedDayLoad` definition the recommender enforces against, and five surfaces render
+`committed / dailyCapacity`: the **SE Planner grid** (a rightmost `Load / Cap` column plus an
+`Over Capacity` KPI tile — both drawn in v2 reference 16 and built to the image), the **Batch Schedule
+list** (joined from `/schedules/engineers`, deliberately *not* from `ScheduleRow.ticketCount`, which
+counts one schedule rather than one day), the **SE Management directory** (its bare "Active Tickets"
+column gained the denominator), and the **assign pickers** — Critical queue, Swap/Reassign/Split
+targets, commissioning cohort, and the Device-Detail `AssignSePanel`. (The cohort picker's own line
+lands with the **uncommitted #236** work — that control does not exist at HEAD, so its three lines
+could not be committed with #269.) One vocabulary behind all of
+them: `lib/capacity.ts` (`isOverCapacity` / `formatLoad` / `engineerOptionLabel`) + `ui/LoadBadge`,
+so no surface can answer "is this engineer full?" with its own inline comparison. Marked at
+`committed >= dailyCapacity`, matching the engine's own `OVER_CAPACITY` drop. **Visibility only** —
+#258 Q2 rules manual overload an administrative right, so nothing here disables an option, blocks a
+button or interposes a confirmation, and that is pinned by test on both the admin and backend sides.
 
 **#160 admin table & chrome UX pass (done, 2026-07-27/28):** `TopBar` renders a real breadcrumb
 (`shell/breadcrumb.ts` `resolveBreadcrumb`, off `buildNav` + a small detail-route table) — the former
