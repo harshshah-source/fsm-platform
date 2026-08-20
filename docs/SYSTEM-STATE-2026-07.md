@@ -73,6 +73,8 @@ Section order is the resume order for future sessions.
 > failures in either**. The time-of-day failure those runs exposed — `plant-zone-change-impact`,
 > whose fixture stated a **UTC** day against an **IST**-day read and so was red only from 00:00 to
 > 05:30 IST — is closed by **#256**, with a 24-hour pin so it cannot drift back unnoticed.
+> A third full run after that fix (05:25 IST, 388 files) came back **1892 passed / 2 failed / 5
+> skipped in a single pass, no crash-retry** — the whole red surface being the one file below.
 > **The current known-pre-existing failure list is 2, at every hour, with no caveat:**
 > `voucher-controller` (#187, compounded by #215 — the two must land together or it fails harder).
 > Anything beyond that on a local run is worth treating as real.

@@ -69,7 +69,10 @@ Sensitivity probe: revert `scheduleDay` to `setUTCHours(0,0,0,0)` → **both** t
 the pin turn red; restore → green, restored file `diff`-verified byte-identical. The pin's red is the
 one that matters, because it is the one that would still fire at 14:00.
 
-Full backend suite after the fix: see the session-log row in INDEX.
+Full backend suite after the fix (run 3, started 05:25 IST — i.e. begun inside the failing window):
+**388 files, 1892 passed / 2 failed / 5 skipped, in a single pass with no #184 crash-retry.** The 2
+failures are the `voucher-controller` pair and nothing else — the first full run in this sequence
+whose entire red surface is that one known file. `plant-zone-change-impact` reported 5/5.
 
 ## The sweep (AC3) — four other candidates, all safe
 
