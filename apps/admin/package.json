@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:seam": "vitest run --config vitest.seam.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "echo \"(no lint configured yet)\"",

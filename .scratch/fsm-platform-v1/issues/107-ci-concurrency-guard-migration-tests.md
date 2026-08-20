@@ -26,9 +26,9 @@ and route-guard findings can't currently regress-fail.
 
 - [x] CI runs on push/PR: migrate-from-zero → backend suite + admin vitest + tsc + builds, all green, against a disposable DB. *(`.github/workflows/ci.yml`, 2026-07-22.)*
 - [x] A migration-from-zero test asserts a clean migrate with no drift (beyond `SELECT 1`) — **scoped to NEW drift** by operator decision; see "Drift gate" below.
-- [ ] A route-guard sweep test exists (here or referenced from #99) and fails on an unguarded route.
-- [ ] A documented, reusable concurrency-test pattern exists; at least one representative `Promise.all` double-invoke test runs in CI.
-- [ ] The pipeline is documented (how to run locally, how the disposable DB is provisioned).
+- [x] A route-guard sweep test exists (here or referenced from #99) and fails on an unguarded route. *(Owned by #99: `global-guard-validation.e2e-spec.ts:96` walks the real route map with a conscious allowlist. Verified 2026-08-20 by probe — marking `VouchersController` `@Public()` turned it red naming 12 leaked routes; restored.)*
+- [x] A documented, reusable concurrency-test pattern exists; at least one representative `Promise.all` double-invoke test runs in CI. *(`test/support/concurrency.ts` + `test/concurrency-harness.e2e-spec.ts`, 8 tests. See "Slice 3" below for why a barrier, not bare `Promise.all`.)*
+- [x] The pipeline is documented (how to run locally, how the disposable DB is provisioned) — [`docs/ci-pipeline.md`](../../../docs/ci-pipeline.md).
 
 ### Added 2026-07-22 — adversarial review v3 (`docs/audits/2026-07-22-adversarial-review-admin-backend.md`)
 
@@ -36,7 +36,7 @@ and route-guard findings can't currently regress-fail.
 
 - [x] **The CI test step asserts vitest's own exit code.** The two suite steps are bare `pnpm test` with `working-directory` set — no pipe anywhere in the workflow, with a comment recording why. *(The deliberate-break confirmation still needs a real Actions run — see "Remaining".)*
 - [x] **CI runs both suites in full** — separate `Backend suite` / `Admin suite` steps running bare `pnpm test`: no `-t` filter, no file list, no subset. *(Rationale: the #128 session ran a careful, deliberate four-suite regression sweep and still missed N4, because the broken test lay outside the blast radius the author imagined — no amount of diligence reliably selects the right subset.)*
-- [ ] **N3 — the admin→backend HTTP seam has unmocked coverage in the pipeline:** at least one smoke test exercises admin→backend over real HTTP against a booted backend, **or** `apps/admin/visual/` is promoted into the pipeline with a CI-started dev server. Whichever is chosen is documented as the seam's owner.
+- [x] **N3 — the admin→backend HTTP seam has unmocked coverage in the pipeline:** at least one smoke test exercises admin→backend over real HTTP against a booted backend, **or** `apps/admin/visual/` is promoted into the pipeline with a CI-started dev server. Whichever is chosen is documented as the seam's owner.
 - [x] The issue's blocker record is corrected (see "Blockers cleared" below) so no future session re-parks this on obsolete grounds.
 
 ### Drift gate — scoped to NEW drift (operator decision, 2026-07-22)
@@ -77,6 +77,79 @@ against a *booted* database the gate correctly reports `runtime_lock` as new dri
   to fail on new drift — but it has **never executed on GitHub Actions**. The deliberate-break
   confirmation must be done on a real run, and the first push should be treated as the real test of
   the DB-provisioning and `pnpm/action-setup` steps.
+
+---
+
+## 2026-08-20 — the finding that reframes this issue: CI had never run a test
+
+**106 runs. 106 failures. Zero tests executed — ever.**
+
+The workflow has been live and triggering on every push since 2026-07-22. The "first-run verification"
+item below was stale in the worst possible direction: it had not merely run, it had run 106 times and
+failed every single time, and nobody looked past the red dot.
+
+The cause was the `Schema drift gate` (step 7 of 10), failing on **two cosmetic drift lines** that
+appeared after the 2026-07-22 baseline was written:
+
+- `media_objects.media_id` — the **fourth** `gen_random_uuid()` DB default whose three siblings
+  (`voucher_id`, `submission_id`, `run_id`) were already baselined. Landed 2026-08-04.
+- `company_tier_overrides_lookup_idx` — the **19th** short index name, of a class with 18 baselined.
+
+Both are exactly the classes the baseline exists to tolerate; the gate was working as designed and the
+baseline was stale. But because a failed step skips the rest of the job, **all three suite steps were
+marked *skipped* on every one of those runs.** The pipeline written to stop "both suites were red and
+nobody knew" was itself running no suites, and nobody knew — the same failure, one level up.
+
+### What changed as a result
+
+1. **Baseline updated** (+4 lines, both tolerated classes, provenance recorded in the file header).
+2. **The suites now run regardless** — `if: '!cancelled()'` on all three suite steps and the new seam
+   step. The gates still fail the job; nothing was softened. But the primary signal can no longer be
+   switched off by an unrelated earlier step. **This is the structural fix**: the baseline going stale
+   again is a matter of time, and next time it must cost a red gate, not every test in the repository.
+3. `docs/ci-pipeline.md` records the failure mode so the next person reads it as history rather than
+   rediscovering it.
+
+### Pre-flight before trusting the first green run
+
+**GitHub runners are UTC; this repo's developers are on IST**, and that gap has already produced two
+defects this week (#256, a spec red 5½ hours a night; #254, a cron firing five hours after the batch it
+feeds). The full backend suite was therefore run locally under **`TZ=UTC`** before pushing — the
+single highest-value thing that can be checked without a runner. Result recorded in the session log.
+
+## Slice 3 — the concurrency scaffolding, and why a barrier
+
+`await Promise.all([f(), g()])` — the pattern four specs already use — starts both calls but does not
+make them overlap where it matters. Both are entered on one thread: the first runs to its first `await`
+before the second begins. A read-modify-write with no `await` between the read and the write is
+therefore **atomic**, and the interleaving that loses an update is *unreachable* — so a test asserting
+"no lost update" passes without ever having tried the case it claims to cover.
+
+`test/support/concurrency.ts` adds a two-party release barrier: each invocation calls `arrive()` at the
+contended point and neither proceeds until both are there. Overlap becomes a property of the harness
+rather than of scheduling luck. The spec **demonstrates the difference rather than asserting it** — the
+same read-modify-write loses exactly one update every time under `raceTwice`, and loses none under
+`raceTwiceUnbarriered`.
+
+Also provided: `expectExactlyOneWinner`, which states the assertion double-invoke tests actually want —
+one winner, one clean no-op **or** a clean rejection, and the end state identical *whichever* won,
+because that is the part a passing run must not depend on. `raceTwiceUnbarriered` is kept for code with
+no injection point, with the docstring requiring the test name to say it is a start-together race.
+
+## Slice 4 — N3, the admin→backend seam
+
+`apps/admin/test/seam/admin-backend-http.seam.test.ts`, run by its own `vitest.seam.config.ts` and its
+own CI step that boots the real backend against `fsm_test` (already migrated and seeded by the backend
+suite, which is where the fixture credentials live). **Excluded from `pnpm test`** — a suite that goes
+red whenever you have not started a backend gets ignored, and an ignored suite is worse than none.
+
+One flaw found and fixed while building it, worth recording because it is the failure mode seam tests
+are prone to: the first draft read the base URL from a bespoke `SEAM_API_URL` while the client read its
+own `VITE_API_URL`. It passed 4/4 — with the client talking to a **stale backend on the default port**
+and the raw fetches talking to the one under test. A seam test measuring two different servers and
+reporting green. Both now derive from the single expression the client itself uses, and a test asserts
+`VITE_API_URL` is set at all, so the divergence is unconstructible. Verified red against a dead backend
+(3 of 5 fail) — it can no longer pass by accident.
 
 ## UI surfaces
 n/a (test/infra)

@@ -2,16 +2,27 @@
 # CI fails on any drift line NOT listed here. Regenerate deliberately with
 #   node scripts/check-schema-drift.mjs --write
 #
-# All 72 lines below are COSMETIC — 18 renamed indexes, 1 renamed foreign key, and FK/default
+# All 76 lines below are COSMETIC — 19 renamed indexes, 1 renamed foreign key, and FK/default
 # annotation differences, caused by hand-written migrations using short index names where Prisma's
 # introspected default naming differs. Discovered 2026-07-22 while verifying #144; normalising them
 # is deferred to #152, at which point this file shrinks to empty.
+#
+# 2026-08-20 (#107): +4 lines, both of classes already listed here, added by work that landed AFTER
+# the 2026-07-22 baseline — `media_objects.media_id` is the FOURTH `gen_random_uuid()` DB default
+# whose siblings (`voucher_id`, `submission_id`, `run_id`) were already baselined, and
+# `company_tier_overrides_lookup_idx` is the 19th short index name. Nothing structural.
+# THIS IS WHY CI HAD NEVER BEEN GREEN: the gate runs before the suites, so from the day this drift
+# appeared the job failed here and all three suite steps were SKIPPED — 106 runs, zero tests ever
+# executed. The suite steps now run regardless (ci.yml `if: !cancelled()`), so a cosmetic gate can
+# never again hide every test in the repository.
 #
 # DELIBERATELY NOT LISTED: `runtime_lock`. That table is created at BOOT by
 # PrismaService.onModuleInit (#130 L1 build-fingerprint lock), not by any migration, so it is not
 # migration drift. Run this gate against a database built by `migrate deploy` ONLY and never booted
 # (CI uses a dedicated `fsm_drift` database) — against a booted DB it will correctly report
 # runtime_lock as new drift.
+[*] Changed the `company_tier_overrides` table
+  [*] Renamed index `company_tier_overrides_lookup_idx` to `company_tier_overrides_company_id_zone_id_status_expires_at_idx`
 [*] Changed the `component_blocked_queue` table
   [-] Removed index on columns (blocked_at)
 [*] Changed the `component_request` table
@@ -46,6 +57,8 @@
   [-] Removed foreign key on columns (ticket_id)
   [+] Added foreign key on columns (ticket_id)
   [+] Added foreign key on columns (submission_id)
+[*] Changed the `media_objects` table
+  [*] Altered column `media_id` (default changed from `Some(DbGenerated(Some("gen_random_uuid()")))` to `None`)
 [*] Changed the `notification_deliveries` table
   [*] Renamed index `notification_deliveries_notification_idx` to `notification_deliveries_notification_id_idx`
 [*] Changed the `notifications` table

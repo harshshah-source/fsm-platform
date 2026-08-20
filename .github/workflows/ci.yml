@@ -107,11 +107,24 @@ jobs:
       # NEVER pipe these into tail/head/tee. During the 2026-07-22 review `vitest … | tail -60`
       # reported "exit code 0" — that was tail's status, not vitest's, on a suite that was red.
       # `set -o pipefail` is not a substitute: just do not pipe.
+      #
+      # `if: '!cancelled()'` on all three suite steps (#107, 2026-08-20) — NOT a softening of the
+      # gates above, which still fail the job. It exists because of what actually happened: from
+      # the day a cosmetic drift line appeared (a renamed index and a `gen_random_uuid()` default)
+      # the drift gate failed, every suite step was SKIPPED as a dependent, and the job went red
+      # for a reason that had nothing to do with any test. That ran for 106 consecutive red runs
+      # in which ZERO tests ever executed — the pipeline written to stop 'both suites were red and
+      # nobody knew' was itself running no suites, and nobody knew. A pipeline whose test signal
+      # can be switched off entirely by an unrelated earlier step is worth less than the sum of
+      # its steps; the suites are the primary product and must report on every run that gets far
+      # enough to run them.
       - name: Backend suite
+        if: '!cancelled()'
         working-directory: apps/backend
         run: pnpm test
 
       - name: Admin suite
+        if: '!cancelled()'
         working-directory: apps/admin
         run: pnpm test
 
@@ -121,5 +134,36 @@ jobs:
       # knew. Mobile would have been the third instance. The suite is green today (verified
       # 2026-07-28) — this step is what keeps that claim true.
       - name: Mobile suite
+        if: '!cancelled()'
         working-directory: apps/mobile
         run: pnpm test
+
+      # --- #107 N3: the admin -> backend HTTP seam, unmocked ----------------------------------
+      # Every other admin test mocks `fetch`, so a backend that renames a field, changes a status
+      # code or moves a route stays green on BOTH sides and breaks only in a browser. This step boots
+      # the real backend and drives it through the admin's own `src/api/client.ts`.
+      #
+      # It runs against `fsm_test`, which the backend suite above has already migrated and seeded —
+      # that is where the `*@fsm.test` fixture credentials the seam logs in with live.
+      #
+      # VITE_API_URL, not a bespoke variable: it is the exact env var the client itself reads, so the
+      # test and the code under test cannot end up pointed at different servers. (An earlier draft used
+      # a separate SEAM_API_URL and passed while the client talked to a stale default-port backend.)
+      - name: Admin -> backend seam (unmocked HTTP)
+        if: '!cancelled()'
+        env:
+          DATABASE_URL: postgresql://fsm:fsm@localhost:5432/fsm_test?schema=public
+          PORT: '3100'
+          VITE_API_URL: http://127.0.0.1:3100/api
+        run: |
+          set -euo pipefail
+          node -r dotenv/config apps/backend/dist/main.js &
+          backend=$!
+          trap 'kill $backend 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:3100/api/health >/dev/null && break
+            if ! kill -0 $backend 2>/dev/null; then echo 'backend exited during boot'; exit 1; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:3100/api/health >/dev/null || { echo 'backend never became healthy'; exit 1; }
+          pnpm --filter @fsm/admin test:seam
