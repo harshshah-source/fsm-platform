@@ -253,4 +253,25 @@ describe('#266 — the score selects the SE within the coverage tier', () => {
 
     await setClusterMultiplier(1.25);
   });
+
+  it('AC — the capacity counter and the plant set both follow the SCORED winner', async () => {
+    // Both in-run counters used to be keyed on `passed[0]`. They are now keyed on whoever the score
+    // chose, and this checks they moved together — a counter still following precedence would be the
+    // subtle version of this bug: the right engineer is dispatched while the wrong one is debited,
+    // so capacity is enforced against an engineer who was never given the work.
+    await setClusterMultiplier(1.25);
+    const summary = await rec.runForZone(zoneId, { now: NOW, dryRun: true, targetDate: NOW });
+    const mine = (summary.projection?.decisions ?? []).filter((d) => d.seId === seHigh);
+
+    // Both tickets at this plant go to the clustered SE: the first because they arrived with the plant
+    // on their day plan, the second because winning the first ADDED it to their in-run set — the
+    // growth half of Q-A, which is what stops clustering being a property of the day plan alone.
+    expect(mine).toHaveLength(2);
+
+    // And the capacity counter advanced for that same engineer across the two decisions, rather than
+    // staying put or debiting the `se_id` winner. The seeded stop counts too, so this starts above 0.
+    const used = mine.map((d) => d.capacityAtDecision?.used ?? null);
+    expect(used[0]).not.toBeNull();
+    expect(used[1]).toBe((used[0] as number) + 1);
+  });
 });
