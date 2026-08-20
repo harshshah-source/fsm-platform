@@ -1,6 +1,6 @@
 # 266 — Scoring selects the SE within the coverage tier, and the cluster multiplier becomes candidate-specific
 
-Status: **partial — slice 1 landed 2026-08-21 (`8303f2d`)**; tier grouping + per-candidate scoring + Q-A clustering + floored base are in. Remaining: trace/breakdown correctness (item 4), the three dead seeded weights (item 5), the canonical-ordering pin and the preview-parity assertion (item 6).
+Status: **partial — slices 1–2 landed 2026-08-21 (`8303f2d`, `4ae45e5`)**; tier grouping, per-candidate scoring, Q-A clustering, floored base, and trace/breakdown correctness (item 4) are in. Remaining: the three dead seeded weights (item 5), the canonical-ordering pin and the preview-parity assertion (item 6).
 Type: AFK · Backend + Admin
 Decision: #258 **Q1** (hard eligibility → coverage tier → score among that tier's eligible
 candidates → final SE; precedence inviolable; canonical ticket ordering untouched) **+ Q-A** (the
@@ -105,7 +105,7 @@ weights page loses the three dead rows. Mobile: n/a.
       until `distance` becomes per-candidate.
 - [x] Planner-named SE beats a higher-scoring same-tier peer; `plannerBias` recorded.
 - [x] Equal scores → `se_id` asc, pinned for determinism.
-- [ ] Runner-up trace scores are the runner-ups' own (regression on the `:687` defect).
+- [x] Runner-up trace scores are the runner-ups' own (regression on the `:687` defect).
 - [ ] Canonical ticket ordering byte-identical before/after (processingRank unchanged on a fixed
       fixture) — Q1's "do not replace canonical ordering" clause, pinned.
 - [ ] Capacity/cluster interplay: the winning SE's `assigned` increment and plant-set growth follow
@@ -176,3 +176,33 @@ Code-only; seed migration reversible.
 - **`committedDayLoad` is re-expressed over a new `committedDayPlan`** rather than duplicated, so the
   capacity counter and the clustering plant-set are seeded from the same rows and cannot drift — one
   widened `select`, not a second query, so the NEW-A1 per-run cost is unchanged.
+
+## Slice 2 — trace correctness (item 4), and the defect slice 1 introduced
+
+- **Runner-up scores were the winner's** (`:687`, with an in-code TODO admitting it): every passing
+  runner-up was scored with the multiplier computed for the *chosen* SE. Harmless while all candidates
+  scored alike; **actively wrong once Q-A made clustering candidate-specific**, because a runner-up who
+  has never been to the plant was displayed carrying the winner's cluster bonus and the trace reported
+  a tie the engine never saw. Now read from the same `tierScores` map the selection used, so the
+  explanation cannot drift from the decision. The TODO expected #267's distance to trigger this;
+  clustering got there first.
+- **`scoreDegenerate` became a lie in slice 1 and is fixed here.** It read
+  `distanceFromPrevStopKm === null || weights.distance === 0` — "distance is the only per-SE component,
+  so everything ties and precedence decided". Clustering falsified that *without touching the
+  expression*: on exactly the tickets where the score genuinely decided, the flag still announced
+  precedence had. Now derived from the spread of the scores actually computed — the only form that
+  survives #267 adding another per-candidate term.
+- **`TIER_NOT_REACHED`** replaces `PASSED`-with-a-score for candidates below the winning tier. They were
+  never scored; calling them PASSED said they were weighed and lost on merit, calling them DROPPED
+  would say a filter rejected them. Neither happened.
+- **The winner's `score`, `breakdown` and `tierEvaluated` are now on the trace** (additive JSON), so
+  "why this SE" can be read against the runners-up instead of inferred. Q-A's requirement that the
+  breakdown *show* the clustering contribution is satisfied here.
+- **The issue's UI claim was stale.** It says the drawer "renders per-candidate scores (values change,
+  layout doesn't)" — the drawer rendered **no** scores. It now shows the winner's and each runner-up's,
+  badges `TIER_NOT_REACHED` neutral rather than amber (amber asserts something went wrong for that
+  candidate; nothing did), and the degeneracy copy no longer blames travel distance, which stopped
+  being the reason scores can tie.
+- **One expectation re-derived:** `dispatch-transparency`'s runner-up `seB` is MULTI_PLANT while the
+  winner `seA` is DEDICATED, so its tier was never reached — the old test asserted `PASSED` plus
+  `typeof score === 'number'`, i.e. it was pinning the defect. Title corrected with it.
