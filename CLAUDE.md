@@ -31,7 +31,8 @@ Single-context. Authority order is `CONTEXT.md` → PRD → workflow → backend
 Strategic HITL policy (AFK by default; stop only for architecture / business-rule conflict /
 backlog-ownership / external-access / security events), the per-slice TDD report format, and the UI
 reference rules live in `docs/agents/workflow.md`. The red-green-refactor protocol itself is the
-`/tdd` skill — not restated in the docs. Authoritative UI references: `docs/ui/desktop/v2-reference/`
+`/tdd` skill — not restated in the docs. Authoritative UI references: `docs/ui/desktop/v2-reference/`,
+`docs/ui/desktop/approved-designs/` (operator-approved directions for screens the v2 set never drew)
 and `docs/ui/mobile/`.
 
 ## Progress & state convention (mandatory)
@@ -61,9 +62,9 @@ already implemented in this repo.
 
 **Before executing any issue that touches a dashboard, page, screen, form, table, drawer, queue,
 report, or navigation:** read the authoritative reference image(s) under
-`docs/ui/desktop/v2-reference/` (desktop) or `docs/ui/mobile/` (mobile — plain single `.png`
-extension) and follow the UI-discovery steps in `docs/agents/workflow.md`. Match layout, hierarchy,
-role visibility, and navigation; do not redesign.
+`docs/ui/desktop/v2-reference/` then `docs/ui/desktop/approved-designs/` (desktop) or
+`docs/ui/mobile/` (mobile — plain single `.png` extension) and follow the UI-discovery steps in
+`docs/agents/workflow.md`. Match layout, hierarchy, role visibility, and navigation; do not redesign.
 
 **Parity gate (hard stop before "done"):** an issue may not be marked done while leaving in-scope
 UI/mobile ACs unbuilt unless (a) a follow-up issue is filed and linked in INDEX.md, **and** (b) the

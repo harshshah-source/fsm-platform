@@ -90,6 +90,10 @@ workflow UX, the reference images are **authoritative inputs** (authority order 
 
 - Desktop: `docs/ui/desktop/v2-reference/` (authoritative). `docs/ui/desktop/v1-legacy/` is superseded.
 - Mobile: `docs/ui/mobile/`.
+- **Approved designs: `docs/ui/desktop/approved-designs/`** (added 2026-08-20, #272) — operator-approved
+  directions for screens the v2 set never drew, authoritative for those screens. Self-contained `.html`
+  files; open one in a browser. First entry: the Assign Work Console (`/assign`). A v2 image always
+  wins where one exists; an approved design may only add screens, never contradict one.
 
 **File names (corrected 2026-07-28, #172):** mobile reference files are plain **single `.png`** —
 `home-dashboard.png`, `verification.png`, and eight others in `docs/ui/mobile/`. This paragraph
@@ -99,7 +103,7 @@ corrected. Reference and open images by their on-disk name; list the directory i
 
 ### UI discovery (before any UI implementation)
 
-1. Identify the relevant reference image(s).
+1. Identify the relevant reference image(s) — check `v2-reference/` first, then `approved-designs/`.
 2. Analyze the image structure (layout, sections, hierarchy).
 3. Map image sections to the issue's acceptance criteria.
 4. Identify reusable components already in `apps/admin` / `apps/mobile`.

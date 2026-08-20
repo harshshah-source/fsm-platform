@@ -28,10 +28,16 @@ For any work touching a dashboard, page, screen, form, table, drawer, queue, rep
 navigation, authoritative UI references live under `docs/ui/` and slot into the hierarchy
 **between workflow and existing code**:
 
-`CONTEXT.md` → PRD → workflow → **UI reference images** → existing UI code → ADRs.
+`CONTEXT.md` → PRD → workflow → **UI reference images / approved designs** → existing UI code → ADRs.
 
 - Desktop: `docs/ui/desktop/v2-reference/` (authoritative). `docs/ui/desktop/v1-legacy/` is superseded.
 - Mobile: `docs/ui/mobile/`.
+- **Approved designs: `docs/ui/desktop/approved-designs/`** — operator-approved directions for screens
+  the v2 set never drew, carrying the same authority for those screens (index + entry rules in that
+  directory's `README.md`). Where a v2 image covers a screen, the image wins; an approved design may
+  only **add** screens, never contradict one. "No v2 image exists for this screen" is therefore never
+  a reason to stall *or* a licence to redesign — check `approved-designs/` first, and if neither
+  covers it, that is a Strategic HITL event (backlog ownership), not an invitation.
 
 The pre-implementation review rules for UI live in `docs/agents/workflow.md`. If an image and the
 PRD conflict, follow the PRD and document the discrepancy.

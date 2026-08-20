@@ -1,0 +1,1335 @@
+<title>Assign Work Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --bg: #eef0f3;
+    --surface: #ffffff;
+    --surface-2: #f6f7f9;
+    --ink: #14151a;
+    --ink-2: #4c505a;
+    --ink-3: #767b85;
+    --line: #dcdfe4;
+    --line-2: #c6cad1;
+    --accent: #b9102b;
+    --good: #197a3d;
+    --good-soft: #e3f5e9;
+    --warn: #9a6700;
+    --warn-soft: #fdf2d9;
+    --crit: #b42318;
+    --crit-soft: #fbe3e3;
+    --info: #1d4ed8;
+    --info-soft: #e5eeff;
+    --violet: #6d28d9;
+    --violet-soft: #eee7fb;
+
+    /* The product's own tokens, mirrored so the mockups read as this app. */
+    --app-bg: #f2f3f5;
+    --app-card: #ffffff;
+    --app-sunken: #ebedf0;
+    --app-line: #e4e6ea;
+    --app-line-strong: #cbcfd6;
+    --app-ink: #101114;
+    --app-ink-2: #32343a;
+    --app-ink-3: #6b6e76;
+    --app-caps: #83868e;
+    --app-brand: #b9102b;
+    --app-chrome: #0a0a0c;
+    --app-chrome-text: #d6d6db;
+    --app-chrome-muted: #8e8e96;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0b0d;
+      --surface: #141417;
+      --surface-2: #1b1b1f;
+      --ink: #e9eaee;
+      --ink-2: #a8adb6;
+      --ink-3: #7d828c;
+      --line: #2a2b30;
+      --line-2: #3b3d44;
+      --accent: #e0455e;
+      --good: #56c07d;
+      --good-soft: #12291b;
+      --warn: #d9a441;
+      --warn-soft: #2c2313;
+      --crit: #f07167;
+      --crit-soft: #33191a;
+      --info: #7aa5ff;
+      --info-soft: #14203a;
+      --violet: #b294f5;
+      --violet-soft: #221a3a;
+
+      --app-bg: #000000;
+      --app-card: #0d0d0d;
+      --app-sunken: #1f1f1f;
+      --app-line: #262626;
+      --app-line-strong: #3d3d3d;
+      --app-ink: #f2f2f2;
+      --app-ink-2: #d4d4d4;
+      --app-ink-3: #9a9a9a;
+      --app-caps: #8a8a8a;
+      --app-brand: #d81f3c;
+      --app-chrome: #171717;
+      --app-chrome-text: #e6e6e6;
+      --app-chrome-muted: #9a9a9a;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #0b0b0d;
+    --surface: #141417;
+    --surface-2: #1b1b1f;
+    --ink: #e9eaee;
+    --ink-2: #a8adb6;
+    --ink-3: #7d828c;
+    --line: #2a2b30;
+    --line-2: #3b3d44;
+    --accent: #e0455e;
+    --good: #56c07d;
+    --good-soft: #12291b;
+    --warn: #d9a441;
+    --warn-soft: #2c2313;
+    --crit: #f07167;
+    --crit-soft: #33191a;
+    --info: #7aa5ff;
+    --info-soft: #14203a;
+    --violet: #b294f5;
+    --violet-soft: #221a3a;
+
+    --app-bg: #000000;
+    --app-card: #0d0d0d;
+    --app-sunken: #1f1f1f;
+    --app-line: #262626;
+    --app-line-strong: #3d3d3d;
+    --app-ink: #f2f2f2;
+    --app-ink-2: #d4d4d4;
+    --app-ink-3: #9a9a9a;
+    --app-caps: #8a8a8a;
+    --app-brand: #d81f3c;
+    --app-chrome: #171717;
+    --app-chrome-text: #e6e6e6;
+    --app-chrome-muted: #9a9a9a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    display: grid;
+    grid-template-columns: 1fr min(66ch, 100%) 1fr;
+    padding: 0 20px 96px;
+  }
+  .page > * { grid-column: 2; }
+  .wide {
+    grid-column: 1 / -1;
+    width: min(1180px, 100%);
+    justify-self: center;
+  }
+  .inner {
+    display: grid;
+    grid-template-columns: 1fr min(66ch, 100%) 1fr;
+  }
+  .inner > * { grid-column: 2; }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    padding: 72px 0 34px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 42px;
+  }
+  .kicker {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(36px, 5.6vw, 56px);
+    line-height: 1.07;
+    letter-spacing: -0.018em;
+    text-wrap: balance;
+    margin: 0 0 20px;
+  }
+  .standfirst {
+    font-family: Newsreader, Georgia, serif;
+    font-size: 20px;
+    line-height: 1.55;
+    color: var(--ink-2);
+    margin: 0 0 26px;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 22px;
+    font-size: 12.5px;
+    color: var(--ink-3);
+  }
+  .meta b { color: var(--ink-2); font-weight: 600; }
+
+  /* ---------- sections ---------- */
+  .band { margin-bottom: 56px; }
+  .sec-label {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 14px;
+  }
+  .sec-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+  h2 {
+    font-family: Newsreader, Georgia, serif;
+    font-weight: 500;
+    font-size: clamp(26px, 3.3vw, 33px);
+    line-height: 1.18;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+    margin: 0 0 16px;
+  }
+  h3 {
+    font-family: Inter, sans-serif;
+    font-weight: 600;
+    font-size: 16.5px;
+    line-height: 1.4;
+    letter-spacing: -0.003em;
+    margin: 34px 0 10px;
+  }
+  h4 {
+    font-family: Inter, sans-serif;
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 26px 0 8px;
+  }
+  p { margin: 0 0 16px; }
+  ul, ol { margin: 0 0 18px; padding-left: 22px; }
+  li { margin-bottom: 8px; }
+  li::marker { color: var(--ink-3); }
+  strong { font-weight: 600; }
+
+  code, .mono {
+    font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+    font-size: 0.855em;
+    font-weight: 400;
+  }
+  p code, li code, td code {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.5px 4px;
+    color: var(--ink-2);
+    word-break: break-word;
+  }
+
+  .lede { font-size: 17.5px; color: var(--ink-2); }
+
+  /* ---------- callouts ---------- */
+  .note {
+    border-left: 2px solid var(--accent);
+    background: var(--surface);
+    padding: 16px 20px;
+    margin: 0 0 20px;
+    font-size: 15px;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  .note .ntag {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .note.quiet { border-left-color: var(--line-2); }
+  .note.quiet .ntag { color: var(--ink-3); }
+
+  /* ---------- doc tables ---------- */
+  .tablewrap {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    margin-bottom: 22px;
+  }
+  .doctable {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    min-width: 640px;
+  }
+  .doctable thead th {
+    text-align: left;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+    background: var(--surface-2);
+  }
+  .doctable tbody td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+    color: var(--ink-2);
+  }
+  .doctable tbody tr:last-child td { border-bottom: 0; }
+  .doctable tbody td:first-child { color: var(--ink); font-weight: 500; }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .pill {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .pill.ok   { background: var(--good-soft); color: var(--good); }
+  .pill.no   { background: var(--crit-soft); color: var(--crit); }
+  .pill.part { background: var(--warn-soft); color: var(--warn); }
+
+  /* ---------- wireframe chrome ---------- */
+  figure { margin: 0 0 26px; }
+  figcaption {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    margin-top: 10px;
+    padding-left: 2px;
+    max-width: 78ch;
+  }
+  figcaption b { color: var(--ink-2); font-weight: 600; }
+
+  .mockscroll {
+    overflow-x: auto;
+    border-radius: 12px;
+    border: 1px solid var(--line-2);
+    background: var(--app-bg);
+    box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 10px 30px -18px rgba(0,0,0,.35);
+  }
+  .mock {
+    min-width: 1000px;
+    font-family: Inter, sans-serif;
+    color: var(--app-ink-2);
+    font-size: 12px;
+    line-height: 1.42;
+  }
+  .mock-topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    background: var(--app-chrome);
+    color: var(--app-chrome-text);
+    font-size: 11.5px;
+  }
+  .mock-topbar .crumb { color: var(--app-chrome-muted); }
+  .mock-topbar .crumb b { color: var(--app-chrome-text); font-weight: 500; }
+  .mock-topbar .spacer { flex: 1; }
+  .btn-brand {
+    background: var(--app-brand);
+    color: #ffffff;
+    border-radius: 7px;
+    padding: 5px 11px;
+    font-weight: 600;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+  .ledger {
+    display: flex;
+    flex-wrap: wrap;
+    background: var(--app-card);
+    border-bottom: 1px solid var(--app-line);
+  }
+  .ledger .cell {
+    padding: 12px 18px;
+    border-right: 1px solid var(--app-line);
+    min-width: 150px;
+  }
+  .ledger .lbl {
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--app-caps);
+  }
+  .ledger .val {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--app-ink);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+  .ledger .val.brandnum { color: var(--app-brand); }
+  .ledger .val.critnum { color: var(--crit); }
+  .ledger .hint { font-size: 10px; color: var(--app-ink-3); }
+  .ledger .grow {
+    flex: 1;
+    border-right: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 12px 16px;
+    gap: 6px;
+  }
+
+  .cols {
+    display: grid;
+    grid-template-columns: 266px 1fr 272px;
+    background: var(--app-line);
+    gap: 1px;
+  }
+  .col { background: var(--app-bg); }
+  .colhead {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 12px;
+    background: var(--app-card);
+    border-bottom: 1px solid var(--app-line);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--app-caps);
+  }
+  .colhead .n { margin-left: auto; color: var(--app-ink-3); letter-spacing: 0; font-weight: 600; font-size: 10px; text-transform: none; }
+  .colbody { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+  .field {
+    background: var(--app-card);
+    border: 1px solid var(--app-line-strong);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 11px;
+    color: var(--app-ink-3);
+  }
+  .chiprow { display: flex; flex-wrap: wrap; gap: 5px; }
+  .fchip {
+    border: 1px solid var(--app-line-strong);
+    border-radius: 999px;
+    padding: 2.5px 8px;
+    font-size: 10px;
+    color: var(--app-ink-3);
+    background: var(--app-card);
+  }
+  .fchip.on { background: var(--app-brand); border-color: var(--app-brand); color: #ffffff; font-weight: 600; }
+
+  .group {
+    background: var(--app-card);
+    border: 1px solid var(--app-line);
+    border-radius: 9px;
+    overflow: hidden;
+  }
+  .ghead {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    background: var(--app-sunken);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--app-ink);
+  }
+  .ghead .n { margin-left: auto; font-weight: 500; font-size: 10px; color: var(--app-ink-3); font-variant-numeric: tabular-nums; }
+
+  .plant {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-top: 1px solid var(--app-line);
+  }
+  .plant.sel { background: var(--info-soft); }
+  .plant .box {
+    width: 12px; height: 12px;
+    border: 1.5px solid var(--app-line-strong);
+    border-radius: 3px;
+  }
+  .plant.sel .box { background: var(--info); border-color: var(--info); }
+  .plant .nm { font-size: 11.5px; color: var(--app-ink); font-weight: 500; }
+  .plant .sub { font-size: 10px; color: var(--app-ink-3); font-variant-numeric: tabular-nums; }
+  .plant .right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+
+  .cnt {
+    font-variant-numeric: tabular-nums;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--app-ink);
+  }
+  .cnt .of { color: var(--app-ink-3); font-weight: 400; font-size: 10px; }
+
+  .tag {
+    display: inline-block;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 1.5px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .t-crit { background: var(--crit-soft); color: var(--crit); }
+  .t-warn { background: var(--warn-soft); color: var(--warn); }
+  .t-ok   { background: var(--good-soft); color: var(--good); }
+  .t-info { background: var(--info-soft); color: var(--info); }
+  .t-vio  { background: var(--violet-soft); color: var(--violet); }
+  .t-mut  { background: var(--app-sunken); color: var(--app-ink-3); }
+
+  .lane {
+    background: var(--app-card);
+    border: 1px solid var(--app-line);
+    border-radius: 9px;
+    overflow: hidden;
+  }
+  .lane.over { border-color: var(--warn); }
+  .lhead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border-bottom: 1px solid var(--app-line);
+  }
+  .lane.over .lhead { background: var(--warn-soft); }
+  .lhead .who { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .lhead .who .nm { font-weight: 600; font-size: 12.5px; color: var(--app-ink); }
+  .lhead .push { margin-left: auto; }
+  .load {
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--app-ink);
+    white-space: nowrap;
+  }
+  .load .was, .load .cap { color: var(--app-ink-3); font-weight: 400; }
+  .load.hot { color: var(--warn); }
+  .lbody { padding: 9px 11px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+  .wchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1.5px solid var(--app-line-strong);
+    border-radius: 7px;
+    background: var(--app-card);
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--app-ink);
+  }
+  .wchip .qty { font-variant-numeric: tabular-nums; color: var(--app-ink-3); font-size: 10.5px; }
+  .wchip .x { color: var(--app-ink-3); font-size: 12px; }
+  .wchip.critical { border-color: var(--crit); border-width: 2px; }
+  .wchip.human { border-style: dashed; border-color: var(--violet); }
+  .wchip.ghost {
+    border-style: dashed;
+    border-color: var(--app-line-strong);
+    color: var(--app-ink-3);
+    background: transparent;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--info); flex: none; }
+  .dot.critdot { background: var(--crit); }
+
+  .rail {
+    background: var(--app-card);
+    border: 1px dashed var(--crit);
+    border-radius: 9px;
+    padding: 9px 11px;
+  }
+  .rail .rt {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--crit);
+    margin-bottom: 7px;
+  }
+
+  .tierlbl {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--app-caps);
+    padding: 6px 2px 5px;
+    border-bottom: 1px solid var(--app-line);
+  }
+  .tierlbl .rank {
+    background: var(--app-sunken);
+    color: var(--app-ink-3);
+    border-radius: 3px;
+    padding: 0 4px;
+    letter-spacing: 0;
+  }
+  .cand {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--app-line);
+  }
+  .cand .nm { font-size: 11.5px; font-weight: 600; color: var(--app-ink); }
+  .cand .push { margin-left: auto; }
+  .cand .meta2 { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 4px; }
+  .cand.dropped .nm { color: var(--app-ink-3); }
+  .cempty {
+    font-size: 10.5px;
+    color: var(--app-ink-3);
+    font-style: italic;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--app-line);
+  }
+
+  .mock-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 14px;
+    background: var(--app-card);
+    border-top: 1px solid var(--app-line);
+    font-size: 11.5px;
+    color: var(--app-ink-3);
+  }
+  .mock-foot .spacer { flex: 1; }
+  .btn-ghost {
+    border: 1px solid var(--app-line-strong);
+    border-radius: 7px;
+    padding: 5px 11px;
+    font-weight: 500;
+    color: var(--app-ink-2);
+    white-space: nowrap;
+  }
+
+  .rtable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .rtable th {
+    text-align: left;
+    font-size: 9.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--app-caps);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--app-line);
+    background: var(--app-sunken);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .rtable td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--app-line);
+    color: var(--app-ink-2);
+    vertical-align: middle;
+    background: var(--app-card);
+  }
+  .rtable td:first-child { color: var(--app-ink); font-weight: 600; }
+  .rtable tr:last-child td { border-bottom: 0; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    padding: 10px 14px;
+    background: var(--app-sunken);
+    border-top: 1px solid var(--app-line);
+    font-size: 10.5px;
+    color: var(--app-ink-3);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 22px; height: 12px; border-radius: 4px; flex: none; }
+  .sw-sys { border: 1.5px solid var(--app-line-strong); background: var(--app-card); }
+  .sw-hum { border: 1.5px dashed var(--violet); background: var(--app-card); }
+  .sw-cri { border: 2px solid var(--crit); background: var(--app-card); }
+
+  .reasonbar { padding: 14px; background: var(--app-card); border-top: 1px solid var(--app-line); }
+  .reasonbar .rl {
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--app-caps);
+    margin-bottom: 6px;
+  }
+
+  .two {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px;
+    margin-bottom: 22px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .card h4 { margin-top: 0; }
+  .card p:last-child { margin-bottom: 0; }
+  .card .big {
+    font-family: Newsreader, Georgia, serif;
+    font-size: 32px;
+    line-height: 1.1;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0 0 22px; }
+  .steps > li {
+    counter-increment: s;
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    gap: 14px;
+    padding: 14px 0;
+    border-top: 1px solid var(--line);
+    margin: 0;
+  }
+  .steps > li::before {
+    content: counter(s, decimal-leading-zero);
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--accent);
+    padding-top: 3px;
+  }
+  .steps > li:last-child { border-bottom: 1px solid var(--line); }
+  .steps b { display: block; color: var(--ink); font-weight: 600; margin-bottom: 2px; }
+  .steps p { margin: 0; font-size: 14.5px; color: var(--ink-2); }
+
+  .end {
+    border-top: 1px solid var(--line);
+    padding-top: 22px;
+    font-size: 13px;
+    color: var(--ink-3);
+  }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+  @media (max-width: 720px) {
+    .masthead { padding-top: 48px; }
+    .ledger .cell { min-width: 128px; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <p class="kicker">FSM Platform · Scheduler · UI/UX proposal</p>
+    <h1>The manual assign screen never tells you what is left</h1>
+    <p class="standfirst">Seven surfaces can move work to an engineer today. Not one of them shows how much work there is, how much remains after you press the button, or whether the engineer you picked can carry it. Here is what is actually built, why the shape is wrong, and one console that replaces it.</p>
+    <div class="meta">
+      <span><b>Scope</b> Admin web · manual assignment &amp; reassignment</span>
+      <span><b>Branch</b> <span class="mono">feat/autoplant-integration</span></span>
+      <span><b>Date</b> 20 Aug 2026</span>
+      <span><b>Status</b> Proposal — nothing implemented</span>
+    </div>
+  </header>
+
+  <div class="band">
+    <p class="sec-label">The ask</p>
+    <h2>Three things a dispatcher asked for</h2>
+    <p class="lede">A complete view while reassigning — how many devices are left. Assigning many devices at once. And putting two or more engineers onto more than one plant in a single pass.</p>
+    <p>All three describe the same missing thing: the operator is working on a <em>plan</em>, and the software only understands <em>one write at a time</em>. Every manual path in the codebase is shaped N&nbsp;→&nbsp;1 — many tickets, one engineer, committed immediately, no preview, no residual. The dispatcher's real job is M&nbsp;→&nbsp;N and it has no home.</p>
+  </div>
+
+  <div class="band wide">
+    <div class="inner">
+      <div>
+        <p class="sec-label">What exists</p>
+        <h2>Seven surfaces, no console</h2>
+        <p>Manual assignment is scattered across seven places built at different times for different issues. Verified against the working tree.</p>
+      </div>
+    </div>
+    <div class="tablewrap" style="margin-top:18px">
+      <table class="doctable">
+        <thead>
+          <tr>
+            <th>Surface</th>
+            <th>Where it lives</th>
+            <th>Shape</th>
+            <th>What it shows about the engineer</th>
+            <th>Reachable</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Assign SE to plants</td>
+            <td><code>reports/AssignSePanel.tsx</code></td>
+            <td class="num">N plants → 1 SE</td>
+            <td>Name, global coverage type, active-ticket count, activity badge</td>
+            <td><span class="pill part">Device Detail only</span></td>
+          </tr>
+          <tr>
+            <td>Batch overrides</td>
+            <td><code>ScheduleDetailPage.tsx</code></td>
+            <td class="num">1 ticket / 1 stop / n tickets → 1 SE</td>
+            <td>Name only — <code>SePicker</code> renders <code>e.name</code> and nothing else</td>
+            <td><span class="pill ok">Batch Schedule</span></td>
+          </tr>
+          <tr>
+            <td>Critical queue one-click</td>
+            <td><code>dashboard/CriticalQueue.tsx</code></td>
+            <td class="num">cluster → 1 SE</td>
+            <td>Name in a dropdown</td>
+            <td><span class="pill no">Orphaned — imported by nothing</span></td>
+          </tr>
+          <tr>
+            <td>Intra-day manual assign</td>
+            <td><code>intraday-insertion.controller.ts</code></td>
+            <td class="num">1 insertion → 1 SE</td>
+            <td>Endpoint returns <code>string[]</code> — bare UUIDs</td>
+            <td><span class="pill no">No admin client at all</span></td>
+          </tr>
+          <tr>
+            <td>SE Planner grid</td>
+            <td><code>planner/PlannerPage.tsx</code></td>
+            <td class="num">SE × day × plant intent</td>
+            <td>Engineer column renders the raw <code>engineerId</code> UUID</td>
+            <td><span class="pill part">Intent only, not assignment</span></td>
+          </tr>
+          <tr>
+            <td>Bulk unassign</td>
+            <td><code>admin/BulkUnassignPage.tsx</code></td>
+            <td class="num">zone → nobody</td>
+            <td>—</td>
+            <td><span class="pill ok">Operations Head only</span></td>
+          </tr>
+          <tr>
+            <td>"Assign SE" top-bar button</td>
+            <td><code>shell/TopBar.tsx:154</code></td>
+            <td class="num">—</td>
+            <td>—</td>
+            <td><span class="pill no">navigate('/') — dead end</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="inner">
+      <div class="note">
+        <span class="ntag">The tell</span>
+        <p>The v2 reference puts <strong>Assign SE</strong> in the top bar as the one red primary button on every screen — it is meant to be the console. In code it navigates to the dashboard. The most prominent control in the product opens nothing.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="band">
+    <p class="sec-label">Analysis</p>
+    <h2>Three blind spots, all with the data already sitting there</h2>
+
+    <h3>1 · How much work am I about to hand over?</h3>
+    <p><code>DeviceFilterOptions.plants</code> carries <code>{plantId, name, companyId}</code> and nothing else. The operator ticks plants blind and learns the volume afterwards, from a toast. The number exists — <code>PlantAssignSummary.perPlant[].openUnassigned</code> — but it is computed <em>during</em> the write, inside the loop, so it can only ever be reported after the fact.</p>
+
+    <h3>2 · How much is left?</h3>
+    <p>Nothing anywhere answers it. <code>plantDeviceStats</code> in <code>dispatch-transparency-query.service.ts:496</code> computes <code>assignedDevices</code> / <code>unassignedDevices</code> per plant, but it is wired only into dispatch transparency and never into an assignment flow.</p>
+    <div class="note quiet">
+      <span class="ntag">Predicate mismatch — fix before reusing</span>
+      <p><code>plantDeviceStats</code> counts tickets by <code>assignment_state</code> with <strong>no status filter</strong>. <code>assignPlants</code> writes only where <code>status='OPEN' AND assignment_state='UNASSIGNED'</code> and the ticket is not deferred (<code>override.service.ts:466-471</code>). Showing the first number beside a button that does the second would over-report what the button does. The console needs one shared predicate, not two.</p>
+    </div>
+
+    <h3>3 · Can this engineer take it?</h3>
+    <p><code>dailyCapacity</code> is already on <code>EngineerListRow</code> <em>and</em> <code>ZoneEngineer</code>, and is rendered in exactly zero places. Coverage is shown as the engineer's <em>global</em> <code>coverageType</code> — which for a multi-plant engineer says nothing about whether they cover <em>these</em> plants. The per-pair answer lives in <code>se_coverage.coverage_type</code>, and the ordered eligibility list is one existing function, <code>orderedCandidatesForPlant</code>, that no admin surface can reach.</p>
+
+    <div class="two" style="margin-top:26px">
+      <div class="card">
+        <h4>Already computed, already tested</h4>
+        <p><code>orderedCandidatesForPlant</code> · <code>applyHardFilters</code> · <code>committedDayLoad</code> · <code>plantDeviceStats</code> · <code>dailyCapacity</code></p>
+      </div>
+      <div class="card">
+        <h4>Reachable from an assignment screen</h4>
+        <p><span class="big">0</span>Every one is backend-internal, or wired to a page that is not the page where work gets assigned.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="band">
+    <p class="sec-label">Analysis</p>
+    <h2>The shape is wrong, not the styling</h2>
+    <p>To put two engineers across three plants today, the operator runs <code>AssignSePanel</code> twice. Between the two runs the panel keeps no memory: the plant list looks identical, still carries no counts, and gives no sign that the first three plants are now spoken for. There is no basket, no diff, and no answer to "what will this day look like when I press go".</p>
+    <p><code>assignPlants</code> loops <code>assignTicket</code> ticket by ticket with no enclosing transaction and no dry run. A partial failure leaves a partial plan behind a single aggregate toast. The one honest thing the current panel does — skipping tickets another manager deliberately deferred — exists as a code comment, never as UI.</p>
+
+    <div class="note">
+      <span class="ntag">What the redesign must not break</span>
+      <p><strong>Q2</strong> — capacity is a scheduler constraint, not an authorization limit. Over-capacity engineers stay <em>selectable</em>, visibly marked. No block, no forced confirm.<br>
+      <strong>Q1</strong> — dedicated → multi-plant → floating precedence is inviolable for the system. A human may cross it, but must see the tier they are crossing.<br>
+      <strong>Q6</strong> — no live GPS in Phase 1. No map, no ETA, no route line.<br>
+      <strong>#269</strong> owns the <code>{committed, dailyCapacity}</code> payload. This console consumes it; it does not define a second counter.</p>
+    </div>
+  </div>
+
+  <div class="band wide">
+    <div class="inner">
+      <div>
+        <p class="sec-label">The redesign</p>
+        <h2>One console: work pool, draft plan, candidates</h2>
+        <p>Full-viewport, three columns, one running ledger, one commit. The top-bar <strong>Assign SE</strong> button finally opens it. Nothing is written until the operator commits, which is what makes the residual count live rather than retrospective.</p>
+      </div>
+    </div>
+
+    <figure style="margin-top:22px">
+      <div class="mockscroll">
+        <div class="mock">
+
+          <div class="mock-topbar">
+            <span class="crumb">FSM Command Console › <b>Assign work</b></span>
+            <span class="spacer"></span>
+            <span class="btn-brand">Assign SE</span>
+          </div>
+
+          <div class="ledger">
+            <div class="cell">
+              <div class="lbl">Open unassigned</div>
+              <div class="val">148</div>
+              <div class="hint">West Zone · 12 Jun</div>
+            </div>
+            <div class="cell">
+              <div class="lbl">In this draft</div>
+              <div class="val brandnum">46</div>
+              <div class="hint">4 plants · 3 engineers</div>
+            </div>
+            <div class="cell">
+              <div class="lbl">Left after commit</div>
+              <div class="val">102</div>
+              <div class="hint">69% still unassigned</div>
+            </div>
+            <div class="cell">
+              <div class="lbl">Critical+ in draft</div>
+              <div class="val critnum">11</div>
+              <div class="hint">of 18 in zone</div>
+            </div>
+            <div class="cell grow">
+              <span class="tag t-warn">2 engineers over capacity</span>
+              <span class="tag t-vio">1 tier crossing</span>
+              <span class="tag t-crit">7 no coverage</span>
+            </div>
+          </div>
+
+          <div class="cols">
+
+            <div class="col">
+              <div class="colhead">Work pool <span class="n">148 devices</span></div>
+              <div class="colbody">
+                <div class="field">Search company, plant, device…</div>
+                <div class="chiprow">
+                  <span class="fchip on">Critical+</span>
+                  <span class="fchip">Troubleshoot</span>
+                  <span class="fchip">Install</span>
+                  <span class="fchip">Held &lt; 24h</span>
+                </div>
+
+                <div class="group">
+                  <div class="ghead">UltraTech Rajasthan <span class="n">3 plants · 54</span></div>
+                  <div class="plant sel">
+                    <span class="box"></span>
+                    <span>
+                      <span class="nm">Kotputli Works</span><br>
+                      <span class="sub">oldest 61 h silent</span>
+                    </span>
+                    <span class="right">
+                      <span class="cnt">12 <span class="of">/ 38</span></span>
+                      <span class="tag t-crit">3 crit</span>
+                    </span>
+                  </div>
+                  <div class="plant sel">
+                    <span class="box"></span>
+                    <span>
+                      <span class="nm">Nathdwara Works</span><br>
+                      <span class="sub">oldest 34 h silent</span>
+                    </span>
+                    <span class="right">
+                      <span class="cnt">4 <span class="of">/ 22</span></span>
+                    </span>
+                  </div>
+                  <div class="plant">
+                    <span class="box"></span>
+                    <span>
+                      <span class="nm">Chittorgarh Works</span><br>
+                      <span class="sub">2 held to 14 Jun</span>
+                    </span>
+                    <span class="right">
+                      <span class="cnt">9 <span class="of">/ 31</span></span>
+                      <span class="tag t-warn">2 held</span>
+                    </span>
+                  </div>
+                </div>
+
+                <div class="group">
+                  <div class="ghead">Acme Cement <span class="n">2 plants · 41</span></div>
+                  <div class="plant sel">
+                    <span class="box"></span>
+                    <span>
+                      <span class="nm">Pali Works</span><br>
+                      <span class="sub">oldest 88 h silent</span>
+                    </span>
+                    <span class="right">
+                      <span class="cnt">18 <span class="of">/ 44</span></span>
+                      <span class="tag t-crit">6 crit</span>
+                    </span>
+                  </div>
+                  <div class="plant sel">
+                    <span class="box"></span>
+                    <span>
+                      <span class="nm">Sirohi Works</span><br>
+                      <span class="sub">oldest 26 h silent</span>
+                    </span>
+                    <span class="right">
+                      <span class="cnt">12 <span class="of">/ 29</span></span>
+                      <span class="tag t-crit">2 crit</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="col">
+              <div class="colhead">Draft plan <span class="n">nothing written yet</span></div>
+              <div class="colbody">
+
+                <div class="lane">
+                  <div class="lhead">
+                    <span class="who">
+                      <span class="nm">Amit Yadav</span>
+                      <span class="tag t-ok">DEDICATED · Kotputli</span>
+                      <span class="tag t-mut">AVAILABLE</span>
+                    </span>
+                    <span class="push load"><span class="was">5 →</span> 9 <span class="cap">/ 12</span></span>
+                  </div>
+                  <div class="lbody">
+                    <span class="wchip critical"><span class="dot critdot"></span>Kotputli Works<span class="qty">×3 crit</span><span class="x">×</span></span>
+                    <span class="wchip"><span class="dot"></span>Kotputli Works<span class="qty">×1</span><span class="x">×</span></span>
+                    <span class="wchip ghost">+ drop work here</span>
+                  </div>
+                </div>
+
+                <div class="lane over">
+                  <div class="lhead">
+                    <span class="who">
+                      <span class="nm">Karan Singh</span>
+                      <span class="tag t-info">FLOATING · Pali</span>
+                      <span class="tag t-vio">FLOATING · Sirohi</span>
+                      <span class="tag t-mut">AVAILABLE</span>
+                    </span>
+                    <span class="push load hot"><span class="was">6 →</span> 24 <span class="cap">/ 8</span></span>
+                  </div>
+                  <div class="lbody">
+                    <span class="wchip critical"><span class="dot critdot"></span>Pali Works<span class="qty">×6 crit</span><span class="x">×</span></span>
+                    <span class="wchip"><span class="dot"></span>Pali Works<span class="qty">×12</span><span class="x">×</span></span>
+                    <span class="wchip human"><span class="dot"></span>Sirohi Works<span class="qty">×12</span><span class="x">×</span></span>
+                    <span class="wchip ghost">+ drop work here</span>
+                  </div>
+                </div>
+
+                <div class="lane">
+                  <div class="lhead">
+                    <span class="who">
+                      <span class="nm">Deepak Verma</span>
+                      <span class="tag t-ok">MULTI-PLANT · Nathdwara</span>
+                      <span class="tag t-warn">KIT SHORT ×2</span>
+                    </span>
+                    <span class="push load"><span class="was">3 →</span> 7 <span class="cap">/ 10</span></span>
+                  </div>
+                  <div class="lbody">
+                    <span class="wchip"><span class="dot"></span>Nathdwara Works<span class="qty">×4</span><span class="x">×</span></span>
+                    <span class="wchip ghost">+ drop work here</span>
+                  </div>
+                </div>
+
+                <div class="rail">
+                  <div class="rt">No eligible engineer · 7 devices</div>
+                  <div class="chiprow">
+                    <span class="wchip ghost"><span class="dot critdot"></span>Chittorgarh Works<span class="qty">×5 · no coverage</span></span>
+                    <span class="wchip ghost"><span class="dot"></span>Pali Works<span class="qty">×2 · all dropped</span></span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <div class="col">
+              <div class="colhead">Candidates <span class="n">Sirohi Works</span></div>
+              <div class="colbody">
+                <div>
+                  <div class="tierlbl"><span class="rank">1</span> Dedicated</div>
+                  <div class="cempty">No dedicated engineer for this plant.</div>
+                </div>
+                <div>
+                  <div class="tierlbl"><span class="rank">2</span> Multi-plant</div>
+                  <div class="cand dropped">
+                    <span class="nm">Sneha Pillai</span>
+                    <span class="push load">11 <span class="cap">/ 9</span></span>
+                    <span class="meta2">
+                      <span class="tag t-crit">DROPPED · SE_UNAVAILABLE</span>
+                      <span class="tag t-mut">on leave to 14 Jun</span>
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <div class="tierlbl"><span class="rank">3</span> Floating</div>
+                  <div class="cand">
+                    <span class="nm">Karan Singh</span>
+                    <span class="push load hot">12 <span class="cap">/ 8</span></span>
+                    <span class="meta2">
+                      <span class="tag t-ok">PASSED</span>
+                      <span class="tag t-warn">over capacity — still assignable</span>
+                      <span class="tag t-mut">kit complete</span>
+                    </span>
+                  </div>
+                  <div class="cand">
+                    <span class="nm">Deepak Verma</span>
+                    <span class="push load">7 <span class="cap">/ 10</span></span>
+                    <span class="meta2">
+                      <span class="tag t-ok">PASSED</span>
+                      <span class="tag t-warn">kit short ×2</span>
+                    </span>
+                  </div>
+                  <div class="cand dropped">
+                    <span class="nm">Ravi Menon</span>
+                    <span class="push load">4 <span class="cap">/ 8</span></span>
+                    <span class="meta2"><span class="tag t-crit">DROPPED · COMMON_KIT_INCOMPLETE</span></span>
+                  </div>
+                </div>
+                <div class="field" style="margin-top:6px; text-align:center; color:var(--app-brand); font-weight:600">
+                  Add selected work to a lane
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="mock-foot">
+            <span><b style="color:var(--app-ink)">46 devices</b> → 3 engineers · 4 plants</span>
+            <span class="spacer"></span>
+            <span class="btn-ghost">Distribute across selected engineers…</span>
+            <span class="btn-ghost">Clear draft</span>
+            <span class="btn-brand">Review &amp; commit</span>
+          </div>
+
+          <div class="legend">
+            <span><span class="swatch sw-sys"></span> solid — assignment inside the engineer's own coverage</span>
+            <span><span class="swatch sw-hum"></span> dashed — a human crossed a coverage tier</span>
+            <span><span class="swatch sw-cri"></span> heavy crimson — critical work</span>
+          </div>
+
+        </div>
+      </div>
+      <figcaption><b>Assign work console.</b> The ledger across the top is the answer to "how many are left" — it recomputes as chips move, before anything is written. Karan Singh's lane is amber at 24 of 8: over capacity, marked, and still fully assignable, exactly as Q2 requires.</figcaption>
+    </figure>
+  </div>
+
+  <div class="band">
+    <p class="sec-label">The redesign</p>
+    <h2>How the three asks are answered</h2>
+
+    <ol class="steps">
+      <li>
+        <b>Complete view, before the write</b>
+        <p>Every plant row carries <span class="mono">open unassigned / total devices</span>, its critical+ count, and the oldest silent age. The header ledger holds <em>open · in draft · left after commit</em>. Because nothing commits until the operator says so, "left" is a live number rather than a post-hoc report.</p>
+      </li>
+      <li>
+        <b>Many devices at once</b>
+        <p>Selection works at company, plant, or device level. A plant tick means "every open unassigned device here"; expanding it lets the operator peel off individual devices — the split <code>SPLIT_BATCH</code> already supports, but only inside one existing batch.</p>
+      </li>
+      <li>
+        <b>Two or more engineers across more than one plant</b>
+        <p>The draft plan is a set of lanes, one per engineer, each holding chips from any number of plants. Select several plants and several engineers, then <strong>Distribute</strong> proposes a split — by capacity headroom, by coverage tier, or keeping each plant whole — into the draft, where it stays editable.</p>
+      </li>
+      <li>
+        <b>Whether the engineer can take it</b>
+        <p>Coverage is shown <em>per engineer-and-plant</em>, so a lane spanning two plants shows two badges when they differ. Load reads <span class="mono">5 → 9 / 12</span>: committed today, after this draft, against capacity. The candidate column is <code>orderedCandidatesForPlant</code> rendered honestly — tier-grouped, including the engineers the hard filters dropped and the reason why.</p>
+      </li>
+      <li>
+        <b>A commit that survives partial failure</b>
+        <p>One review diff, one mandatory reason, then a transaction per engineer. The result reports per engineer rather than as one aggregate toast, so a lane that fails is legible and re-runnable while the rest stand.</p>
+      </li>
+    </ol>
+  </div>
+
+  <div class="band wide">
+    <div class="inner">
+      <div>
+        <p class="sec-label">The redesign</p>
+        <h2>The commit review</h2>
+        <p>The last screen before anything is written. It is a diff, not a confirmation dialog: it states what changes, what it costs, and what is still unassigned afterwards.</p>
+      </div>
+    </div>
+
+    <figure style="margin-top:22px">
+      <div class="mockscroll">
+        <div class="mock" style="min-width:840px">
+          <div class="mock-topbar">
+            <span class="crumb">Assign work › <b>Review &amp; commit</b></span>
+            <span class="spacer"></span>
+            <span style="color:var(--app-chrome-muted)">12 Jun 2026 · West Zone</span>
+          </div>
+
+          <div class="ledger">
+            <div class="cell">
+              <div class="lbl">Committing</div>
+              <div class="val brandnum">46</div>
+              <div class="hint">devices → 3 engineers</div>
+            </div>
+            <div class="cell">
+              <div class="lbl">Still unassigned after</div>
+              <div class="val">102</div>
+              <div class="hint">including 7 with no eligible engineer</div>
+            </div>
+            <div class="cell">
+              <div class="lbl">Over capacity</div>
+              <div class="val critnum">2</div>
+              <div class="hint">allowed — not blocked</div>
+            </div>
+            <div class="cell grow">
+              <span class="tag t-mut">one audit row per ticket</span>
+            </div>
+          </div>
+
+          <table class="rtable">
+            <thead>
+              <tr>
+                <th>Engineer</th>
+                <th>Coverage used</th>
+                <th>Plants</th>
+                <th>Devices</th>
+                <th>Load</th>
+                <th>Flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Amit Yadav</td>
+                <td><span class="tag t-ok">DEDICATED</span></td>
+                <td>Kotputli Works</td>
+                <td class="num">4 <span style="color:var(--app-ink-3)">(3 crit)</span></td>
+                <td class="num">5 → 9 / 12</td>
+                <td><span class="tag t-ok">within capacity</span></td>
+              </tr>
+              <tr>
+                <td>Karan Singh</td>
+                <td><span class="tag t-info">FLOATING</span> <span class="tag t-vio">tier crossed</span></td>
+                <td>Pali Works, Sirohi Works</td>
+                <td class="num">30 <span style="color:var(--app-ink-3)">(8 crit)</span></td>
+                <td class="num" style="color:var(--warn); font-weight:600">6 → 24 / 8</td>
+                <td><span class="tag t-warn">3× capacity</span></td>
+              </tr>
+              <tr>
+                <td>Deepak Verma</td>
+                <td><span class="tag t-ok">MULTI-PLANT</span></td>
+                <td>Nathdwara Works</td>
+                <td class="num">4</td>
+                <td class="num">3 → 7 / 10</td>
+                <td><span class="tag t-warn">kit short ×2</span></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="reasonbar">
+            <div class="rl">Reason for this manual plan — required</div>
+            <div class="field" style="padding:9px 10px">Pali backlog cleared ahead of the monsoon shutdown; Karan reassigned off Chittorgarh.</div>
+          </div>
+
+          <div class="mock-foot">
+            <span>Karan Singh is being taken to <b style="color:var(--warn)">three times his daily capacity</b>. This is allowed and will be recorded — it is not blocked.</span>
+            <span class="spacer"></span>
+            <span class="btn-ghost">Back to draft</span>
+            <span class="btn-brand">Commit 46 assignments</span>
+          </div>
+        </div>
+      </div>
+      <figcaption><b>Review &amp; commit.</b> Over-capacity is stated in words at the point of decision and then allowed through — the Q2 posture written into the screen instead of into a confirm dialog nobody reads.</figcaption>
+    </figure>
+  </div>
+
+  <div class="band">
+    <p class="sec-label">Build</p>
+    <h2>What the backend has to expose</h2>
+    <p>Mostly exposure of functions that already exist and already have tests. Nothing here is a new algorithm.</p>
+
+    <h4>Reads</h4>
+    <ul>
+      <li><code>GET /schedules/assignable-work?zone&amp;date</code> — company → plant → device tree with <code>{openUnassigned, totalDevices, criticalCount, oldestInactivityHours, heldCount}</code>, built on <strong>the same predicate <code>assignPlants</code> uses</strong>, so the number on screen is the number the button will move.</li>
+      <li><code>GET /schedules/candidates?plantIds[]</code> — per plant, <code>orderedCandidatesForPlant</code> joined to <code>applyHardFilters</code> and to #269's <code>{committed, dailyCapacity}</code>: tier, verdict, drop reason, availability and kit state per engineer.</li>
+    </ul>
+
+    <h4>Write</h4>
+    <ul>
+      <li><code>POST /schedules/assign-batch</code> — <code>{reasonCode, lanes:[{seId, ticketIds[]}]}</code>, one transaction per engineer, one result row per engineer. <code>assignPlants</code> survives as the plant-shorthand that expands into lanes, so the Device Detail panel keeps working unchanged.</li>
+      <li>A dry run of the same body, reusing the <code>dryRun</code> seam #250 already built into the recommender, so <strong>Distribute</strong> proposes from the real selection logic rather than a second copy of it in the client.</li>
+    </ul>
+
+    <h4>Repairs on the way past</h4>
+    <ul>
+      <li><code>available-ses</code> returns bare UUIDs. Give it the candidate row shape above and the missing intra-day manual-assign modal becomes buildable.</li>
+      <li><code>PlannerPage</code> renders <code>engineerId</code> where reference 16 shows a name, and omits the <span class="mono">LOAD / CAP</span> column the reference specifies. Both values are already in <code>ZoneEngineer</code>.</li>
+      <li><code>CriticalQueue.tsx</code> is orphaned but already contains an engineer picker, one-click assign and the deferral confirm. Absorb it as the console's <em>Critical+</em> preset instead of leaving it dead or rebuilding it.</li>
+    </ul>
+  </div>
+
+  <div class="band">
+    <p class="sec-label">Build</p>
+    <h2>Sequencing</h2>
+    <p>The console cannot land before the numbers it displays are true.</p>
+    <div class="tablewrap">
+      <table class="doctable">
+        <thead><tr><th>Must land first</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>#178</td><td>Closure never clears assignment — until it does, <code>committedDayLoad</code> overcounts and the load column lies.</td></tr>
+          <tr><td>#269</td><td>Defines the one <code>{committed, dailyCapacity}</code> payload. A second counter here would fork the definition.</td></tr>
+          <tr><td>#266</td><td>Score currently decides nothing — <code>chosen = planner ?? passed[0]</code>. Showing a candidate order the engine does not actually use would teach the operator a false model.</td></tr>
+          <tr><td>#262</td><td>Per-SE dispatch transactions — the natural home for <code>assign-batch</code>'s per-lane transaction shape. Built separately, the two produce competing transaction strategies over the same tables.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>#269's text says "existing pages, no redesign", and that is right: #269 is the instrumentation, this is the surface it makes possible. They are not in competition — this proposal is the consumer #269 was written for.</p>
+  </div>
+
+  <div class="band">
+    <p class="sec-label">Open</p>
+    <h2>Three calls that are not mine to make</h2>
+    <ul>
+      <li><strong>Does the console replace the Device Detail panel, or sit beside it?</strong> Keeping both means two answers to "how do I assign", which is how we reached seven surfaces. Recommendation: the panel stays as a shortcut that deep-links into the console, pre-scoped to that device's plant.</li>
+      <li><strong>Is a draft persistent?</strong> A shared, resumable draft is more useful and considerably more work — its own table, an owner, and a staleness rule for when the underlying tickets move. Recommendation: session-local for v1, said plainly on screen.</li>
+      <li><strong>Does the Zonal Manager get Distribute, or only Operations Head and Central Service?</strong> The RBAC ladder already splits preview and holds (all managers) from dispatch-run (OH + CSM). Distribute is closer to a dispatch run than to a single assignment.</li>
+    </ul>
+  </div>
+
+  <div class="end">
+    <p><strong>Verified against</strong> <span class="mono">feat/autoplant-integration</span>, working tree of 20 Aug 2026. Every file, line and function named above was read, not inferred. No code was changed to produce this document.</p>
+    <p style="margin-bottom:0">Related: <span class="mono">#258</span> decision record · <span class="mono">#269</span> capacity overload visibility · <span class="mono">#266</span> score selects within tier · references <span class="mono">12-batch-schedule-review</span> and <span class="mono">16-se-planner</span>.</p>
+  </div>
+
+</div>

@@ -3,6 +3,10 @@
 Status: ready-for-agent
 Type: AFK · Backend + Admin
 Decision: #258 Q2. Explicitly NOT a blocking/confirmation feature — visibility only.
+Consumed by: **#274** (Assign Work Console, P9) — this issue owns the **one** `{committed,
+dailyCapacity}` definition and P9 defines no second counter (#272 R9). The "existing pages, no
+redesign" scope below is unchanged and not superseded: #269 is the instrumentation, P9 is the
+surface it makes possible. Keep the shared-predicate AC — it is what stops the two forking.
 
 ## Objective
 
