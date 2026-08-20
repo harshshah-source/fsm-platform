@@ -1,6 +1,6 @@
 # 266 — Scoring selects the SE within the coverage tier, and the cluster multiplier becomes candidate-specific
 
-Status: **partial — slices 1–2 landed 2026-08-21 (`8303f2d`, `4ae45e5`)**; tier grouping, per-candidate scoring, Q-A clustering, floored base, and trace/breakdown correctness (item 4) are in. Remaining: the three dead seeded weights (item 5), the canonical-ordering pin and the preview-parity assertion (item 6).
+Status: **DONE 2026-08-21** (`8303f2d`, `4ae45e5`, `5dcad0d`, `322a4e4`) — report: `docs/progress/266-score-selects-within-tier.md`. All items landed. AC-2 is recorded **unbuildable as written** (see below) rather than silently ticked.
 Type: AFK · Backend + Admin
 Decision: #258 **Q1** (hard eligibility → coverage tier → score among that tier's eligible
 candidates → final SE; precedence inviolable; canonical ticket ordering untouched) **+ Q-A** (the
@@ -106,9 +106,9 @@ weights page loses the three dead rows. Mobile: n/a.
 - [x] Planner-named SE beats a higher-scoring same-tier peer; `plannerBias` recorded.
 - [x] Equal scores → `se_id` asc, pinned for determinism.
 - [x] Runner-up trace scores are the runner-ups' own (regression on the `:687` defect).
-- [ ] Canonical ticket ordering byte-identical before/after (processingRank unchanged on a fixed
+- [x] Canonical ticket ordering byte-identical before/after (processingRank unchanged on a fixed
       fixture) — Q1's "do not replace canonical ordering" clause, pinned.
-- [ ] Capacity/cluster interplay: the winning SE's `assigned` increment and plant-set growth follow
+- [x] Capacity/cluster interplay: the winning SE's `assigned` increment and plant-set growth follow
       the SCORED winner (the counters at `:406`/`:468` keyed on the new chosen).
 - [x] **Q-A clustering is candidate-specific**: same tier, otherwise-equal candidates, SE A already
       holding a stop at plant P and SE B not → A wins the next ticket at P; the breakdown shows the
@@ -206,3 +206,25 @@ Code-only; seed migration reversible.
 - **One expectation re-derived:** `dispatch-transparency`'s runner-up `seB` is MULTI_PLANT while the
   winner `seA` is DEDICATED, so its tier was never reached — the old test asserted `PASSED` plus
   `typeof score === 'number'`, i.e. it was pinning the defect. Title corrected with it.
+
+## Slice 3 — the closed vocabulary (item 5) and the ordering pin (item 6)
+
+- **Item 5 was widened by what the surface actually showed.** The three dead seeded weights were the
+  instance; the class is that the admin's Component field is **free text** and the table never shows
+  `active`, so any string could be saved and would then sit beside the real levers — and ride along in
+  every persisted `score_breakdown.weights`, since `activeWeights` loads whatever is active.
+  **Operator-ruled: close the set.** `scoring.ts` exports `SCORING_COMPONENTS`, the API 400s on
+  anything outside it, `GET /org/scoring-weights/components` serves the list so the picker and the
+  validation cannot drift, and the field becomes a picker. The three are **deactivated, not deleted**
+  (the table is operator-tunable and audited; a past run's `weight_set_ref` must still resolve to the
+  rows that were live) and dropped from the seed.
+- **Item 6's preview parity was already covered** — `recommender-dry-run` AC-4 compares
+  `ticketId/seId/processingRank/status` between a dry run and the real run, and stayed green through
+  every slice, so it exercises the rewritten path. Not duplicated. The **canonical-ordering pin** was
+  the missing half and is built: flipping `plant_cluster_multiplier` demonstrably moves the ticket
+  between engineers, and every `processingRank` must be identical across that flip. Q1 ratified two
+  separate things — the score picks the ENGINEER, the canonical sort picks the ORDER — and they live
+  inches apart in the same loop.
+- **The last AC is now tested rather than merely implemented:** both in-run counters (`assigned` and
+  the Q-A plant set) follow the **scored** winner. A counter still following precedence would be the
+  subtle form of the bug — the right engineer dispatched while the wrong one is debited.
