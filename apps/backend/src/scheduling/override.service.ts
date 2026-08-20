@@ -3,6 +3,7 @@ import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { assignableTickets } from '../ticketing/assignable-work';
 import { isNotDeferredOn, notDeferredOn } from '../ticketing/deferral';
 import { DAY_PLAN_NOTIFIER, DayPlanNotifier } from './day-plan-notifier';
 import { REMOVAL_REASONS } from './removal-reason';
@@ -466,7 +467,13 @@ export class OverrideService {
         // #146 — a bulk "assign this plant's open work to an SE" must not silently resurrect a ticket
         // another ZM deliberately deferred to a future date. The deferral is still an explicit human
         // decision; a ZM who wants it back today can re-assign that ticket directly.
-        where: { plantId, status: 'OPEN', assignmentState: 'UNASSIGNED', ...notDeferredOn(istDate(now)) },
+        //
+        // #273 — this predicate moved to `ticketing/assignable-work.ts` and is now shared with the
+        // Assign Work Console's work pool. It is the definition of "work this button will move", and
+        // the console shows that count beside the button, so the two cannot be allowed to drift: a
+        // read spelled even slightly differently would promise the operator a number this loop does
+        // not deliver. `assignable-work.e2e-spec.ts` asserts the read predicts this write.
+        where: { plantId, ...assignableTickets(now) },
         select: { ticketId: true },
         orderBy: { createdAt: 'asc' },
       });

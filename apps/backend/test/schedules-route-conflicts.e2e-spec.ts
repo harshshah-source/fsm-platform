@@ -8,6 +8,7 @@ import { DayPlanQueryService } from '../src/scheduling/day-plan-query.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
 import { DispatchScheduleService } from '../src/scheduling/dispatch-schedule.service';
 import { OverrideService } from '../src/scheduling/override.service';
+import { AssignableWorkQueryService } from '../src/scheduling/assignable-work-query.service';
 import { SchedulerPreviewService } from '../src/scheduling/scheduler-preview.service';
 import { SchedulesController } from '../src/scheduling/schedules.controller';
 import { ZmScheduleQueryService } from '../src/scheduling/zm-schedule-query.service';
@@ -22,6 +23,7 @@ describe('Schedules route matching (e2e)', () => {
     getScheduleDetail: vi.fn(),
   };
   const dispatchSchedule = { current: vi.fn(), setCron: vi.fn() };
+  const assignableWork = { listForScope: vi.fn() };
 
   const authGuard: CanActivate = {
     canActivate(context: ExecutionContext): boolean {
@@ -52,6 +54,12 @@ describe('Schedules route matching (e2e)', () => {
           provide: SchedulerPreviewService,
           useValue: { preview: vi.fn(), placeHold: vi.fn(), releaseHold: vi.fn() },
         },
+        // #273 — stubbed for the same reason as the rest: this spec pins *route matching*, so the
+        // controller only has to construct. Adding a constructor dependency without adding it here
+        // makes `beforeAll` throw, and vitest then reports the file as **4 skipped** rather than
+        // failed — the suite stays green while this file silently contributes no coverage at all.
+        // That is exactly how it went unnoticed for one run; see `docs/progress/273-…md`.
+        { provide: AssignableWorkQueryService, useValue: assignableWork },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -104,6 +112,26 @@ describe('Schedules route matching (e2e)', () => {
 
     expect(res.body).toHaveLength(1);
     expect(zm.listZoneEngineers).toHaveBeenCalledWith({ role: 'ZONAL_MANAGER', zoneId: 1 });
+    expect(zm.getScheduleDetail).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #273 — `assignable-work` is the third literal path on a controller that also has `GET :engineerId`.
+   * It went in below the param route on the first attempt and every request came back **400** from
+   * `ParseUUIDPipe`, which is the same trap `dispatch-schedule` and `engineers` sit in. Pinned here so
+   * the ordering is a property of the suite rather than of whoever edits the controller next.
+   */
+  it('routes GET /api/schedules/assignable-work to the work-pool handler, not :engineerId', async () => {
+    assignableWork.listForScope.mockResolvedValue({
+      date: '2026-06-24',
+      totals: { openUnassigned: 0, criticalCount: 0, heldCount: 0, plants: 0 },
+      companies: [],
+    });
+
+    const res = await request(app.getHttpServer()).get('/api/schedules/assignable-work').expect(200);
+
+    expect(res.body.companies).toEqual([]);
+    expect(assignableWork.listForScope).toHaveBeenCalledTimes(1);
     expect(zm.getScheduleDetail).not.toHaveBeenCalled();
   });
 

@@ -100,7 +100,10 @@ export function TopBar() {
             everyone else). On a completed run it broadcasts so the OH dashboard rolls its KPIs. */}
         <RunIngestionButton onSuccess={emitIngestionComplete} />
 
-        <Button size="sm" className="h-10 shrink-0 gap-1.5 whitespace-nowrap px-4 shadow-sm" onClick={() => navigate('/')}>
+        {/* #273 — this called `navigate('/')` for its whole life: a prominent button on every manager
+            screen that reloaded the dashboard and opened nothing. It is the Assign Work Console's
+            entry point, pinned by test so it can never quietly resolve to `/` again. */}
+        <Button size="sm" className="h-10 shrink-0 gap-1.5 whitespace-nowrap px-4 shadow-sm" onClick={() => navigate('/assign')}>
           <IconPlus className="h-4 w-4" /> Assign SE
         </Button>
 

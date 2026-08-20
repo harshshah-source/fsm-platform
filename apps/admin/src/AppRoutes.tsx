@@ -18,6 +18,7 @@ import { DispatchRunDetailPage } from './pages/dispatch/DispatchRunDetailPage';
 import { DispatchZoneDetailPage } from './pages/dispatch/DispatchZoneDetailPage';
 import { DispatchBatchDetailPage } from './pages/dispatch/DispatchBatchDetailPage';
 import { InstallCreatePage } from './pages/install/InstallCreatePage';
+import { AssignConsolePage } from './pages/assign/AssignConsolePage';
 import { PlannerPage } from './pages/planner/PlannerPage';
 import { VehicleUnavailabilityPage } from './pages/readiness/VehicleUnavailabilityPage';
 import { NonOperationalQueuePage } from './pages/readiness/NonOperationalQueuePage';
@@ -76,6 +77,16 @@ export function AppRoutes() {
           <Route path="/tickets" element={<TicketsPage />}>
             <Route path=":ticketId" element={<TicketDetailDrawer />} />
           </Route>
+          {/* #273 — the Assign Work Console. The one place work is handed out, replacing the seven
+              scattered surfaces that could each move work without ever showing a count. */}
+          <Route
+            path="/assign"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <AssignConsolePage />
+              </RoleRoute>
+            }
+          />
           {/* ZM Batch-Schedule monitoring + override (Issue 13b) — manager roles only. */}
           <Route
             path="/schedules"

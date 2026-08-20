@@ -678,6 +678,16 @@ POSTs) drive identical code paths with no cron.
 
 ### 3h. Manual scheduling / override / intraday / cross-zone (ZM & CSM/OH paths)
 
+- **Assign Work Console** (#273/P9, `GET /api/schedules/assignable-work` +
+  `AssignableWorkQueryService`): the M→N surface the manual paths never had. Every other entry in this
+  section is N→1 — many tickets, one engineer, written immediately, no preview and no residual — and
+  none of them shows a count. The console reads the pool (company → plant, with the assignable count,
+  the device denominator, critical+, oldest-silent and held), drafts against it client-side, shows the
+  residual live, and commits. **`src/ticketing/assignable-work.ts` is the one predicate** it shares
+  with `assignPlants`, so the count and the write cannot drift; `heldTickets` is its reported
+  complement, never a subtraction. Selection is **plant-shaped** in slice 1 because `assignPlants`
+  is — a shared site's whole set moves, which the ledger counts and the row states. #274–#277 add the
+  candidate column, the transactional `assign-batch`, Distribute, and absorb the orphaned surfaces.
 - **ZM override engine** (#13a, `override.service.ts` header): each action (reassign/split/remove/
   defer/reorder) commits immediately, flips batch + schedule to OVERRIDDEN with mandatory reason +
   overrider, audits in-transaction, fires a push. No approval gate. Overriding work an SE is ON_SITE
@@ -808,6 +818,25 @@ pages consume real API clients; remaining gated placeholders are *documented omi
 missing backend endpoints (#90 work-type mix, #94 ticket chrome, #74 scorecard causality).
 Known FE gaps: `window.prompt` reason legs (#80), Playwright visual baseline (FE-00 partial),
 `components/data/` untracked by git (#114).
+
+**#273 the Assign Work Console — slice 1 (done, 2026-08-20):** `/assign` exists, gated to manager
+roles, and the top-bar **Assign SE** button opens it — it called `navigate('/')` for its entire life,
+a prominent button on every manager screen that opened nothing. The console answers the question none
+of the **seven** existing assign surfaces could: *how much is left?* Work pool (company → plant, with
+`open / devices`, critical+, oldest-silent and held counts) → client-side draft lanes → a running
+ledger (`open · in draft · left after commit · critical+ in draft`) → commit. **Nothing is written
+until commit** (#272 R2), which is what makes the residual live rather than retrospective; the draft
+is **session-local** and says so on screen (#272 Q2). Backed by `GET /api/schedules/assignable-work`
+and, crucially, by **one predicate** — `src/ticketing/assignable-work.ts` — that the read and
+`assignPlants` share, so the number on screen is the number the button moves (#272 R3). Two structural
+facts drive the shape: `plants` carries **no `company_id`** (several companies' fleets sit at one
+site), so the tree groups by the *ticket's* company; and `assignPlants` is **plant-shaped**, so
+drafting one company's row at a shared site commits every company's work there — the ledger counts the
+whole plant and the row says so, rather than under-reporting its own commit. Ticket-level selection,
+the transactional write, Distribute and the orphaned surfaces follow in #274–#277. **Acting-zone is
+honoured on this surface** (inline collapse from the committed `RequestActor` + the shared
+`authHeaders()` client, both halves together) rather than waiting for #239's sweep: on a screen about
+what is left in *this* zone, an acting OH reading pan-India is about to hand out another zone's work.
 
 **#269 capacity is visible on the admin (done, 2026-08-20):** `daily_capacity` shipped with Issue 13b
 and was rendered in **zero** places — it had no numerator, so an overload today was discoverable only

@@ -4,6 +4,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecommenderModule } from '../recommender/recommender.module';
+import { AssignableWorkQueryService } from './assignable-work-query.service';
 import { BatchAssignmentService } from './batch-assignment.service';
 import { BulkUnassignService } from './bulk-unassign.service';
 import { DAY_PLAN_NOTIFIER, SpineDayPlanNotifier } from './day-plan-notifier';
@@ -59,6 +60,7 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
       useFactory: (prisma: PrismaService) => new ScheduleClosureScheduler(prisma),
       inject: [PrismaService],
     },
+    AssignableWorkQueryService,
     // #76 adoption — SpineDayPlanNotifier routes through the real notification spine.
     { provide: DAY_PLAN_NOTIFIER, useClass: SpineDayPlanNotifier },
     // Issue 15 AC#7 — the real soft_states-backed conflict source replaces the 13a no-conflict seam.
@@ -68,6 +70,6 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
   // controller is registered in `AppModule`, so a provider that is only visible inside this module
   // resolves at `SchedulingModule` boot and then fails at AppModule boot — which is every e2e that
   // stands up the real app, and none of the ones that construct services by hand.
-  exports: [BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService],
+  exports: [AssignableWorkQueryService, BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService],
 })
 export class SchedulingModule {}

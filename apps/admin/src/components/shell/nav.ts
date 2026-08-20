@@ -10,6 +10,7 @@ import {
   IconHelp,
   IconMapPin,
   IconPackage,
+  IconPlus,
   IconRoute,
   IconRotate,
   IconSearch,
@@ -83,6 +84,9 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
   ];
   if (isManager) {
     operations.push(
+      // #273 — first in the manager list: handing out work is the job the console exists for, and it
+      // is what the top-bar `Assign SE` button now opens.
+      { label: 'Assign Work', to: '/assign', icon: IconPlus },
       { label: 'Create Install', to: '/install', icon: IconTruck },
       { label: 'Schedules', to: '/schedules', icon: IconCalendar },
       // #251 — the pre-run twin of Schedules (which shows what WAS dispatched). Same manager roles;

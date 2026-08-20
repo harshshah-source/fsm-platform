@@ -40,6 +40,10 @@ import {
   type SchedulerPreviewResult,
 } from './scheduler-preview.service';
 import {
+  AssignableWorkQueryService,
+  type AssignableWorkView,
+} from './assignable-work-query.service';
+import {
   ZmScheduleQueryService,
   type ZmScheduleDetail,
   type ZmScheduleRow,
@@ -93,6 +97,7 @@ export class SchedulesController {
     private readonly bulkUnassign: BulkUnassignService,
     private readonly dispatchSchedule: DispatchScheduleService,
     private readonly schedulerPreview: SchedulerPreviewService,
+    private readonly assignableWork: AssignableWorkQueryService,
   ) {}
 
   /**
@@ -368,6 +373,32 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   zoneEngineers(@CurrentUser() user: AccessTokenClaims): Promise<ZoneEngineerRow[]> {
     return this.zm.listZoneEngineers({ role: user.role, zoneId: user.zone_id });
+  }
+
+  /**
+   * #273 — the Assign Work Console's work pool: company → plant, with the counts a dispatcher needs
+   * *before* choosing anything. Built on the one `assignableTickets` predicate `assignPlants` writes
+   * through, so the number shown is the number the commit will move.
+   *
+   * **Acting-zone is honoured here rather than deferred to #239.** Every sibling read on this
+   * controller builds its scope straight off the claims, which structurally cannot carry acting — so
+   * an Operations Head acting in a zone would open the console and be handed the pan-India pool. That
+   * is not a cosmetic mismatch on a screen whose entire purpose is "what is left in *this* zone", so
+   * the collapse is applied inline, from the committed `RequestActor` the controller already resolves.
+   * #239 owns converting the rest of `/schedules` and will replace this with its shared `@CurrentScope()`
+   * helper; the behaviour is deliberately identical so that swap is a one-line no-op.
+   */
+  @Get('assignable-work')
+  @Roles(...MANAGER_ROLES)
+  assignableWorkPool(
+    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
+  ): Promise<AssignableWorkView> {
+    const scope =
+      actor.actingZone !== null
+        ? { role: 'ZONAL_MANAGER', zoneId: actor.actingZone }
+        : { role: user.role, zoneId: user.zone_id };
+    return this.assignableWork.listForScope(scope);
   }
 
   @Get(':engineerId')
