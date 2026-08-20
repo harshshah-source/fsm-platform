@@ -1,6 +1,6 @@
 # 266 — Scoring selects the SE within the coverage tier, and the cluster multiplier becomes candidate-specific
 
-Status: ready-for-agent
+Status: **partial — slice 1 landed 2026-08-21 (`8303f2d`)**; tier grouping + per-candidate scoring + Q-A clustering + floored base are in. Remaining: trace/breakdown correctness (item 4), the three dead seeded weights (item 5), the canonical-ordering pin and the preview-parity assertion (item 6).
 Type: AFK · Backend + Admin
 Decision: #258 **Q1** (hard eligibility → coverage tier → score among that tier's eligible
 candidates → final SE; precedence inviolable; canonical ticket ordering untouched) **+ Q-A** (the
@@ -91,23 +91,32 @@ weights page loses the three dead rows. Mobile: n/a.
 
 ## Acceptance criteria
 
-- [ ] DEDICATED score 60 beats FLOATING score 95 (precedence inviolable).
-- [ ] Within one tier: higher score wins; weight change flips the winner (the "weights actually do
-      something" test that could never exist before).
-- [ ] Planner-named SE beats a higher-scoring same-tier peer; `plannerBias` recorded.
-- [ ] Equal scores → `se_id` asc, pinned for determinism.
+- [x] DEDICATED score 60 beats FLOATING score 95 (precedence inviolable).
+- [~] ~~Within one tier: higher score wins; weight change flips the winner~~ — **UNBUILDABLE AS
+      WRITTEN, and the reason matters.** `features` is built entirely from the *ticket*
+      (`companyPriorityRank`, `dispatchUrgency`, `repeatFailure`, `inactivityHours`) and
+      `distanceFromPrevStopKm` is hardcoded `null` until #267, so **every candidate for a ticket
+      computes an identical `baseScore`** and no weight change can reorder them. The cluster
+      multiplier is the only per-candidate term this slice can produce — which is exactly what the
+      pre-implementation review meant by Q-A "could not otherwise influence any decision". Built
+      instead in the only form the feature set allows: driving `plant_cluster_multiplier` to 1.0
+      hands the ticket back to the `se_id` winner, which fails if clustering is cosmetic.
+      **Consequence to carry into #267:** the four remaining weights still influence no selection
+      until `distance` becomes per-candidate.
+- [x] Planner-named SE beats a higher-scoring same-tier peer; `plannerBias` recorded.
+- [x] Equal scores → `se_id` asc, pinned for determinism.
 - [ ] Runner-up trace scores are the runner-ups' own (regression on the `:687` defect).
 - [ ] Canonical ticket ordering byte-identical before/after (processingRank unchanged on a fixed
       fixture) — Q1's "do not replace canonical ordering" clause, pinned.
 - [ ] Capacity/cluster interplay: the winning SE's `assigned` increment and plant-set growth follow
       the SCORED winner (the counters at `:406`/`:468` keyed on the new chosen).
-- [ ] **Q-A clustering is candidate-specific**: same tier, otherwise-equal candidates, SE A already
+- [x] **Q-A clustering is candidate-specific**: same tier, otherwise-equal candidates, SE A already
       holding a stop at plant P and SE B not → A wins the next ticket at P; the breakdown shows the
       multiplier applied to A and not to B. Setting `plant_cluster_multiplier` to 1.0 flips the
       outcome back to the score-only winner (proves the factor is load-bearing, not cosmetic).
-- [ ] Clustering seeds from an SE's **pre-existing** day plan, not only from in-run wins (an SE
+- [x] Clustering seeds from an SE's **pre-existing** day plan, not only from in-run wins (an SE
       given plant P by an earlier run or a manual assign carries the benefit into this run).
-- [ ] Clustering never promotes a lower tier over a higher one, and never drops a candidate
+- [x] Clustering never promotes a lower tier over a higher one, and never drops a candidate
       (not a filter) — asserted with a FLOATING SE holding the plant vs. a DEDICATED SE who is not.
 
 ## Tests
@@ -138,3 +147,32 @@ reference line (it stays deferred; only the pointer changes).
 ## Rollback
 
 Code-only; seed migration reversible.
+
+## Rulings and corrections made while building (slice 1)
+
+- **Item 3 was self-contradictory and is now ruled.** It said planner bias sits above score *"within
+  the tier ... exactly as today"* — but today the pin **crosses tiers**: `passed.find(planner)`
+  searches every filter-passing candidate, and `recommender-planner-bias.e2e-spec.ts` has pinned a
+  planner-named MULTI_PLANT SE beating an eligible DEDICATED one since Issue 14a. Restricting it to
+  the winning tier silently retires a ratified ADR-0022 behaviour and overrides a manager's explicit
+  choice with an SE they did not name. **Operator-ruled: the cross-tier pin stands.** Q1's
+  "precedence is inviolable" therefore binds the **score** — a higher score can never cross a tier,
+  a human's pin still can.
+- **`score = baseScore * clusterMultiplier` inverts on a negative base.** With the seeded DEFICIT
+  weights an install-backlog ticket has `dispatchUrgency = 0` by design, so a repeat-failure ticket
+  for a company at rank F scores exactly 0 (the bonus is a no-op) and at rank G or lower scores
+  negative — where the 1.25x bonus makes the SE *already going to that plant* score **worse**.
+  `company_priority_rank` is a free `String` column, not an enum, so those letters are reachable.
+  **Operator-ruled: multiply a floored base** (`max(base, 0)`); the breakdown still carries the true
+  `baseScore`, so nothing is hidden.
+- **`clusterSeed` changed meaning** from run-level ("first ticket at this plant this run", whoever
+  won it) to per candidate ("this winner's first stop at this plant today"). It is rendered in the
+  transparency drawer; the docstring and `dispatch-transparency.e2e-spec.ts` were updated together.
+- **Three expectations re-derived, none blind-updated** (operator-ruled method): `recommender-run`'s
+  capacity-fallback SE no longer collects a 1.5x cluster boost for a plant they have never visited
+  (1.5 → 1, same SE chosen), and `dispatch-transparency`'s same fallback SE is now correctly recorded
+  as seeding the plant (false → true). Both test titles asserted the old meaning in words and were
+  corrected with them.
+- **`committedDayLoad` is re-expressed over a new `committedDayPlan`** rather than duplicated, so the
+  capacity counter and the clustering plant-set are seeded from the same rows and cannot drift — one
+  widened `select`, not a second query, so the NEW-A1 per-run cost is unchanged.
