@@ -1,6 +1,6 @@
 # 256 — `plant-zone-change-impact` fails every night between 00:00 and 05:30 IST
 
-Status: ready-for-agent
+Status: done (2026-08-20)
 Type: AFK · Backend (test fixture)
 
 Filed 2026-08-20 from #255's second verification run. Not a product defect — a **test fixture** that
@@ -78,12 +78,28 @@ Confirmed against the clock at the time of the failing isolation run: **05:13 IS
 
 ## Acceptance criteria
 
-- [ ] AC1 — `plant-zone-change-impact.e2e-spec.ts` passes at every hour of the day, demonstrated for a
+- [x] AC1 — `plant-zone-change-impact.e2e-spec.ts` passes at every hour of the day, demonstrated for a
       time inside 00:00–05:30 IST rather than argued.
-- [ ] AC2 — The fixture and `zone-mapping.service.ts` agree on one definition of "today", not two.
-- [ ] AC3 — Other test fixtures using a UTC midnight against an IST-day read are found and listed;
+- [x] AC2 — The fixture and `zone-mapping.service.ts` agree on one definition of "today", not two.
+- [x] AC3 — Other test fixtures using a UTC midnight against an IST-day read are found and listed;
       each is either fixed or recorded as genuinely UTC-correct.
-- [ ] AC4 — The known-pre-existing failure list is restated with no time-of-day caveat.
+- [x] AC4 — The known-pre-existing failure list is restated with no time-of-day caveat.
+
+## The sweep (AC3) — four other candidates, all safe, and the reason matters
+
+`plant-zone-change-impact` was the **only** fixture deriving a day bucket from the **live** clock and
+comparing it against an IST-day read. That is the property that makes a flake: a frozen constant can
+be wrong, but it is wrong on *every* run, which a single green run exposes. The others:
+
+| Site | Day source | Verdict |
+|---|---|---|
+| `special-ticket-api.e2e-spec.ts:100` | `NOW = new Date('2026-08-19T06:00:00Z')` — **frozen** | Safe. Deterministic by construction, and 06:00Z is mid-day in both zones. The schedules are historical and `PARTIAL`, so no "today" read reaches them. |
+| `special-ticket-derivation.e2e-spec.ts:100` | same frozen `NOW` | Safe, same reasoning. |
+| `commissioning-cohort.e2e-spec.ts:121` | live `new Date()`, but `setUTCHours(9, 0, 0, 0)` | Safe. 09:00 UTC is 14:30 IST — mid-day in both zones, so the two dates agree at every hour. The existing comment already reasons about exactly this. |
+| `test/env/book8/book8-se-org.ts:73` | `ds.datasetNow`, derived from the dataset's latest ping | Safe. `book8-dataset.ts` is explicit that it uses no `Date.now()`, so the value is frozen with the CSV. |
+
+None changed. Recording them is the point: the next person to grep `setUTCHours` should not have to
+re-derive why four of the five hits are fine.
 
 ## Blocked by
 

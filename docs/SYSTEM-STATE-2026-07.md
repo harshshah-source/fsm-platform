@@ -70,10 +70,12 @@ Section order is the resume order for future sessions.
 > **#184** Windows worker crash remains, but `scripts/run-tests.mjs` detects and retries it, and both
 > runs below recovered every file. **Two full suites on one tree, 2026-08-19:** 388 files both times —
 > 18:03 IST 1890 passed / 2 failed, 23:33 IST 1889 passed / 3 failed, **zero suite-level `beforeAll`
-> failures in either**. **The current known-pre-existing failure list is 2 at any hour**
-> (`voucher-controller`, #187/#215) **and 3 between 00:00 and 05:30 IST** — plus
-> `plant-zone-change-impact`, whose fixture states a **UTC** day against an **IST**-day read (**#256**).
-> Anything beyond that list on a local run is worth treating as real.
+> failures in either**. The time-of-day failure those runs exposed — `plant-zone-change-impact`,
+> whose fixture stated a **UTC** day against an **IST**-day read and so was red only from 00:00 to
+> 05:30 IST — is closed by **#256**, with a 24-hour pin so it cannot drift back unnoticed.
+> **The current known-pre-existing failure list is 2, at every hour, with no caveat:**
+> `voucher-controller` (#187, compounded by #215 — the two must land together or it fails harder).
+> Anything beyond that on a local run is worth treating as real.
 
 > **2026-08-13 — currency marker.** This document is current through **2026-08-13**. Reconciled this
 > session: **§3l is new** (the #232 commissioning cohort / install-quality endpoints, which existed as

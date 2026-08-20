@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { AuditService } from '../src/audit/audit.service';
 import { ZoneMappingService } from '../src/org/zone-mapping.service';
+import { istDate } from '../src/common/ist-day';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -17,6 +18,19 @@ import { PrismaService } from '../src/prisma/prisma.service';
 const NS = Date.now();
 const SRC_PLANT = 995401n;
 const DEVICE_ID = `IMPACT-${NS}`;
+
+/**
+ * The day a `work_schedules` row must carry to count as "dispatched today" (#256).
+ *
+ * `ZoneMappingService.zoneChangeImpact` filters on `istDate(new Date())` — the **IST** calendar day,
+ * per #204 — so a fixture that stamps the **UTC** day disagrees with it for the 5h30m from 00:00 to
+ * 05:30 IST, when the UTC date is still yesterday. This spec used `setUTCHours(0, 0, 0, 0)` and was
+ * therefore red every night for that window and green the other 18.5 hours.
+ *
+ * One definition, shared with the code under test rather than restated: `date_from`/`date_to` are
+ * `@db.Date`, which is exactly what `istDate` exists to produce.
+ */
+const scheduleDay = (now: Date = new Date()): Date => istDate(now);
 
 describe('#158 — zone change impact probe', () => {
   let prisma: PrismaService;
@@ -140,9 +154,8 @@ describe('#158 — zone change impact probe', () => {
       data: { engineerId: seId, coverageType: 'MULTI_PLANT', zoneId: eastId, dailyCapacity: 25 },
     });
 
-    // Today's dispatched day plan carrying this plant's ticket.
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
+    // Today's dispatched day plan carrying this plant's ticket — the IST day the service reads (#256).
+    const today = scheduleDay();
     const schedule = await prisma.workSchedule.create({
       data: { seId, zoneId: eastId, dateFrom: today, dateTo: today, status: 'ACTIVE' },
     });
@@ -208,6 +221,25 @@ describe('#158 — zone change impact probe', () => {
     });
   });
 
+  it('#256 — states its day the way the service reads it, at every hour of the clock', () => {
+    // The regression this guards is invisible for 18.5 hours a day: a UTC-day fixture and an IST-day
+    // read name the same date from 05:30 to 23:59 IST and disagree from 00:00 to 05:29. Walking the
+    // whole clock is what makes the pin fire regardless of when the suite happens to run — asserting
+    // it once against `new Date()` would pass on the very fixture that produced #256.
+    const disagreements: string[] = [];
+    for (let hour = 0; hour < 24; hour++) {
+      const instant = new Date(Date.UTC(2026, 7, 19, hour, 30));
+      const utcDay = new Date(instant);
+      utcDay.setUTCHours(0, 0, 0, 0);
+      if (scheduleDay(instant).getTime() !== istDate(instant).getTime()) {
+        disagreements.push(`${instant.toISOString()} → fixture ${scheduleDay(instant).toISOString()}`);
+      }
+      // …and the pin is only meaningful because the two definitions genuinely differ somewhere:
+      // from 18:30Z onward the IST date has rolled over and the UTC date has not.
+      if (hour >= 19) expect(utcDay.getTime()).not.toBe(istDate(instant).getTime());
+    }
+    expect(disagreements).toEqual([]);
+  });
   it('404s for a plant that was never synced from AutoPlant', async () => {
     await expect(service.zoneChangeImpact(99999999n)).rejects.toBeInstanceOf(NotFoundException);
   });
