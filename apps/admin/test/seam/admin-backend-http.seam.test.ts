@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { apiLogin } from '../../src/api/client';
 
 /**
@@ -72,8 +72,9 @@ describe('#107 N3 — admin → backend over real HTTP', () => {
   it('maps an unreachable backend to SERVICE_UNAVAILABLE', async () => {
     // Port 1 is reserved and never listening; this pins the other half of the mapping against a real
     // network refusal rather than a thrown mock.
-    const original = import.meta.env.VITE_API_URL;
-    import.meta.env.VITE_API_URL = 'http://127.0.0.1:1/api';
+    // `vi.stubEnv`, not a direct assignment: `import.meta.env` is readonly to TypeScript, so assigning
+    // to it compiles under vitest (esbuild strips types) and fails `tsc -b` — which is the admin build.
+    vi.stubEnv('VITE_API_URL', 'http://127.0.0.1:1/api');
     try {
       // Re-imported so the module re-reads BASE_URL. Asserted on `.code`, not `instanceof`: the fresh
       // import carries its OWN LoginError class, so an identity check would fail for a reason that has
@@ -83,7 +84,7 @@ describe('#107 N3 — admin → backend over real HTTP', () => {
         (freshLogin as typeof apiLogin)({ email: 'zm.north@fsm.test', password: 'correct-password' }),
       ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
     } finally {
-      import.meta.env.VITE_API_URL = original;
+      vi.unstubAllEnvs();
     }
   });
 });
