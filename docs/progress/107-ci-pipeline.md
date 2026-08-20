@@ -1,6 +1,6 @@
 # #107 — CI had run 106 times and never executed a test
 
-**Done 2026-08-20** (slices 3–4, N3, AC#5, and the finding that reframed the issue). Slices 1–2 —
+**Done 2026-08-20**, commit `1b99d1e` (slices 3–4, N3, AC#5, and the finding that reframed the issue). Slices 1–2 —
 the workflow and the drift gate — landed 2026-07-22.
 
 ## The finding
