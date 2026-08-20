@@ -151,10 +151,16 @@ describe('Issue 10 slice 6 — RecommenderService.runForZone', () => {
     expect(b.clusterMultiplier).toBe(1); // first ticket at the plant = cluster seed
   });
 
-  it('falls back Dedicated→Multi-Plant when the dedicated SE is at capacity, with a cluster boost', async () => {
+  it('falls back Dedicated→Multi-Plant when the dedicated SE is at capacity, and gets NO cluster boost', async () => {
     const r = await recFor(ticketIds[1]);
     expect(r.seId).toBe(multi); // dedicated (capacity 1) was consumed by the seed ticket
-    expect((r.scoreBreakdown as Record<string, unknown>).clusterMultiplier).toBe(1.5);
+    // Re-derived for #266 Q-A, not blind-updated: this expectation was 1.5, and the change is the
+    // whole point of the ruling. The old multiplier keyed on a run-level `seededPlants` set — "has ANY
+    // SE been seeded at this plant this run" — so the fallback SE collected a 1.5x "cluster boost" for
+    // a plant they had never been to, purely because the dedicated SE had been sent there first. Q-A
+    // makes it ask the question the name always implied: this SE is going to this plant for the first
+    // time today, so there is nothing to cluster with and the multiplier is 1.
+    expect((r.scoreBreakdown as Record<string, unknown>).clusterMultiplier).toBe(1);
   });
 
   it('persists an UNASSIGNABLE recommendation when no SE covers the plant', async () => {

@@ -99,7 +99,14 @@ export function scoreCandidate(
     wDistance * ds;
 
   return {
-    score: baseScore * clusterMultiplier,
+    // #266 — the cluster bonus multiplies a FLOORED base (operator-ruled). `baseScore` can reach zero
+    // or go negative: with the seeded DEFICIT weights an install-backlog ticket has `dispatchUrgency`
+    // 0 by design, so a repeat-failure ticket for a company at rank F scores exactly 0 (the bonus is a
+    // no-op) and at rank G or below scores negative — where a 1.25x "bonus" would make the SE already
+    // going to that plant score WORSE than one who has never been. `company_priority_rank` is a free
+    // String column, not an enum, so those letters are reachable. The floor keeps the bonus pointing
+    // in one direction; the breakdown still carries the true `baseScore` so nothing is hidden.
+    score: Math.max(baseScore, 0) * clusterMultiplier,
     breakdown: {
       rankScore: rs,
       urgency: features.dispatchUrgency,

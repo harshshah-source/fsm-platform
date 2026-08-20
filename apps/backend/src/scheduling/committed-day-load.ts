@@ -42,6 +42,39 @@ export async function committedDayLoad(
   day: Date,
   opts: { seIds?: string[] } = {},
 ): Promise<Map<string, number>> {
+  const plan = await committedDayPlan(prisma, day, opts);
+  const load = new Map<string, number>();
+  for (const [seId, entry] of plan) load.set(seId, entry.count);
+  return load;
+}
+
+/** One SE's committed day, as both figures the run needs: how much, and where. */
+export interface CommittedDayEntry {
+  /** Live day-plan stops — the figure {@link committedDayLoad} returns and `daily_capacity` caps. */
+  count: number;
+  /** The distinct plants those stops are at, as `plant_id` strings. */
+  plants: Set<string>;
+}
+
+/**
+ * The same read as {@link committedDayLoad}, keeping the plants as well as the count — #266's Q-A.
+ *
+ * The Plant Cluster Multiplier used to ask "has ANY SE been seeded at this plant this run", which is
+ * one value per ticket applied to every candidate, so it cancelled out of every comparison between
+ * them and could not influence a decision. Q-A makes it ask the question its name always implied:
+ * **does THIS engineer already go to this plant today?** That is answerable from the rows already
+ * being read here, so it is one widened `select`, not a second query pattern — the per-run cost NEW-A1
+ * established is unchanged, and clustering and capacity are seeded from the *same* rows rather than
+ * from two notions of "where is this engineer going today" that could drift.
+ *
+ * `committedDayLoad` is re-expressed over this rather than duplicated, so the two can never disagree
+ * about which stops count — the whole reason #269 collapsed three counters into one.
+ */
+export async function committedDayPlan(
+  prisma: CommittedDayLoadClient,
+  day: Date,
+  opts: { seIds?: string[] } = {},
+): Promise<Map<string, CommittedDayEntry>> {
   const target = istDate(day);
   const rows = await prisma.batchAssignmentTicket.findMany({
     where: {
@@ -51,9 +84,14 @@ export async function committedDayLoad(
         schedule: { ...liveScheduleFilter(), dateFrom: { lte: target }, dateTo: { gte: target } },
       },
     },
-    select: { batch: { select: { seId: true } } },
+    select: { batch: { select: { seId: true, plantId: true } } },
   });
-  const load = new Map<string, number>();
-  for (const r of rows) load.set(r.batch.seId, (load.get(r.batch.seId) ?? 0) + 1);
-  return load;
+  const plan = new Map<string, CommittedDayEntry>();
+  for (const r of rows) {
+    const entry = plan.get(r.batch.seId) ?? { count: 0, plants: new Set<string>() };
+    entry.count += 1;
+    entry.plants.add(String(r.batch.plantId));
+    plan.set(r.batch.seId, entry);
+  }
+  return plan;
 }

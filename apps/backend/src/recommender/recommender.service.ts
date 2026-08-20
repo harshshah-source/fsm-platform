@@ -8,10 +8,14 @@ import { type ActiveOverride, resolveActiveOverrides, tierOverrideKey } from '..
 import { PrismaService } from '../prisma/prisma.service';
 import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-inactive-count.service';
 import { readAssignmentThresholdHours } from '../settings/assignment-threshold';
-import { committedDayLoad } from '../scheduling/committed-day-load';
+import {
+  type CommittedDayEntry,
+  committedDayLoad,
+  committedDayPlan,
+} from '../scheduling/committed-day-load';
 import { notDeferredOn, returnDateArrivedBefore } from '../ticketing/deferral';
 import { componentBlockedTickets, notComponentBlocked } from '../ticketing/component-blocked';
-import { CandidateSelectionService } from './candidate-selection.service';
+import { CandidateSelectionService, type CoverageType } from './candidate-selection.service';
 import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
 import { type ScoringWeights, scoreCandidate } from './scoring';
@@ -131,6 +135,12 @@ export interface PreviewDecision {
   poolEmptyReason: PoolEmptyReason | null;
   /** True only when the SE Planner soft bias actually changed the pick (ADR-0022). */
   plannerBias: boolean;
+  /**
+   * #266 Q-A — true when the winner is going to this plant for the FIRST time today, so no cluster
+   * multiplier applied. Per candidate since Q-A; it used to be run-level ("is this the first ticket at
+   * this plant this run", whoever it went to), which recorded a fallback SE as a cluster follow-on for
+   * a plant they had never visited.
+   */
   clusterSeed: boolean;
   capacityAtDecision: { used: number; cap: number | null } | null;
 }
@@ -451,11 +461,41 @@ export class RecommenderService {
     // isolation. Without this a cross-zone floating/multi-plant SE is dispatched up to capacity in every
     // zone the daily loop visits (each `runForZone` started the map at 0). The in-run increments below add
     // this zone's suggestions on top, giving a running whole-day total to check against the cap.
-    const assigned = await this.committedDayLoad(targetDay); // se_id → tickets on the SE's day plan
-    const seededPlants = new Set<string>(); // plant_id → already has a cluster seed this run
+    // #266 Q-A — one read, both figures: the capacity counter AND each SE's set of plants for the day.
+    // Clustering is seeded from exactly the rows capacity is seeded from, then grown by in-run wins in
+    // the same place the counter is incremented, so "how much is this engineer carrying" and "where are
+    // they already going" can never drift apart.
+    const committed = await this.committedDayPlan(targetDay);
+    const assigned = new Map<string, number>(); // se_id → tickets on the SE's day plan
+    const plantsBySe = new Map<string, Set<string>>(); // se_id → plants already on that day plan
+    for (const [seId, entry] of committed) {
+      assigned.set(seId, entry.count);
+      plantsBySe.set(seId, entry.plants);
+    }
     const plannerByPlant = await this.plannerForDate(zoneId, targetDay); // plant_id → planned se_ids (soft bias)
     const kitStatusBySe = new Map<string, CommonKitStatus>(); // memoised Common-Kit status per SE
     const availabilityBySe = new Map<string, SeAvailabilityStatus>(); // memoised current availability per SE
+
+    /**
+     * The ticket's scoring features — one definition, used both to score every candidate in the
+     * winning tier and to persist the winner's breakdown, so the number that selected an SE and the
+     * number stored to explain that selection are the same computation rather than two derivations.
+     *
+     * Every field comes from the TICKET, which is the structural fact behind #258 Q-A: candidates for
+     * one ticket share an identical `baseScore`, so without a per-candidate term the score cannot
+     * order them at all. `distanceFromPrevStopKm` is the other per-candidate term and stays null until
+     * #267 gives it real geometry.
+     */
+    const featuresFor = (c: RunCandidate) => ({
+      companyPriorityRank: c.companyPriorityRank,
+      // Install candidates have no SLA bucket → zero dispatch urgency (backlog, not an active outage).
+      dispatchUrgency: c.deviceBucket ? urgencyFromBucket(c.deviceBucket) : 0,
+      repeatFailure: c.repeatFailure,
+      // Age drives the PREVENTIVE aged-bias term (weighted 0 in DEFICIT). For installs the anchor is the
+      // backlog target date, so older Install backlog ranks higher.
+      inactivityHours: c.ageAnchor ? Math.max(0, (now.getTime() - c.ageAnchor.getTime()) / 3_600_000) : null,
+      distanceFromPrevStopKm: null, // Floating distance-from-previous-stop deferred (needs day-plan geo)
+    });
 
     let recommended = 0;
     let unassignable = 0;
@@ -493,11 +533,16 @@ export class RecommenderService {
       await Promise.all(ordered.map((c) => this.ensureKitStatus(c.seId, kitStatusBySe)));
       await this.ensureAvailability(ordered.map((c) => c.seId), availabilityBySe, asOf);
 
-      const readiness: (SeCandidateReadiness & { seId: string })[] = ordered.map((c) => {
+      // #266 — the tier rides along with each candidate's readiness so `applyHardFilters` (generic over
+      // this shape) hands it back on `passed`, and the winning-tier grouping needs no second lookup.
+      const readiness: (SeCandidateReadiness & { seId: string; coverageType: CoverageType })[] = ordered.map((c) => {
         const cap = capacity.get(c.seId);
         const availStatus = availabilityBySe.get(c.seId) ?? 'AVAILABLE';
         return {
           seId: c.seId,
+          // #266 — carried through `applyHardFilters` (generic over the readiness shape) so the tier
+          // grouping below needs no second lookup: each candidate already knows its own tier.
+          coverageType: c.coverageType,
           vehicleReadiness: 'UNKNOWN',
           available: (cap?.isActive ?? true) && availStatus === 'AVAILABLE',
           overCapacity: cap !== undefined && (assigned.get(c.seId) ?? 0) >= cap.dailyCapacity,
@@ -511,11 +556,54 @@ export class RecommenderService {
       const filtered = applyHardFilters(readiness);
       const passed = filtered.passed;
       const planned = plannerByPlant.get(String(t.plantId));
-      const chosen = (planned ? passed.find((c) => planned.has(c.seId)) : undefined) ?? passed[0] ?? null;
+      const ticketPlant = String(t.plantId);
 
-      const isSeed = !seededPlants.has(String(t.plantId));
-      seededPlants.add(String(t.plantId));
-      const multiplier = isSeed ? 1 : clusterMultiplier;
+      // #266 step 1 — the WINNING TIER is the first non-empty tier in precedence order. `passed` is
+      // already in precedence order, so this is a scan, not a sort, and a lower tier is reached only
+      // when every higher-tier candidate was filtered out. A FLOATING SE can therefore never out-score
+      // an eligible DEDICATED one: the score is only ever consulted *within* one tier.
+      const winningTier = passed[0]?.coverageType ?? null;
+      const tierCandidates = passed.filter((c) => c.coverageType === winningTier);
+
+      // #266 Q-A — the multiplier is per candidate, and means what its name says: does THIS engineer
+      // already go to this plant today? (The old test asked whether ANY SE had been seeded at the
+      // plant this run — one value applied to every candidate, so it cancelled out of every comparison
+      // and could decide nothing.)
+      const clusterFor = (seId: string): number =>
+        plantsBySe.get(seId)?.has(ticketPlant) ? clusterMultiplier : 1;
+
+      // #266 step 2 — score every candidate in the winning tier. Note that `features` below is built
+      // from the TICKET, so `baseScore` is identical across these candidates and the cluster term is
+      // the only thing that separates them until #267 gives `distance` a real per-candidate value.
+      const tierScores = new Map<string, number>(
+        tierCandidates.map((c) => [c.seId, scoreCandidate(featuresFor(t), weights, clusterFor(c.seId)).score]),
+      );
+
+      // #266 step 3 — selection order, ratified: the SE Planner pin, then the winning tier, then score,
+      // then `se_id` ascending.
+      //
+      // **The pin is searched across ALL passing candidates, not just the winning tier, and that is a
+      // deliberate operator ruling rather than an oversight.** ADR-0022's bias has crossed tiers since
+      // Issue 14a — `recommender-planner-bias.e2e-spec.ts` pins a planner-named MULTI_PLANT SE beating
+      // an eligible DEDICATED one — and restricting it to the winning tier would silently retire that,
+      // overriding a manager's explicit choice with an SE they did not name and giving them no signal
+      // their pin was discarded. So Q1's "precedence is inviolable" binds the SCORE, which is all this
+      // issue needed: a higher score can never cross a tier, while a human's pin still can.
+      const pinned = planned ? passed.find((c) => planned.has(c.seId)) : undefined;
+      const chosen =
+        pinned ??
+        [...tierCandidates].sort((a, b) => {
+          const byScore = (tierScores.get(b.seId) ?? 0) - (tierScores.get(a.seId) ?? 0);
+          // Ties break on `se_id` ascending — deterministic rather than "whatever the database
+          // returned first", which is what a run has to be if two runs on one fixture must agree.
+          return byScore !== 0 ? byScore : a.seId.localeCompare(b.seId);
+        })[0] ??
+        null;
+
+      const multiplier = chosen ? clusterFor(chosen.seId) : 1;
+      // Retained for the trace/preview field of the same name, now with its Q-A meaning: this decision
+      // was NOT a cluster follow-on for the winner (they were not already going to this plant).
+      const isSeed = multiplier === 1;
 
       // Per-filter drop COUNTS across the whole pool — the trace never stores dropped rows verbatim.
       const dropCounts: Record<string, number> = {};
@@ -607,17 +695,10 @@ export class RecommenderService {
       // The ticket is assignable now — clear any stale Component-Blocked row for it.
       if (!dryRun) await this.inventory.resolveComponentBlock(t.ticketId, now);
 
-      const coverageType = ordered.find((c) => c.seId === chosen.seId)!.coverageType;
-      const features = {
-        companyPriorityRank: t.companyPriorityRank,
-        // Install candidates have no SLA bucket → zero dispatch urgency (backlog, not an active outage).
-        dispatchUrgency: t.deviceBucket ? urgencyFromBucket(t.deviceBucket) : 0,
-        repeatFailure: t.repeatFailure,
-        // Age drives the PREVENTIVE aged-bias term (weighted 0 in DEFICIT). For installs the anchor is the
-        // backlog target date, so older Install backlog ranks higher.
-        inactivityHours: t.ageAnchor ? Math.max(0, (now.getTime() - t.ageAnchor.getTime()) / 3_600_000) : null,
-        distanceFromPrevStopKm: null, // Floating distance-from-previous-stop deferred (needs day-plan geo)
-      };
+      const coverageType = chosen.coverageType;
+      const features = featuresFor(t);
+      // The winner's persisted breakdown is the same computation that selected them — same helper,
+      // same multiplier — rather than a second derivation that could quietly disagree with it.
       const scored = scoreCandidate(features, weights, multiplier);
 
       // #126 — guard-not-throw. Stale orphans from finalized/aborted runs were cleared before the
@@ -661,6 +742,12 @@ export class RecommenderService {
       }
 
       assigned.set(chosen.seId, (assigned.get(chosen.seId) ?? 0) + 1);
+      // #266 Q-A — grow the winner's plant set in-run, mirroring the capacity counter one line above:
+      // an SE who has just been given this plant carries the clustering benefit into the next ticket
+      // here, exactly as an SE who arrived with it already on their day plan does.
+      const wonPlants = plantsBySe.get(chosen.seId) ?? new Set<string>();
+      wonPlants.add(ticketPlant);
+      plantsBySe.set(chosen.seId, wonPlants);
       recommended++;
 
       const plannerPlannedChosen = planned?.has(chosen.seId) ?? false;
@@ -979,6 +1066,10 @@ export class RecommenderService {
    * #153 — "live" includes OVERRIDDEN. A ZM adjusting a day plan does not un-commit the work still on
    * it; counting only ACTIVE zeroed the SE's load and let the next run hand them a whole second day.
    */
+  private committedDayPlan(day: Date): Promise<Map<string, CommittedDayEntry>> {
+    return committedDayPlan(this.prisma, day);
+  }
+
   private committedDayLoad(day: Date): Promise<Map<string, number>> {
     return committedDayLoad(this.prisma, day);
   }

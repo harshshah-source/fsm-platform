@@ -191,7 +191,7 @@ describe('dispatch transparency — per-ticket decision traces (seeded zone)', (
     expect(typeof trace.runnersUp[0].score).toBe('number');
   });
 
-  it('capacity fallback trace: OVER_CAPACITY drop count, DROPPED runner-up, no cluster seed', async () => {
+  it('capacity fallback trace: OVER_CAPACITY drop count, DROPPED runner-up, and IS a cluster seed', async () => {
     const { row, trace } = await traceFor(t2);
     expect(row.seId).toBe(seB);
     expect(trace.dropCounts).toEqual({ OVER_CAPACITY: 1 });
@@ -200,7 +200,11 @@ describe('dispatch transparency — per-ticket decision traces (seeded zone)', (
       seId: seB,
       coverageType: 'MULTI_PLANT',
       precedenceRank: 2,
-      clusterSeed: false,
+      // Re-derived for #266 Q-A, not blind-updated. `clusterSeed` used to be run-level — "is this the
+      // first ticket at this plant this run", regardless of WHO it went to — so the fallback SE was
+      // recorded as a cluster follow-on for a plant they had never visited. It is now per candidate:
+      // seB is going to this plant for the first time today, so this decision genuinely IS their seed.
+      clusterSeed: true,
       capacityAtDecision: { used: 1, cap: 10 },
     });
     const droppedA = trace.runnersUp.find((r: any) => r.seId === seA);
