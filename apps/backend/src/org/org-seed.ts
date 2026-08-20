@@ -66,11 +66,16 @@ const SEED_SLA_RULES: {
 
 const SEED_WEIGHT_SET = 'v1';
 // Within-(Tier×Bucket)-cell weighted-score components (ADR-0003 layer 4, read by the Recommender,
-// Issue 10). company_tier/device_bucket are the upstream gates, kept for back-compat / reporting.
+// Issue 10).
+//
+// #266 — `company_tier`, `device_bucket` and `sla_urgency` were seeded here and read by NOTHING: the
+// tier and bucket are the upstream gates that decide the canonical ticket ORDER, and they never were
+// score components. They still loaded into `activeWeights` and were persisted in every breakdown, so
+// each stored explanation carried three numbers that contributed nothing to the score it explained.
+// Dropped from the seed so a fresh database never grows them, and deactivated on existing databases
+// by `20260821120000_retire_dead_scoring_weights`. `scoring.ts`'s SCORING_COMPONENTS is now the one
+// definition of what a lever is, and the admin API validates against it.
 const SEED_WEIGHTS: { component: string; weight: number }[] = [
-  { component: 'company_tier', weight: 0.4 },
-  { component: 'device_bucket', weight: 0.3 },
-  { component: 'sla_urgency', weight: 0.3 },
   { component: 'company_priority_rank', weight: 0.4 },
   { component: 'dispatch_urgency', weight: 0.3 },
   { component: 'repeat_failure_penalty', weight: 0.2 },

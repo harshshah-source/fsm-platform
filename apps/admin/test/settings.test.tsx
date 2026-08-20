@@ -236,3 +236,30 @@ describe('Settings — Operations Head only (AC#1)', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('Settings — Scoring Weights component vocabulary (#266)', () => {
+  it('offers only the components the recommender reads, fetched rather than hard-coded', async () => {
+    // The Component field was free text: any string could be saved, and the resulting weight then sat
+    // in this table looking exactly like a real lever while contributing nothing to any score. Three
+    // had been seeded that way since Issue 02 (`company_tier`, `device_bucket`, `sla_urgency`) and are
+    // retired by migration; closing the field is what stops the next one being created.
+    stubApi({
+      '/org/scoring-weights/components': {
+        body: { components: ['company_priority_rank', 'dispatch_urgency', 'device_age'] },
+      },
+      '/org/scoring-weights': { body: [] },
+    });
+    renderAt('/settings', opsHead);
+
+    await userEvent.click(await screen.findByRole('tab', { name: /Scoring Weights/i }));
+
+    const select = await screen.findByLabelText('Component');
+    // A picker, not a text box — the operator can no longer invent a component the scorer will ignore.
+    expect(select.tagName).toBe('SELECT');
+    expect(within(select).getByRole('option', { name: 'company_priority_rank' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'device_age' })).toBeInTheDocument();
+    // The options come from the server's list, so the picker and the validation that 400s on anything
+    // outside it cannot drift apart. A retired component is absent because it is absent there.
+    expect(within(select).queryByRole('option', { name: 'company_tier' })).not.toBeInTheDocument();
+  });
+});

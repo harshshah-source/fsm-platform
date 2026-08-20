@@ -52,6 +52,34 @@ const W_AGE = 'device_age';
 /** Inactivity hours capped at 7 days → 0..1. Older (more inactive) device → higher age score. */
 const AGE_CAP_HOURS = 168;
 
+/**
+ * #266 — the closed vocabulary of scoring components: every weight `scoreCandidate` actually reads,
+ * and nothing else.
+ *
+ * This exists because the weight set was open. `priority_rule_config` accepted any component string,
+ * the admin form's Component field is free text, and `activeWeights` loads whatever is active — so a
+ * weight named anything at all would appear in the settings table beside the real ones and ride along
+ * in every persisted `score_breakdown.weights`, contributing nothing. Three had been seeded that way
+ * since Issue 02 (`company_tier`, `device_bucket`, `sla_urgency`) and were read by nothing.
+ *
+ * Deactivating those three without closing the set would have fixed the instance and left the class:
+ * the next dead lever is one form submission away. The scorer is the only thing that can say what a
+ * lever is, so it says it here and the admin API validates against it.
+ */
+export const SCORING_COMPONENTS = [
+  W_RANK,
+  W_URGENCY,
+  W_REPEAT,
+  W_DISTANCE,
+  W_REPEAT_BONUS,
+  W_AGE,
+] as const;
+
+/** True when `component` is a weight the scorer reads. */
+export function isScoringComponent(component: string): boolean {
+  return (SCORING_COMPONENTS as readonly string[]).includes(component);
+}
+
 /** A=1.0, B=0.9, C=0.8 … clamped to [0,1]. Higher rank → higher score. */
 function rankScore(letter: string): number {
   const idx = letter.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);

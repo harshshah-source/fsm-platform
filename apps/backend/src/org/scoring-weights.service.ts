@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
+import { isScoringComponent, SCORING_COMPONENTS } from '../recommender/scoring';
 
 export interface ScoringWeightView {
   weightSetRef: string;
@@ -43,6 +44,15 @@ export class ScoringWeightsService {
     }
     if (typeof input.weight !== 'number' || !Number.isFinite(input.weight)) {
       throw new BadRequestException('weight must be a finite number');
+    }
+    // #266 — the weight set is a closed vocabulary. `scoring.ts` names the components `scoreCandidate`
+    // reads; anything else is a lever that moves nothing, and would still show up in this table beside
+    // the real ones and in every persisted `score_breakdown.weights`. The message names the offender
+    // AND the real vocabulary, because "then what can I set?" is always the next question.
+    if (!isScoringComponent(input.component)) {
+      throw new BadRequestException(
+        `component "${input.component}" is not read by the recommender; expected one of: ${SCORING_COMPONENTS.join(', ')}`,
+      );
     }
     const active = input.active ?? true;
     return this.audit.withAudit(

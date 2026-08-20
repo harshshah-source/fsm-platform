@@ -121,6 +121,13 @@ export const upsertSlaRule = (body: {
 }) => api<SlaRuleView>('/org/sla-rules', { method: 'PUT', body: JSON.stringify(body) });
 
 export const listScoringWeights = () => api<ScoringWeightView[]>('/org/scoring-weights');
+/**
+ * #266 — the components the recommender actually reads, served by the backend rather than restated
+ * here. `scoring.ts` is the one definition; hard-coding the list in the admin would let the picker
+ * drift from the validation that rejects anything outside it.
+ */
+export const listScoringComponents = () =>
+  api<{ components: string[] }>('/org/scoring-weights/components');
 export const upsertScoringWeight = (body: {
   weightSetRef: string;
   component: string;

@@ -165,6 +165,8 @@ describe('#266 — the score selects the SE within the coverage tier', () => {
     // rule produced the answer.
     await giveExistingStopAtPlant(seHigh);
     subjectTicket = await makeTicket();
+    // A second ticket so "the order" is something more than one row.
+    await makeTicket();
   });
 
   afterAll(async () => {
@@ -222,5 +224,33 @@ describe('#266 — the score selects the SE within the coverage tier', () => {
     const winner = await winnerOf(subjectTicket);
     expect(winner).not.toBe(floating);
     expect([seLow, seHigh]).toContain(winner);
+  });
+
+  it('AC — scoring never reorders the tickets themselves (Q1: canonical ordering is not replaced)', async () => {
+    // Q1 ratified two separate things and this pins the boundary between them: the score decides
+    // WHICH ENGINEER, and the canonical sort decides IN WHAT ORDER TICKETS ARE PROCESSED. They must
+    // not bleed into one another. A scoring rewrite is exactly the change that could silently start
+    // ranking tickets by score — the two live inches apart in the same loop — and the failure would be
+    // invisible: dispatch still works, every ticket still gets an SE, but urgency ordering has quietly
+    // become an engineer-preference ordering.
+    //
+    // Driven by the one input proven to change the winner. The multiplier flip is not incidental here:
+    // the earlier tests establish that it genuinely moves the ticket from one SE to another, so if
+    // scoring had any influence on `processingRank` this fixture would show it.
+    const ranksAt = async (multiplier: number): Promise<Record<string, number | null>> => {
+      await setClusterMultiplier(multiplier);
+      const summary = await rec.runForZone(zoneId, { now: NOW, dryRun: true, targetDate: NOW });
+      const out: Record<string, number | null> = {};
+      for (const d of summary.projection?.decisions ?? []) out[d.ticketId] = d.processingRank;
+      return out;
+    };
+
+    const clustered = await ranksAt(1.25);
+    const neutral = await ranksAt(1.0);
+
+    expect(Object.keys(clustered).length).toBeGreaterThan(1);
+    expect(neutral).toEqual(clustered);
+
+    await setClusterMultiplier(1.25);
   });
 });

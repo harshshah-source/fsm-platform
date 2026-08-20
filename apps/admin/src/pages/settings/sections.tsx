@@ -486,6 +486,17 @@ export function ScoringWeightsSection() {
   const [weightSetRef, setRef] = useState('v1');
   const [component, setComponent] = useState('');
   const [weight, setWeight] = useState('');
+  // #266 — the recommender's own vocabulary, fetched rather than restated. This field used to be free
+  // text, so any string could be saved and would then sit in this table looking exactly like a real
+  // lever while contributing nothing to a score. The server rejects those now; this makes the valid
+  // set visible instead of leaving the operator to discover it from a 400.
+  const [components, setComponents] = useState<string[]>([]);
+  useEffect(() => {
+    org
+      .listScoringComponents()
+      .then((r) => setComponents(r.components))
+      .catch(() => setComponents([]));
+  }, []);
   return (
     <section>
       <form
@@ -505,7 +516,14 @@ export function ScoringWeightsSection() {
           <input className={inputClass} value={weightSetRef} onChange={(e) => setRef(e.target.value)} />
         </Field>
         <Field label="Component">
-          <input className={inputClass} value={component} onChange={(e) => setComponent(e.target.value)} />
+          <select className={inputClass} value={component} onChange={(e) => setComponent(e.target.value)}>
+            <option value="">Select component…</option>
+            {components.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
         </Field>
         <Field label="Weight">
           <input className={inputClass} value={weight} onChange={(e) => setWeight(e.target.value)} />
