@@ -257,6 +257,9 @@ export class DispatchRunService {
     // before deciding anything. `null` until some zone actually reports one, so a run in which no zone's
     // recommender ever got that far records "not measured" rather than a fabricated 0.
     let bucketlessDropped: number | null = null;
+    // #177 — tickets held back because a part is on order. `null` on the same terms as the line above:
+    // a run in which no zone's recommender reported records "not measured", never a fabricated 0.
+    let componentBlockedWithheld: number | null = null;
     // Zones that did not fully dispatch — a hard error OR a benign skip (lock contention / a residual
     // schedule conflict). Any such zone stamps its `dispatch_run_zones.error`, so this equals the list's
     // "Errors" column and drives the run status: a run with an issue is never labelled SUCCESS.
@@ -292,6 +295,7 @@ export class DispatchRunService {
       unassignable += rec?.unassignable ?? 0;
       withheldBelowThreshold += rec?.withheldBelowThreshold ?? 0;
       if (rec) bucketlessDropped = (bucketlessDropped ?? 0) + rec.bucketlessDropped;
+      if (rec) componentBlockedWithheld = (componentBlockedWithheld ?? 0) + rec.componentBlockedWithheld;
       if (error !== null) zonesWithIssue++;
     }
 
@@ -314,6 +318,7 @@ export class DispatchRunService {
         unassignable,
         withheldBelowThreshold,
         bucketlessDropped,
+        componentBlockedWithheld,
       },
     });
     await this.audit.record({
@@ -332,6 +337,7 @@ export class DispatchRunService {
         unassignable,
         withheldBelowThreshold,
         bucketlessDropped,
+        componentBlockedWithheld,
         errorCount: summary.errors.length,
       },
     });
@@ -366,6 +372,9 @@ export class DispatchRunService {
         // #242 - `null` rather than 0 for a zone whose recommender threw: "no figure" and "dropped
         // none" are different answers, and this column exists because the second used to be assumed.
         bucketlessDropped: rec?.bucketlessDropped ?? null,
+        // #177 — same distinction: a zone whose recommender threw withheld no *measured* figure, and
+        // saying 0 would claim it looked and found nothing waiting on a part.
+        componentBlockedWithheld: rec?.componentBlockedWithheld ?? null,
         assignmentThresholdHours: rec?.assignmentThresholdHours ?? null,
         ...(rec?.unassignableReasons
           ? { unassignableReasons: rec.unassignableReasons as unknown as Prisma.InputJsonValue }

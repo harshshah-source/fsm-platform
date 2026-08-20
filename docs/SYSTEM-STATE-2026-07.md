@@ -566,6 +566,26 @@ its two neighbours because they route to different teams: `unassignable` = the e
 nobody (Ops), `withheld_below_threshold` = it deliberately did not look yet (policy), `bucketless_dropped`
 = it could not look (data). **Neither of the last two is rendered anywhere yet — the transparency zone
 card projects neither → #252.**
+**Component-blocked work is excluded from BOTH automatic pools, and counted (#177).** A ticket whose
+failure cycle is `WAITING_COMPONENT` stays OPEN by design (ADR-0008) — the failure is real, the part is
+on order — and until this slice neither the morning selection nor the intraday CRITICAL sweep
+(`fireForZone`) looked at the cycle at all, so the moment it was also UNASSIGNED it was dispatched or
+offered like any other. The SE could not finish, resubmitted on site (the submit gate is also just
+`status === 'OPEN'`), and opened a **second live `component_request`** — that table's only unique is
+`submission_id`. One predicate, `src/ticketing/component-blocked.ts`, on the `deferral.ts` model, and
+**compose it under `AND`**: it and `notDeferredOn` are both top-level `OR`s, so flat-spreading the two
+silently keeps only the last and the filter appears to do nothing. Keyed on the **live cycle state
+alone** — never `sla_paused`, the pause reason, or the existence of a request — because
+`confirmResubmit`'s floating-SE `RETURN_TO_POOL` is the normal way blocked work resumes and unassigns
+*after* the cycle is back to OPEN; a pause-keyed filter strands exactly the tickets whose parts have
+arrived. Stamped as `dispatch_runs.component_blocked_withheld` +
+`dispatch_run_zones.component_blocked_withheld`, **nullable** (this population used to be *dispatched*
+rather than withheld, so 0 on a historical run would claim a measurement nobody took). It is the
+**third** member of the family above and separate for the same reason: `unassignable` routes to Ops,
+`withheld_below_threshold` to nobody, this one to the **warehouse**. The `/assign` console pool
+(#273's `assignableTickets`) is deliberately **not** filtered — the two pools here are automatic, with
+no human judgment, whereas the console is a dispatcher deciding and #258 Q1/Q2 ratified show-don't-gate
+there; marking it belongs to #274.
 **Mode switch**: `SoftInactiveCountService.modeForZone` — soft-inactive count > threshold% ⇒
 DEFICIT, else PREVENTIVE (#40); PREVENTIVE appends the INSTALL backlog (REQUESTED+UNASSIGNED,
 `installSort`: tier → rank → oldest backlog) after TROUBLESHOOT candidates (#75).

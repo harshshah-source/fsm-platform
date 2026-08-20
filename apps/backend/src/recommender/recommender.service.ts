@@ -10,6 +10,7 @@ import { type RecommenderMode, SoftInactiveCountService } from '../reports/soft-
 import { readAssignmentThresholdHours } from '../settings/assignment-threshold';
 import { committedDayLoad } from '../scheduling/committed-day-load';
 import { notDeferredOn, returnDateArrivedBefore } from '../ticketing/deferral';
+import { componentBlockedTickets, notComponentBlocked } from '../ticketing/component-blocked';
 import { CandidateSelectionService } from './candidate-selection.service';
 import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
@@ -87,6 +88,19 @@ export interface RunSummary {
    */
   bucketlessDropped: number;
   /**
+   * #177 — open, unassigned tickets this zone is holding back because their failure cycle is
+   * `WAITING_COMPONENT`: the part is on order, the SLA is paused, and the ticket is still OPEN by
+   * design (ADR-0008). Dispatching one costs a capacity slot, a wasted visit, and a second live
+   * `component_request` when the SE resubmits on site.
+   *
+   * The third member of the same family as the two figures above, and separate for the same reason.
+   * `unassignable` is an Ops problem (the engine looked and found nobody); `withheldBelowThreshold`
+   * is nobody's problem (policy working as intended); this one is the warehouse's — the work is
+   * real, it is waiting on a part, and no amount of coverage will move it. Folding it into the first
+   * would make a supplier delay read as a fleet-wide dispatch outage.
+   */
+  componentBlockedWithheld: number;
+  /**
    * #250 — populated **only** on a dry run. The real path leaves it undefined, so its type and every
    * existing caller are untouched.
    */
@@ -160,6 +174,8 @@ export interface ZoneProjection {
   recommended: number;
   unassignable: number;
   withheldBelowThreshold: number;
+  /** #177 — held back for a part on order, not for coverage and not for policy. */
+  componentBlockedWithheld: number;
   /** Why the unassignable ones were unassignable — coverage gap vs filters emptying the pool. */
   unassignableReasons: UnassignableReasons;
   decisions: PreviewDecision[];
@@ -269,7 +285,20 @@ export class RecommenderService {
       workType: 'TROUBLESHOOT',
       status: 'OPEN',
       assignmentState: 'UNASSIGNED',
-    } as const;
+      // #177 — a ticket whose failure cycle is WAITING_COMPONENT is OPEN by design (the failure is
+      // real and the part is on order), so `status` alone has never said whether it can be worked.
+      // Dispatching one hands the SE a job they cannot finish and, because the submit gate is also
+      // just `status === 'OPEN'`, earns a second live `component_request` when they resubmit on site.
+      // Excluded here in the shared `ticketWhere` so the withheld count below inherits it: a ticket
+      // that is both blocked and below the age threshold belongs to the blocked figure, and counting
+      // it in both would make the two columns sum past the pool they partition.
+      //
+      // Nested under `AND` rather than spread flat, and that is load-bearing: this predicate and
+      // `notDeferredOn` both express themselves as a top-level `OR`, so spreading the two into one
+      // object silently keeps only the last — measured, not feared. It cost one confusing red run
+      // where the exclusion appeared to do nothing at all.
+      AND: [notComponentBlocked()],
+    } satisfies Prisma.TicketWhereInput;
 
     const tickets = await this.prisma.ticket.findMany({
       where: {
@@ -333,6 +362,25 @@ export class RecommenderService {
           departures: { none: { restoredAt: null } },
           state: { inactivityHours: { lt: assignmentThresholdHours } },
         },
+      },
+    });
+
+    // #177 — what the cycle exclusion above just held back. Counted rather than fetched (nothing
+    // downstream needs the rows) and counted from the SAME clauses as the read with only the cycle
+    // predicate flipped, so the two cannot drift into disagreeing about which tickets were in scope.
+    //
+    // Deliberately NOT `ticketWhere` spread with an override: `ticketWhere` now carries the exclusion
+    // itself, so reusing it here would count the tickets that survived it. The zone/plant/device
+    // guards are repeated instead, which is the same shape `withheldBelowThreshold` already uses.
+    const componentBlockedWithheld = await this.prisma.ticket.count({
+      where: {
+        workType: 'TROUBLESHOOT',
+        status: 'OPEN',
+        assignmentState: 'UNASSIGNED',
+        ...notDeferredOn(targetDay),
+        plant: { zoneId, deactivations: { none: { reactivatedAt: null } } },
+        device: { departures: { none: { restoredAt: null } } },
+        AND: [componentBlockedTickets()],
       },
     });
 
@@ -708,6 +756,7 @@ export class RecommenderService {
               recommended,
               unassignable,
               withheldBelowThreshold,
+              componentBlockedWithheld,
               unassignableReasons,
               decisions,
               plan: buildPreviewPlan(decisions),
@@ -723,6 +772,7 @@ export class RecommenderService {
       assignmentThresholdHours,
       withheldBelowThreshold,
       bucketlessDropped,
+      componentBlockedWithheld,
     };
   }
 

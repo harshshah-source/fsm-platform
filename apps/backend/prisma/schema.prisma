@@ -800,6 +800,13 @@ model DispatchRun {
   /// purpose — the drop predates the counter, so 0 on a historical run would claim a measurement
   /// nobody took; NULL reads as "not recorded".
   bucketlessDropped Int?               @map("bucketless_dropped")
+  /// #177 — open unassigned tickets the automatic pools declined to hand out because their failure
+  /// cycle is WAITING_COMPONENT (part on order, SLA paused, ticket still OPEN by ADR-0008). A third
+  /// column rather than a merge: `unassignable` is an Ops coverage gap, `withheld_below_threshold` is
+  /// policy working, and this is the warehouse's clock. NULLABLE for #242's reason — this population
+  /// used to be dispatched rather than withheld, so 0 on a historical run would claim a measurement
+  /// nobody took.
+  componentBlockedWithheld Int?          @map("component_blocked_withheld")
   configSnapshot    Json               @map("config_snapshot")
   // #130 L3 — build that produced this run (nullable/additive; stamped at creation from build-info).
   buildVersion      BigInt?            @map("build_version")
@@ -839,6 +846,9 @@ model DispatchRunZone {
   /// #242 — this zone's share of the run-level figure; see DispatchRun.bucketlessDropped. NULL when the
   /// zone's recommender never reported (it threw), which is not the same as "it dropped none".
   bucketlessDropped   Int?              @map("bucketless_dropped")
+  /// #177 — this zone's share of the run-level figure; see DispatchRun.componentBlockedWithheld. NULL
+  /// when the zone's recommender never reported (it threw), which is not "it withheld none".
+  componentBlockedWithheld Int?         @map("component_blocked_withheld")
   schedules           Int               @default(0)
   batches             Int               @default(0)
   ticketsDispatched   Int               @default(0) @map("tickets_dispatched")

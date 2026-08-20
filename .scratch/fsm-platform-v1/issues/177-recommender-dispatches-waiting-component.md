@@ -1,6 +1,6 @@
 # 177 — Recommender dispatches WAITING_COMPONENT tickets
 
-Status: ready-for-agent — **sequenced into P8 as a hard prerequisite of [#266](./266-score-selects-within-tier.md)** (2026-08-20 pre-implementation review). Two reasons: a selection rewrite belongs over a correct candidate pool, and [#268](./268-critical-direct-assignment.md)'s automatic CRITICAL direct assignment inherits this gap through the shared chooser — without the fix, component-blocked CRITICAL work would be pushed to SEs automatically and routinely rather than only via a manual path.
+Status: **DONE 2026-08-20** (`docs/progress/177-recommender-dispatches-waiting-component.md`) — sequenced into P8 as a hard prerequisite of [#266](./266-score-selects-within-tier.md) (2026-08-20 pre-implementation review). Two reasons: a selection rewrite belongs over a correct candidate pool, and [#268](./268-critical-direct-assignment.md)'s automatic CRITICAL direct assignment inherits this gap through the shared chooser — without the fix, component-blocked CRITICAL work would be pushed to SEs automatically and routinely rather than only via a manual path.
 Type: AFK · Backend
 
 Filed 2026-07-29 (found during the #179 bulk-unassign design investigation; companion to
@@ -63,12 +63,48 @@ the same condition the 07-22 audits warned about. Do not read the zero as safety
 
 ## Acceptance criteria
 
-- [ ] A WAITING_COMPONENT ticket that is OPEN + UNASSIGNED is not recommended, not dispatched, and
+- [x] A WAITING_COMPONENT ticket that is OPEN + UNASSIGNED is not recommended, not dispatched, and
       not offered intraday (e2e both paths)
-- [ ] A RETURN_TO_POOL resubmit ticket (cycle back to OPEN) IS re-dispatchable (regression e2e)
-- [ ] The exclusion is visible on the run's unassignable/trace surface, not silent
-- [ ] #179 interplay: bulk-unassigned component-blocked tickets sit UNASSIGNED until their cycle
+- [x] A RETURN_TO_POOL resubmit ticket (cycle back to OPEN) IS re-dispatchable (regression e2e)
+- [x] The exclusion is visible on the run's unassignable/trace surface, not silent
+      — operator-ruled as a **separate ledger column** (`component_blocked_withheld` on both
+      `dispatch_runs` and `dispatch_run_zones`), not an `unassignableReasons` bucket. That blob
+      aggregates over *unassignable* tickets — ones that entered the pool and found no SE — so filing
+      a policy hold there would report a warehouse delay as an Ops coverage gap. Follows #238 and
+      #242's precedent exactly, including the NULLABLE honesty clause.
+- [x] #179 interplay: bulk-unassigned component-blocked tickets sit UNASSIGNED until their cycle
       returns to OPEN, then re-dispatch normally (e2e)
+
+## Corrections made in place while building (the issue was stale)
+
+- **Line numbers**: `recommender.service.ts:113-127` is now interface declarations; the selection is
+  `:268`. `intraday-insertion.service.ts:101-111` was accurate.
+- **"one `where` clause on the cycle relation" understates it twice.** The natural spelling
+  `NOT: { failureCycle: { is: { state: 'WAITING_COMPONENT' } } }` is the trap the file next door
+  already documents as measured: Prisma renders a negated to-one relation filter so a NULL relation
+  matches neither it nor its negation. And the predicate **cannot be flat-spread** into either query,
+  because it and `notDeferredOn` are both top-level `OR`s — the first green attempt did exactly that
+  and the filter silently did nothing. Both queries compose it under `AND`.
+- **The NULL-cycle class does not exist in the morning pool**, and the reason is a DB constraint the
+  issue never mentions: `tickets_troubleshoot_requires_cycle` (`20260620124718:254`) is
+  `work_type <> 'TROUBLESHOOT' OR failure_cycle_id IS NOT NULL`. It *is* live for the intraday sweep,
+  which has no `workType` clause at all and is saved today only by RECOVERY/INSTALL tickets being
+  created `REQUESTED` rather than `OPEN` — an emergent property of two unrelated facts. One correct
+  spelling ships in both places rather than relying on it.
+
+## Found while building
+
+- **There is now a third pool the issue predates.** #273's `assignableTickets()` (the `/assign`
+  console, landed 2026-08-20) selects the same OPEN + UNASSIGNED work, and its own docblock warns
+  against absorbing "any future exclusion". **Operator-ruled: not excluded there.** The two pools
+  fixed here are *automatic* — no human judgment, so a blocked ticket is pure waste. The console is a
+  dispatcher deciding, where #258 Q1/Q2 ratified show-don't-gate (over-capacity is marked, selectable,
+  never blocked), and a part that has just landed is a legitimate reason to assign one. Marking it in
+  the console belongs to **#274**, which owns candidate/pool transparency — filed there, not here.
+- **Item 4 of "What to build" stands unbuilt, deliberately, as specified.** The missing
+  one-live-request-per-ticket partial unique on `component_request` is recorded, not added: it is not
+  trivially safe against existing data (it needs a duplicate probe first, and dev has 0 rows, which
+  #156's lesson says is not evidence). Its own hardening slice.
 
 ## UI surfaces
 

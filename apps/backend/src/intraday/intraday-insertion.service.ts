@@ -1,4 +1,5 @@
 import { istDate } from '../common/ist-day';
+import { notComponentBlocked } from '../ticketing/component-blocked';
 import { notDeferredOn } from '../ticketing/deferral';
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
@@ -108,6 +109,12 @@ export class IntradayInsertionService {
         plant: { zoneId },
         device: { state: { slaBucket: { in: TRIGGER_BUCKETS } } },
         intradayInsertions: { none: { status: { in: ['PENDING_ACCEPTANCE', 'ACCEPTED'] } } },
+        // #177 — the same exclusion the morning pool takes, reached by a different query. Speed is
+        // this sweep's whole point, which is exactly what makes a component-blocked ticket worse here
+        // than there: the offer lands on the SE's phone within minutes for a job whose part is still
+        // on order, and the fastest possible Accept is a wasted trip. Nested under `AND` because both
+        // this predicate and `notDeferredOn` above are top-level `OR`s — see the predicate's docblock.
+        AND: [notComponentBlocked()],
       },
       include: { device: { select: { state: true } } },
     });
