@@ -1,10 +1,33 @@
 # 178 — Ticket closure never clears assignment state (351 closed tickets burn phantom capacity)
 
-Status: ready-for-agent — **sequenced into P8 as a hard prerequisite of [#269](./269-capacity-overload-visibility.md)** (2026-08-20 pre-implementation review). `committedDayLoad` has no ticket-status filter, so until this lands the capacity figure overcounts closed work until the 04:00 recycle — #269 would display that inflated number as fact, and [#268](./268-critical-direct-assignment.md) reads the same figure for its Q-B escalation decision. Fix the source before surfacing or escalating on it.
+Status: **DONE 2026-08-20** (`docs/progress/178-closure-never-clears-assignment.md`) — the backfill probe is built and **NOT executed** (read-only by default; `--apply` is a deliberate act) — **sequenced into P8 as a hard prerequisite of [#269](./269-capacity-overload-visibility.md)** (2026-08-20 pre-implementation review). `committedDayLoad` has no ticket-status filter, so until this lands the capacity figure overcounts closed work until the 04:00 recycle — #269 would display that inflated number as fact, and [#268](./268-critical-direct-assignment.md) reads the same figure for its Q-B escalation decision. Fix the source before surfacing or escalating on it.
 Type: AFK · Backend
 
 Filed 2026-07-29 (found during the #179 bulk-unassign design investigation; independent companion —
 #179's predicate excludes these rows, this issue fixes why they exist).
+
+## Inventory corrected at implementation time (2026-08-20)
+
+The writer list below was accurate when filed (2026-07-29) and **is not accurate now** — #241 landed
+in between and fixed two of the paths it names. Verified against the working tree:
+
+| Terminal writer | Status |
+|---|---|
+| `device-departure.service.ts:289` | ✅ already stamped by #241 (`TICKET_CANCELLED`) |
+| `plant-deactivation.service.ts:177` | ✅ already stamped by #241 (`TICKET_CANCELLED`) |
+| `auto-recovery.service.ts:268` | ✅ already stamped (`AUTO_RECOVERY`) |
+| `verification.service.ts:135` (manual auto-recovery) | ❌ fixed here |
+| `verification.service.ts` `finalize` (CLOSED / FAILED_VERIFICATION) | ❌ fixed here |
+| `recovery.service.ts` `confirmWarehouseReceipt` | ❌ fixed here |
+| `recovery.service.ts` `closeWith` (manual close + failed-recovery close) | ❌ fixed here — **not named in the original list** |
+| `install-lifecycle.service.ts` `closeVerified` + `failActivation` | ❌ fixed here |
+| `non-operational.service.ts:405` (CLOSED_NON_OPERATIONAL) | ❌ fixed here — **not named in the original list** |
+
+Two terminal paths the original list missed (recovery's shared `closeWith`, and the non-operational
+auto-close) are the reason the fix went in behind **one shared writer** rather than six inline copies:
+`retireAssignmentOnClosure` (`src/scheduling/close-assignment.ts`).
+
+Also corrected: `committedDayLoad` is at **`recommender.service.ts:926-937`**, not `:600-607`.
 
 ## The defect
 
@@ -20,6 +43,39 @@ device-departure cancel (`device-departure.service.ts:286`) and plant-deactivati
 **Measured 2026-07-29 (dev DB, read-only):** 351 tickets are `CLOSED` + `FORMALLY_ASSIGNED` with
 live batch rows. The arithmetic closes exactly: 7,150 live batch rows = 6,799 OPEN assigned +
 351 CLOSED.
+
+## Backfill population re-measured 2026-08-20 — and it is #243's C1 + C3
+
+**Do not execute this backfill without an operator decision.** The probe
+(`npm run closure-backfill:probe`, read-only) measured the dev mirror at implementation time:
+
+| Class | Count |
+|---|---|
+| Live batch rows on resolved tickets | **3,310** |
+| Resolved tickets still `FORMALLY_ASSIGNED` | **4,402** |
+
+The issue's headline figure of **351** is stale by an order of magnitude — it was measured
+2026-07-29, before #128's departure backfill and #241 landed.
+
+These are not a new population. They are **exactly** [#243](./243-dev-data-cleanup-stranded-assignments.md)'s
+already-ratified cleanup classes, and the arithmetic closes to the row:
+
+```
+C1  live rows on resolved/cancelled tickets      3,310
+C3  resolved + FORMALLY_ASSIGNED with no row     1,092
+                                                 -----
+    resolved tickets still FORMALLY_ASSIGNED     4,402   ✓ probe
+```
+
+So this slice's backfill and #243's C1+C3 would write to the same rows, with **different reasons** —
+`TICKET_RESOLVED` here, `DEV_CLEANUP` there. #243 is HITL-gated, ratified, and explicitly not to be
+executed without fresh approval, and `DEV_CLEANUP` is documented as *its own rollback handle*. Running
+this backfill first would silently consume #243's C1+C3 and destroy that handle.
+
+**Disposition:** the mechanism above is complete and live, so the population stops growing from now.
+The historical residue is left to #243 as a **backlog-ownership decision for the operator** — either
+fold C1+C3 into #243's single audited cleanup (recommended: it keeps one rollback handle), or rule
+that #178 owns them and amend #243's scope. Nothing was written either way.
 
 ## Why it matters (not cosmetic)
 

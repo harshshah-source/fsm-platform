@@ -4,6 +4,7 @@ import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 import { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
 import {
   CUSTOMER_CONFIRMATION_NOTIFIER,
   type CustomerConfirmationNotifier,
@@ -425,6 +426,10 @@ export class NonOperationalService {
         });
       }
     }
+    // #178 — the device has left service, so any assignment against it is over. Retiring the batch
+    // rows here, in the confirmation transaction, is what stops the SE being routed to a device the
+    // business has just switched off (and stops it spending one of their capacity slots).
+    await retireAssignmentOnClosure(tx, open.map((t) => t.ticketId), now);
 
     // Leaving the eligible set both excludes the device from the Fleet-Uptime denominator (AC#5) and
     // blocks new Failure Cycles (the ticket-creation gate requires eligible_for_uptime = true) (AC#3).

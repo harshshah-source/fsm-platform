@@ -3,6 +3,7 @@ import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 import { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
 import {
   LoggingRecoveryNotifier,
   RECOVERY_NOTIFIER,
@@ -157,6 +158,9 @@ export class RecoveryService {
           data: { status: 'CLOSED', closureType: 'AUTO_CLOSED_ON_WAREHOUSE_RECEIPT', closedAt: now, lastStateChangedAt: now },
         });
         await tx.ticketEvent.create({ data: { ticketId, fromState: 'RECEIVED_AT_WAREHOUSE', toState: 'CLOSED', reasonCode: 'AUTO_CLOSED_ON_WAREHOUSE_RECEIPT', ...eventActor(actor), at: now } });
+        // #178 — the device is physically back in the warehouse; there is nothing left to collect, so
+        // the assignment ends with the ticket rather than outliving it as a phantom stop.
+        await retireAssignmentOnClosure(tx, [ticketId], now);
         return row;
       },
     );
@@ -348,6 +352,9 @@ export class RecoveryService {
           data: { status: toState, closureType, closureReason: reason, closedAt: now, lastStateChangedAt: now },
         });
         await tx.ticketEvent.create({ data: { ticketId: ticket.ticketId, fromState: ticket.status, toState, reasonCode: closureType, ...eventActor(actor), at: now } });
+        // #178 — shared by the manual close and the failed-recovery close; both are terminal, so both
+        // end the assignment here rather than leaving the SE a stop for a ticket nobody will work.
+        await retireAssignmentOnClosure(tx, [ticket.ticketId], now);
         return row;
       },
     );

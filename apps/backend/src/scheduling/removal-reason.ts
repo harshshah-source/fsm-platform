@@ -32,6 +32,16 @@ export const REMOVAL_REASONS = {
   AUTO_RECOVERY: 'AUTO_RECOVERY',
   /** The ticket was cancelled out from under the assignment — device departure or plant deactivation. */
   TICKET_CANCELLED: 'TICKET_CANCELLED',
+  /**
+   * The ticket reached a terminal state and its assignment ended with it — verification decided,
+   * warehouse receipt, install closed or failed, marked non-operational, manual auto-recovery (#178).
+   *
+   * Distinct from `TICKET_CANCELLED`, where the work was called off from outside: here the work
+   * genuinely finished, successfully or not. Both are excluded from #244's attempt counting for the
+   * same reason — an ended attempt is only evidence the ticket *resists repair* when it ran out
+   * (`PLAN_EXPIRED` / `VEHICLE_UNAVAILABLE`), never when it concluded.
+   */
+  TICKET_RESOLVED: 'TICKET_RESOLVED',
   /** Returned to the pool waiting on a component (`ComponentRequestService.confirmResubmit`). */
   COMPONENT_WAIT: 'COMPONENT_WAIT',
   /** Unresolved at schedule closure — the nightly recycle. Written by #242; no writer yet. */

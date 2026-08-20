@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
 import { evaluatePhase1, evaluatePhase2 } from './verification-criteria';
 
 /**
@@ -146,6 +147,10 @@ export class VerificationService {
       await tx.auditLog.create({
         data: { actorId: actor.userId, actorRole: actor.role, action: 'MANUAL_AUTO_RECOVERY', entityType: 'tickets', entityId: ticketId },
       });
+      // #178 — the ticket is terminal, so the assignment is over: retire the live batch row and clear
+      // FORMALLY_ASSIGNED in this same transaction, or the SE keeps a stop (and the recommender keeps
+      // a spent capacity slot) for a device just declared recovered.
+      await retireAssignmentOnClosure(tx, [ticketId], now);
     });
     return 'OK';
   }
@@ -308,6 +313,9 @@ export class VerificationService {
         data: { ...runData, outcome, outcomeAt: now },
       });
       await tx.ticket.update({ where: { ticketId: ticket.ticketId }, data: { status: ticketStatus, lastStateChangedAt: now } });
+      // #178 — CLOSED and FAILED_VERIFICATION are both terminal, so the assignment ends here. This is
+      // the highest-volume closure in the product and the largest source of the phantom live rows.
+      await retireAssignmentOnClosure(tx, [ticket.ticketId], now);
       if (outcome === 'CLOSED' && ticket.failureCycleId) {
         await tx.failureCycle.update({ where: { cycleId: ticket.failureCycleId }, data: { state: 'VERIFIED', closedAt: now } });
         await tx.deviceState.updateMany({ where: { deviceId: ticket.deviceId }, data: { hasOpenFailureCycle: false } });

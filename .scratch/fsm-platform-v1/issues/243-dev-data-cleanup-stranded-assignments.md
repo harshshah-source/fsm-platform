@@ -1,6 +1,8 @@
 # 243 — Development-data cleanup: stranded and dead assignment state
 
 Status: ready-for-human
+**2026-08-20 — #178 overlap, unresolved:** #178 landed the closure mechanism and built a backfill whose population is **exactly C1 + C3** (probe: 3,310 live rows / 4,402 resolved-yet-assigned = 3,310 C1 + 1,092 C3, to the row). Its backfill was **NOT executed** precisely so it could not consume C1+C3 under a different `removal_reason` (`TICKET_RESOLVED`) and destroy the `DEV_CLEANUP` rollback handle. Whether C1+C3 execute here or in #178 is an open operator decision — see #178. From 2026-08-20 the population no longer grows: every terminal closure path now retires its own assignment.
+
 Ratified 2026-08-20 (#258 Part 10): C1/C2/C3 scope confirmed by the operator as part of the scheduler production-readiness decision set. Still HITL-gated — NOT executed; counts re-measured at execution time; runs only after explicit execution approval.
 Type: HITL · Data operation (no application code)
 

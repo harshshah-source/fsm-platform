@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 import type { ZmScope } from './zm-schedule-query.service';
 
 export interface DispatchRunListRow {
@@ -509,6 +510,10 @@ export class DispatchTransparencyQueryService {
              COUNT(*) FILTER (WHERE t.assignment_state = 'UNASSIGNED')::int AS "unassigned"
       FROM tickets t
       WHERE t.plant_id IN (${ids})
+        -- #178 — a finished ticket is neither assigned work nor outstanding work. Without this the
+        -- closure fix would simply move it from one column to the other and still report it as work
+        -- at the plant. assignment_state answers who holds it, never whether anything is left to do.
+        AND t.status NOT IN (${Prisma.join([...RESOLVED_TICKET_STATUSES])})
       GROUP BY t.plant_id`);
 
     const stats: Record<string, PlantDeviceStats> = {};

@@ -332,6 +332,37 @@ describe('/api/dispatch-runs (e2e)', () => {
     });
   });
 
+  /**
+   * #178 — the per-plant fleet stats count tickets by `assignment_state` and must not count ones whose
+   * ticket is over. Closure now clears `assignment_state`, so without a status filter here a closed
+   * ticket would simply move from the assigned column to the unassigned one and still be reported as
+   * outstanding work at the plant. It belongs in neither.
+   */
+  it('#178: a closed ticket at a dispatched plant counts as neither assigned nor unassigned', async () => {
+    const token = await login('csm@fsm.test');
+    const detail = () =>
+      request(app.getHttpServer())
+        .get(`/api/dispatch-runs/${runId}/zones/${ZM_ZONE}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+    const before = (await detail()).body;
+    const dispatchedPlantId = before.batches[0].plantId;
+    const statsBefore = before.plantStats[dispatchedPlantId];
+
+    // A finished ticket at that same plant. FORMALLY_ASSIGNED is left on deliberately: it is exactly
+    // the shape #178's backfill has yet to reach, and the read must be honest about it regardless.
+    const closedTicketId = await makeTicket(BigInt(dispatchedPlantId), companyId);
+    await prisma.ticket.update({
+      where: { ticketId: closedTicketId },
+      data: { status: 'CLOSED', assignmentState: 'FORMALLY_ASSIGNED' },
+    });
+
+    const statsAfter = (await detail()).body.plantStats[dispatchedPlantId];
+    expect(statsAfter.assignedDevices).toBe(statsBefore.assignedDevices);
+    expect(statsAfter.unassignedDevices).toBe(statsBefore.unassignedDevices);
+  });
+
   it('ZM foreign zone detail is 403 (global ZoneScopeGuard, not the service clamp)', async () => {
     // The `:zoneId` route param trips the platform-wide ZoneScopeGuard (#99) before the controller
     // runs — the standard cross-zone response. (Batch/trace routes have no :zoneId param, so they

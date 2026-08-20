@@ -3,6 +3,7 @@ import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 import { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
 import { INSTALL_NOTIFIER, type InstallNotifier, LoggingInstallNotifier } from './install-notifier';
 
 type TicketStatus = $Enums.TicketStatus;
@@ -241,6 +242,8 @@ export class InstallLifecycleService {
       await tx.ticket.update({ where: { ticketId: t.ticketId }, data: { status: 'CLOSED', closedAt: now, lastStateChangedAt: now } });
       await tx.ticketEvent.create({ data: { ticketId: t.ticketId, fromState: 'ACTIVATED', toState: 'CLOSED', reasonCode: 'INSTALL_VERIFIED', at: now } });
       await tx.auditLog.create({ data: { actorId: 'SYSTEM', actorRole: 'SYSTEM', action: 'INSTALL_VERIFIED', entityType: 'tickets', entityId: t.ticketId, metadata: { deviceId: String(t.deviceId) } } });
+      // #178 — the install is verified and the ticket terminal; the assignment ends with it.
+      await retireAssignmentOnClosure(tx, [t.ticketId], now);
     });
   }
 
@@ -250,6 +253,8 @@ export class InstallLifecycleService {
       await tx.ticket.update({ where: { ticketId: t.ticketId }, data: { status: 'FAILED_ACTIVATION', lastStateChangedAt: now } });
       await tx.ticketEvent.create({ data: { ticketId: t.ticketId, fromState: 'ACTIVATED', toState: 'FAILED_ACTIVATION', reasonCode: 'INSTALL_FAILED_ACTIVATION', at: now } });
       await tx.auditLog.create({ data: { actorId: 'SYSTEM', actorRole: 'SYSTEM', action: 'INSTALL_FAILED_ACTIVATION', entityType: 'tickets', entityId: t.ticketId, metadata: { deviceId: String(t.deviceId) } } });
+      // #178 — FAILED_ACTIVATION is terminal too: the attempt is over either way, so the stop goes.
+      await retireAssignmentOnClosure(tx, [t.ticketId], now);
     });
   }
 
