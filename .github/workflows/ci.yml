@@ -155,9 +155,18 @@ jobs:
           DATABASE_URL: postgresql://fsm:fsm@localhost:5432/fsm_test?schema=public
           PORT: '3100'
           VITE_API_URL: http://127.0.0.1:3100/api
+          # `validateBootConfig()` is fail-fast by design and has no lenient mode (boot-config.ts:22):
+          # it refuses to start without a >=32-char JWT_ACCESS_SECRET, in CI as much as in production.
+          # Throwaway value, minted here and used by nothing else — the seam only needs the app to mint
+          # and verify a token within its own process.
+          JWT_ACCESS_SECRET: ci-seam-only-throwaway-secret-not-a-real-key-0123456789
         run: |
           set -euo pipefail
-          node -r dotenv/config apps/backend/dist/main.js &
+          # From apps/backend, and without `-r dotenv/config`: every value the app needs is passed
+          # explicitly above, and dotenv is a backend dependency that need not resolve from the repo
+          # root under pnpm's isolated node_modules.
+          cd apps/backend
+          node dist/main.js &
           backend=$!
           trap 'kill $backend 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
@@ -166,4 +175,4 @@ jobs:
             sleep 1
           done
           curl -sf http://127.0.0.1:3100/api/health >/dev/null || { echo 'backend never became healthy'; exit 1; }
-          pnpm --filter @fsm/admin test:seam
+          cd ../.. && pnpm --filter @fsm/admin test:seam
