@@ -88,8 +88,7 @@ describe('SE soft-state controller (e2e)', () => {
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
-    // Leave the shared SE_ID users/engineer rows; other suites may rely on them. Just detach from our zone.
-    await prisma.engineerMaster.updateMany({ where: { engineerId: SE_ID, zoneId }, data: {} });
+    // The shared SE's users/engineer rows are canonical seeded state (North, #215) — nothing to detach.
     await prisma.plant.deleteMany({ where: { plantId } });
     await prisma.company.deleteMany({ where: { companyId } });
     await app.close();

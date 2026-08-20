@@ -75,9 +75,16 @@ Section order is the resume order for future sessions.
 > 05:30 IST — is closed by **#256**, with a 24-hour pin so it cannot drift back unnoticed.
 > A third full run after that fix (05:25 IST, 388 files) came back **1892 passed / 2 failed / 5
 > skipped in a single pass, no crash-retry** — the whole red surface being the one file below.
-> **The current known-pre-existing failure list is 2, at every hour, with no caveat:**
-> `voucher-controller` (#187, compounded by #215 — the two must land together or it fails harder).
-> Anything beyond that on a local run is worth treating as real.
+> **2026-08-20 later the same day — the list is now EMPTY.** #187+#215 landed together (the shared
+> SE's `engineer_master` row is canonical seeded state in North — `test/global-setup.ts` →
+> `seedSharedAuthSeEngineer`), and the first full run after them came back **390 files, 386 passed /
+> 0 failed / 3 skipped (1898 tests, 0 failed)** — the first all-green full suite this repo has
+> recorded. **The known-pre-existing failure list is empty: any red file on a local run is real**
+> (after one #184 crash-retry, which `scripts/run-tests.mjs` performs and reports itself). The same
+> session closed #257 — the `could not be applied … No Cron Job was found` ERROR that opened every
+> app boot was #213's boot-apply failing on framework hook ordering, meaning a stored dispatch
+> schedule did not survive a restart; `main.ts` now applies it after `listen()` — and #254, the last
+> unpinned wall-clock cron (`plant-eligibility-refresh`, now 04:30 IST).
 
 > **2026-08-13 — currency marker.** This document is current through **2026-08-13**. Reconciled this
 > session: **§3l is new** (the #232 commissioning cohort / install-quality endpoints, which existed as

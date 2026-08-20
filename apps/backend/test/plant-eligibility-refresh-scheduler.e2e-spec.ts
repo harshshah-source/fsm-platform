@@ -80,4 +80,43 @@ describe('Issue 138 slice 3 — PlantEligibilityRefreshScheduler', () => {
       await app.close();
     }
   });
+
+
+  /**
+   * #254 AC-1 — the refresh must precede the 05:00 IST dispatch it feeds, and that ordering is only
+   * true if this cron is pinned to the same timezone the dispatch cron is. It carried no `timeZone`,
+   * so on a UTC host `30 4 * * *` fired at 10:00 IST — five hours AFTER the batch, exactly the #240
+   * `schedule-closure` defect on the last job that missed that fix.
+   *
+   * Asserted behaviourally, as an absolute instant: 04:30 IST == 23:00 UTC the previous day — after
+   * the 04:00 IST closure (22:30Z) and before the 05:00 IST dispatch (23:30Z). NOTE: this host runs
+   * on IST, where an unpinned cron gives the same answer — the pin was verified RED-without-fix
+   * under `TZ=UTC npx vitest run` (recorded in docs/progress/254-…md), which is the environment #107's
+   * CI will actually run in.
+   */
+  it('#254: the refresh cron fires at 04:30 IST — between the 04:00 closure and the 05:00 dispatch — on any host', async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { ScheduleModule, SchedulerRegistry } = await import('@nestjs/schedule');
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [ScheduleModule.forRoot()],
+      providers: [{ provide: PlantEligibilityRefreshScheduler, useFactory: () => makeScheduler(makeSvc(), false) }],
+    }).compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+    try {
+      const job = app.get(SchedulerRegistry).getCronJob('plant-eligibility-refresh');
+      const next = job.nextDate();
+      // `cron` v3 returns a Luxon DateTime, v2 a Date — normalise to an absolute epoch either way.
+      const nextUtc = new Date(
+        typeof (next as { toJSDate?: unknown }).toJSDate === 'function'
+          ? (next as unknown as { toJSDate: () => Date }).toJSDate()
+          : (next as unknown as Date),
+      );
+      expect(nextUtc.getUTCHours()).toBe(23);
+      expect(nextUtc.getUTCMinutes()).toBe(0);
+    } finally {
+      await app.close();
+    }
+  });
 });

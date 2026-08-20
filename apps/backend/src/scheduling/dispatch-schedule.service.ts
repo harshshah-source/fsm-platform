@@ -60,23 +60,44 @@ export class DispatchScheduleService implements OnApplicationBootstrap {
   ) {}
 
   /**
-   * Bring the registered job in line with the stored schedule at boot. The `@Cron` decorator on
-   * `DispatchSchedulerService` registers the job under {@link DISPATCH_JOB_NAME} at its compile-time
-   * default; this is what makes the *setting* authoritative from the first tick onwards.
+   * Seed the setting row at boot (#213 AC-1) and apply it **if the job is already mounted**.
    *
-   * `onApplicationBootstrap`, not `onModuleInit`: `@nestjs/schedule` mounts decorator-declared jobs into
-   * the registry in its own bootstrap hook, so the job does not exist yet at module-init time.
+   * It usually is not (#257): `@nestjs/schedule` discovers `@Cron` methods at module-init but only
+   * mounts them into `SchedulerRegistry` in `SchedulerOrchestrator`'s own `onApplicationBootstrap` —
+   * and Nest runs bootstrap hooks deepest-module-first (`b.distance - a.distance`), which on this
+   * app's graph puts THIS hook before the orchestrator's. From here the job's absence is documented
+   * framework ordering, not a defect, so it defers quietly; the authoritative application is
+   * {@link applyStoredSchedule}, called from `main.ts` once bootstrap has completed — the only point
+   * Nest actually guarantees every module's hook has run. (The previous version treated the missing
+   * job as a bad stored expression and logged an ERROR on every boot while staying on the
+   * compile-time default — which meant an operator's schedule silently did not survive a restart.)
    */
   async onApplicationBootstrap(): Promise<void> {
     const cron = await this.resolveCron();
+    if (this.registry.doesExist('cron', DISPATCH_JOB_NAME)) {
+      this.applyResolved(cron);
+    } else {
+      this.logger.log(`dispatch schedule '${cron}' stored; job not mounted yet — applied after bootstrap (main.ts)`);
+    }
+  }
+
+  /**
+   * Bring the registered job in line with the stored schedule — the boot-path step `main.ts` runs
+   * after `app.listen()` (#257 AC-4). Idempotent; safe to call any time after bootstrap.
+   */
+  async applyStoredSchedule(): Promise<void> {
+    this.applyResolved(await this.resolveCron());
+  }
+
+  private applyResolved(cron: string): void {
     try {
       this.applyToJob(cron);
       this.logger.log(`dispatch schedule '${cron}' (${BUSINESS_TIMEZONE}) — next fire ${this.nextFire().toISOString()}`);
     } catch (e) {
       // A stored expression the parser rejects (hand-edited row, or a library change) must not take the
-      // app down — the job stays on its decorator default and the discrepancy is logged loudly.
+      // app down — the job stays on its previous schedule and the discrepancy is logged loudly.
       this.logger.error(
-        `stored dispatch schedule '${cron}' could not be applied, staying on the registered default: ` +
+        `stored dispatch schedule '${cron}' could not be applied, staying on the previous schedule: ` +
           `${e instanceof Error ? e.message : String(e)}`,
       );
     }

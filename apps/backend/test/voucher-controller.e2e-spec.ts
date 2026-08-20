@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { seedSharedAuthSeEngineer } from './fixtures/shared-auth-se';
 
 /**
  * Issue 38 — Expense Vouchers HTTP surface + RBAC (`/api/vouchers`). Drives the full lifecycle through
@@ -36,6 +37,12 @@ describe('Issue 38 — VouchersController (e2e)', () => {
     app.setGlobalPrefix('api');
     await app.init();
     prisma = app.get(PrismaService);
+
+    // #187 — this spec authenticates as se.north@fsm.test and creates vouchers for it, so the SE's
+    // engineer_master row must exist and sit in zm.north's zone (the ZM queue scopes on
+    // engineer.zoneId, vouchers.service.ts:217). The row is canonical seeded state (global setup,
+    // #215); calling the seeder here keeps the spec self-sufficient rather than incidental.
+    await seedSharedAuthSeEngineer(prisma);
   });
 
   afterAll(async () => {

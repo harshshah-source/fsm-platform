@@ -1,6 +1,6 @@
 # 254 — `plant-eligibility-refresh` fires after the dispatch it feeds (unpinned cron, #240 family)
 
-Status: ready-for-agent
+Status: done (2026-08-20)
 Type: AFK · Backend
 
 Filed 2026-08-19 while documenting the daily cron chain for #247. Not found by a test — found by
@@ -60,12 +60,30 @@ and a reader who trusts the docstring will reason wrongly about MV freshness.
 
 ## Acceptance criteria
 
-- [ ] AC1 — `plant-eligibility-refresh` fires at 04:30 IST on any host, pinned and asserted absolutely.
-- [ ] AC2 — The docstring states IST and no longer claims a UTC time is "shortly before" an IST one.
-- [ ] AC3 — The pin is verified to fail under `TZ=UTC` without the `timeZone` option (recorded, since
+- [x] AC1 — `plant-eligibility-refresh` fires at 04:30 IST on any host, pinned and asserted absolutely.
+- [x] AC2 — The docstring states IST and no longer claims a UTC time is "shortly before" an IST one.
+- [x] AC3 — The pin is verified to fail under `TZ=UTC` without the `timeZone` option (recorded, since
       it cannot fail on an IST host).
-- [ ] AC4 — The report-cube crons' day/month boundary semantics are ruled on explicitly: either pinned,
+- [x] AC4 — The report-cube crons' day/month boundary semantics are ruled on explicitly: either pinned,
       or documented as deliberately UTC-bounded with the reason.
+
+## Closed 2026-08-20
+
+AC1/AC2: `timeZone: BUSINESS_TIMEZONE` on the registration, docstring rewritten to say 04:30 **IST**,
+between the 04:00 IST closure and the 05:00 IST dispatch, and to note `PLANT_ELIGIBILITY_REFRESH_CRON`
+is thereafter an IST expression. AC3: the behavioural pin (in
+`plant-eligibility-refresh-scheduler.e2e-spec.ts`, absolute instant 23:00 UTC) was run **red first
+under `TZ=UTC`** — `expected 4 to be 23`, i.e. the job firing at 04:30 UTC, the defect verbatim — then
+green under both `TZ=UTC` and the host IST after the one-line fix. On the IST host alone it cannot go
+red, which is why the TZ=UTC run is the recorded evidence.
+
+AC4 — the ruling on what stays unpinned, and why:
+
+| Cron(s) | Verdict |
+|---|---|
+| `ingestion-telemetry`, `ingestion-masters`, and the minute-cadence `business-*` sweeps (verification, install-verification, intraday-timeout, cross-zone, repeat-escalation, tier-override-expiry, soft-inactive) | **Correctly unpinned** — "every N minutes" has no wall-clock meaning; a timezone would change nothing. |
+| `partition-maintenance` (`10 0 * * *`) | **Unpinned, acceptable** — it creates/drops time-range partitions whose boundaries are data-defined; the hour it runs at only needs to be off-peak, which 00:10 is in either zone. |
+| The report cubes — `business-system-efficiency` (`30 1 * * *`), `business-fleet-uptime`, `business-root-cause`, `business-zm-performance` (month-start) | **Deliberately unpinned/UTC until #214 executes.** The cubes' day/month boundaries are UTC by construction (`previousUtcDayStart`), and the operator ruling to move analytics to the IST day is filed as #214, which requires a written finding per cube before any recompute. Pinning these crons *now* would make new rows IST-bounded against UTC-bounded history inside one cube — the worst of both. The pin belongs to #214's execution, not here. |
 
 ## Blocked by
 

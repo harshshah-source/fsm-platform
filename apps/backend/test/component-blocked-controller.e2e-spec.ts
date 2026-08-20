@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SHARED_AUTH_SE_ID, ensureSharedAuthSe } from './fixtures/shared-auth-se';
 
 /**
  * Issue 21, slices 4–5 — the Component-Blocked Queue (`/api/component-blocked`, ZM read-only) and the SE
@@ -11,7 +12,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * action shows `warehouseOverdue`. The SE surface returns carried components + Common-Kit completeness.
  */
 const NS = Date.now();
-const SE_ID = '22222222-2222-2222-2222-222222222222';
+const SE_ID = SHARED_AUTH_SE_ID; // se.north@fsm.test — shared across 16 specs, see fixtures/shared-auth-se.ts
 
 describe('Component-Blocked Queue + SE van-stock (e2e)', () => {
   let app: INestApplication;
@@ -58,8 +59,7 @@ describe('Component-Blocked Queue + SE van-stock (e2e)', () => {
     companyId = (await prisma.company.create({ data: { name: 'Co-cbq-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-cbq-' + NS, zoneId } })).plantId;
     sim = (await prisma.componentMaster.create({ data: { name: 'SIM-cbq-' + NS } })).componentId;
-    await prisma.user.upsert({ where: { userId: SE_ID }, create: { userId: SE_ID, name: 'SE North', role: 'SERVICE_ENGINEER', phone: 'ph-cbq-' + NS, email: `se-cbq-${NS}@x.test`, zoneId }, update: {} });
-    await prisma.engineerMaster.upsert({ where: { engineerId: SE_ID }, create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 }, update: {} });
+    await ensureSharedAuthSe(prisma, { zoneId, tag: `cbq-${NS}` });
     await prisma.seVanStock.deleteMany({ where: { seId: SE_ID, componentId: sim } });
     await prisma.seVanStock.create({ data: { seId: SE_ID, componentId: sim, qty: 4 } });
   });

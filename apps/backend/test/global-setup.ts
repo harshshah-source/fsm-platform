@@ -4,6 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { seedAuthFixtureUsers } from '../src/auth/auth-fixture-seed';
 import { PrismaClient } from '../src/generated/prisma/client';
 import { seedOrgReferenceData } from '../src/org/org-seed';
+import { seedSharedAuthSeEngineer } from './fixtures/shared-auth-se';
 import { testDatabaseUrl } from './test-db-url';
 import { truncateTestDatabase } from './truncate-test-db';
 
@@ -40,6 +41,11 @@ export default async function setup(): Promise<void> {
     await truncateTestDatabase(prisma, url);
     await seedOrgReferenceData(prisma);
     await seedAuthFixtureUsers(prisma);
+    // #215/#187 — the shared SE's canonical engineer_master row (North, DEDICATED). Before this,
+    // whichever spec ran first minted it into a throwaway zone of its own and voucher-controller
+    // inherited vitest's scheduling as its zone. Test-only on purpose: seedAuthFixtureUsers is also
+    // called by the gated dev-seed runner, where a fixture engineer row does not belong.
+    await seedSharedAuthSeEngineer(prisma);
   } finally {
     await prisma.$disconnect();
   }

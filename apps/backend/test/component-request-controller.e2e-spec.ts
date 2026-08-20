@@ -5,6 +5,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { TokenService } from '../src/auth/token.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SHARED_AUTH_SE_ID, ensureSharedAuthSe } from './fixtures/shared-auth-se';
 
 /**
  * Issue 22, slice 6 — HTTP surface. Warehouse Manager queue + actions
@@ -13,7 +14,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
  * to 200 / 400 / 404 / 409.
  */
 const NS = Date.now();
-const SE_ID = '22222222-2222-2222-2222-222222222222';
+const SE_ID = SHARED_AUTH_SE_ID; // se.north@fsm.test — shared across 16 specs, see fixtures/shared-auth-se.ts
 
 describe('Component Request HTTP surface (e2e)', () => {
   let app: INestApplication;
@@ -79,8 +80,7 @@ describe('Component Request HTTP surface (e2e)', () => {
     companyId = (await prisma.company.create({ data: { name: 'Co-crc-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-crc-' + NS, zoneId } })).plantId;
     componentId = (await prisma.componentMaster.create({ data: { name: 'cmp-crc-' + NS } })).componentId;
-    await prisma.user.upsert({ where: { userId: SE_ID }, create: { userId: SE_ID, name: 'SE North', role: 'SERVICE_ENGINEER', phone: 'ph-crc-' + NS, email: `se-crc-${NS}@x.test`, zoneId }, update: {} });
-    await prisma.engineerMaster.upsert({ where: { engineerId: SE_ID }, create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 }, update: {} });
+    await ensureSharedAuthSe(prisma, { zoneId, tag: `crc-${NS}` });
 
     const otherTag = randomUUID().slice(0, 8);
     const otherUser = await prisma.user.create({

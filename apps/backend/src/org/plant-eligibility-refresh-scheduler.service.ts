@@ -1,11 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { BUSINESS_TIMEZONE } from '../scheduling/dispatch-cron';
 import { PlantEligibleFloatingSeService } from './plant-eligible-floating-se.service';
 
 /**
- * Default cron for the periodic `plant_eligible_floating_se` refresh — daily at 04:30 UTC, i.e. shortly
- * before the default 05:00 dispatch tick, so the floating-SE eligibility index is rebuilt from current
- * plants + territory before the morning batch consumes it. Overridable via `PLANT_ELIGIBILITY_REFRESH_CRON`.
+ * Default cron for the periodic `plant_eligible_floating_se` refresh — daily at **04:30 IST** (#254),
+ * between the 04:00 IST schedule-closure and the 05:00 IST dispatch tick, so the floating-SE
+ * eligibility index is rebuilt from current plants + territory before the morning batch consumes it.
+ * Overridable via `PLANT_ELIGIBILITY_REFRESH_CRON`, which is read as an **IST** expression — the
+ * registration pins `timeZone: BUSINESS_TIMEZONE`, without which this fired at 04:30 UTC = 10:00 IST
+ * on a UTC host, five hours AFTER the batch it feeds (the #240 `schedule-closure` defect, on the one
+ * job that fix did not cover).
  */
 export const DEFAULT_PLANT_ELIGIBILITY_REFRESH_CRON = '30 4 * * *';
 
@@ -56,7 +61,7 @@ export class PlantEligibilityRefreshScheduler {
     this.config = { ...readPlantEligibilityRefreshConfig(), ...config };
   }
 
-  @Cron(readPlantEligibilityRefreshConfig().refreshCron, { name: 'plant-eligibility-refresh' })
+  @Cron(readPlantEligibilityRefreshConfig().refreshCron, { name: 'plant-eligibility-refresh', timeZone: BUSINESS_TIMEZONE })
   async refreshTick(): Promise<RefreshTickOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     if (this.inFlight) {

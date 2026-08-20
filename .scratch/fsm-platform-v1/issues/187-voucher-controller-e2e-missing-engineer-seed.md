@@ -1,6 +1,6 @@
 # 187 — `voucher-controller.e2e-spec.ts` fails 3/5: fixture never seeds the SE's `EngineerMaster` row
 
-Status: ready-for-agent
+Status: done (2026-08-20, with #215)
 Type: AFK · Backend · Test infrastructure
 
 Filed 2026-08-03, found incidentally while verifying the #161/#162 slice (not caused by it — reproduces
@@ -78,10 +78,22 @@ Out of scope: whether `#38`'s other, currently-`[x]`-checked ACs still hold beyo
 file exercises — this issue is scoped to making the existing spec's own fixture correct, not a fresh
 audit of the voucher feature.
 
+> **Correction at fix time (2026-08-20).** "Add the same seed the other 104 files already do" was the
+> wrong prescription, because those 104 seeds are themselves half of #215: per-file create-only
+> upserts into per-file zones, first writer wins. Copying the pattern here would have made this spec
+> pass while leaving its outcome dependent on scheduling whenever it lost the race. What landed
+> instead: the shared SE's `engineer_master` row is **canonical seeded state** — `test/global-setup.ts`
+> → `seedSharedAuthSeEngineer()` (`test/fixtures/shared-auth-se.ts`), zone **North** (the zone the
+> seeded `users` row already names, and zm.north's — the queue scopes on `engineer.zoneId`,
+> `vouchers.service.ts:217`). This spec calls the same seeder in its own `beforeAll`, which is the
+> self-sufficiency AC2 wants without a second competing definition of the row. No zone creation was
+> needed: the org seed guarantees North exists. Nothing is deleted in `afterAll` — the row is seeded
+> state, and deleting it would recreate #215 for every spec that runs after.
+
 ## Acceptance criteria
 
-- [ ] `voucher-controller.e2e-spec.ts` passes 5/5
-- [ ] The fixture seeds its own `user`/`engineerMaster` row rather than depending on incidental state
+- [x] `voucher-controller.e2e-spec.ts` passes 5/5
+- [x] The fixture seeds its own `user`/`engineerMaster` row rather than depending on incidental state
       from elsewhere, matching the pattern already used by the other 104 e2e specs that authenticate
       as `se.north@fsm.test`
 

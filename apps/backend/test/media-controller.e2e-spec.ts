@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { SHARED_AUTH_SE_ID, seedSharedAuthSeEngineer } from './fixtures/shared-auth-se';
 
 /**
  * Issue 81 (D-12) — the Media Upload API. `POST /api/media/upload` turns a captured photo into an
@@ -16,7 +17,7 @@ const JPEG_BYTES = Buffer.from('ffd8ffe000104a464946', 'hex');
 // se.north@fsm.test's fixed userId (auth-fixture-seed.ts) — not globally given an EngineerMaster
 // row, so writes through it FK-violate on media_objects.se_id until this suite upserts one,
 // same pattern as verification-controller.e2e-spec.ts.
-const SE_ID = '22222222-2222-2222-2222-222222222222';
+const SE_ID = SHARED_AUTH_SE_ID; // se.north@fsm.test — shared across 16 specs, see fixtures/shared-auth-se.ts
 
 describe('media controller (e2e)', () => {
   let app: INestApplication;
@@ -31,12 +32,7 @@ describe('media controller (e2e)', () => {
     await app.init();
     prisma = app.get(PrismaService);
 
-    const zone = await prisma.zone.findFirstOrThrow({ where: { name: 'North' } });
-    await prisma.engineerMaster.upsert({
-      where: { engineerId: SE_ID },
-      create: { engineerId: SE_ID, coverageType: 'DEDICATED', zoneId: zone.zoneId, dailyCapacity: 10 },
-      update: {},
-    });
+    await seedSharedAuthSeEngineer(prisma); // canonical North row (#215); a create-only no-op post-global-setup
   });
 
   afterAll(async () => {

@@ -1,6 +1,6 @@
 # 215 — Nine specs re-zone the shared fixture SE and never clean up; `voucher-controller` is the one that trips over it
 
-Status: ready-for-agent
+Status: done (2026-08-20, with #187)
 Type: AFK · Backend (test infrastructure)
 Filed 2026-08-04 · Completes [#180](./180-test-db-determinism-truncate-reseed.md): truncate-and-reseed
 made the DB deterministic **at the start of a run**, and this is the hole it left — the specs themselves
@@ -69,18 +69,38 @@ on stops existing. Give the voucher spec its own fixture first, or do both in on
 **Out:** the `VouchersService` zone-scoping itself — it is behaving correctly; the queue is meant to be
 zone-scoped and the SE genuinely was in another zone. Nothing in `src/` is at fault here.
 
+> **How it was closed (2026-08-20).** A third shape, cleaner than either the per-spec cleanup or the
+> per-spec SE: the row became **canonical seeded state**. `test/global-setup.ts` now calls
+> `seedSharedAuthSeEngineer()` (`test/fixtures/shared-auth-se.ts`) right after `seedAuthFixtureUsers`,
+> creating the `engineer_master` row in **North** — the zone the seeded `users` row already names.
+> Every per-spec create-only upsert is thereby structurally unable to win, so "first writer decides
+> the zone" has no writer left to decide anything: the leak is closed by construction, not by nine
+> cleanups that each individually rot. The nine specs' inline upserts were replaced with fixture-module
+> calls (`ensureSharedAuthSe` / `ensureSharedSeCoversPlant`), and a static guard in
+> `shared-auth-se-fixture-guard.spec.ts` now rejects any `engineerMaster` write naming the shared id
+> outside `test/fixtures/shared-auth-se.ts` — it was red on exactly five call sites (the four inline
+> upserts plus soft-state's dead `updateMany` "detach") before the refactor. The seed itself is pinned
+> by `shared-auth-se-canonical-seed.e2e-spec.ts` (exists / North / DEDICATED), red 3/3 before the
+> global-setup line landed, and probe-verified (seed disabled → 3/3 red again). The audit the size
+> estimate feared — "some may legitimately rely on the fixture SE being in *their* zone" — came back
+> clean: all nine use the SE for identity, SE-scoped reads or plant-scoped coverage; none reads its
+> zone. `voucher-controller`: 5/5 alone, twice; 5/5 with `verification-controller` run first (the
+> worked example that used to flip 3→2); its `beforeAll` calls the canonical seeder for AC1's
+> self-sufficiency. Deliberately NOT part of `seedAuthFixtureUsers` itself: the dev-seed runner also
+> calls that, and a fixture engineer row does not belong in a development database.
+
 ## Acceptance criteria
 
-- [ ] `voucher-controller.e2e-spec.ts` creates the SE fixture it needs (own user + `engineer_master` in
+- [x] `voucher-controller.e2e-spec.ts` creates the SE fixture it needs (own user + `engineer_master` in
       the ZM's zone, or its own SE entirely) and deletes it in `afterAll` — and **passes when run alone**
-- [ ] No spec creates, upserts or mutates an `engineer_master` row for a **seeded fixture user id**
+- [x] No spec creates, upserts or mutates an `engineer_master` row for a **seeded fixture user id**
       without deleting it again; the nine listed above are each either given their own SE or made to
       clean up
-- [ ] A spec that must use a seeded fixture user does not silently re-zone it for everything that runs
+- [x] A spec that must use a seeded fixture user does not silently re-zone it for everything that runs
       afterwards
-- [ ] The full suite passes with **zero** failing files, so "green" means green — today's baseline of
+- [x] The full suite passes with **zero** failing files, so "green" means green — today's baseline of
       "341 passed, 1 known-bad" trains everyone to read past a real regression
-- [ ] Running `voucher-controller.e2e-spec.ts` alone and as part of the full sweep gives the **same**
+- [x] Running `voucher-controller.e2e-spec.ts` alone and as part of the full sweep gives the **same**
       result, twice in a row
 
 ## Verification

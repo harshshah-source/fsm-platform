@@ -178,6 +178,50 @@ function findTeardownOrderViolations(): OrderViolation[] {
   return violations;
 }
 
+/**
+ * #215 — the engineer_master half. The shared SE's `engineer_master` row is canonical seeded state
+ * (North, DEDICATED — `test/global-setup.ts` → `seedSharedAuthSeEngineer`). A spec that writes it
+ * directly is either a no-op restating the seed (clutter that invites divergence) or an attempt to
+ * re-zone the shared identity for everything that runs afterwards — the exact leak that made
+ * `voucher-controller`'s outcome a function of vitest worker scheduling. All writes go through
+ * `test/fixtures/shared-auth-se.ts`; nothing else touches the row.
+ */
+const ENGINEER_WRITE_RE = /engineerMaster\.(?:create|createMany|upsert|update|updateMany|delete|deleteMany)\(/g;
+const FIXTURES_FILE = 'shared-auth-se.ts';
+
+function findEngineerWriteViolations(): Violation[] {
+  const violations: Violation[] = [];
+  for (const filePath of listTsFiles(TEST_DIR)) {
+    if (filePath.endsWith(FIXTURES_FILE)) continue; // the canonical writer
+    const text = readFileSync(filePath, 'utf8');
+    const aliases = sharedSeAliases(text);
+    for (const match of text.matchAll(ENGINEER_WRITE_RE)) {
+      const matchIndex = match.index ?? 0;
+      const callArgs = extractCallArgs(text, matchIndex + match[0].length - 1);
+      if (!referencesSharedSe(callArgs, aliases)) continue;
+      const preceding = text.slice(Math.max(0, matchIndex - 400), matchIndex);
+      if (preceding.includes(OPT_OUT_MARKER)) continue;
+      violations.push({ file: filePath, line: lineNumberAt(text, matchIndex) });
+    }
+  }
+  return violations;
+}
+
+describe('shared auth SE engineer_master guard (#215)', () => {
+  it('no spec writes the shared SE’s engineer_master row outside the fixtures module', () => {
+    const violations = findEngineerWriteViolations();
+    if (violations.length > 0) {
+      const list = violations.map((v) => `  ${v.file}:${v.line}`).join('\n');
+      throw new Error(
+        `engineer_master write(s) target the shared auth-seed SE ${SHARED_AUTH_SE_ID} outside ` +
+          `test/fixtures/shared-auth-se.ts (#215 — the row is canonical seeded state in North; a ` +
+          `per-spec write either restates the seed or re-zones the shared identity for every spec ` +
+          `that follows). Use ensureSharedAuthSe() / ensureSharedSeCoversPlant():\n${list}`,
+      );
+    }
+    expect(violations).toEqual([]);
+  });
+});
 describe('teardown FK ordering (#255 AC-3)', () => {
   it('every afterAll that clears both tables deletes se_coverage before engineer_master', () => {
     const violations = findTeardownOrderViolations();
