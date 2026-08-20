@@ -1,6 +1,6 @@
 # 273 — Assign Work Console S1: the work pool, the ledger, and one honest "assignable" predicate
 
-Status: **DONE 2026-08-20** (`docs/progress/273-assign-console-work-pool.md`) — `/assign` exists, the top-bar button opens it, and `src/ticketing/assignable-work.ts` is the one predicate the read and `assignPlants` share. **Selection is plant-shaped in S1** (operator-ruled): `assignPlants` takes plant ids and moves a plant's whole assignable set, so ticket-level chips wait for #275's `assign-batch`.
+Status: **DONE 2026-08-20** (`3bc3636`, `docs/progress/273-assign-console-work-pool.md`) — `/assign` exists, the top-bar button opens it, and `src/ticketing/assignable-work.ts` is the one predicate the read and `assignPlants` share. **Selection is plant-shaped in S1** (operator-ruled): `assignPlants` takes plant ids and moves a plant's whole assignable set, so ticket-level chips wait for #275's `assign-batch`.
 Type: AFK · Backend + Admin
 Decision: #272 **R1** (one console), **R2** (nothing written until commit), **R3** (one predicate for
 "assignable")
