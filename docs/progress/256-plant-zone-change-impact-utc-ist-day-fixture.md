@@ -1,6 +1,6 @@
 # #256 — a fixture that told the truth for 18.5 hours a day
 
-**Done 2026-08-20.** Test fixture only; no `src/` change. One spec, one helper, one pin.
+**Done 2026-08-20**, commit `bd7dd06`. Test fixture only; no `src/` change. One spec, one helper, one pin.
 
 ## What this closes
 
