@@ -162,7 +162,7 @@ describe('dispatch transparency — per-ticket decision traces (seeded zone)', (
     for (const t of traces) expect(recIds.has(t.recommendationId)).toBe(true);
   });
 
-  it('chosen SE trace: precedence context, capacity slot, cluster seed, PASSED runner-up', async () => {
+  it('chosen SE trace: precedence context, capacity slot, cluster seed, TIER_NOT_REACHED runner-up', async () => {
     const { row, trace } = await traceFor(t1);
     expect(row.seId).toBe(seA);
     expect(row.zoneId).toBe(zoneId);
@@ -181,14 +181,22 @@ describe('dispatch transparency — per-ticket decision traces (seeded zone)', (
       capacityAtDecision: { used: 1, cap: 1 },
     });
     expect(trace.runnersUp).toHaveLength(1);
+    // Re-derived for #266, not blind-updated. seB is MULTI_PLANT and the winner seA is DEDICATED, so
+    // the winning tier was DEDICATED and seB was **never scored** — the tier is chosen first and the
+    // score is only ever consulted inside it. The old trace called seB `PASSED` and handed it a
+    // number, which read as "it was weighed against seA and lost on merit". It was not weighed at all,
+    // and the number it carried was seA's own score.
     expect(trace.runnersUp[0]).toMatchObject({
       seId: seB,
       coverageType: 'MULTI_PLANT',
       precedenceRank: 2,
-      verdict: 'PASSED',
+      verdict: 'TIER_NOT_REACHED',
       plannerPlanned: false,
     });
-    expect(typeof trace.runnersUp[0].score).toBe('number');
+    expect(trace.runnersUp[0].score).toBeNull();
+    // Only one candidate was ever scored, so there was no spread — precedence really did decide here,
+    // and the flag still says so. It is now derived from that fact rather than from distance being null.
+    expect(trace.scoreDegenerate).toBe(true);
   });
 
   it('capacity fallback trace: OVER_CAPACITY drop count, DROPPED runner-up, and IS a cluster seed', async () => {

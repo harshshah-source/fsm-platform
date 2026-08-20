@@ -182,7 +182,12 @@ export interface TraceRunnerUp {
   seId: string;
   coverageType: string;
   precedenceRank: number;
-  verdict: 'PASSED' | 'DROPPED';
+  /**
+   * #266 — three outcomes, not two. `TIER_NOT_REACHED` is a candidate that passed every hard filter
+   * but sits below the winning coverage tier, so it was never scored: the tier is decided first and
+   * the score is only ever consulted inside it. It is not a near-miss and not a rejection.
+   */
+  verdict: 'PASSED' | 'DROPPED' | 'TIER_NOT_REACHED';
   dropReason: string | null;
   plannerPlanned: boolean;
   score: number | null;
@@ -196,6 +201,10 @@ export interface TraceChosen {
   plannerBias: boolean;
   capacityAtDecision: { used: number; cap: number | null };
   clusterSeed: boolean;
+  /** #266 — the winner's own score, so it can be read against the runners-up. Absent on older runs. */
+  score?: number | null;
+  /** #266 — the coverage tier the score was consulted within. Absent on older runs. */
+  tierEvaluated?: string | null;
 }
 
 export interface DecisionTrace {

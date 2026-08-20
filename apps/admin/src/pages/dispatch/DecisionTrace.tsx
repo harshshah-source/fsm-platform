@@ -52,6 +52,10 @@ export function DecisionTraceView({ data }: { data: DispatchTicketTrace }) {
             <Badge tone="neutral">{t.chosen.coverageType}</Badge>
             {t.chosen.plannerBias && <Badge tone="brand">SE-Planner bias</Badge>}
             {t.chosen.clusterSeed && <Badge tone="info">Cluster seed</Badge>}
+            {/* #266 — the number that actually chose this engineer, beside the runners-up it beat. */}
+            {t.chosen.score !== null && t.chosen.score !== undefined && (
+              <span className="text-xs tabular-nums text-ink-muted">score {t.chosen.score.toFixed(2)}</span>
+            )}
           </div>
           <p className="mt-1 text-ink-muted">
             {ordinal(t.chosen.precedenceRank)} of {t.candidatesTotal} eligible engineer{t.candidatesTotal === 1 ? '' : 's'} by
@@ -66,10 +70,16 @@ export function DecisionTraceView({ data }: { data: DispatchTicketTrace }) {
         </div>
       )}
 
+      {/*
+        #266 — the copy no longer blames travel distance. `scoreDegenerate` used to be derived from
+        `distance` being unweighted, so this sentence was the true explanation; it is now derived from
+        the scores that were actually computed, and they can differ today via same-plant clustering.
+        Naming distance here would send an operator to a setting that is not the reason.
+      */}
       {t.scoreDegenerate && (
         <p className="rounded-md bg-surface-sunken px-3 py-2 text-xs text-ink-muted">
-          Scores are identical until travel-distance scoring is enabled — this pick was decided by precedence
-          (coverage tier first, then order), not a score.
+          Every candidate scored the same, so this pick was decided by precedence (coverage tier first, then
+          order) rather than by a score.
         </p>
       )}
 
@@ -85,7 +95,23 @@ export function DecisionTraceView({ data }: { data: DispatchTicketTrace }) {
                   {ordinal(r.precedenceRank)}. {name(r.seId)}
                 </span>
                 <Badge tone="neutral">{r.coverageType}</Badge>
-                <Badge tone={r.verdict === 'PASSED' ? 'success' : 'warning'}>{r.verdict}</Badge>
+                {/*
+                  #266 — a never-reached tier is neutral, not a warning. Amber here would tell the
+                  operator something went wrong for this candidate; nothing did. The winning tier was
+                  decided first and this one was simply never consulted.
+                */}
+                <Badge tone={r.verdict === 'PASSED' ? 'success' : r.verdict === 'DROPPED' ? 'warning' : 'neutral'}>
+                  {r.verdict}
+                </Badge>
+                {/*
+                  #266 — the runner-up's OWN score. It decides the winner now, so it has to be visible:
+                  these numbers used to all be the winner's, which displayed as a tie the engine never
+                  saw. A candidate whose tier was never reached has no score, and showing one would
+                  re-tell exactly the lie this slice removed.
+                */}
+                {r.score !== null && r.score !== undefined && (
+                  <span className="text-xs tabular-nums text-ink-muted">{r.score.toFixed(2)}</span>
+                )}
                 {r.dropReason && <span className="text-xs text-ink-muted">{r.dropReason}</span>}
               </li>
             ))}

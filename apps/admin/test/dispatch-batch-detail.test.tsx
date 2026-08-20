@@ -90,6 +90,9 @@ const trace = {
     },
     runnersUp: [
       { seId: 'se-uuid-2', coverageType: 'FLOATING', precedenceRank: 2, verdict: 'PASSED', dropReason: null, plannerPlanned: false, score: 4.2 },
+      // #266 — a candidate whose tier was never reached: it passed every hard filter but sits below
+      // the winning tier, so it was never scored. Neither PASSED-with-a-number nor DROPPED.
+      { seId: 'se-uuid-3', coverageType: 'MULTI_PLANT', precedenceRank: 3, verdict: 'TIER_NOT_REACHED', dropReason: null, plannerPlanned: false, score: null },
     ],
     scoreDegenerate: true,
     poolEmptyReason: null,
@@ -173,6 +176,13 @@ describe('Dispatch batch detail (Issue 123)', () => {
     // Runner-up rendered by name (not UUID) with its verdict.
     expect(screen.getByText(/Suresh Rao/)).toBeInTheDocument();
     expect(screen.getByText('PASSED')).toBeInTheDocument();
+    // #266 — the score is what decides the winner now, so the drawer has to show it. A runner-up
+    // carrying its OWN number is the whole point: two candidates that used to display the winner's
+    // score looked like a tie the engine never saw.
+    expect(screen.getByText('4.20')).toBeInTheDocument();
+    // #266 — a never-reached tier reads as its own outcome, not as a near-miss. It has no score to
+    // show, and rendering one would re-tell the lie the backend just stopped telling.
+    expect(screen.getByText('TIER_NOT_REACHED')).toBeInTheDocument();
     // The degeneracy note is surfaced.
     expect(screen.getByText(/decided by precedence/)).toBeInTheDocument();
   });

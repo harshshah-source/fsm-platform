@@ -774,9 +774,20 @@ export class RecommenderService {
       });
 
       if (opts.runId !== undefined && recommendationId !== null) {
-        // Distance-from-previous-stop is the only per-SE score component and is deferred-null, so all
-        // of a ticket's candidates score identically — precedence decides, and the trace says so.
-        const scoreDegenerate = features.distanceFromPrevStopKm === null || (weights['distance'] ?? 0) === 0;
+        // #266 — derived from the scores this ticket ACTUALLY produced, not from distance alone.
+        //
+        // It used to read `distanceFromPrevStopKm === null || weights.distance === 0`, on the reasoning
+        // that distance was the only per-SE component, so everything tied and precedence decided. Q-A
+        // broke that without touching the expression: the cluster multiplier is per candidate, so two
+        // candidates in the winning tier genuinely differ and the score genuinely decides — while the
+        // old flag still announced that precedence had. That is worse than a stale field, because an
+        // operator reading "precedence decided" goes looking for a coverage explanation that does not
+        // exist. Computing it from the spread keeps it true as further per-candidate terms arrive
+        // (#267's distance is next), which the distance-shaped expression could never do.
+        const tierScoreValues = [...tierScores.values()];
+        const scoreDegenerate =
+          tierScoreValues.length < 2 ||
+          Math.max(...tierScoreValues) - Math.min(...tierScoreValues) < 1e-9;
         const chosenRank = ordered.findIndex((c) => c.seId === chosen.seId) + 1;
         const plannerPlanned = planned?.has(chosen.seId) ?? false;
         traceRows.push({
@@ -801,6 +812,13 @@ export class RecommenderService {
                 cap: capacity.get(chosen.seId)?.dailyCapacity ?? null,
               },
               clusterSeed: isSeed,
+              // #266 — the winner's own score and the breakdown that produced it, so "why this SE"
+              // can be read against the runner-ups below rather than inferred. Additive JSON; the
+              // recommendation row keeps carrying the same breakdown for its own consumers.
+              score: scored.score,
+              breakdown: scored.breakdown,
+              /** Which coverage tier the score was consulted within — everything below it was never reached. */
+              tierEvaluated: winningTier,
             },
             runnersUp: ordered
               .filter((c) => c.seId !== chosen.seId)
@@ -809,21 +827,33 @@ export class RecommenderService {
                 seId: c.seId,
                 coverageType: c.coverageType,
                 precedenceRank: ordered.findIndex((o) => o.seId === c.seId) + 1,
-                verdict: passedSet.has(c.seId) ? 'PASSED' : 'DROPPED',
+                // #266 — three outcomes, not two. A candidate that passed every hard filter but sits in
+                // a tier below the winning one was never scored: the tier is chosen first and the score
+                // is only ever consulted inside it. Calling that PASSED-with-a-score said it had been
+                // weighed and lost on merit; calling it DROPPED would say a filter rejected it. Neither
+                // happened, so it gets the verdict that describes what did.
+                verdict: !passedSet.has(c.seId)
+                  ? 'DROPPED'
+                  : tierScores.has(c.seId)
+                    ? 'PASSED'
+                    : 'TIER_NOT_REACHED',
                 dropReason: dropReasonBySe.get(c.seId) ?? null,
                 plannerPlanned: planned?.has(c.seId) ?? false,
-                // PASSED runners-up are scored purely for the trace (pure function, observe-only);
-                // identical to the winner's score while `scoreDegenerate` holds.
-                // TODO: when distance scoring lands (weights.distance > 0 && distanceFromPrevStopKm !== null),
-                // scoreCandidate MUST receive per-candidate features, not the ticket's features. Otherwise
-                // scoreDegenerate flips off and runner-up scores become misleadingly equal to the winner's —
-                // the trace becomes an actively wrong 'why this SE' explanation. Reference: transparency
-                // audit 2026-07-15, note 1.
-                score: passedSet.has(c.seId) ? scoreCandidate(features, weights, multiplier).score : null,
+                // #266 — the runner-up's OWN score, closing the defect the TODO here used to admit.
+                // Every passing runner-up was previously scored with `multiplier` — the multiplier
+                // computed for the CHOSEN SE — which was merely redundant while all candidates scored
+                // alike, and became actively wrong the moment Q-A made clustering candidate-specific: a
+                // runner-up who has never been to this plant was shown carrying the winner's cluster
+                // bonus, so the trace reported a tie the engine never saw. These come from the same map
+                // the selection itself used, so the explanation cannot drift from the decision.
+                score: tierScores.get(c.seId) ?? null,
               })),
             scoreDegenerate,
             poolEmptyReason: null,
-          } as Prisma.InputJsonValue,
+            // Via `unknown` because the winner's breakdown carries `weights: Record<string, number>`,
+            // whose index signature does not structurally overlap Prisma's `InputJsonValue` union —
+            // the same cast `dispatch-run.service.ts` already uses for `unassignableReasons`.
+          } as unknown as Prisma.InputJsonValue,
         });
       }
     }
