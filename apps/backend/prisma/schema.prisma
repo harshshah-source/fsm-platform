@@ -757,6 +757,20 @@ enum DispatchRunStatus {
   @@map("dispatch_run_status")
 }
 
+/// #259 — the lifecycle of a `dispatch_run_zones` row, which is now the dispatch **claim** on a zone
+/// rather than a record written after the fact. RUNNING is the live claim (at most one per zone, by
+/// `ux_dispatch_run_zones_one_running_per_zone`); DONE/ERROR are its terminal states, discriminated
+/// exactly as before by whether `error` was stamped; CONTENDED is the refusal a run records for a zone
+/// it asked for and could not have, naming the holder in `contendedWithRunId`.
+enum DispatchZoneClaimStatus {
+  RUNNING
+  DONE
+  ERROR
+  CONTENDED
+
+  @@map("dispatch_zone_claim_status")
+}
+
 /// A zone's Recommender operating mode at run time (Soft Inactive Count switch, Issue 40) —
 /// persisted per run-zone so past runs show the mode that actually applied.
 enum DispatchZoneMode {
@@ -824,7 +838,11 @@ model DispatchRun {
   @@map("dispatch_runs")
 }
 
-/// Per-zone breakdown of a dispatch run — feeds the run-detail zone cards directly.
+/// Per-zone breakdown of a dispatch run — feeds the run-detail zone cards directly, and since #259
+/// also **the run's claim on the zone**: the row is created RUNNING at admission and finalized
+/// DONE/ERROR where it used to be created, which is what makes a refusal outlive the process that
+/// issued it. A run that asked for a zone somebody else held records it CONTENDED with zeroed totals,
+/// so the per-zone cards still sum to the run's own columns.
 /// `unassignableReasons` distinguishes NO_COVERAGE (plant returned zero candidates — an Ops
 /// coverage gap) from ALL_DROPPED (candidates existed; `dropBuckets` shows which hard filters
 /// emptied the pool). `mode`/`weightSetRef` are null when the zone errored before the recommender ran.
@@ -832,6 +850,13 @@ model DispatchRunZone {
   id                  BigInt            @id @default(autoincrement())
   runId               BigInt            @map("run_id")
   zoneId              BigInt            @map("zone_id")
+  /// #259 — RUNNING while this run holds the zone, DONE/ERROR once it lets go, CONTENDED when the run
+  /// asked for the zone and another run already held it. No default on purpose: a claim and a refusal
+  /// are written by different code paths and each has to say which one it is.
+  status              DispatchZoneClaimStatus
+  /// #259 — for a CONTENDED row, the `dispatch_runs.run_id` that was holding the zone. Plain BigInt,
+  /// no relation: see the migration for why a purge must not be able to rewrite this history.
+  contendedWithRunId  BigInt?           @map("contended_with_run_id")
   mode                DispatchZoneMode?
   weightSetRef        String?           @map("weight_set_ref")
   ticketsConsidered   Int               @default(0) @map("tickets_considered")

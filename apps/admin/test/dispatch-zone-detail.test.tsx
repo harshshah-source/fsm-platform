@@ -24,6 +24,11 @@ const zoneDetail = {
     batches: 1,
     ticketsDispatched: 1,
     error: null,
+    outcome: 'DONE',
+    contendedWithRunId: null,
+    withheldBelowThreshold: 4,
+    bucketlessDropped: 12,
+    componentBlockedWithheld: null,
   },
   batches: [
     {
@@ -88,6 +93,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
   sessionStorage.clear();
 });
+
+/** #252 — the same page over a different payload, for the ledger-counter cases. */
+function renderWith(body: unknown) {
+  vi.stubGlobal('fetch', vi.fn(async () => json(body)));
+  renderPage();
+}
 
 function renderPage() {
   render(
@@ -162,5 +173,40 @@ describe('Dispatch zone detail — companies & plants overview', () => {
     await userEvent.type(screen.getByLabelText(/search unassignable/i), 'shree');
     expect(await screen.findByTestId('dispatch-unassignable-row-t-uuid-1')).toBeInTheDocument();
     expect(screen.queryByTestId('dispatch-unassignable-row-t-uuid-2')).not.toBeInTheDocument();
+  });
+
+  /**
+   * #252 (landed with #259) — the two "the engine did not decide" populations were written to the
+   * ledger by #238 and #242 and read by nobody, so `recommended + unassignable` read as the whole
+   * funnel while a larger population sat outside it. #177's third column has the same shape and is
+   * included here for the same reason.
+   *
+   * They are rendered apart from `unassignable` and from each other on purpose: `unassignable` is an
+   * Ops coverage gap, "not looked at yet" is policy working, "no SLA bucket" is a data fault and
+   * "waiting on a part" is the warehouse's clock. Folding them together sends the wrong team.
+   */
+  it('#252 — shows the withheld and bucket-less populations apart from unassignable', async () => {
+    renderWith(zoneDetail);
+    const funnel = await screen.findByTestId('zone-funnel');
+    expect(funnel).toHaveTextContent(/1 unassignable/);
+    expect(funnel).toHaveTextContent(/held below threshold: 4/i);
+    expect(funnel).toHaveTextContent(/no SLA bucket: 12/i);
+  });
+
+  /**
+   * `bucketless_dropped` and `component_blocked_withheld` are nullable precisely so a run predating the
+   * counter does not claim a measurement nobody took. "0" would be that claim.
+   */
+  it('#252 — a null counter reads as "not recorded", never as 0', async () => {
+    renderWith({ ...zoneDetail, zone: { ...zoneDetail.zone, bucketlessDropped: null, componentBlockedWithheld: null } });
+    const funnel = await screen.findByTestId('zone-funnel');
+    expect(funnel).toHaveTextContent(/no SLA bucket: not recorded/i);
+    expect(funnel).not.toHaveTextContent(/no SLA bucket: 0/i);
+  });
+
+  /** The newest of the three (#177) renders on the same terms once a run has measured it. */
+  it('#252 — the component-blocked population renders when the run measured it', async () => {
+    renderWith({ ...zoneDetail, zone: { ...zoneDetail.zone, componentBlockedWithheld: 7 } });
+    expect(await screen.findByTestId('zone-funnel')).toHaveTextContent(/waiting on a part: 7/i);
   });
 });

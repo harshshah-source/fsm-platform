@@ -41,7 +41,7 @@ describe('dispatch run detail — ticketsRemovedSince (#179 follow-up)', () => {
       data: { trigger: 'CRON', startedAt: NOW, finishedAt: NOW, status: 'SUCCESS', configSnapshot: {}, ticketsDispatched: 3, schedules: 1, batches: 1, zones: 1 },
     });
     await prisma.dispatchRunZone.create({
-      data: { runId: run.runId, zoneId, ticketsConsidered: 3, recommended: 3, unassignable: 0, schedules: 1, batches: 1, ticketsDispatched: 3, startedAt: NOW, finishedAt: NOW },
+      data: { runId: run.runId, zoneId, status: 'DONE', ticketsConsidered: 3, recommended: 3, unassignable: 0, schedules: 1, batches: 1, ticketsDispatched: 3, startedAt: NOW, finishedAt: NOW },
     });
 
     const schedule = await prisma.workSchedule.create({

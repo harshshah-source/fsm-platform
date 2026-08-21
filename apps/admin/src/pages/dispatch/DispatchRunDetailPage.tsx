@@ -28,7 +28,15 @@ export function DispatchRunDetailPage() {
 
   const metrics: Metric[] = detail
     ? [
-        { label: 'Zones', value: detail.zones.length, tone: 'neutral' },
+        // #259 — zones this run WORKED. A contended zone still gets a card below (it is part of what
+        // the run asked for), but counting it here would disagree with the same run's row in the runs
+        // list, which reports the ledger's own `zones` column.
+        {
+          label: 'Zones',
+          value: detail.zones.filter((z) => z.outcome !== 'CONTENDED').length,
+          tone: 'neutral',
+          testId: 'metric-zones',
+        },
         { label: 'Schedules', value: detail.schedules, tone: 'info' },
         { label: 'Batches', value: detail.batches, tone: 'info' },
         { label: 'Dispatched', value: detail.ticketsDispatched, tone: 'success' },
@@ -98,6 +106,7 @@ export function DispatchRunDetailPage() {
 
 function ZoneCard({ zone, onOpen }: { zone: DispatchRunZoneCard; onOpen: () => void }) {
   const reasons = zone.unassignableReasons;
+  const contended = zone.outcome === 'CONTENDED';
   return (
     <Card
       className="cursor-pointer p-4 focus-ring"
@@ -114,10 +123,16 @@ function ZoneCard({ zone, onOpen }: { zone: DispatchRunZoneCard; onOpen: () => v
     >
       <div className="mb-3 flex items-center justify-between gap-2">
         <span className="font-semibold text-ink-strong">{zone.zoneName ?? `Zone ${zone.zoneId}`}</span>
-        {zone.mode && <Badge tone={MODE_TONE[zone.mode]}>{zone.mode}</Badge>}
+        {contended ? <Badge tone="warning">CONTENDED</Badge> : zone.mode && <Badge tone={MODE_TONE[zone.mode]}>{zone.mode}</Badge>}
       </div>
 
-      {zone.error ? (
+      {/* #259 — this run asked for the zone and another run already had it. Its counters are all zero,
+          and showing them would read as "looked, found nothing" rather than "never looked". */}
+      {contended ? (
+        <p className="text-sm text-ink-muted" data-testid="zone-contended-note">
+          Not dispatched — a dispatch was already running under run {zone.contendedWithRunId ?? 'unknown'}.
+        </p>
+      ) : zone.error ? (
         <p className="text-sm font-medium text-critical" role="alert">
           Failed: {zone.error}
         </p>

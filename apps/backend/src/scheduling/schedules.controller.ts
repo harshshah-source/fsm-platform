@@ -187,11 +187,14 @@ export class SchedulesController {
    * #213 — which zones currently have a run in flight, so admin can disable the Run-dispatch button and
    * show why *before* anyone presses it, rather than letting them discover the conflict by pressing
    * twice. Same role gate as the trigger it guards.
+   *
+   * #259 — the answer is now read from the claim ledger, so it is truthful about a run this instance
+   * did not start and about one that was in flight across a restart. Same response shape.
    */
   @Get('dispatch-run/in-flight')
   @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
-  dispatchInFlight(): { inFlight: DispatchInFlight[] } {
-    return { inFlight: this.dispatchRun.inFlightZones() };
+  async dispatchInFlight(): Promise<{ inFlight: DispatchInFlight[] }> {
+    return { inFlight: await this.dispatchRun.inFlightZones() };
   }
 
   /**

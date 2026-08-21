@@ -58,6 +58,27 @@ export interface DispatchInFlight {
   trigger: DispatchRunTrigger;
   /** Who started it: the actor's role, or `SYSTEM` for the cron. */
   actor: string;
+  /**
+   * #259 — the `dispatch_runs.run_id` doing the holding. Added with the DB-backed claim: an operator
+   * refused by a run they cannot see needs a handle to go and look at it, and the CONTENDED ledger row
+   * stores the same id so the refusal is readable months later.
+   */
+  runId?: string;
+}
+
+/**
+ * What a single requested zone got out of a run (#259). `DONE`/`ERROR` are the two terminal states of
+ * a claim this run actually held; `CONTENDED` is a zone it asked for and was refused, which is a
+ * per-zone outcome now rather than a reason to refuse the whole request.
+ */
+export type DispatchZoneOutcome = 'DONE' | 'ERROR' | 'CONTENDED';
+
+/** One requested zone's outcome, in the order the zones were asked for. */
+export interface DispatchZoneOutcomeRow {
+  zoneId: string;
+  outcome: DispatchZoneOutcome;
+  /** Present only on `CONTENDED` — who held the zone, so the caller can say more than "busy". */
+  holder?: DispatchInFlight;
 }
 
 /**
@@ -70,7 +91,7 @@ export type DispatchRunOutcome =
   | { result: 'CONFLICT'; inFlight: DispatchInFlight[] };
 
 export interface DispatchRunSummary {
-  /** Active zones processed this run. */
+  /** Active zones processed this run. Contended zones are not "processed" and are not counted here. */
   zones: number;
   /** WorkSchedules dispatched across all zones. */
   schedules: number;
@@ -80,6 +101,35 @@ export interface DispatchRunSummary {
   errors: DispatchRunError[];
   /** dispatch_runs ledger id (string — bigint does not survive JSON serialization). */
   runId: string;
+  /**
+   * #259 — per-zone outcome for **every** requested zone, contended ones included. The run-level
+   * `zones` count above deliberately excludes contended zones, so without this a caller could not tell
+   * a three-zone run that dispatched three zones from a four-zone run that was refused one.
+   */
+  zoneOutcomes: DispatchZoneOutcomeRow[];
+}
+
+/**
+ * Every zone the caller asked for was already claimed by the time the inserts ran (#259).
+ *
+ * Thrown from **inside** the admission transaction on purpose. A `dispatch_run_zones` row cannot exist
+ * without its parent `dispatch_runs` row, so recording the refusal would mean opening a run that never
+ * ran — and #213's refusal semantics are that a run which never happened leaves no history. The pre-read
+ * catches this case without ever opening the transaction; this covers the race where the last free zone
+ * is taken between that read and the insert, and rolling the transaction back is what keeps "409 with
+ * zero rows" true in both.
+ */
+class AllZonesHeldError extends Error {
+  /**
+   * The holders are carried on the error rather than re-read after the rollback, because by then the
+   * winner of a tight race may already have finished and released the zone — leaving the loser with a
+   * bare 409 naming nobody, which is the one thing #213 said a refusal must never be. Read inside the
+   * transaction, the row the insert collided with is committed and therefore guaranteed visible.
+   */
+  constructor(readonly holders: DispatchInFlight[]) {
+    super('every requested zone is already claimed');
+    this.name = 'AllZonesHeldError';
+  }
 }
 
 /**
@@ -109,17 +159,6 @@ export interface DispatchRunSummary {
 export class DispatchRunService {
   private readonly logger = new Logger(DispatchRunService.name);
 
-  /**
-   * Zones with a run in flight, keyed by zone id (#213). Per zone, matching the per-zone advisory locks
-   * `BatchAssignmentService` already takes (#100).
-   *
-   * In-process, and deliberately so: this is the guard that gives an operator a **clear answer** when
-   * they press the button twice. The cross-process guarantee is the advisory lock plus idempotency,
-   * which degrade an overlap to benign skips — a second instance would not double-assign, it would
-   * simply not be refused as informatively.
-   */
-  private readonly inFlight = new Map<string, DispatchInFlight>();
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly recommender: RecommenderService,
@@ -145,28 +184,210 @@ export class DispatchRunService {
           `would create future-dated day plans. Use previewActiveZones() to project a future date.`,
       );
     }
+    // Ascending, always — `activeZoneIds` orders by zone id and a scoped run is a single zone. Two
+    // concurrent admissions therefore take their claims in the same order and cannot deadlock on each
+    // other's speculative inserts.
     const zoneIds = opts.zoneId != null ? [opts.zoneId] : await this.activeZoneIds();
 
-    // #213 — the single in-flight guard, taken before the ledger row is opened so a refused caller
-    // leaves no trace of a run that never happened. It lives HERE, in the one path both the cron tick
-    // and the manual trigger go through, rather than on the scheduler: the scheduler's private field
-    // guarded only its own tick, and the manual trigger — the path an operator reaches for in an
-    // emergency — called straight past it.
-    const conflicts = zoneIds.map((z) => this.inFlight.get(z.toString())).filter((h): h is DispatchInFlight => !!h);
-    if (conflicts.length > 0) return { result: 'CONFLICT', inFlight: conflicts };
-    const held: DispatchInFlight[] = zoneIds.map((z) => ({
-      zoneId: z.toString(),
-      startedAt: now.toISOString(),
-      trigger,
-      actor: actorRole,
-    }));
-    for (const h of held) this.inFlight.set(h.zoneId, h);
+    // #259 — admission is the database's answer now, not a private field's. See {@link admit}.
+    const admission = await this.admit(now, opts, { trigger, zoneIds });
+    if (admission.result === 'CONFLICT') return { result: 'CONFLICT', inFlight: admission.inFlight };
 
     try {
-      return { result: 'RAN', summary: await this.execute(now, opts, { trigger, actorId, actorRole, day, zoneIds }) };
+      return {
+        result: 'RAN',
+        summary: await this.execute(now, opts, {
+          trigger,
+          actorId,
+          actorRole,
+          day,
+          runId: admission.runId,
+          admitted: admission.admitted,
+          contended: admission.contended,
+        }),
+      };
     } finally {
-      // Released in a `finally`: a run that throws must not wedge its zones permanently refusing.
-      for (const h of held) this.inFlight.delete(h.zoneId);
+      // A run that throws must not wedge its zones permanently refusing. #261 adds the reaper that
+      // covers the case this cannot — a process that dies without unwinding at all.
+      await this.releaseStrandedClaims(admission.runId);
+    }
+  }
+
+  /**
+   * Take the per-zone claims for one run, and decide what the caller is told (#259).
+   *
+   * The shape here is forced by one fact: a `dispatch_run_zones` row cannot exist without its parent
+   * `dispatch_runs` row. So there are exactly two answers and no third —
+   *  - **every requested zone already held** -> 409, and **nothing written at all**, preserving #213's
+   *    rule that a run which never happened leaves no history;
+   *  - **at least one free** -> open the run, claim the free zones, and record the held ones as
+   *    CONTENDED rows *on this run*, which is what makes a partial outcome legible afterwards.
+   *
+   * The claim itself is `INSERT ... ON CONFLICT DO NOTHING` against
+   * `ux_dispatch_run_zones_one_running_per_zone`, deliberately **not** insert-and-catch: a P2002 aborts
+   * its Postgres transaction, so catching one would leave nothing to continue with. `DO NOTHING`
+   * answers with a row count instead, which lets the whole admission — run row, claims and refusals —
+   * live in one transaction that can still roll back cleanly when the race takes the last free zone.
+   */
+  private async admit(
+    now: Date,
+    opts: DispatchRunOptions,
+    ctx: { trigger: DispatchRunTrigger; zoneIds: bigint[] },
+  ): Promise<
+    | { result: 'CONFLICT'; inFlight: DispatchInFlight[] }
+    | {
+        result: 'ADMITTED';
+        runId: bigint;
+        admitted: bigint[];
+        contended: Array<{ zoneId: bigint; holder: DispatchInFlight | null }>;
+      }
+  > {
+    const { trigger, zoneIds } = ctx;
+
+    // The cheap read, outside any transaction: in the ordinary all-held case it is the whole answer,
+    // and taking it here means the common refusal never even opens a transaction to roll back.
+    const preRead = await this.holdersFor(zoneIds);
+    if (zoneIds.length > 0 && preRead.length === zoneIds.length) return { result: 'CONFLICT', inFlight: preRead };
+
+    // Captured after the free-check and before the run row, so the snapshot is the config in effect at
+    // the moment this run actually started rather than at the moment somebody asked.
+    const configSnapshot = await this.captureConfigSnapshot(now);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const run = await tx.dispatchRun.create({
+          data: {
+            trigger,
+            actorUserId: opts.actorUserId ?? null,
+            actorRole: opts.actorRole ?? null,
+            // Blank-as-absent: an empty box on the admin form means "no reason given", not "the reason
+            // is the empty string" — a stored '' would render as a present-but-useless note.
+            reason: opts.reason?.trim() || null,
+            startedAt: now,
+            configSnapshot,
+            ...buildStampFields(),
+          },
+        });
+
+        const admitted: bigint[] = [];
+        const refused: bigint[] = [];
+        for (const zoneId of zoneIds) {
+          const claimed = await tx.$executeRaw`
+            INSERT INTO "dispatch_run_zones" ("run_id", "zone_id", "status", "started_at")
+            VALUES (${run.runId}, ${zoneId}, 'RUNNING'::"dispatch_zone_claim_status", ${now})
+            ON CONFLICT DO NOTHING`;
+          if (claimed === 1) admitted.push(zoneId);
+          else refused.push(zoneId);
+        }
+        // One read serves both endings: it names the holders on a CONTENDED row, and it names them to
+        // the caller when there is nothing left to admit.
+        const holders = refused.length > 0 ? await this.claimantsOf(refused, run.runId, tx) : [];
+        if (zoneIds.length > 0 && admitted.length === 0) throw new AllZonesHeldError(holders);
+
+        const byZone = new Map(holders.map((h) => [h.zoneId, h]));
+        const contended = refused.map((zoneId) => ({ zoneId, holder: byZone.get(zoneId.toString()) ?? null }));
+        for (const { zoneId, holder } of contended) {
+          await tx.dispatchRunZone.create({
+            data: {
+              runId: run.runId,
+              zoneId,
+              status: 'CONTENDED',
+              contendedWithRunId: holder?.runId != null ? BigInt(holder.runId) : null,
+              // A refusal is instantaneous: it starts and ends at admission. Leaving `finishedAt` null
+              // would make a CONTENDED row look like a live claim to every reader that checks for one.
+              startedAt: now,
+              finishedAt: now,
+            },
+          });
+        }
+        return { result: 'ADMITTED' as const, runId: run.runId, admitted, contended };
+      });
+    } catch (e) {
+      if (!(e instanceof AllZonesHeldError)) throw e;
+      // Rolled back whole — no run row, no zone rows — and the caller is told who took the zones out
+      // from under it, using the read taken while that was still provably true.
+      return { result: 'CONFLICT', inFlight: e.holders };
+    }
+  }
+
+  /**
+   * The live claims, read from the ledger (#259). `zoneIds === null` means every zone — the in-flight
+   * endpoint's question. Raw because the join to `dispatch_runs` is what carries the holder's identity,
+   * and because the same query has to run inside the admission transaction against `tx`.
+   */
+  private async holdersFor(
+    zoneIds: bigint[] | null,
+    client: Pick<PrismaService, '$queryRaw'> = this.prisma,
+  ): Promise<DispatchInFlight[]> {
+    if (zoneIds !== null && zoneIds.length === 0) return [];
+    const scope = zoneIds === null ? Prisma.sql`TRUE` : Prisma.sql`z."zone_id" IN (${Prisma.join(zoneIds)})`;
+    return this.readClaims(client, Prisma.sql`
+      SELECT z."zone_id", z."run_id", z."started_at", r."trigger", r."actor_role"
+        FROM "dispatch_run_zones" z
+        JOIN "dispatch_runs" r ON r."run_id" = z."run_id"
+       WHERE z."status" = 'RUNNING'::"dispatch_zone_claim_status" AND ${scope}
+       ORDER BY z."zone_id" ASC`);
+  }
+
+  /**
+   * Which run took each of these zones — the question a caller whose claim insert just collided has,
+   * and a **different** question from {@link holdersFor}'s "who holds it right now" (#259).
+   *
+   * The distinction is not pedantry, it is a race this spec found: the winner of a tight admission race
+   * can finalize its claim to DONE before the loser gets to look, and a live-only read then answers
+   * "nobody", leaving the loser with a 409 naming no one — the exact bare refusal #213 exists to
+   * prevent. The latest claim row for the zone is stable under that race and is by construction the row
+   * the insert collided with: no second claim could have been taken while the first was RUNNING.
+   */
+  private async claimantsOf(
+    zoneIds: bigint[],
+    excludeRunId: bigint,
+    client: Pick<PrismaService, '$queryRaw'>,
+  ): Promise<DispatchInFlight[]> {
+    if (zoneIds.length === 0) return [];
+    return this.readClaims(client, Prisma.sql`
+      SELECT DISTINCT ON (z."zone_id")
+             z."zone_id", z."run_id", z."started_at", r."trigger", r."actor_role"
+        FROM "dispatch_run_zones" z
+        JOIN "dispatch_runs" r ON r."run_id" = z."run_id"
+       WHERE z."zone_id" IN (${Prisma.join(zoneIds)}) AND z."run_id" <> ${excludeRunId}
+       ORDER BY z."zone_id" ASC, z."started_at" DESC, z."id" DESC`);
+  }
+
+  /** Shared shaping for the two claim reads — one place decides how a holder is described. */
+  private async readClaims(client: Pick<PrismaService, '$queryRaw'>, sql: Prisma.Sql): Promise<DispatchInFlight[]> {
+    const rows = await client.$queryRaw<
+      Array<{ zone_id: bigint; run_id: bigint; started_at: Date; trigger: DispatchRunTrigger; actor_role: string | null }>
+    >(sql);
+    return rows.map((r) => ({
+      zoneId: r.zone_id.toString(),
+      startedAt: r.started_at.toISOString(),
+      trigger: r.trigger,
+      // The ledger stores a null `actor_role` for the cron; the operator-facing word for that is SYSTEM,
+      // and it is the same word the run's audit bracket uses.
+      actor: r.actor_role ?? 'SYSTEM',
+      runId: r.run_id.toString(),
+    }));
+  }
+
+  /**
+   * Finalize any claim this run is still holding, so one unwound run does not refuse its zones forever.
+   *
+   * Reached in a `finally`, which means it also runs after a clean run — where it matches nothing,
+   * because every admitted zone was finalized as it completed. It cannot clobber a real result for the
+   * same reason: `status = 'RUNNING'` is only true of a claim nobody closed.
+   */
+  private async releaseStrandedClaims(runId: bigint): Promise<void> {
+    try {
+      await this.prisma.dispatchRunZone.updateMany({
+        where: { runId, status: 'RUNNING' },
+        data: { status: 'ERROR', error: 'dispatch run ended without finalizing this zone', finishedAt: new Date() },
+      });
+    } catch (e) {
+      // Never mask the error that is already on its way out of the `finally`.
+      this.logger.error(
+        `failed to release stranded claims for run ${runId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 
@@ -211,42 +432,60 @@ export class DispatchRunService {
     return { targetDate: istDate(targetDate).toISOString().slice(0, 10), zones, errors };
   }
 
-  /** Every zone currently held by a run, for the admin's pre-emptive disabled state (#213 AC-9). */
-  inFlightZones(): DispatchInFlight[] {
-    return [...this.inFlight.values()];
+  /**
+   * Every zone currently held by a run, for the admin's pre-emptive disabled state (#213 AC-9).
+   *
+   * #259 — read from the claim rows rather than from process memory, so the disabled state is truthful
+   * about runs this instance did not start and about runs that were in flight when it last restarted.
+   */
+  inFlightZones(): Promise<DispatchInFlight[]> {
+    return this.holdersFor(null);
   }
 
-  /** The run itself, once {@link runForActiveZones} has taken the guard for every zone in scope. */
+  /**
+   * The run itself, once {@link admit} has opened the ledger row and claimed the zones it could get.
+   *
+   * It walks **admitted** zones only: a contended zone already has its terminal CONTENDED row and there
+   * is nothing to dispatch for it. It appears in `zoneOutcomes` and in the run's status, never in the
+   * per-zone processing.
+   */
   private async execute(
     now: Date,
     opts: DispatchRunOptions,
-    ctx: { trigger: DispatchRunTrigger; actorId: string; actorRole: string; day: Date; zoneIds: bigint[] },
+    ctx: {
+      trigger: DispatchRunTrigger;
+      actorId: string;
+      actorRole: string;
+      day: Date;
+      runId: bigint;
+      admitted: bigint[];
+      contended: Array<{ zoneId: bigint; holder: DispatchInFlight | null }>;
+    },
   ): Promise<DispatchRunSummary> {
-    const { trigger, actorId, actorRole, day, zoneIds } = ctx;
+    const { trigger, actorId, actorRole, day, runId, admitted, contended } = ctx;
 
-    const run = await this.prisma.dispatchRun.create({
-      data: {
-        trigger,
-        actorUserId: opts.actorUserId ?? null,
-        actorRole: opts.actorRole ?? null,
-        // Blank-as-absent: an empty box on the admin form means "no reason given", not "the reason is
-        // the empty string" — a stored '' would render as a present-but-useless note.
-        reason: opts.reason?.trim() || null,
-        startedAt: now,
-        configSnapshot: await this.captureConfigSnapshot(now),
-        ...buildStampFields(),
-      },
-    });
     await this.audit.record({
       actorId,
       actorRole,
       action: 'DISPATCH_RUN_STARTED',
       entityType: 'dispatch_run',
-      entityId: run.runId.toString(),
-      metadata: { trigger },
+      entityId: runId.toString(),
+      metadata: { trigger, zonesClaimed: admitted.length, zonesContended: contended.length },
     });
 
-    const summary: DispatchRunSummary = { zones: 0, schedules: 0, tickets: 0, errors: [], runId: run.runId.toString() };
+    const zoneOutcomes: DispatchZoneOutcomeRow[] = contended.map((c) => ({
+      zoneId: c.zoneId.toString(),
+      outcome: 'CONTENDED' as const,
+      ...(c.holder ? { holder: c.holder } : {}),
+    }));
+    const summary: DispatchRunSummary = {
+      zones: 0,
+      schedules: 0,
+      tickets: 0,
+      errors: [],
+      runId: runId.toString(),
+      zoneOutcomes,
+    };
     let batches = 0;
     let recommended = 0;
     let unassignable = 0;
@@ -265,14 +504,13 @@ export class DispatchRunService {
     // "Errors" column and drives the run status: a run with an issue is never labelled SUCCESS.
     let zonesWithIssue = 0;
 
-    for (const zoneId of zoneIds) {
-      const zoneStart = new Date();
+    for (const zoneId of admitted) {
       let rec: RunSummary | undefined;
       let out: DispatchSummary | undefined;
       let error: string | null = null;
       try {
-        rec = await this.recommender.runForZone(zoneId, { now, runId: run.runId });
-        out = await this.dispatch.dispatchForZone(zoneId, { dateFrom: day, dateTo: day, now, runId: run.runId });
+        rec = await this.recommender.runForZone(zoneId, { now, runId });
+        out = await this.dispatch.dispatchForZone(zoneId, { dateFrom: day, dateTo: day, now, runId });
         summary.zones++;
         // #126 — a benign non-dispatch (residual schedule conflict / lock contention) is no longer
         // silent: its reason is stamped on the zone row's `error`. A dispatched zone → skipReason
@@ -287,7 +525,8 @@ export class DispatchRunService {
       // alike), so a run's columns always equal the sum of its per-zone cards — recommended, dispatched,
       // unassignable, batches and schedules reconcile by construction. `undefined ?? 0` covers a zone
       // whose dispatch threw (no `out`) or whose recommender threw (no `rec`).
-      await this.zoneRow(run.runId, zoneId, zoneStart, rec, out, error);
+      await this.finalizeZoneClaim(runId, zoneId, rec, out, error);
+      zoneOutcomes.push({ zoneId: zoneId.toString(), outcome: error === null ? 'DONE' : 'ERROR' });
       summary.schedules += out?.schedules ?? 0;
       summary.tickets += out?.tickets ?? 0;
       batches += out?.batches ?? 0;
@@ -299,14 +538,17 @@ export class DispatchRunService {
       if (error !== null) zonesWithIssue++;
     }
 
+    // #259 — a contended zone is neither a success nor a failure of this run: the work simply was not
+    // this run's to do. It cannot be SUCCESS (the request was not fully served) and it cannot be FAILED
+    // (nothing failed), which is exactly what PARTIAL already means on this ledger.
     const status: DispatchRunStatus =
-      zonesWithIssue === 0
+      contended.length === 0 && zonesWithIssue === 0
         ? 'SUCCESS'
-        : zoneIds.length > 0 && summary.errors.length >= zoneIds.length
+        : contended.length === 0 && admitted.length > 0 && summary.errors.length >= admitted.length
           ? 'FAILED'
           : 'PARTIAL';
     await this.prisma.dispatchRun.update({
-      where: { runId: run.runId },
+      where: { runId },
       data: {
         finishedAt: new Date(),
         status,
@@ -326,10 +568,11 @@ export class DispatchRunService {
       actorRole,
       action: 'DISPATCH_RUN_FINISHED',
       entityType: 'dispatch_run',
-      entityId: run.runId.toString(),
+      entityId: runId.toString(),
       metadata: {
         status,
         zones: summary.zones,
+        zonesContended: contended.length,
         schedules: summary.schedules,
         batches,
         ticketsDispatched: summary.tickets,
@@ -343,24 +586,34 @@ export class DispatchRunService {
     });
 
     this.logger.log(
-      `dispatch run: ${summary.zones} zones, ${summary.schedules} schedules, ${summary.tickets} tickets, ${summary.errors.length} errors`,
+      `dispatch run: ${summary.zones} zones, ${summary.schedules} schedules, ${summary.tickets} tickets, ` +
+        `${summary.errors.length} errors, ${contended.length} contended`,
     );
     return summary;
   }
 
-  /** One dispatch_run_zones row per zone — written for successes AND contained failures. */
-  private async zoneRow(
+  /**
+   * Close this run's claim on a zone — written for successes AND contained failures.
+   *
+   * #259 turned this from a create into an update: the row already exists, because it is the claim the
+   * run took at admission. `started_at` therefore now means "when the zone was claimed" rather than
+   * "when its processing began", which is the honest reading for a ledger whose row is what blocks
+   * everyone else — the zone is genuinely unavailable from admission, not from its turn in the loop.
+   */
+  private async finalizeZoneClaim(
     runId: bigint,
     zoneId: bigint,
-    startedAt: Date,
     rec: RunSummary | undefined,
     out: DispatchSummary | undefined,
     error: string | null,
   ): Promise<void> {
-    await this.prisma.dispatchRunZone.create({
+    await this.prisma.dispatchRunZone.update({
+      where: { runId_zoneId: { runId, zoneId } },
       data: {
-        runId,
-        zoneId,
+        // Same discriminator the backfill used, and the same one `error` has always carried: a benign
+        // skip (lock contention, a residual schedule conflict) stamps it too, and that is deliberate —
+        // the zone did not dispatch, whatever the reason.
+        status: error === null ? 'DONE' : 'ERROR',
         mode: rec?.mode ?? null,
         weightSetRef: rec?.weightSetRef ?? null,
         ticketsConsidered: rec?.ticketsConsidered ?? 0,
@@ -383,7 +636,6 @@ export class DispatchRunService {
         batches: out?.batches ?? 0,
         ticketsDispatched: out?.tickets ?? 0,
         error,
-        startedAt,
         finishedAt: new Date(),
       },
     });

@@ -182,6 +182,12 @@ describe('/api/dispatch-runs (e2e)', () => {
         data: {
           runId,
           zoneId,
+          // #259 — this fixture hand-writes what a completed zone looks like; a completed claim is DONE.
+          status: 'DONE',
+          // #252 — written by #238/#242 and, until #259 landed the projection, read by nobody. Pinned
+          // here so the assertion below proves the whole path, not just the query object.
+          withheldBelowThreshold: 4,
+          bucketlessDropped: 12,
           mode: rec.mode,
           weightSetRef: rec.weightSetRef,
           ticketsConsidered: rec.ticketsConsidered,
@@ -321,6 +327,17 @@ describe('/api/dispatch-runs (e2e)', () => {
       ticketId: tZmUnassignable,
       poolEmptyReason: 'NO_COVERAGE',
       companyName,
+    });
+    // #252 (landed with #259) — the three "the engine did not decide" populations reach the client.
+    // `recommended + unassignable` is not the whole funnel and the page can no longer imply it is.
+    expect(res.body.zone).toMatchObject({
+      outcome: 'DONE',
+      contendedWithRunId: null,
+      withheldBelowThreshold: 4,
+      bucketlessDropped: 12,
+      // NULL survives as NULL: a run that never measured this must not report 0, which would claim a
+      // measurement nobody took.
+      componentBlockedWithheld: null,
     });
     // Change-request 2026-07: per-plant fleet stats for every dispatched plant, keyed by plantId.
     const dispatchedPlantId = res.body.batches[0].plantId;

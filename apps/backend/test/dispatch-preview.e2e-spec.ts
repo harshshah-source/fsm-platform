@@ -155,10 +155,13 @@ describe('#250 — dispatch preview orchestration + the future-date guard', () =
   /**
    * The preview takes no in-flight slot, so it can neither block a real run nor be refused by one. If
    * it took the guard, the real run below would come back CONFLICT instead of RAN.
+   *
+   * #259 — the slot is now a claim row, so this reads the ledger rather than process memory: a preview
+   * that wrote one would be visible to every instance, not just this one.
    */
   it('AC-1: a preview holds no in-flight slot and does not block a real run', async () => {
     await svc.previewActiveZones(TOMORROW, { zoneId, now: NOW });
-    expect(svc.inFlightZones()).toHaveLength(0);
+    expect((await svc.inFlightZones()).filter((f) => f.zoneId === String(zoneId))).toHaveLength(0);
 
     const outcome = await svc.runForActiveZones(NOW, { zoneId });
     expect(outcome.result).toBe('RAN');

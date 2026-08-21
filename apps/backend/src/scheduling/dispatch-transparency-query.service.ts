@@ -38,6 +38,30 @@ export interface DispatchRunZoneCard {
   ticketsDispatched: number;
   error: string | null;
   /**
+   * #259 — what this run's claim on the zone came to. DONE/ERROR are the two ways a zone this run held
+   * finished; CONTENDED means it never held the zone at all, because another run did. Without it a
+   * refused zone renders identically to a zone that had no work — zeros across the card — and those are
+   * very different facts for whoever is asking why nothing was dispatched there.
+   */
+  outcome: string;
+  /** #259 — for a CONTENDED card, the run that held the zone, so the operator can go and read it. */
+  contendedWithRunId: string | null;
+  /**
+   * #252 (landed with #259) — the three populations the engine did **not** decide on, written to the
+   * ledger by #238 / #242 / #177 and, until now, projected by nothing. Without them
+   * `recommended + unassignable` reads as the whole funnel while a larger population sits outside it
+   * entirely; on the dev mirror at #252's filing, 5,127 of 6,464 open unassigned Troubleshoot tickets
+   * carried no computed SLA bucket.
+   *
+   * Kept apart from `unassignable` and from each other because they send different teams:
+   * `unassignable` is an Ops coverage gap, `withheldBelowThreshold` is policy working,
+   * `bucketlessDropped` is a data fault and `componentBlockedWithheld` is the warehouse's clock. The
+   * last two are `null` when the zone's recommender never reported — "not recorded", not "none".
+   */
+  withheldBelowThreshold: number;
+  bucketlessDropped: number | null;
+  componentBlockedWithheld: number | null;
+  /**
    * #179 follow-up — LIVE counters beside the historical `ticketsDispatched`. The ledger is
    * immutable ("this run dispatched X"), which read alone implies the work is still on engineers'
    * plans; it is not, once a bulk unassign or a ZM override stamped `removed_at`. Derived from the
@@ -219,6 +243,7 @@ export class DispatchTransparencyQueryService {
           ...(zoneClamp !== null ? { where: { zoneId: zoneClamp } } : {}),
           select: {
             zoneId: true,
+            status: true,
             schedules: true,
             batches: true,
             ticketsDispatched: true,
@@ -258,7 +283,10 @@ export class DispatchTransparencyQueryService {
       const mine = run.zoneRows[0];
       return {
         ...base,
-        zones: mine ? 1 : 0,
+        // #259 — a CONTENDED row means this run never held the zone. Counting it as a processed zone
+        // would tell the ZM their zone was worked and produced nothing, when in fact it was not worked
+        // at all; the run-level column beside it excludes contended zones for the same reason.
+        zones: mine && mine.status !== 'CONTENDED' ? 1 : 0,
         schedules: mine?.schedules ?? 0,
         batches: mine?.batches ?? 0,
         ticketsDispatched: mine?.ticketsDispatched ?? 0,
@@ -299,6 +327,11 @@ export class DispatchTransparencyQueryService {
         batches: z.batches,
         ticketsDispatched: z.ticketsDispatched,
         error: z.error,
+        outcome: z.status,
+        contendedWithRunId: z.contendedWithRunId?.toString() ?? null,
+        withheldBelowThreshold: z.withheldBelowThreshold,
+        bucketlessDropped: z.bucketlessDropped,
+        componentBlockedWithheld: z.componentBlockedWithheld,
         ticketsStillAssigned: live.stillAssigned,
         ticketsRemovedSince: live.removedSince,
       };
@@ -480,6 +513,11 @@ export class DispatchTransparencyQueryService {
         batches: zoneRow.batches,
         ticketsDispatched: zoneRow.ticketsDispatched,
         error: zoneRow.error,
+        outcome: zoneRow.status,
+        contendedWithRunId: zoneRow.contendedWithRunId?.toString() ?? null,
+        withheldBelowThreshold: zoneRow.withheldBelowThreshold,
+        bucketlessDropped: zoneRow.bucketlessDropped,
+        componentBlockedWithheld: zoneRow.componentBlockedWithheld,
         ticketsStillAssigned: zoneLive.stillAssigned,
         ticketsRemovedSince: zoneLive.removedSince,
       },

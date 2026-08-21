@@ -47,6 +47,8 @@ const detail = {
       batches: 2,
       ticketsDispatched: 2,
       error: null,
+      outcome: 'DONE',
+      contendedWithRunId: null,
     },
   ],
   build: null,
@@ -158,5 +160,56 @@ describe('Dispatch run detail (Issue 123)', () => {
 
     await screen.findByTestId('dispatch-zone-card-1');
     expect(screen.queryByTestId('zone-removed-since')).not.toBeInTheDocument();
+  });
+
+  /**
+   * #259 — a zone this run asked for and did not get. Its counters are all zero, which without a label
+   * reads exactly like a zone that had no work to do; the card has to say the run never held the zone,
+   * and name the run that did so the operator can go and read it.
+   */
+  it('#259 — labels a contended zone and names the run that held it', async () => {
+    renderWith({
+      ...detail,
+      status: 'PARTIAL',
+      zones: [
+        ...detail.zones,
+        {
+          zoneId: '2',
+          zoneName: 'West',
+          mode: null,
+          weightSetRef: null,
+          ticketsConsidered: 0,
+          recommended: 0,
+          unassignable: 0,
+          unassignableReasons: null,
+          schedules: 0,
+          batches: 0,
+          ticketsDispatched: 0,
+          error: null,
+          outcome: 'CONTENDED',
+          contendedWithRunId: '41',
+        },
+      ],
+    });
+
+    // The header counts zones the run WORKED, matching the runs-list column for the same run; the
+    // contended zone still gets a card, so 2 cards under a "Zones 1" tile is the intended reading.
+    expect(await screen.findByTestId('metric-zones')).toHaveTextContent('1');
+
+    const zone = within(await screen.findByTestId('dispatch-zone-card-2'));
+    expect(zone.getByText('CONTENDED')).toBeInTheDocument();
+    expect(zone.getByTestId('zone-contended-note')).toHaveTextContent(/already running under run 41/i);
+    // The zero counters are not shown: a "0 dispatched" tile beside the label would invite the reading
+    // that this run looked and found nothing.
+    expect(zone.queryByText('Dispatched')).not.toBeInTheDocument();
+  });
+
+  /** A dispatched zone keeps its counters and gains no label — the ordinary case must not change. */
+  it('#259 — a DONE zone is unchanged: counters, no outcome badge', async () => {
+    renderWith(detail);
+    const zone = within(await screen.findByTestId('dispatch-zone-card-1'));
+    expect(zone.getByText('Dispatched')).toBeInTheDocument();
+    expect(zone.queryByText('CONTENDED')).not.toBeInTheDocument();
+    expect(zone.queryByTestId('zone-contended-note')).not.toBeInTheDocument();
   });
 });

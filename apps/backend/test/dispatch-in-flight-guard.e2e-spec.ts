@@ -21,8 +21,12 @@ import { DispatchSchedulerService } from '../src/scheduling/dispatch-scheduler.s
  *
  * Timing is real, not simulated: the recommender (which every run awaits, per zone) is blocked, so a run
  * is genuinely mid-flight when the second caller arrives. Assertions are on the two callers' outcomes
- * rather than on `dispatch_runs` row counts — the suite runs spec files in parallel against one shared
- * database, so a count of "runs since X" is not this spec's to claim.
+ * rather than on `dispatch_runs` row counts — a count of "runs since X" is not this spec's to claim.
+ *
+ * #259 — the guard these tests exercise is now the `dispatch_run_zones` claim row rather than an
+ * in-process `Map`, so every case below holds across instances and restarts as well. The
+ * cross-connection proofs live in `dispatch-zone-claim-admission.e2e-spec.ts`; what stays here is that
+ * BOTH entry points — the cron tick and the manual HTTP trigger — go through one guard.
  */
 describe('#213 slice 2 — one shared per-zone dispatch in-flight guard (e2e)', () => {
   let app: INestApplication;
@@ -145,15 +149,20 @@ describe('#213 slice 2 — one shared per-zone dispatch in-flight guard (e2e)', 
   /**
    * The classic wedge: a guard taken and never released leaves dispatch permanently refusing. Driven
    * through the real service with a ledger write that fails, so the release has to be in a `finally`.
+   *
+   * #259 moved the guard from a `Map` entry to a row, which makes the wedge durable rather than
+   * process-lived — so the break has to land where a claim is actually open. The per-zone finalize is
+   * that point: the run row is written and the zone is claimed, and the write that would close the
+   * claim is the one that fails.
    */
   it('releases the guard even when the run throws, so one failure does not wedge dispatch forever', async () => {
-    const prismaLike = (dispatchRun as unknown as { prisma: { dispatchRun: { create: unknown } } }).prisma;
-    const originalCreate = prismaLike.dispatchRun.create;
-    prismaLike.dispatchRun.create = async () => {
+    const prismaLike = (dispatchRun as unknown as { prisma: { dispatchRunZone: { update: unknown } } }).prisma;
+    const originalUpdate = prismaLike.dispatchRunZone.update;
+    prismaLike.dispatchRunZone.update = async () => {
       throw new Error('ledger write exploded');
     };
     await expect(dispatchRun.runForActiveZones(new Date(), { zoneId: 1n })).rejects.toThrow('ledger write exploded');
-    prismaLike.dispatchRun.create = originalCreate;
+    prismaLike.dispatchRunZone.update = originalUpdate;
 
     const outcome = await dispatchRun.runForActiveZones(new Date(), { zoneId: 1n });
     expect(outcome.result).toBe('RAN');

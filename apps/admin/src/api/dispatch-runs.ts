@@ -59,6 +59,23 @@ export interface DispatchRunZoneCard {
   ticketsDispatched: number;
   error: string | null;
   /**
+   * #259 — what this run's claim on the zone came to: DONE / ERROR for a zone it held, CONTENDED for
+   * one another run was already holding. Optional: absent when served by a backend build predating the
+   * zone claim, in which case the card renders exactly as it always did.
+   */
+  outcome?: 'DONE' | 'ERROR' | 'CONTENDED' | 'RUNNING';
+  /** #259 — for a CONTENDED zone, the run that held it. */
+  contendedWithRunId?: string | null;
+  /**
+   * #252 (landed with #259) — the three populations the engine did NOT decide on. Each is a different
+   * team's problem, so they render apart from `unassignable` and from each other. The two nullable ones
+   * are `null` when the run never measured them; that reads as "not recorded", never as 0. Optional:
+   * absent when served by a backend build predating the projection.
+   */
+  withheldBelowThreshold?: number;
+  bucketlessDropped?: number | null;
+  componentBlockedWithheld?: number | null;
+  /**
    * #179 — LIVE counters beside the historical `ticketsDispatched`. The ledger records what the run
    * dispatched and never changes; these say how much of it is still on a day plan now vs has since
    * been pulled off (bulk unassign / ZM override — cause deliberately not attributed). Optional:
