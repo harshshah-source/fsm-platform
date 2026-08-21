@@ -1,6 +1,6 @@
 # 252 — Surface the two "engine did not decide" counters on the dispatch transparency zone card
 
-Status: ready-for-agent
+Status: done (2026-08-21, landed inside #259)
 Type: AFK · Admin
 
 Filed 2026-08-19 as a follow-up to **#242** (accepted-with-follow-up). #242's own `## UI surfaces`
@@ -31,14 +31,36 @@ took).
 
 ## Acceptance criteria
 
-- [ ] AC1 — `DispatchRunZoneCard` carries `withheldBelowThreshold` and `bucketlessDropped`
+- [x] AC1 — `DispatchRunZoneCard` carries `withheldBelowThreshold` and `bucketlessDropped`
       (`number | null` for the latter), and the run detail response projects both.
-- [ ] AC2 — The zone detail page renders both beside `unassignable`, each distinguishable from it and
+- [x] AC2 — The zone detail page renders both beside `unassignable`, each distinguishable from it and
       from each other; a `null` renders as "not recorded", never as `0`.
-- [ ] AC3 — A run whose zone dropped N bucket-less tickets shows N on that zone's card (asserted
+- [x] AC3 — A run whose zone dropped N bucket-less tickets shows N on that zone's card (asserted
       end-to-end, not on the query layer alone).
-- [ ] AC4 — Layout, hierarchy and role visibility follow the existing zone-card structure; no
+- [x] AC4 — Layout, hierarchy and role visibility follow the existing zone-card structure; no
       redesign.
+
+## Closed 2026-08-21, inside #259
+
+Landed with #259 per INDEX's "#252's counters … overlap #259's CONTENDED rows — land them inside
+whichever of those two ships first and close #252 there".
+
+**Extended to a third column.** This issue named #238's `withheld_below_threshold` and #242's
+`bucketless_dropped`. **#177's `component_blocked_withheld` has the identical defect** — written by the
+engine, projected by nothing — and was added rather than left to be re-filed. It renders on the same
+terms, and is omitted entirely (rather than shown as "not recorded") when a run never measured it, so
+the line does not carry two "not recorded"s at once.
+
+**Rendering.** The three use a `label: value` form rather than the `value label` of the four counters
+beside them, because one of them can legitimately read "not recorded" and *"not recorded no SLA
+bucket"* is not a sentence. The zone-detail subtitle is now built by a `ZoneFunnel` component
+(`DispatchZoneDetailPage.tsx`) rather than an inline template string; layout, hierarchy and role
+visibility are unchanged (AC4).
+
+Proof: `apps/admin/test/dispatch-zone-detail.test.tsx` (three cases: rendered, `null` → "not recorded",
+the #177 column) and `apps/backend/test/dispatch-transparency-api.e2e-spec.ts` (AC3's end-to-end
+projection through `GET /api/dispatch-runs/:id/zones/:zoneId`, with NULL surviving as NULL).
+Full report: [`docs/progress/259-zone-claim-admission.md`](../../../docs/progress/259-zone-claim-admission.md).
 
 ## UI surfaces
 

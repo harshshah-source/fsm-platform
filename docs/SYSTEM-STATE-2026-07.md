@@ -645,6 +645,39 @@ post-commit (`:44-46`). Durable backstops: the three partial uniques (one-SUGGES
 one-ACTIVE-schedule-per-se/zone/day, one-active-batch-per-ticket). Graceful P2002 handling.
 Verified by 4 specs added with #100 (INDEX.md:97; suite 920 pass at that commit).
 
+**Run admission — the zone claim (#259, 2026-08-21).** Admission is per zone and **database-
+authoritative**. The `dispatch_run_zones` row is the claim: created `RUNNING` when a zone is admitted
+and finalized `DONE`/`ERROR` where it used to be created at completion, behind the raw partial unique
+`ux_dispatch_run_zones_one_running_per_zone ON dispatch_run_zones(zone_id) WHERE status = 'RUNNING'`.
+It replaces #213's in-process `Map`, which died with the process and was invisible to a second
+instance — so the "clear answer" an operator got on a double press was only ever true within one
+process. Consequences worth knowing:
+
+- **Per zone, so a partial run is a real outcome.** One held zone used to refuse the entire request
+  (`if (conflicts.length > 0) return CONFLICT`), which meant a zone-scoped rebalance in flight at
+  05:00:00 cancelled the whole national cron run. Now the free zones dispatch, the held ones get
+  `CONTENDED` rows naming the holder (`contended_with_run_id`), and the run finalizes **PARTIAL**.
+- **Two cases, no third.** A `dispatch_run_zones` row cannot exist without its parent `dispatch_runs`
+  row, so *every zone held* → **409 with zero rows written to either table** (#213's rule that a run
+  which never happened leaves no history), and *at least one free* → one run row with DONE + CONTENDED
+  rows under it. Admission is `INSERT … ON CONFLICT DO NOTHING` rather than insert-and-catch — a P2002
+  aborts its Postgres transaction (#265), so `DO NOTHING`'s row count is what lets the whole admission
+  share one transaction that can still roll back when the last free zone is taken mid-flight.
+- **Claims are taken in ascending zone id**, so two concurrent admissions cannot deadlock.
+- **`started_at` on a zone row now means "when the zone was claimed"**, not "when its processing
+  began" — the zone is unavailable from admission, not from its turn in the loop.
+- **A contended zone is not an error**: `error` stays NULL, so the ledger's Errors column and the
+  run-detail card's failure branch are unchanged. Both the runs list and the run detail exclude
+  contended zones from their "Zones" count (the ZM slice included), while still showing the card.
+- **Not yet reaped.** A run that *unwinds* finalizes its own claims in a `finally`; a process that
+  **dies** leaves a `RUNNING` claim refusing that zone until somebody clears it. The reaper is
+  **#261** — and `in-flight` reporting a claim across a restart is an acceptance criterion here
+  precisely so #261 has something to reap.
+
+`GET /api/schedules/dispatch-run/in-flight` reads the RUNNING claim rows (same response shape, now
+truthful across instances and restarts). `POST /api/schedules/dispatch-run` gains
+`summary.zoneOutcomes` — per requested zone, `DONE | ERROR | CONTENDED` plus the holder.
+
 ### 3g. Schedulers (#97-A1 / #108 / #113)
 
 All in-process `@nestjs/schedule`; cron expressions resolved from env **once at decorator

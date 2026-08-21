@@ -1,6 +1,6 @@
 # 259 — Zone-claim admission: DB-backed per-zone dispatch claims, partial multi-zone outcomes
 
-Status: ready-for-agent
+Status: done (2026-08-21)
 Type: AFK · Backend + Admin
 Decision: #258 Q8.3/Q8.4/Q8.5 (G2, G5-half, G6, G7)
 
@@ -72,18 +72,22 @@ outcome label only).
 
 ## Acceptance criteria
 
-- [ ] Two concurrent single-zone runs, same zone: exactly one dispatches; the other receives 409
+- [x] Two concurrent single-zone runs, same zone: exactly one dispatches; the other receives 409
       naming the holder (trigger, actor, startedAt) — proven with the claim held by a *different
       connection* (not the in-process map).
-- [ ] Multi-zone run with one zone held: held zone → CONTENDED row; all other zones dispatch; run
+- [x] Multi-zone run with one zone held: held zone → CONTENDED row; all other zones dispatch; run
       finalizes PARTIAL; ledger sums still reconcile per #123's invariant.
-- [ ] Two zone-scoped runs on disjoint zones run concurrently, two ledger rows, no interference.
-- [ ] Restart with a RUNNING claim row: `in-flight` still reports it (release is #261's reaper).
-- [ ] **All-held case**: request whose every zone is held → 409, and **zero** rows written to
+- [x] Two zone-scoped runs on disjoint zones run concurrently, two ledger rows, no interference.
+- [x] Restart with a RUNNING claim row: `in-flight` still reports it (release is #261's reaper).
+- [x] **All-held case**: request whose every zone is held → 409, and **zero** rows written to
       `dispatch_runs` AND `dispatch_run_zones` (asserted by row counts before/after, not by absence
       of an error).
-- [ ] **Partial case**: at least one free zone → exactly one `dispatch_runs` row, DONE rows for the
+- [x] **Partial case**: at least one free zone → exactly one `dispatch_runs` row, DONE rows for the
       dispatched zones, CONTENDED rows for the held ones, run status PARTIAL.
+
+All six proven in `apps/backend/test/dispatch-zone-claim-admission.e2e-spec.ts`, every assertion made
+across two independently constructed services over two separate `PrismaService` connection pools.
+Full report: [`docs/progress/259-zone-claim-admission.md`](../../../docs/progress/259-zone-claim-admission.md).
 
 ## Tests
 
@@ -103,3 +107,50 @@ reads must not double-count; the reconcile-by-construction invariant must be re-
 ## Rollback
 
 Column + index are additive; reverting to map-admission is a code revert, rows remain valid history.
+
+---
+
+## Corrections / found while building (2026-08-21)
+
+**Three deviations from the text above, each deliberate.** `status` is a Prisma **enum**
+(`DispatchZoneClaimStatus`) rather than the `TEXT` this issue specified — the two statuses beside it on
+the same model are enums and a TEXT column would be the only unconstrained one in the ledger.
+`contended_with_run_id` carries **no FK**: it is a historical breadcrumb, the #104 purge would either
+cascade it away or null it, and a second relation to `DispatchRun` forces relation names onto the
+existing `run` relation for no gain. The response field is `summary.zoneOutcomes`, not this issue's
+`zones[].outcome` — `summary.zones` is an established **count** and renaming it breaks every consumer.
+
+**The admission is `INSERT … ON CONFLICT DO NOTHING`, not the insert-and-catch this issue implies.**
+#265 established that a P2002 aborts its Postgres transaction, so a caught one leaves nothing to
+continue with. `DO NOTHING` answers with a row count, which is what lets the entire admission — run
+row, claims and refusals — live in one transaction that can still roll back whole. That rollback is
+what makes "two cases, no third" true: when the last free zone is taken between the pre-read and the
+insert, the transaction unwinds and the caller gets the no-trace 409 rather than an empty run.
+
+**A refusal could name nobody — a defect this issue's own AC-1 would not have caught.** The loser of an
+admission race re-read the *live* claims after its rollback, and the winner may have finalized its own
+claim by then, producing `inFlight: []` and a bare 409. Found by the barriered race test, intermittent
+(2 of 5 runs). Fixed by reading the **latest** claim row for the zone — whichever status — inside the
+losing transaction, where the row the insert collided with is guaranteed visible.
+
+**`dispatch_run_zones.started_at` changed meaning**, from "when this zone's processing began" to "when
+the zone was claimed". That is the honest reading for a row whose existence blocks everyone else.
+
+**A contended zone is not an error.** `error` stays `null` on a CONTENDED row so the ledger's Errors
+column is unchanged; the run status carries the fact (contended → PARTIAL).
+
+**The new cardinality made the runs list and the run detail disagree about "Zones"** — the list reports
+`dispatch_runs.zones` (processed) and the detail counted cards (which now include contended). Both
+exclude contended zones now, the ZM list slice included: `zones: 1` for a contended zone would tell a
+Zonal Manager their zone was worked and produced nothing.
+
+**Two test-method traps, both recorded because both cost time.** A barrier at the read→write gap is not
+enough when the whole run is stubbed — the winner can claim, dispatch and *release* before the loser
+reaches its insert, and the test reports two legitimate winners; the zone has to be parked as well. And
+`vi.restoreAllMocks()` **destroys** a Prisma delegate method (its methods are not own properties, so
+restore deletes the spy and leaves nothing), silently breaking the client for every later test in the
+file.
+
+**#252 landed here**, per INDEX's "land it inside whichever of #259/#262 ships first", and was extended
+to #177's `component_blocked_withheld` — the issue named only #238's and #242's columns, but the third
+has the identical defect.
