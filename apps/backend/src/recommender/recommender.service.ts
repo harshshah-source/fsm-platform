@@ -17,6 +17,7 @@ import { notDeferredOn, returnDateArrivedBefore } from '../ticketing/deferral';
 import { componentBlockedTickets, notComponentBlocked } from '../ticketing/component-blocked';
 import { CandidateSelectionService, type CoverageType } from './candidate-selection.service';
 import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
+import { buildCandidateReadiness } from './candidate-readiness';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
 import { type ScoringWeights, scoreCandidate } from './scoring';
 
@@ -535,21 +536,24 @@ export class RecommenderService {
 
       // #266 — the tier rides along with each candidate's readiness so `applyHardFilters` (generic over
       // this shape) hands it back on `passed`, and the winning-tier grouping needs no second lookup.
-      const readiness: (SeCandidateReadiness & { seId: string; coverageType: CoverageType })[] = ordered.map((c) => {
-        const cap = capacity.get(c.seId);
-        const availStatus = availabilityBySe.get(c.seId) ?? 'AVAILABLE';
-        return {
+      //
+      // #274 — the rule itself now lives in `buildCandidateReadiness`, because the Assign Console's
+      // candidate column asks this identical question of these identical facts and its whole value is
+      // that its answer is *this* answer. Sharing `applyHardFilters` alone was never sufficient: that
+      // function takes readiness as given, so two callers could feed it two different readings of one
+      // engineer and still agree perfectly on the rule. The only difference between the two callers is
+      // the counter — a live run passes its in-run `assigned` tally, a read passes #269's
+      // `committedDayLoad`, and NEW-A1 seeds the first from the second so they start equal.
+      const readiness: (SeCandidateReadiness & { seId: string; coverageType: CoverageType })[] = ordered.map((c) =>
+        buildCandidateReadiness({
           seId: c.seId,
-          // #266 — carried through `applyHardFilters` (generic over the readiness shape) so the tier
-          // grouping below needs no second lookup: each candidate already knows its own tier.
           coverageType: c.coverageType,
-          vehicleReadiness: 'UNKNOWN',
-          available: (cap?.isActive ?? true) && availStatus === 'AVAILABLE',
-          overCapacity: cap !== undefined && (assigned.get(c.seId) ?? 0) >= cap.dailyCapacity,
+          availabilityStatus: availabilityBySe.get(c.seId) ?? 'AVAILABLE',
+          committed: assigned.get(c.seId) ?? 0,
+          capacity: capacity.get(c.seId),
           commonKitComplete: kitStatusBySe.get(c.seId)?.complete ?? true,
-          expectedComponentsAvailable: true,
-        };
-      });
+        }),
+      );
       // SE Planner soft bias (ADR-0022): among eligible candidates, prefer the planner-named SE for
       // this plant/date; otherwise keep strict precedence (passed[0]). Activity-ping staleness is NOT
       // a filter — `last_activity_at` never gates scoring (CONTEXT §3/§16).

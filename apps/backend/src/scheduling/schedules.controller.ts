@@ -43,12 +43,30 @@ import {
   AssignableWorkQueryService,
   type AssignableWorkView,
 } from './assignable-work-query.service';
+import { CandidateQueryService, type CandidatesView } from './candidate-query.service';
 import {
   ZmScheduleQueryService,
   type ZmScheduleDetail,
   type ZmScheduleRow,
   type ZoneEngineerRow,
 } from './zm-schedule-query.service';
+
+/**
+ * `?plantIds=1,2,3` → `bigint[]`. Deliberately lenient about junk: an unparseable id is dropped
+ * rather than 400-ing the whole request, because the console asks for the plants it is showing and a
+ * single bad id must not blank the column for the rest of them. Duplicates collapse.
+ */
+function parsePlantIds(raw: string | undefined): bigint[] {
+  if (!raw) return [];
+  const out: bigint[] = [];
+  for (const part of raw.split(',')) {
+    const trimmed = part.trim();
+    if (!/^\d+$/.test(trimmed)) continue;
+    const id = BigInt(trimmed);
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
 
 interface BulkUnassignRequestBody {
   mode: 'PREVIEW' | 'EXECUTE';
@@ -98,6 +116,7 @@ export class SchedulesController {
     private readonly dispatchSchedule: DispatchScheduleService,
     private readonly schedulerPreview: SchedulerPreviewService,
     private readonly assignableWork: AssignableWorkQueryService,
+    private readonly candidateQuery: CandidateQueryService,
   ) {}
 
   /**
@@ -399,6 +418,26 @@ export class SchedulesController {
         ? { role: 'ZONAL_MANAGER', zoneId: actor.actingZone }
         : { role: user.role, zoneId: user.zone_id };
     return this.assignableWork.listForScope(scope);
+  }
+
+  /**
+   * #274 — the Assign Work Console's candidate column: for each requested plant, the engine's own
+   * ordered candidate list. Same acting-zone collapse and same reason as the pool above; the two reads
+   * feed one screen and must be scoped identically or the column offers engineers for work the pool
+   * never showed.
+   */
+  @Get('candidates')
+  @Roles(...MANAGER_ROLES)
+  candidates(
+    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
+    @Query('plantIds') plantIds?: string,
+  ): Promise<CandidatesView> {
+    const scope =
+      actor.actingZone !== null
+        ? { role: 'ZONAL_MANAGER', zoneId: actor.actingZone }
+        : { role: user.role, zoneId: user.zone_id };
+    return this.candidateQuery.listForPlants(parsePlantIds(plantIds), scope);
   }
 
   @Get(':engineerId')

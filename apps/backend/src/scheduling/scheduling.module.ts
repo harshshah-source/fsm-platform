@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { EngineersModule } from '../engineers/engineers.module';
+import { InventoryModule } from '../inventory/inventory.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { RecommenderModule } from '../recommender/recommender.module';
 import { AssignableWorkQueryService } from './assignable-work-query.service';
 import { BatchAssignmentService } from './batch-assignment.service';
+import { CandidateQueryService } from './candidate-query.service';
 import { BulkUnassignService } from './bulk-unassign.service';
 import { DAY_PLAN_NOTIFIER, SpineDayPlanNotifier } from './day-plan-notifier';
 import { DayPlanQueryService } from './day-plan-query.service';
@@ -27,7 +30,7 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
  * no approval gate (Decision §7). Read surfaces (/api/schedules/*) build on this service.
  */
 @Module({
-  imports: [PrismaModule, AuditModule, RecommenderModule, NotificationsModule],
+  imports: [PrismaModule, AuditModule, RecommenderModule, NotificationsModule, EngineersModule, InventoryModule],
   providers: [
     BatchAssignmentService,
     // #251 — the Scheduler Preview's read + the two hold writes. Plain DI: it composes
@@ -61,6 +64,9 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
       inject: [PrismaService],
     },
     AssignableWorkQueryService,
+    // #274 — the candidate column's read. Composes the recommender's own `orderedCandidatesForPlant`
+    // plus the readiness inputs the engine's hard filters consume, so the column cannot drift from it.
+    CandidateQueryService,
     // #76 adoption — SpineDayPlanNotifier routes through the real notification spine.
     { provide: DAY_PLAN_NOTIFIER, useClass: SpineDayPlanNotifier },
     // Issue 15 AC#7 — the real soft_states-backed conflict source replaces the 13a no-conflict seam.
@@ -70,6 +76,6 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
   // controller is registered in `AppModule`, so a provider that is only visible inside this module
   // resolves at `SchedulingModule` boot and then fails at AppModule boot — which is every e2e that
   // stands up the real app, and none of the ones that construct services by hand.
-  exports: [AssignableWorkQueryService, BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService],
+  exports: [AssignableWorkQueryService, CandidateQueryService, BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService],
 })
 export class SchedulingModule {}
