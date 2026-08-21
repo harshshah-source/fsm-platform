@@ -720,6 +720,24 @@ POSTs) drive identical code paths with no cron.
   `TIER_NOT_REACHED` is deliberately **not** a verdict on this read (a human may cross tiers, so a
   never-reached tier is not a rejection). Over capacity is reported as the drop the engine actually
   makes **and** marked "still assignable" — #258 Q2 lives in selectability, not in a softened verdict.
+- **Lost-race hygiene across every manual write** (#265, `src/common/unique-violation.ts` +
+  `src/common/lost-race.ts`): the manual paths were `read → check in JS → write by primary key`, so a
+  second writer either crashed into a partial unique (an unhandled P2002 leaving the service as a
+  **500** on routes both controllers map to 409) or **silently overwrote the first writer's
+  attribution**. The closure recycle guarded its own writes; the paths racing it did not. Now:
+  `assignTicket` answers a lost ticket race with `ALREADY_ASSIGNED`; a lost *schedule* race retries the
+  whole transaction once and shares the winner's row; and every terminal stamp on
+  `batch_assignment_tickets` (`removeTicket`, `deferTicket`, `moveTickets`) is guarded on
+  `removedAt: null`, losing by throwing so the transaction — **and the audit row `withAudit` writes
+  inside it** — rolls back whole. Two facts here are non-obvious and measured: **`meta.target` does not
+  exist under this repo's driver adapter** (`modelName` is the discriminator), and **a P2002 aborts its
+  interactive transaction**, so recovery cannot catch-and-continue in place. Two defects were found
+  beyond the issue's list: `ensureSchedule` matched `date_to` while
+  `work_schedules_one_active_per_se_zone_day` does not, so any live schedule with a differing or null
+  `date_to` made **every** manual assign to that engineer 500 with no race involved; and
+  `flagOverridden` wrote `OVERRIDDEN` (a LIVE status) over `COMPLETED`/`PARTIAL`, **resurrecting closed
+  day plans** — both now guarded, the latter narrowly, with "refuse the override outright on a terminal
+  schedule" left to #271.
 - **ZM override engine** (#13a, `override.service.ts` header): each action (reassign/split/remove/
   defer/reorder) commits immediately, flips batch + schedule to OVERRIDDEN with mandatory reason +
   overrider, audits in-transaction, fires a push. No approval gate. Overriding work an SE is ON_SITE
