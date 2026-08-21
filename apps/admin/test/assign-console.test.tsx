@@ -73,6 +73,9 @@ function stubReads() {
     const u = String(url);
     if (u.includes('/schedules/assignable-work')) return json(pool);
     if (u.includes('/schedules/engineers')) return json(engineers);
+    // #274 added a third read to this page. The pool tests do not exercise candidates, but the page
+    // legitimately asks for them, so the stub answers in the real shape rather than with a bare array.
+    if (u.includes('/schedules/candidates')) return json({ date: pool.date, plants: [] });
     return json([]);
   });
   vi.stubGlobal('fetch', fetchMock);

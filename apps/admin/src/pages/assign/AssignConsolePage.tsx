@@ -4,12 +4,15 @@ import {
   type AssignablePlantRow,
   type AssignableWorkView,
 } from '../../api/assignWork';
+import { apiCandidates, type CandidatesView, type PlantCandidates } from '../../api/candidates';
 import { apiAssignPlants, apiZoneEngineers, type ZoneEngineer } from '../../api/schedules';
 import { MetricStrip, PageHeader, SearchInput, type Metric } from '../../components/data';
 import { Badge, Button, LoadBadge } from '../../components/ui';
 import { engineerOptionLabel } from '../../lib/capacity';
 import { cn } from '../../lib/cn';
 import { formatPlantDisplayName } from '../../lib/plantNames';
+import { CandidateColumn } from './CandidateColumn';
+import { LaneHeader, laneCoverage } from './LaneCoverage';
 
 /**
  * **Assign work** — the manual-assignment console (#273, approved direction #272; the authoritative
@@ -28,9 +31,11 @@ import { formatPlantDisplayName } from '../../lib/plantNames';
  * rather than implying a durability it does not have. A shared, resumable draft needs its own table,
  * an owner and a staleness rule for when the underlying tickets move; that is not v1.
  *
- * **Slice 1 of five.** The candidate column (#274), the transactional `assign-batch` write (#275),
- * Distribute (#276) and the absorbed orphan surfaces (#277) follow. What is here is usable on its own:
- * see the pool, draft against it, watch the residual, commit.
+ * **Slices 1 and 2 of five.** #273 built the pool, the ledger and the commit; **#274** added the
+ * candidate column (the engine's own ordered eligibility list, dropped candidates included with their
+ * reason), coverage badges per engineer-and-plant, and the `committed → after / capacity` load each
+ * lane would carry. The transactional `assign-batch` write (#275), Distribute (#276) and the absorbed
+ * orphan surfaces (#277) follow.
  */
 
 /** The unit of selection. A plant serves several companies, so neither id alone identifies a row. */
@@ -83,6 +88,14 @@ export function AssignConsolePage() {
   const [lanes, setLanes] = useState<Lane[]>([{ id: 1, seId: '', plantIds: [] }]);
   const [nextLaneId, setNextLaneId] = useState(2);
   const [committing, setCommitting] = useState(false);
+  /**
+   * The plant the candidate column is answering for (#274 item 2 — "focus follows the plant or chip
+   * the operator is working on"). Null until the pool arrives, then the first row, so the column is
+   * useful on load rather than an instruction to click something.
+   */
+  const [focusedPlantId, setFocusedPlantId] = useState<string | null>(null);
+  const [candidateView, setCandidateView] = useState<CandidatesView | null>(null);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [results, setResults] = useState<{ seId: string; ok: boolean; assigned: number; message?: string }[] | null>(null);
 
   const load = useCallback(() => {
@@ -104,6 +117,52 @@ export function AssignConsolePage() {
 
   /** Plants already drafted, across every lane — a plant cannot be handed to two engineers. */
   const drafted = useMemo(() => new Set(lanes.flatMap((l) => l.plantIds)), [lanes]);
+
+  /**
+   * Which plants the column needs an answer for: the focused one, plus every plant already drafted —
+   * the lanes need per-(engineer, plant) coverage and the same load figures, and asking for them in
+   * the one request the column already makes is cheaper than a second read per lane.
+   */
+  const askFor = useMemo(() => {
+    const ids = new Set(drafted);
+    if (focusedPlantId) ids.add(focusedPlantId);
+    return [...ids].sort();
+  }, [drafted, focusedPlantId]);
+
+  // The pool arrives busiest-first, so the first row is where the operator's eye already is.
+  useEffect(() => {
+    if (focusedPlantId !== null) return;
+    const first = view?.companies[0]?.plants[0]?.plantId;
+    if (first) setFocusedPlantId(first);
+  }, [view, focusedPlantId]);
+
+  useEffect(() => {
+    if (askFor.length === 0) {
+      setCandidateView(null);
+      return;
+    }
+    let alive = true;
+    setCandidatesLoading(true);
+    apiCandidates(askFor)
+      .then((v) => alive && setCandidateView(v))
+      .catch(() => alive && setCandidateView(null))
+      .finally(() => alive && setCandidatesLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [askFor]);
+
+  /**
+   * The focused plant's candidate list, or null while it is still in flight.
+   *
+   * Read defensively on purpose. The candidate column is **additive** — #274's rollback is "hide the
+   * column and the console degrades to #273's behaviour" — so a candidates read that answers with an
+   * unexpected shape must cost the operator the column and nothing else. Reaching into `plants`
+   * unguarded took the whole page down with it: the pool, the ledger and the Commit button, none of
+   * which depend on this read at all.
+   */
+  const focusedCandidates: PlantCandidates | null =
+    candidateView?.plants?.find((p) => p.plantId === focusedPlantId) ?? null;
 
   const inDraft = useMemo(() => {
     let open = 0;
@@ -163,6 +222,33 @@ export function AssignConsolePage() {
     setSelected(new Set());
   };
 
+  /**
+   * Pick this engineer for the focused plant (#274 item 2 — the column's arrow into the draft).
+   *
+   * Reuses the engineer's existing lane if they already have one, otherwise the first empty lane,
+   * otherwise a new one. A second lane for the same engineer would split their load across two rows
+   * and make the `→ after / cap` figure on each of them a lie.
+   *
+   * **Never refused**, whatever the candidate's verdict: the engine's hard filters decide what
+   * *dispatch* does, and #258 Q2 rules manual overload an administrative right. The row states the
+   * drop and the load; the decision is the operator's.
+   */
+  const assignCandidate = (seId: string) => {
+    if (!focusedPlantId) return;
+    setLanes((prev) => {
+      const existing = prev.find((l) => l.seId === seId) ?? prev.find((l) => !l.seId && l.plantIds.length === 0);
+      if (existing) {
+        return prev.map((l) =>
+          l.id === existing.id
+            ? { ...l, seId, plantIds: [...new Set([...l.plantIds, focusedPlantId])] }
+            : l,
+        );
+      }
+      return [...prev, { id: nextLaneId, seId, plantIds: [focusedPlantId] }];
+    });
+    setNextLaneId((n) => (lanes.some((l) => l.seId === seId || (!l.seId && l.plantIds.length === 0)) ? n : n + 1));
+  };
+
   const addLane = () => {
     setLanes((prev) => [...prev, { id: nextLaneId, seId: '', plantIds: [] }]);
     setNextLaneId((n) => n + 1);
@@ -198,6 +284,8 @@ export function AssignConsolePage() {
   };
 
   const engineerName = (seId: string) => engineers.find((e) => e.engineerId === seId)?.name ?? seId;
+  const plantName = (plantId: string) =>
+    view?.companies.flatMap((c) => c.plants).find((p) => p.plantId === plantId)?.plantName ?? `Plant ${plantId}`;
   const readyLanes = lanes.filter((l) => l.seId && l.plantIds.length > 0);
 
   return (
@@ -265,12 +353,26 @@ export function AssignConsolePage() {
                             aria-label={`Select ${p.plantName} for ${company.companyName}`}
                             checked={selected.has(key)}
                             disabled={p.openUnassigned === 0 || already}
-                            onChange={() => toggle(key)}
+                            onChange={() => {
+                              toggle(key);
+                              setFocusedPlantId(p.plantId);
+                            }}
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate font-medium text-ink-strong">
+                            {/* The name is the focus control, kept separate from the checkbox: ticking
+                                a row drafts it, clicking its name asks "who can cover this?" — two
+                                different questions the dispatcher alternates between. */}
+                            <button
+                              type="button"
+                              aria-label={`Candidates for ${p.plantName}`}
+                              onClick={() => setFocusedPlantId(p.plantId)}
+                              className={cn(
+                                'block w-full truncate text-left font-medium text-ink-strong hover:underline',
+                                focusedPlantId === p.plantId && 'underline decoration-brand-600 decoration-2',
+                              )}
+                            >
                               {formatPlantDisplayName(p.plantName)}
-                            </span>
+                            </button>
                             <span className="block text-[11px] text-ink-muted">
                               {silent ?? 'age not recorded'}
                               {/* The plant-shaped commit, said out loud on the row it applies to. */}
@@ -328,6 +430,21 @@ export function AssignConsolePage() {
                       <LoadBadge seId={eng.engineerId} committed={eng.committed ?? 0} dailyCapacity={eng.dailyCapacity} />
                     )}
                   </div>
+
+                  {/* #274 — coverage per (engineer, plant) and the load this draft would add. Both are
+                      states the dispatcher reads before committing, and neither is a gate. */}
+                  {eng && lane.plantIds.length > 0 && (
+                    <LaneHeader
+                      seId={eng.engineerId}
+                      coverage={laneCoverage(eng.engineerId, lane.plantIds, candidateView, plantName)}
+                      committed={eng.committed ?? 0}
+                      after={
+                        (eng.committed ?? 0) +
+                        lane.plantIds.reduce((n, id) => n + (totals.get(id)?.openUnassigned ?? 0), 0)
+                      }
+                      dailyCapacity={typeof eng.dailyCapacity === 'number' ? eng.dailyCapacity : null}
+                    />
+                  )}
 
                   <div className="mt-2 flex flex-wrap gap-1">
                     {lane.plantIds.map((plantId) => {
@@ -390,18 +507,7 @@ export function AssignConsolePage() {
         </section>
 
         {/* ---------------- Candidates (#274) ---------------- */}
-        <section className="rounded-card border border-line bg-surface-card p-3" aria-label="Candidates">
-          <header className="mb-2">
-            <h2 className="text-sm font-semibold text-ink-strong">Candidates</h2>
-          </header>
-          {/* Not a placeholder for its own sake: the column is in the approved design and #274 owns it
-              (ordered candidates, dropped ones shown with their reason, coverage per engineer+plant).
-              Saying which slice it belongs to beats a blank third of the screen. */}
-          <p className="text-xs text-ink-muted">
-            Engineer ranking for the selected plant — who covers it, in what tier, and why anyone was
-            dropped — arrives with the next slice. Until then, pick the engineer on the lane.
-          </p>
-        </section>
+        <CandidateColumn plant={focusedCandidates} loading={candidatesLoading} onAssign={assignCandidate} />
       </div>
 
       <footer className="mt-4 flex flex-wrap items-center gap-2 rounded-card border border-line bg-surface-card p-3 text-sm">
