@@ -62,6 +62,15 @@ export interface CandidatesView {
  * **Order is the engine's order, untouched.** Sorting for the operator's convenience would render a
  * ranking the engine does not use, which is precisely why #266 was sequenced ahead of this issue.
  *
+ * **Cost is one `orderedCandidatesForPlant` call per plant, and that is deliberate** — the function
+ * is the engine's, and batching it across plants would mean re-spelling its two queries here, which
+ * is the exact fork this issue exists to close. The readiness inputs *are* gathered once for the
+ * union of candidates, so the per-plant part is two queries and nothing else. The console asks only
+ * for the focused plant plus whatever is drafted, so the fan-out is bounded by what a human drafts;
+ * **#276's Distribute may ask for many more at once and should measure before assuming this scales.**
+ * There is no cap: silently truncating a plant list would answer "nobody covers that site" for a site
+ * nobody asked about, which is worse than being slow.
+ *
  * **Dropped candidates are returned, not filtered out.** The operator's question at this column is
  * "why not them", and an empty list is the least useful possible answer to it. The engine persists
  * only drop *counts* to its trace, so before this the rows existed for a few milliseconds inside one

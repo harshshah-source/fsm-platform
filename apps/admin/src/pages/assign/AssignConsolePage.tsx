@@ -235,6 +235,11 @@ export function AssignConsolePage() {
    */
   const assignCandidate = (seId: string) => {
     if (!focusedPlantId) return;
+    // The "did we open a new lane?" decision is made **once**, inside the updater that has the
+    // authoritative `prev`. Asking it twice — once over `prev`, once over the render's `lanes` to
+    // decide whether to bump the id — is two copies of one predicate that have to agree forever, and
+    // the day they stop agreeing two lanes share an id.
+    let opened = false;
     setLanes((prev) => {
       const existing = prev.find((l) => l.seId === seId) ?? prev.find((l) => !l.seId && l.plantIds.length === 0);
       if (existing) {
@@ -244,9 +249,10 @@ export function AssignConsolePage() {
             : l,
         );
       }
+      opened = true;
       return [...prev, { id: nextLaneId, seId, plantIds: [focusedPlantId] }];
     });
-    setNextLaneId((n) => (lanes.some((l) => l.seId === seId || (!l.seId && l.plantIds.length === 0)) ? n : n + 1));
+    if (opened) setNextLaneId((n) => n + 1);
   };
 
   const addLane = () => {
