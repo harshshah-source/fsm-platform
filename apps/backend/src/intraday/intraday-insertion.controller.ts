@@ -102,7 +102,7 @@ export class IntradayInsertionController {
   async manualAssign(
     @CurrentUser() user: AccessTokenClaims,
     @Param('id') id: string,
-    @Body() body: { seId: string },
+    @Body() body: { seId: string; confirm?: boolean; reasonCode?: string },
   ) {
     if (!body.seId) throw new BadRequestException({ code: 'SE_REQUIRED' });
     const out = await this.svc.manualAssign(
@@ -110,9 +110,27 @@ export class IntradayInsertionController {
       body.seId,
       { userId: user.user_id, role: user.role, actedAsRole: null },
       { role: user.role, zoneId: user.zone_id },
+      undefined,
+      // #265 item 4 — the ZM's deferral decision reaches the primitive, so #249's existing confirm
+      // flow is reachable from the escalation queue instead of dead-ending in a 404.
+      { confirm: body.confirm, reasonCode: body.reasonCode },
     );
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'INSERTION_OR_SE_NOT_FOUND' });
     if (out.result === 'ALREADY_ASSIGNED') throw new ConflictException({ code: 'TICKET_ALREADY_ASSIGNED' });
+    // Mirrors the `/schedules/assign` mapping for the identical outcomes, so one ticket held to a
+    // future date answers the same way whichever door the manager came through.
+    if (out.result === 'CONFLICT_DEFERRED') {
+      throw new ConflictException({
+        code: 'CONFLICT_DEFERRED',
+        message: 'Ticket is held to a future vehicle-return date — resend with confirm=true and a reason.',
+        ticketId: out.ticketId,
+        deferredUntil: out.deferredUntil,
+        vuReport: out.vuReport,
+      });
+    }
+    if (out.result === 'REASON_REQUIRED') {
+      throw new BadRequestException({ code: 'DEFERRAL_OVERRIDE_REASON_REQUIRED' });
+    }
     return out;
   }
 }

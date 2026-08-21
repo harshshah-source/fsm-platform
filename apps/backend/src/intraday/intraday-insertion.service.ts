@@ -9,7 +9,12 @@ import { Prisma } from '../generated/prisma/client';
 import { type SlaBucket } from '../generated/prisma/enums';
 import { NotificationService } from '../notifications/notification.service';
 import { CandidateSelectionService } from '../recommender/candidate-selection.service';
-import { ActorContext, OverrideService } from '../scheduling/override.service';
+import {
+  ActorContext,
+  type DeferralOverrideInput,
+  type DeferralVuContext,
+  OverrideService,
+} from '../scheduling/override.service';
 import { ZmScope } from '../scheduling/zm-schedule-query.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -67,7 +72,17 @@ export type DeclineOutcome =
 export type ManualAssignOutcome =
   | { result: 'OK'; insertionId: string; scheduleId: string; batchId: string; seId: string }
   | { result: 'NOT_FOUND' }
-  | { result: 'ALREADY_ASSIGNED' };
+  | { result: 'ALREADY_ASSIGNED' }
+  /**
+   * #265 / #249 — the ticket is held to a future return date. Previously collapsed into `NOT_FOUND`,
+   * which the controller renders as a 404: a resolvable, actionable condition reported to the ZM as
+   * "that doesn't exist", so they retry, get the same 404, and the retry chain burns against a hold
+   * nothing on screen names. A deferral may be **overridden, never bypassed** — and a ZM told "not
+   * found" cannot override anything.
+   */
+  | { result: 'CONFLICT_DEFERRED'; ticketId: string; deferredUntil: string; vuReport: DeferralVuContext | null }
+  /** #249 — confirmed, but with no reason. An override with no stated why is not an override. */
+  | { result: 'REASON_REQUIRED' };
 
 type ActiveInsertionTicket = Prisma.TicketGetPayload<{ include: { device: { select: { state: true } } } }>;
 
@@ -196,6 +211,25 @@ export class IntradayInsertionService {
     const actor: ActorContext = { userId: seId, role: 'SERVICE_ENGINEER' };
     const assigned = await this.override.assignTicket(ins.ticketId, seId, scope, actor, now, 'CRITICAL_ASSIGN', true);
     if (assigned.result !== 'OK') {
+      // #265 item 4 — a deferral is not a re-offerable failure. Every other reason to land here means
+      // "somebody else took it", where releasing the claim so the timeout sweep re-offers is exactly
+      // right. A `CONFLICT_DEFERRED` is different in kind: **no Service Engineer can clear a hold.**
+      // Re-offering hands the identical refusal to the next SE, and the next, until the retry chain is
+      // exhausted and the ticket escalates anyway — hours later, with a trail recording several SEs
+      // declining nothing. A hold only a manager may override goes to a manager now; #265 gave the
+      // escalation queue's manual assign the `CONFLICT_DEFERRED` answer and the confirm-with-reason
+      // flow to resolve it, so this hands the ZM something actionable rather than another dead end.
+      if (assigned.result === 'CONFLICT_DEFERRED') {
+        const claim = await transitionOrConflict(
+          this.prisma.intradayInsertion,
+          { insertionId, status: 'ACCEPTED', offeredSeId: seId },
+          { status: 'ESCALATION_REQUIRED', respondedAt: now },
+        );
+        // Guarded like the release below: a writer that already moved the insertion on is untouched,
+        // and the escalation side effect fires only if this call actually owns the transition.
+        if (claim.won) await this.escalateToZm(ins.zoneId, ins.ticketId, ins.insertionId);
+        return { result: 'NOT_PENDING', status: 'ESCALATION_REQUIRED' };
+      }
       // Ticket was closed/assigned out between our claim and this commit. Release the claim (guarded, so a
       // writer that already moved it on again is untouched) so the timeout sweep can re-offer it.
       await transitionOrConflict(
@@ -311,11 +345,30 @@ export class IntradayInsertionService {
     actor: ActorContext,
     scope: ZmScope,
     now: Date = new Date(),
+    /**
+     * #265 item 4 — the ZM's explicit decision about a return-date deferral, passed through to
+     * `assignTicket` rather than left to default. Without it this path could only ever *hit* the
+     * deferral, never resolve it, so #249's confirm flow was unreachable from the escalation queue.
+     */
+    deferral: DeferralOverrideInput = {},
   ): Promise<ManualAssignOutcome> {
     const ins = await this.prisma.intradayInsertion.findUnique({ where: { insertionId } });
     if (!ins) return { result: 'NOT_FOUND' };
-    const assigned = await this.override.assignTicket(ins.ticketId, seId, scope, actor, now, 'CRITICAL_ASSIGN', true);
+    const assigned = await this.override.assignTicket(
+      ins.ticketId,
+      seId,
+      scope,
+      actor,
+      now,
+      'CRITICAL_ASSIGN',
+      true,
+      deferral,
+    );
     if (assigned.result === 'ALREADY_ASSIGNED') return { result: 'ALREADY_ASSIGNED' };
+    // #265 — carried through verbatim instead of flattened. `NOT_FOUND` stays what it always meant:
+    // the insertion, ticket or SE genuinely is not there.
+    if (assigned.result === 'CONFLICT_DEFERRED') return assigned;
+    if (assigned.result === 'REASON_REQUIRED') return { result: 'REASON_REQUIRED' };
     if (assigned.result !== 'OK') return { result: 'NOT_FOUND' };
 
     await this.prisma.intradayInsertion.update({

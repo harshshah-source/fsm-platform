@@ -1,5 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { istDate } from '../common/ist-day';
+import { LostRaceError, stampOnceOrLose } from '../common/lost-race';
+import { isUniqueViolationOn, retryOnceOnUniqueViolation } from '../common/unique-violation';
 import { Prisma } from '../generated/prisma/client';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -192,23 +194,38 @@ export class OverrideService {
     });
     if (!bat) return { result: 'NOT_FOUND' };
 
-    await this.audit.withAudit(
-      this.auditEntry(actor, batchId, {
-        action: cmd.action,
-        ticketId: cmd.ticketId,
-        reasonCode: cmd.reasonCode,
-        seId,
-      }, auditAction),
-      async (tx) => {
-        await tx.batchAssignmentTicket.update({
-          where: { id: bat.id },
-          data: { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.ZM_WITHDRAWN },
-        });
-        // Returned to the Shared Pool — no longer a Formal Assignment.
-        await tx.ticket.update({ where: { ticketId: cmd.ticketId }, data: { assignmentState: 'UNASSIGNED' } });
-        await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
-      },
-    );
+    try {
+      await this.audit.withAudit(
+        this.auditEntry(actor, batchId, {
+          action: cmd.action,
+          ticketId: cmd.ticketId,
+          reasonCode: cmd.reasonCode,
+          seId,
+        }, auditAction),
+        async (tx) => {
+          // #265 — `removedAt: null` back in the WHERE. The read above happened outside this
+          // transaction, so a concurrent remover — or the 04:00 closure recycle, which guards its own
+          // writes for precisely this reason — can commit in between; an update keyed only on `id`
+          // would then overwrite their actor and reason with ours. #244 reads `removal_reason` as a
+          // predicate, so that is an operational reclassification, not a visible error. Losing throws
+          // so the transaction rolls back **including the audit row**: nothing may record a withdrawal
+          // that did not happen.
+          await stampOnceOrLose(
+            tx.batchAssignmentTicket,
+            { id: bat.id, removedAt: null },
+            { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.ZM_WITHDRAWN },
+            'REMOVE_TICKET',
+          );
+          // Returned to the Shared Pool — no longer a Formal Assignment.
+          await tx.ticket.update({ where: { ticketId: cmd.ticketId }, data: { assignmentState: 'UNASSIGNED' } });
+          await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
+        },
+      );
+    } catch (e: unknown) {
+      // The row is already terminal — the same answer the pre-read would have given a moment later.
+      if (e instanceof LostRaceError) return { result: 'NOT_FOUND' };
+      throw e;
+    }
 
     await this.notifier.dayPlanOverridden({ seId, scheduleId, batchId, action: cmd.action });
     return { result: 'OK', batchId: String(batchId), scheduleId: String(scheduleId), seId, status: 'OVERRIDDEN' };
@@ -227,7 +244,8 @@ export class OverrideService {
     });
     if (!bat) return { result: 'NOT_FOUND' };
 
-    await this.audit.withAudit(
+    try {
+      await this.audit.withAudit(
       this.auditEntry(actor, batchId, {
         action: cmd.action,
         ticketId: cmd.ticketId,
@@ -243,15 +261,20 @@ export class OverrideService {
         // every read already filters `removedAt: null`, so the day plan, the ZM schedule view, the
         // transparency reads and `committedDayLoad` all fall into line at once.
         //
-        await tx.batchAssignmentTicket.update({
-          where: { id: bat.id },
-          data: {
+        // #265 — guarded, for the same reason `removeTicket` is: the read above is outside this
+        // transaction, so a concurrent remover or the closure recycle can make the row terminal in
+        // between, and an update keyed only on `id` would overwrite their attribution with ours.
+        await stampOnceOrLose(
+          tx.batchAssignmentTicket,
+          { id: bat.id, removedAt: null },
+          {
             deferredToDate: new Date(cmd.deferredToDate),
             removedAt: now,
             removedBy: actor.userId,
             removalReason: REMOVAL_REASONS.ZM_DEFERRED,
           },
-        });
+          'DEFER_TICKET',
+        );
         // Slice 3 — the second clause of the workflow's definition: "pushed to a specific future
         // date". The ticket returns to `UNASSIGNED` so it CAN be re-planned (leaving it
         // `FORMALLY_ASSIGNED` stranded it permanently — no reader of unassigned work could ever see
@@ -265,7 +288,11 @@ export class OverrideService {
         });
         await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
       },
-    );
+      );
+    } catch (e: unknown) {
+      if (e instanceof LostRaceError) return { result: 'NOT_FOUND' };
+      throw e;
+    }
 
     await this.notifier.dayPlanOverridden({ seId, scheduleId, batchId, action: cmd.action });
     return { result: 'OK', batchId: String(batchId), scheduleId: String(scheduleId), seId, status: 'OVERRIDDEN' };
@@ -393,7 +420,16 @@ export class OverrideService {
         },
       });
     }
-    const ids = await this.audit.withAudit(
+    // #265 — the `ALREADY_ASSIGNED` guard above reads `tickets.assignment_state` OUTSIDE this
+    // transaction, so two managers assigning one ticket both pass it and the loser's create lands on
+    // `batch_assignment_tickets_one_active_per_ticket`. That P2002 was never caught: it left the
+    // service as an unhandled 500, on a path both controllers map deliberately to a 409 for exactly
+    // this condition. It cannot be caught *inside* the block below either — a P2002 aborts the whole
+    // Postgres transaction — so the recovery wraps the call and lets the rollback do its work, which
+    // is also what stops `withAudit` leaving an audit row for an assignment that never happened.
+    let ids: { scheduleId: bigint; batchId: bigint };
+    const commit = () =>
+      this.audit.withAudit(
       {
         actorId: actor.userId,
         actorRole: actor.role,
@@ -435,7 +471,18 @@ export class OverrideService {
         if (insertAtTop) await this.moveBatchToTop(tx, sched.scheduleId, batch.batchId);
         return { scheduleId: sched.scheduleId, batchId: batch.batchId };
       },
-    );
+      );
+
+    try {
+      // Two different races, two different answers. A concurrent assign to the same ENGINEER only
+      // costs us their schedule row, which our retry then finds and shares — that caller did nothing
+      // wrong. A concurrent assign of the same TICKET means somebody else owns it now, and the honest
+      // answer is the 409 both controllers already map.
+      ids = await retryOnceOnUniqueViolation('WorkSchedule', commit);
+    } catch (e: unknown) {
+      if (isUniqueViolationOn(e, 'BatchAssignmentTicket')) return { result: 'ALREADY_ASSIGNED' };
+      throw e;
+    }
 
     await this.notifier.dayPlanOverridden({ seId, scheduleId: ids.scheduleId, batchId: ids.batchId, action: auditAction });
     return { result: 'OK', scheduleId: String(ids.scheduleId), batchId: String(ids.batchId), ticketId, seId };
@@ -498,7 +545,11 @@ export class OverrideService {
     const target = await this.prisma.engineerMaster.findUnique({ where: { engineerId: cmd.newSeId } });
     if (!target) return { result: 'NOT_FOUND' };
 
-    const newScheduleId = await this.audit.withAudit(
+    // #265 item 5 (the sweep) — `swapSe` reaches `ensureSchedule` too, so it carried the identical
+    // unhandled schedule race: swap two engineers' work at the same moment somebody else assigns to
+    // the target, and the swap 500s. Same recovery, same reason.
+    const newScheduleId = await retryOnceOnUniqueViolation('WorkSchedule', () =>
+      this.audit.withAudit(
       this.auditEntry(actor, batch.batchId, {
         action: cmd.action,
         fromSeId: batch.seId,
@@ -512,12 +563,15 @@ export class OverrideService {
           where: { batchId: batch.batchId },
           data: { scheduleId: sched.scheduleId, seId: cmd.newSeId, status: 'OVERRIDDEN', overrideReason: cmd.reasonCode, stopSequence: seq },
         });
-        await tx.workSchedule.update({
-          where: { scheduleId: batch.scheduleId },
+        // #265 item 5 — `swapSe` spells the same stamp inline, so it carried the same resurrection
+        // defect as `flagOverridden`. Same guard, same reason.
+        await tx.workSchedule.updateMany({
+          where: { scheduleId: batch.scheduleId, ...liveScheduleFilter() },
           data: { status: 'OVERRIDDEN', lastOverriddenBy: actor.userId, lastOverriddenAt: now },
         });
         return sched.scheduleId;
       },
+      ),
     );
 
     await this.notifier.dayPlanOverridden({ seId: cmd.newSeId, scheduleId: newScheduleId, batchId: batch.batchId, action: cmd.action });
@@ -542,7 +596,12 @@ export class OverrideService {
     });
     if (rows.length !== ticketIds.length) return { result: 'NOT_FOUND' };
 
-    const newScheduleId = await this.audit.withAudit(
+    let newScheduleId: bigint;
+    try {
+      // #265 item 5 — and `moveTickets` likewise. A LostRaceError from the guarded stamp below is not
+      // a unique violation, so it passes straight through the retry to the catch that answers it.
+      newScheduleId = await retryOnceOnUniqueViolation('WorkSchedule', () =>
+      this.audit.withAudit(
       this.auditEntry(actor, batch.batchId, { action, ticketIds, newSeId, reasonCode, fromSeId: batch.seId }),
       async (tx) => {
         const sched = await this.ensureSchedule(tx, newSeId, batch.schedule, now);
@@ -564,16 +623,28 @@ export class OverrideService {
         let sort = await this.nextSortOrder(tx, targetBatch.batchId);
         for (const r of rows) {
           // Update (mark removed) before insert so the one-active-batch-per-ticket partial unique holds.
-          await tx.batchAssignmentTicket.update({
-            where: { id: r.id },
-            data: { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.REASSIGNED },
-          });
+          //
+          // #265 — guarded, and note the consequence of it sitting inside the loop: losing the race on
+          // ANY row fails the whole move. That is the point. A REASSIGN that moved three of four
+          // tickets and reported success would leave a half-moved plan nobody asked for; the throw
+          // rolls the transaction back whole, so the move either happens or it does not.
+          await stampOnceOrLose(
+            tx.batchAssignmentTicket,
+            { id: r.id, removedAt: null },
+            { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.REASSIGNED },
+            action,
+          );
           await tx.batchAssignmentTicket.create({ data: { batchId: targetBatch.batchId, ticketId: r.ticketId, sortOrder: sort++ } });
         }
         await this.flagOverridden(tx, batch.batchId, batch.scheduleId, reasonCode, actor, now);
         return sched.scheduleId;
       },
-    );
+      ),
+      );
+    } catch (e: unknown) {
+      if (e instanceof LostRaceError) return { result: 'NOT_FOUND' };
+      throw e;
+    }
 
     await this.notifier.dayPlanOverridden({ seId: newSeId, scheduleId: newScheduleId, batchId: batch.batchId, action });
     return { result: 'OK', batchId: String(batch.batchId), scheduleId: String(batch.scheduleId), seId: batch.seId, status: 'OVERRIDDEN' };
@@ -589,8 +660,20 @@ export class OverrideService {
     // #153 — the target SE's own plan may itself have been overridden earlier (a ZM commonly adjusts
     // several plans in one sitting). Matching ACTIVE only stacked a second ZM_MANUAL schedule on top of
     // the plan they were already working. Oldest-first, matching the dispatch APPEND path.
+    //
+    // #265 — the match is on `date_from` and **not** `date_to`, because that is what the constraint
+    // says. `work_schedules_one_active_per_se_zone_day` is partial-unique on
+    // `(se_id, zone_id, date_from) WHERE status = 'ACTIVE'`; `date_to` is not in it, and
+    // `batch-assignment.service.ts:128` has always looked the row up on exactly those three columns.
+    // This find asked for `date_to` too, so the two call sites gave different answers to "which row is
+    // this engineer's schedule for this day" and the database agreed with only one of them. The cost
+    // needed no race: any live schedule with a different `date_to` — a multi-day plan, which `swapSe`
+    // and `moveTickets` propagate by handing the *source* batch's range down here, or a null one,
+    // which the column allows — made every manual assign to that engineer find nothing, create, and
+    // die on the index. Since the index permits no second ACTIVE row for the day, attaching to the
+    // one that exists is not a compromise; it is the only legal outcome.
     const existing = await tx.workSchedule.findFirst({
-      where: { seId, zoneId: source.zoneId, dateFrom: source.dateFrom, dateTo: source.dateTo, ...liveScheduleFilter() },
+      where: { seId, zoneId: source.zoneId, dateFrom: source.dateFrom, ...liveScheduleFilter() },
       orderBy: { scheduleId: 'asc' },
     });
     if (existing) return existing;
@@ -641,8 +724,18 @@ export class OverrideService {
       where: { batchId },
       data: { status: 'OVERRIDDEN', overrideReason: reasonCode },
     });
-    await tx.workSchedule.update({
-      where: { scheduleId },
+    // #265 item 5 — guarded on liveness, and this one was a real defect rather than a hardening.
+    // `OVERRIDDEN` is a LIVE status (#153) while `COMPLETED`/`PARTIAL` are terminal, so an unguarded
+    // write by primary key **resurrects a closed day plan** — precisely what `schedule-status.ts`
+    // warns of: "widening past those would resurrect finished work onto today's plan". No race needed;
+    // a manager acting on a stale screen after the 04:00 closure is enough.
+    //
+    // `updateMany` with no count check, deliberately: the withdrawal the manager asked for is still
+    // valid on a finished plan (the ticket returns to the pool), and only the *provenance* stamp is
+    // meaningless there. Whether an override should be refused outright on a terminal schedule is a
+    // lifecycle question owned by #271, not one to smuggle in here.
+    await tx.workSchedule.updateMany({
+      where: { scheduleId, ...liveScheduleFilter() },
       data: { status: 'OVERRIDDEN', lastOverriddenBy: actor.userId, lastOverriddenAt: now },
     });
   }
