@@ -9,6 +9,7 @@ import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
 import { DispatchScheduleService } from '../src/scheduling/dispatch-schedule.service';
 import { OverrideService } from '../src/scheduling/override.service';
 import { AssignableWorkQueryService } from '../src/scheduling/assignable-work-query.service';
+import { CandidateQueryService } from '../src/scheduling/candidate-query.service';
 import { SchedulerPreviewService } from '../src/scheduling/scheduler-preview.service';
 import { SchedulesController } from '../src/scheduling/schedules.controller';
 import { ZmScheduleQueryService } from '../src/scheduling/zm-schedule-query.service';
@@ -24,6 +25,7 @@ describe('Schedules route matching (e2e)', () => {
   };
   const dispatchSchedule = { current: vi.fn(), setCron: vi.fn() };
   const assignableWork = { listForScope: vi.fn() };
+  const candidateQuery = { listForPlants: vi.fn() };
 
   const authGuard: CanActivate = {
     canActivate(context: ExecutionContext): boolean {
@@ -60,6 +62,11 @@ describe('Schedules route matching (e2e)', () => {
         // failed — the suite stays green while this file silently contributes no coverage at all.
         // That is exactly how it went unnoticed for one run; see `docs/progress/273-…md`.
         { provide: AssignableWorkQueryService, useValue: assignableWork },
+        // #274 — and the warning above was not hypothetical: this dependency was added to the
+        // controller without being added here, `beforeAll` threw, and the file reported **5 skipped**
+        // while the run summary said "1 failed" — a line easy to read as the known #184 worker crash.
+        // It shipped. The route assertion below now exists so the file has something to fail *with*.
+        { provide: CandidateQueryService, useValue: candidateQuery },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -157,4 +164,22 @@ describe('Schedules route matching (e2e)', () => {
 
     expect(zm.getScheduleDetail).toHaveBeenCalledWith(engineerId, { role: 'ZONAL_MANAGER', zoneId: 1 });
   });
+  /**
+   * #274 — `candidates` is the fourth literal path on a controller that also has `GET :engineerId`,
+   * and it hit the identical `ParseUUIDPipe` 400 on its first attempt. Same trap, fourth time.
+   */
+  it('routes GET /api/schedules/candidates to the candidate handler, not :engineerId', async () => {
+    candidateQuery.listForPlants.mockResolvedValue({ date: '2026-06-24', plants: [] });
+
+    const res = await request(app.getHttpServer())
+      .get('/api/schedules/candidates?plantIds=20,21')
+      .expect(200);
+
+    expect(res.body.plants).toEqual([]);
+    expect(candidateQuery.listForPlants).toHaveBeenCalledTimes(1);
+    // The ids arrive parsed, in order, as bigints — not as the raw query string.
+    expect(candidateQuery.listForPlants.mock.calls[0][0]).toEqual([20n, 21n]);
+    expect(zm.getScheduleDetail).not.toHaveBeenCalled();
+  });
+
 });
