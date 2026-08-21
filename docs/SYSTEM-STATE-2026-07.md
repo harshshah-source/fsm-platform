@@ -706,8 +706,20 @@ POSTs) drive identical code paths with no cron.
   residual live, and commits. **`src/ticketing/assignable-work.ts` is the one predicate** it shares
   with `assignPlants`, so the count and the write cannot drift; `heldTickets` is its reported
   complement, never a subtraction. Selection is **plant-shaped** in slice 1 because `assignPlants`
-  is — a shared site's whole set moves, which the ledger counts and the row states. #274–#277 add the
-  candidate column, the transactional `assign-batch`, Distribute, and absorb the orphaned surfaces.
+  is — a shared site's whole set moves, which the ledger counts and the row states. #275–#277 add the
+  transactional `assign-batch`, Distribute, and absorb the orphaned surfaces.
+- **Candidate column** (#274/P9, `GET /api/schedules/candidates?plantIds=…` + `CandidateQueryService`):
+  the engine's own `orderedCandidatesForPlant` published, in its exact order, **including the
+  candidates `applyHardFilters` drops, with the reason** — drop *rows* had never been persisted or
+  surfaced anywhere, only counts reach the trace. Per candidate: per-(engineer, plant) `coverageType`
+  (not the global `engineer_master` value `AssignSePanel` shows), `tierRank`, `verdict`, `dropReason`,
+  #269's `committed`/`dailyCapacity`, availability and kit. **The readiness rule is now one function**
+  — `src/recommender/candidate-readiness.ts` `buildCandidateReadiness`, which the recommender itself
+  calls: sharing `applyHardFilters` alone was insufficient because it takes readiness *as given*, so
+  two callers could agree on the rule while feeding it two different readings of one engineer.
+  `TIER_NOT_REACHED` is deliberately **not** a verdict on this read (a human may cross tiers, so a
+  never-reached tier is not a rejection). Over capacity is reported as the drop the engine actually
+  makes **and** marked "still assignable" — #258 Q2 lives in selectability, not in a softened verdict.
 - **ZM override engine** (#13a, `override.service.ts` header): each action (reassign/split/remove/
   defer/reorder) commits immediately, flips batch + schedule to OVERRIDDEN with mandatory reason +
   overrider, audits in-transaction, fires a push. No approval gate. Overriding work an SE is ON_SITE
@@ -857,6 +869,22 @@ the transactional write, Distribute and the orphaned surfaces follow in #274–#
 honoured on this surface** (inline collapse from the committed `RequestActor` + the shared
 `authHeaders()` client, both halves together) rather than waiting for #239's sweep: on a screen about
 what is left in *this* zone, an acting OH reading pan-India is about to hand out another zone's work.
+
+**#274 the candidate column — slice 2 (done, 2026-08-21):** the console's third column now answers
+*who can cover this plant, at what tier, and why not them.* It renders `orderedCandidatesForPlant`
+tier-grouped in the engine's exact order (nothing re-sorts — #266 had to land first for that claim to
+be true), all three tier headings present whether populated or not, dropped candidates shown muted
+with their reason, and every row selectable. Lanes gained **per-(engineer, plant) coverage badges** —
+one lane spanning two plants shows two badges when the tiers differ, which is the whole point of R4 —
+with a **tier crossing** marked (dashed, per the #272 grammar) when the chosen engineer's coverage is
+weaker than a tier still *passing* at that plant; never blocked. Lane load reads
+`committed → after / capacity`, amber at `after >= capacity` (the recommender's own boundary, not the
+issue's "exceeds"). Three things this exposed: the **readiness construction**, not `applyHardFilters`,
+was the real fork risk and is now shared with the engine; the approved design's mock tags its
+over-capacity candidate `PASSED` while its own Q2 prose calls capacity a *scheduler* constraint — the
+prose wins, and the endpoint reports the drop; and an unexpected candidates payload **took the whole
+console down**, pool and Commit included, until the read was made defensive — the column is additive
+and its rollback is "hide the column", which a crash defeats.
 
 **#269 capacity is visible on the admin (done, 2026-08-20):** `daily_capacity` shipped with Issue 13b
 and was rendered in **zero** places — it had no numerator, so an overload today was discoverable only

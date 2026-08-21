@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-08-21 — spent.** Its "next issue" (#269) and everything after it through #266 and
+> #274 have landed; nothing here is current. Live state: `docs/SYSTEM-STATE-2026-07.md` and `.scratch/fsm-platform-v1/INDEX.md`.
+
 # Handoff — P8/P9 implementation (session of 2026-08-20)
 
 **Repo:** `C:\fsm-platform-backup` · branch `feat/autoplant-integration`
