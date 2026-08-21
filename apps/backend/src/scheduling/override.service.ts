@@ -430,47 +430,47 @@ export class OverrideService {
     let ids: { scheduleId: bigint; batchId: bigint };
     const commit = () =>
       this.audit.withAudit(
-      {
-        actorId: actor.userId,
-        actorRole: actor.role,
-        actedAsRole: actor.actedAsRole ?? null,
-        action: auditAction,
-        entityType: 'ticket',
-        entityId: ticketId,
-        metadata: (auditAction === 'MANUAL_ZM_UPDATE'
-          ? { seId, updateType: 'ADD' }
-          : { seId }) as Prisma.InputJsonValue,
-      },
-      async (tx) => {
-        const sched = await this.ensureSchedule(tx, seId, { zoneId: ticket.plant.zoneId, dateFrom: day, dateTo: day }, now);
-        let batch = await tx.plantBatchAssignment.findFirst({
-          where: { scheduleId: sched.scheduleId, plantId: ticket.plantId, seId },
-        });
-        if (!batch) {
-          batch = await tx.plantBatchAssignment.create({
-            data: {
-              scheduleId: sched.scheduleId,
-              plantId: ticket.plantId,
-              seId,
-              status: 'AUTO_ASSIGNED',
-              stopSequence: await this.nextStopSequence(tx, sched.scheduleId),
-            },
+        {
+          actorId: actor.userId,
+          actorRole: actor.role,
+          actedAsRole: actor.actedAsRole ?? null,
+          action: auditAction,
+          entityType: 'ticket',
+          entityId: ticketId,
+          metadata: (auditAction === 'MANUAL_ZM_UPDATE'
+            ? { seId, updateType: 'ADD' }
+            : { seId }) as Prisma.InputJsonValue,
+        },
+        async (tx) => {
+          const sched = await this.ensureSchedule(tx, seId, { zoneId: ticket.plant.zoneId, dateFrom: day, dateTo: day }, now);
+          let batch = await tx.plantBatchAssignment.findFirst({
+            where: { scheduleId: sched.scheduleId, plantId: ticket.plantId, seId },
           });
-        }
-        await tx.batchAssignmentTicket.create({
-          data: { batchId: batch.batchId, ticketId, sortOrder: await this.nextSortOrder(tx, batch.batchId) },
-        });
-        // #249 AC2 — the deferral is spent by the assignment, exactly as `dispatchForZone` spends it.
-        // Leaving a future date on a FORMALLY_ASSIGNED ticket is the verified stale-deferral edge this
-        // closes: the batch row and the audit trail are the durable record of what was overridden, and
-        // a live `deferred_until` on assigned work only misleads whatever reads it next.
-        await tx.ticket.update({
-          where: { ticketId },
-          data: { assignmentState: 'FORMALLY_ASSIGNED', deferredUntil: null },
-        });
-        if (insertAtTop) await this.moveBatchToTop(tx, sched.scheduleId, batch.batchId);
-        return { scheduleId: sched.scheduleId, batchId: batch.batchId };
-      },
+          if (!batch) {
+            batch = await tx.plantBatchAssignment.create({
+              data: {
+                scheduleId: sched.scheduleId,
+                plantId: ticket.plantId,
+                seId,
+                status: 'AUTO_ASSIGNED',
+                stopSequence: await this.nextStopSequence(tx, sched.scheduleId),
+              },
+            });
+          }
+          await tx.batchAssignmentTicket.create({
+            data: { batchId: batch.batchId, ticketId, sortOrder: await this.nextSortOrder(tx, batch.batchId) },
+          });
+          // #249 AC2 — the deferral is spent by the assignment, exactly as `dispatchForZone` spends it.
+          // Leaving a future date on a FORMALLY_ASSIGNED ticket is the verified stale-deferral edge this
+          // closes: the batch row and the audit trail are the durable record of what was overridden, and
+          // a live `deferred_until` on assigned work only misleads whatever reads it next.
+          await tx.ticket.update({
+            where: { ticketId },
+            data: { assignmentState: 'FORMALLY_ASSIGNED', deferredUntil: null },
+          });
+          if (insertAtTop) await this.moveBatchToTop(tx, sched.scheduleId, batch.batchId);
+          return { scheduleId: sched.scheduleId, batchId: batch.batchId };
+        },
       );
 
     try {
@@ -550,27 +550,27 @@ export class OverrideService {
     // the target, and the swap 500s. Same recovery, same reason.
     const newScheduleId = await retryOnceOnUniqueViolation('WorkSchedule', () =>
       this.audit.withAudit(
-      this.auditEntry(actor, batch.batchId, {
-        action: cmd.action,
-        fromSeId: batch.seId,
-        newSeId: cmd.newSeId,
-        reasonCode: cmd.reasonCode,
-      }),
-      async (tx) => {
-        const sched = await this.ensureSchedule(tx, cmd.newSeId, batch.schedule, now);
-        const seq = await this.nextStopSequence(tx, sched.scheduleId);
-        await tx.plantBatchAssignment.update({
-          where: { batchId: batch.batchId },
-          data: { scheduleId: sched.scheduleId, seId: cmd.newSeId, status: 'OVERRIDDEN', overrideReason: cmd.reasonCode, stopSequence: seq },
-        });
-        // #265 item 5 — `swapSe` spells the same stamp inline, so it carried the same resurrection
-        // defect as `flagOverridden`. Same guard, same reason.
-        await tx.workSchedule.updateMany({
-          where: { scheduleId: batch.scheduleId, ...liveScheduleFilter() },
-          data: { status: 'OVERRIDDEN', lastOverriddenBy: actor.userId, lastOverriddenAt: now },
-        });
-        return sched.scheduleId;
-      },
+        this.auditEntry(actor, batch.batchId, {
+          action: cmd.action,
+          fromSeId: batch.seId,
+          newSeId: cmd.newSeId,
+          reasonCode: cmd.reasonCode,
+        }),
+        async (tx) => {
+          const sched = await this.ensureSchedule(tx, cmd.newSeId, batch.schedule, now);
+          const seq = await this.nextStopSequence(tx, sched.scheduleId);
+          await tx.plantBatchAssignment.update({
+            where: { batchId: batch.batchId },
+            data: { scheduleId: sched.scheduleId, seId: cmd.newSeId, status: 'OVERRIDDEN', overrideReason: cmd.reasonCode, stopSequence: seq },
+          });
+          // #265 item 5 — `swapSe` spells the same stamp inline, so it carried the same resurrection
+          // defect as `flagOverridden`. Same guard, same reason.
+          await tx.workSchedule.updateMany({
+            where: { scheduleId: batch.scheduleId, ...liveScheduleFilter() },
+            data: { status: 'OVERRIDDEN', lastOverriddenBy: actor.userId, lastOverriddenAt: now },
+          });
+          return sched.scheduleId;
+        },
       ),
     );
 
@@ -601,45 +601,45 @@ export class OverrideService {
       // #265 item 5 — and `moveTickets` likewise. A LostRaceError from the guarded stamp below is not
       // a unique violation, so it passes straight through the retry to the catch that answers it.
       newScheduleId = await retryOnceOnUniqueViolation('WorkSchedule', () =>
-      this.audit.withAudit(
-      this.auditEntry(actor, batch.batchId, { action, ticketIds, newSeId, reasonCode, fromSeId: batch.seId }),
-      async (tx) => {
-        const sched = await this.ensureSchedule(tx, newSeId, batch.schedule, now);
-        let targetBatch = await tx.plantBatchAssignment.findFirst({
-          where: { scheduleId: sched.scheduleId, plantId: batch.plantId, seId: newSeId },
-        });
-        if (!targetBatch) {
-          targetBatch = await tx.plantBatchAssignment.create({
-            data: {
-              scheduleId: sched.scheduleId,
-              plantId: batch.plantId,
-              seId: newSeId,
-              status: 'OVERRIDDEN',
-              overrideReason: reasonCode,
-              stopSequence: await this.nextStopSequence(tx, sched.scheduleId),
-            },
-          });
-        }
-        let sort = await this.nextSortOrder(tx, targetBatch.batchId);
-        for (const r of rows) {
-          // Update (mark removed) before insert so the one-active-batch-per-ticket partial unique holds.
-          //
-          // #265 — guarded, and note the consequence of it sitting inside the loop: losing the race on
-          // ANY row fails the whole move. That is the point. A REASSIGN that moved three of four
-          // tickets and reported success would leave a half-moved plan nobody asked for; the throw
-          // rolls the transaction back whole, so the move either happens or it does not.
-          await stampOnceOrLose(
-            tx.batchAssignmentTicket,
-            { id: r.id, removedAt: null },
-            { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.REASSIGNED },
-            action,
-          );
-          await tx.batchAssignmentTicket.create({ data: { batchId: targetBatch.batchId, ticketId: r.ticketId, sortOrder: sort++ } });
-        }
-        await this.flagOverridden(tx, batch.batchId, batch.scheduleId, reasonCode, actor, now);
-        return sched.scheduleId;
-      },
-      ),
+        this.audit.withAudit(
+          this.auditEntry(actor, batch.batchId, { action, ticketIds, newSeId, reasonCode, fromSeId: batch.seId }),
+          async (tx) => {
+            const sched = await this.ensureSchedule(tx, newSeId, batch.schedule, now);
+            let targetBatch = await tx.plantBatchAssignment.findFirst({
+              where: { scheduleId: sched.scheduleId, plantId: batch.plantId, seId: newSeId },
+            });
+            if (!targetBatch) {
+              targetBatch = await tx.plantBatchAssignment.create({
+                data: {
+                  scheduleId: sched.scheduleId,
+                  plantId: batch.plantId,
+                  seId: newSeId,
+                  status: 'OVERRIDDEN',
+                  overrideReason: reasonCode,
+                  stopSequence: await this.nextStopSequence(tx, sched.scheduleId),
+                },
+              });
+            }
+            let sort = await this.nextSortOrder(tx, targetBatch.batchId);
+            for (const r of rows) {
+              // Update (mark removed) before insert so the one-active-batch-per-ticket partial unique holds.
+              //
+              // #265 — guarded, and note the consequence of it sitting inside the loop: losing the race on
+              // ANY row fails the whole move. That is the point. A REASSIGN that moved three of four
+              // tickets and reported success would leave a half-moved plan nobody asked for; the throw
+              // rolls the transaction back whole, so the move either happens or it does not.
+              await stampOnceOrLose(
+                tx.batchAssignmentTicket,
+                { id: r.id, removedAt: null },
+                { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.REASSIGNED },
+                action,
+              );
+              await tx.batchAssignmentTicket.create({ data: { batchId: targetBatch.batchId, ticketId: r.ticketId, sortOrder: sort++ } });
+            }
+            await this.flagOverridden(tx, batch.batchId, batch.scheduleId, reasonCode, actor, now);
+            return sched.scheduleId;
+          },
+        ),
       );
     } catch (e: unknown) {
       if (e instanceof LostRaceError) return { result: 'NOT_FOUND' };
