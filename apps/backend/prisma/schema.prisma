@@ -1547,6 +1547,10 @@ model SnapshotRun {
   runId      BigInt         @id @default(autoincrement()) @map("run_id")
   startedAt  DateTime       @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt DateTime?      @map("finished_at") @db.Timestamptz(6)
+  /// #261 — last time the run itself said it was alive (touched per pipeline stage). The reaper judges
+  /// staleness on THIS, not `started_at`, so a legitimately slow run is never reaped for being slow.
+  /// NULL for every run written before the column existed; the reaper falls back to `started_at` there.
+  heartbeatAt DateTime?     @map("heartbeat_at") @db.Timestamptz(6)
   status     SnapshotStatus @default(RUNNING)
   cursor     String?
   dataAsOf   DateTime?      @map("data_as_of") @db.Timestamptz(6)
@@ -2125,6 +2129,9 @@ model MasterSyncRun {
   runId       BigInt    @id @default(autoincrement()) @map("run_id")
   startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt  DateTime? @map("finished_at") @db.Timestamptz(6)
+  /// #261 — see SnapshotRun.heartbeatAt. The master sync is the run this matters most for: it is the
+  /// long one, and reaping it mid-flight frees the guard for a second sync over the top of the first.
+  heartbeatAt DateTime? @map("heartbeat_at") @db.Timestamptz(6)
   status      String    @default("RUNNING")
   entityStats Json?     @map("entity_stats") @db.JsonB
   error       String?

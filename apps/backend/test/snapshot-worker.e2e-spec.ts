@@ -140,6 +140,48 @@ describe('Issue 04 slice 5 — SnapshotIngestionWorker', () => {
     expect(chunks.every((c) => c.status === 'SUCCESS')).toBe(true);
   });
 
+  /**
+   * #261 (folding #132) — the beat has to happen **per chunk**, not once at run start.
+   *
+   * A single beat at `startRun` would satisfy "the column is populated" and change nothing: the reaper
+   * would still be judging the run on a timestamp taken before any work began, which is `started_at`
+   * under another name. What buys a long run its next window is the work itself reporting progress, so
+   * this reads `heartbeat_at` out of the database immediately before each source read and requires it
+   * to have moved forward between chunks.
+   */
+  it('beats once per chunk, so a long drain keeps buying itself the next window', async () => {
+    const beats: (Date | null)[] = [];
+    const rows = [row(DEV(41), 0), row(DEV(42), 1), row(DEV(43), 2), row(DEV(44), 3), row(DEV(45), 4), row(DEV(46), 5)];
+    let runId: bigint | null = null;
+    const probing: SourceReader = {
+      async readChunk(cursor: string | null, chunkSize: number): Promise<SourceChunk> {
+        // The run is the only RUNNING row while this test holds the table (beforeEach clears them).
+        const live = await prisma.snapshotRun.findFirst({ where: { status: 'RUNNING' }, orderBy: { runId: 'desc' } });
+        if (live) runId = live.runId;
+        beats.push(live?.heartbeatAt ?? null);
+        // Two consecutive beats inside one millisecond would be indistinguishable in the assertion
+        // below; the delay is about the clock's resolution, not about the code under test.
+        await new Promise((r) => setTimeout(r, 5));
+        const start = cursor === null ? 0 : Number(cursor);
+        const slice = rows.slice(start, start + chunkSize);
+        const next = start + slice.length;
+        return { rows: [...slice], nextCursor: next >= rows.length ? null : String(next) };
+      },
+    };
+
+    const result = await makeWorker(realWriter, probing).run({ chunkSize: 2 });
+    created.push(result.runId);
+
+    expect(result.status).toBe('SUCCESS');
+    expect(runId).toBe(result.runId);
+    // Three reads: the first sees the beat taken at run start, and each later one must see a newer beat
+    // than the read before it — that is one beat per chunk drained.
+    expect(beats).toHaveLength(3);
+    expect(beats[0]).not.toBeNull();
+    expect(beats[1]!.getTime()).toBeGreaterThan(beats[0]!.getTime());
+    expect(beats[2]!.getTime()).toBeGreaterThan(beats[1]!.getTime());
+  });
+
   it('retries a transiently failing chunk and still succeeds', async () => {
     const source = new InMemorySourceReader([row(DEV(11), 0), row(DEV(12), 1), row(DEV(13), 2)]);
     const writer = new FlakyWriter(realWriter, 2); // fail twice, succeed on the 3rd attempt

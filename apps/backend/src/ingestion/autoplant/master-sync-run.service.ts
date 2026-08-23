@@ -1,8 +1,8 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { buildStampFields } from '../../build-info/run-stamp';
 import type { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ORPHANED_RUN_ERROR, readStaleRunMs } from '../stale-run';
+import { ORPHANED_RUN_ERROR, staleRunFilter } from '../stale-run';
 
 export type MasterSyncOutcome = 'SUCCESS' | 'FAILED' | 'PARTIAL';
 
@@ -40,20 +40,32 @@ const runInProgress = (): ConflictException =>
  */
 @Injectable()
 export class MasterSyncRunService {
+  private readonly logger = new Logger(MasterSyncRunService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Reap orphaned RUNNING rows (older than the stale threshold) → FAILED, so a process death never
-   * permanently locks out future runs (review A2). Runs before the guard is taken; a fresh RUNNING
-   * row (within the threshold) is left alone and still 409s. Returns the number reaped.
+   * Reap orphaned RUNNING rows → FAILED, so a process death never permanently locks out future runs
+   * (review A2). Runs before the guard is taken; a live RUNNING row is left alone and still 409s.
+   * Returns the number reaped.
+   *
+   * #261 — "orphaned" is decided by {@link staleRunFilter}: a stale *heartbeat*, not an old
+   * `started_at`. This sync is the long one, so reaping it for being slow was the real risk here.
    */
   async reapStaleRuns(now: Date = new Date()): Promise<number> {
-    const cutoff = new Date(now.getTime() - readStaleRunMs());
     const { count } = await this.prisma.masterSyncRun.updateMany({
-      where: { status: 'RUNNING', startedAt: { lt: cutoff } },
+      where: { status: 'RUNNING', ...staleRunFilter(now) },
       data: { status: 'FAILED', finishedAt: now, error: ORPHANED_RUN_ERROR },
     });
     return count;
+  }
+
+  /** Say the run is still alive (#261) — the twin of `SnapshotRunService.heartbeat`; see it for why. */
+  async heartbeat(runId: bigint, now: Date = new Date()): Promise<void> {
+    await this.prisma.masterSyncRun.updateMany({
+      where: { runId, status: 'RUNNING' },
+      data: { heartbeatAt: now },
+    });
   }
 
   async startRun(): Promise<{ runId: bigint }> {
@@ -65,7 +77,8 @@ export class MasterSyncRunService {
         if (!locked[0]?.locked) {
           throw runInProgress();
         }
-        return tx.masterSyncRun.create({ data: { status: 'RUNNING', ...buildStampFields() } });
+        // The opening beat — see the twin in `SnapshotRunService.startRun`.
+        return tx.masterSyncRun.create({ data: { status: 'RUNNING', heartbeatAt: new Date(), ...buildStampFields() } });
       });
       return { runId: run.runId };
     } catch (e) {
@@ -77,6 +90,12 @@ export class MasterSyncRunService {
     }
   }
 
+  /**
+   * Close the run — **only if it is still RUNNING** (#261, the defect half of #132). See the twin in
+   * `SnapshotRunService.finishRun` for why: a reaped-but-alive run that reports SUCCESS here would
+   * overwrite the reaper's FAILED *and* null out `ORPHANED_RUN_ERROR`, erasing the only record of what
+   * actually happened to it. First writer wins; a reaped run stays reaped.
+   */
   async finishRun(
     runId: bigint,
     params: {
@@ -85,8 +104,8 @@ export class MasterSyncRunService {
       error?: string | null;
     },
   ): Promise<void> {
-    await this.prisma.masterSyncRun.update({
-      where: { runId },
+    const { count } = await this.prisma.masterSyncRun.updateMany({
+      where: { runId, status: 'RUNNING' },
       data: {
         status: params.status,
         finishedAt: new Date(),
@@ -94,5 +113,8 @@ export class MasterSyncRunService {
         error: params.error ?? null,
       },
     });
+    if (count === 0) {
+      this.logger.warn(`master sync run ${runId} finished after being reaped — ${params.status} not recorded`);
+    }
   }
 }

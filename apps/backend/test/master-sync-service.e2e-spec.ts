@@ -141,6 +141,33 @@ describe('Phase 4 — MasterSyncService (plant-first)', () => {
     await prisma.onModuleDestroy();
   });
 
+  /**
+   * #261 (folding #132) — the master sync is the long run in this system, and the whole reason the
+   * reaper stopped keying on `started_at`: a sync that legitimately takes longer than the threshold was
+   * being reaped, losing its result and freeing the in-flight guard for a second sync over the top of
+   * it. That only holds if the sync actually reports progress, so this pins the beat happening
+   * repeatedly *during* a sync rather than once when the run row was opened.
+   */
+  it('beats through the sync, not just at the start, so a long run is never reaped for being long', async () => {
+    const beatsAt: bigint[] = [];
+    const counting = new MasterSyncRunService(prisma);
+    const realHeartbeat = counting.heartbeat.bind(counting);
+    counting.heartbeat = async (runId: bigint, now?: Date): Promise<void> => {
+      beatsAt.push(runId);
+      await realHeartbeat(runId, now);
+    };
+
+    const result = await new MasterSyncService(prisma, counting, source, zoneResolver, scope).sync();
+
+    expect(result.status).toBe('SUCCESS');
+    // Six numbered stages follow the first; one beat each. The exact number is the stage count, not a
+    // magic constant — if a stage is added or removed this figure moves with it, deliberately.
+    expect(beatsAt).toHaveLength(6);
+    expect(beatsAt.every((id) => id === result.runId)).toBe(true);
+    const run = await prisma.masterSyncRun.findUniqueOrThrow({ where: { runId: result.runId } });
+    expect(run.heartbeatAt).not.toBeNull();
+  });
+
   it('scopes plants, derives companies from them, and ignores company_type', async () => {
     const result = await service.sync();
     expect(result.status).toBe('SUCCESS');

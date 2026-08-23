@@ -1,7 +1,7 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { buildStampFields } from '../build-info/run-stamp';
 import { PrismaService } from '../prisma/prisma.service';
-import { readStaleRunMs } from './stale-run';
+import { staleRunFilter } from './stale-run';
 
 export type SnapshotRunOutcome = 'SUCCESS' | 'FAILED' | 'PARTIAL';
 
@@ -23,21 +23,40 @@ const runInProgress = (): ConflictException =>
  */
 @Injectable()
 export class SnapshotRunService {
+  private readonly logger = new Logger(SnapshotRunService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Reap orphaned RUNNING rows (older than the stale threshold) → FAILED, so a process death never
-   * permanently locks out future runs (review A2). `snapshot_runs` has no `error` column, so the
-   * status flip + `finished_at` are the record. Runs before the guard is taken; a fresh RUNNING row
-   * still 409s. Supersedes the CLI-only `deleteMany({status:'RUNNING'})` workaround.
+   * Reap orphaned RUNNING rows → FAILED, so a process death never permanently locks out future runs
+   * (review A2). `snapshot_runs` has no `error` column, so the status flip + `finished_at` are the
+   * record. Runs before the guard is taken; a live RUNNING row still 409s. Supersedes the CLI-only
+   * `deleteMany({status:'RUNNING'})` workaround.
+   *
+   * #261 — "orphaned" is now decided by {@link staleRunFilter}: a stale *heartbeat*, not an old
+   * `started_at`. A slow run that is still beating is alive and is left alone.
    */
   async reapStaleRuns(now: Date = new Date()): Promise<number> {
-    const cutoff = new Date(now.getTime() - readStaleRunMs());
     const { count } = await this.prisma.snapshotRun.updateMany({
-      where: { status: 'RUNNING', startedAt: { lt: cutoff } },
+      where: { status: 'RUNNING', ...staleRunFilter(now) },
       data: { status: 'FAILED', finishedAt: now },
     });
     return count;
+  }
+
+  /**
+   * Say the run is still alive (#261). Called at each pipeline stage boundary — a single-column write
+   * outside any long transaction, which is what makes it affordable often enough to be meaningful.
+   *
+   * Scoped to `status = 'RUNNING'`: a beat cannot un-reap a run (the reaper only looks at RUNNING
+   * rows), but stamping a fresh beat onto a row somebody already closed would make a dead run read as
+   * a live one to the next human who looks.
+   */
+  async heartbeat(runId: bigint, now: Date = new Date()): Promise<void> {
+    await this.prisma.snapshotRun.updateMany({
+      where: { runId, status: 'RUNNING' },
+      data: { heartbeatAt: now },
+    });
   }
 
   async startRun(): Promise<{ runId: bigint }> {
@@ -49,7 +68,9 @@ export class SnapshotRunService {
         if (!locked[0]?.locked) {
           throw runInProgress();
         }
-        return tx.snapshotRun.create({ data: { status: 'RUNNING', ...buildStampFields() } });
+        // The opening beat: without it the row is born already NULL-hearted, and the reaper would fall
+        // back to `started_at` for the whole of its first window.
+        return tx.snapshotRun.create({ data: { status: 'RUNNING', heartbeatAt: new Date(), ...buildStampFields() } });
       });
       return { runId: run.runId };
     } catch (e) {
@@ -75,6 +96,15 @@ export class SnapshotRunService {
     return last?.cursor ?? null;
   }
 
+  /**
+   * Close the run — **only if it is still RUNNING** (#261, the defect half of #132).
+   *
+   * The reaper above exists because a dead process orphans a RUNNING row. But a run slow enough to be
+   * reaped is not always dead: it can wake up, finish its work and call this. An unconditional update
+   * then overwrites the reaper's FAILED with SUCCESS and advances `data_as_of` — a ledger claiming a
+   * successful run that nothing was tracking any more, and a watermark moved by a run nobody trusted.
+   * Conditioning on `status = 'RUNNING'` makes the first writer win, so a reaped run stays reaped.
+   */
   async finishRun(
     runId: bigint,
     params: {
@@ -83,8 +113,8 @@ export class SnapshotRunService {
       cursor?: string | null;
     },
   ): Promise<void> {
-    await this.prisma.snapshotRun.update({
-      where: { runId },
+    const { count } = await this.prisma.snapshotRun.updateMany({
+      where: { runId, status: 'RUNNING' },
       data: {
         status: params.status,
         finishedAt: new Date(),
@@ -92,5 +122,8 @@ export class SnapshotRunService {
         cursor: params.cursor,
       },
     });
+    if (count === 0) {
+      this.logger.warn(`snapshot run ${runId} finished after being reaped — ${params.status} not recorded`);
+    }
   }
 }

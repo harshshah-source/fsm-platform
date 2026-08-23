@@ -236,6 +236,10 @@ export class MasterSyncService {
         existingPlants.has(key) ? stats.plants.updated++ : stats.plants.inserted++;
       });
 
+      // #261 — one beat per numbered stage below. This is the long run in the system, and the reaper
+      // must be able to tell "slow" from "dead" without knowing how long a healthy sync takes.
+      await this.runService.heartbeat(runId);
+
       // 2. Companies — DERIVED: upsert only those an in-scope plant references. No allow-list, and
       //    mst_company.company_type is never consulted (a Transporter-typed plant owner is still an FSM
       //    customer; an unreferenced/INACTIVE-only company is inert and skipped).
@@ -261,6 +265,8 @@ export class MasterSyncService {
         companyIdBySource.set(key, companyRows[i].companyId);
         existingCompanies.has(key) ? stats.companies.updated++ : stats.companies.inserted++;
       });
+
+      await this.runService.heartbeat(runId);
 
       // 3. Transporters — best-effort company FK, keyed by source_transporter_id.
       const transporterIdBySource = new Map<string, bigint>();
@@ -288,6 +294,8 @@ export class MasterSyncService {
         transporterIdBySource.set(key, transporterRows[i].transporterId);
         existingTransporters.has(key) ? stats.transporters.updated++ : stats.transporters.inserted++;
       });
+
+      await this.runService.heartbeat(runId);
 
       // 4. Vehicles — skip any whose plant/company is unsynced, then apply the Issue 128 INSERT-SCOPE
       //    PIN. The read is widened to every deployment_status so departures can be OBSERVED (§128), but
@@ -325,6 +333,8 @@ export class MasterSyncService {
         vehicleIdByNo.set(pl.where.vehicleNo, vehicleRows[i].vehicleId);
         existingVehicles.has(pl.where.vehicleNo) ? stats.vehicles.updated++ : stats.vehicles.inserted++;
       });
+
+      await this.runService.heartbeat(runId);
 
       // 5. Devices — mirrored only when their vehicle synced this run (never orphan a fitment onto a null
       //    vehicle because the plant/company was out of scope). The insert-scope pin applies here too: a
@@ -371,10 +381,14 @@ export class MasterSyncService {
         existingDevices.has(pl.where.deviceId) ? stats.devices.updated++ : stats.devices.inserted++;
       });
 
+      await this.runService.heartbeat(runId);
+
       // 6. Commissioning facts (feasibility §7.3) — append one row per newly-seen (device, vehicle,
       //    installed_at). Runs on the mirrored device set, from the same read, and is inert by
       //    construction: it is the last thing that can fail without consequence.
       await this.appendCommissioning(runId, vehicleMasters, devicePlans, vehicleIdByNo, plantIdBySource, companyIdBySource, stats);
+
+      await this.runService.heartbeat(runId);
 
       // 7. Deployment lifecycle (Issue 128) — mark departures / restores from the SAME read the mirror
       //    was built from. Runs last: the mirror is already truthful, so this only opens/closes the

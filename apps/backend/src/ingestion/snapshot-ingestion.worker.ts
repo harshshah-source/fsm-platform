@@ -96,6 +96,11 @@ export class SnapshotIngestionWorker {
           }
         }
 
+        // #261 — one beat per drained chunk. A run that is merely slow keeps saying so and is never
+        // reaped for its wall-clock age; a run whose process died stops saying it immediately. Outside
+        // any transaction and a single column, so the cost does not scale with the chunk.
+        await this.runs.heartbeat(runId);
+
         cursor = chunk.nextCursor;
         if (cursor === null) break;
       }
