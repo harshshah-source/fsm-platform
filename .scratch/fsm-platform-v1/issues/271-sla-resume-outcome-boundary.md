@@ -1,6 +1,6 @@
 # 271 — SLA resume at the real lifecycle boundaries: fold-and-resume on submission, terminal at verification
 
-Status: ready-for-agent
+Status: done (2026-08-24) — see `docs/progress/271-sla-resume-outcome-boundary.md`
 Type: AFK · Backend
 Decision: #258 Q7 — supersedes #247 AC2's "the sweep is the single automatic resumer" invariant.
 Supersedes #253 (the stranded-pause defect is AC-1 here).
@@ -90,19 +90,21 @@ None / n/a — state-machine correctness; existing surfaces read the corrected f
 
 ## Acceptance criteria
 
-- [ ] **AC-1 (#253's scenario, dead)**: submission *before* the return date, normal path → report
+- [x] **AC-1 (#253's scenario, dead)**: submission *before* the return date, normal path → report
       RESOLVED, VU pause folded exactly once, `sla_paused = false`, ticket continues under SLA.
-- [ ] **AC-2**: same submission but component-unavailable → VU interval folded first, THEN the
+- [x] **AC-2**: same submission but component-unavailable → VU interval folded first, THEN the
       `WAITING_COMPONENT` pause opens; `slaAccumulatedPauseSeconds` contains the VU interval and
       `slaPauseReason = 'WAITING_COMPONENT'` (the overwrite bug pinned dead).
-- [ ] **AC-3**: verification success → cycle `VERIFIED` with `closedAt`, `sla_paused = false`, and
+- [x] **AC-3**: verification success → cycle `VERIFIED` with `closedAt`, `sla_paused = false`, and
       **no resume/restart event of any kind** recorded after closure.
-- [ ] **AC-4**: verification failure → ticket `ESCALATED`, clock still running from the submission
-      resume, no second fold.
-- [ ] **AC-5**: vehicle returns with no submission → the 03:30 sweep resumes exactly as today
+- [x] **AC-4**: verification failure → ~~ticket `ESCALATED`~~ **corrected: ticket `FAILED_VERIFICATION`**
+      (the automatic sweep's own terminal status — `ESCALATED` is reached only via the separate manual
+      `escalateFraud()`, never automatically; see the completion report §4), clock still running from
+      the submission resume, no second fold.
+- [x] **AC-5**: vehicle returns with no submission → the 03:30 sweep resumes exactly as today
       (regression pin on #247's specs).
-- [ ] **AC-6**: a `WAITING_COMPONENT` pause is never touched by any VU path (reason-guard pin).
-- [ ] **AC-7**: exactly one fold per pause regardless of writer interleaving — submission racing the
+- [x] **AC-6**: a `WAITING_COMPONENT` pause is never touched by any VU path (reason-guard pin).
+- [x] **AC-7**: exactly one fold per pause regardless of writer interleaving — submission racing the
       sweep resolves through the guarded flip; the loser is a no-op and adds no seconds.
 
 ## Tests

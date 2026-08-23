@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { returnDateArrivedBefore } from './deferral';
+import { foldAndResumeSlaPause } from './sla-pause';
 
 export interface VehicleReturnResumeResult {
   /** How many Failure Cycles this tick restarted. */
@@ -36,6 +37,16 @@ export interface VehicleReturnResumeResult {
  * end, and clearing it would restart the clock on a ticket nobody can work (the manual mirror of this
  * is `resumeSla`'s AC1 guard).
  *
+ * **#271 — no longer the only writer.** `troubleshoot-submission.service.ts` now folds the same
+ * `VEHICLE_UNAVAILABLE` pause at the point submission ends the vehicle's absence, which is almost
+ * always BEFORE this sweep would ever see the report (the report is resolved at submission, so this
+ * sweep's own `status: 'OPEN'` filter naturally excludes it from then on — #253's dead scenario). This
+ * sweep now exists for exactly the case submission cannot reach: nobody has submitted, but the vehicle
+ * is due back anyway. The per-cycle fold below is routed through {@link foldAndResumeSlaPause}'s guarded
+ * write specifically so that if a submission lands in the same instant this tick is running, at most
+ * one of them folds the interval (AC-7) — the pre-filter immediately below is a cheap candidate list,
+ * not the authority on which cycles are actually still paused when the write happens.
+ *
  * **The report is deliberately left OPEN** (Decision 16). The vehicle being *due* back is not the same
  * as the SE finding it there; the report resolves when a submission closes the attempt or a fresh
  * absence supersedes it. Resuming the clock and resolving the report are two different claims, and
@@ -62,51 +73,43 @@ export class VehicleReturnResumeService {
     const reportByCycle = new Map<string, (typeof due)[number]>();
     for (const r of due) if (!reportByCycle.has(r.failureCycleId!)) reportByCycle.set(r.failureCycleId!, r);
 
-    const cycles = await this.prisma.failureCycle.findMany({
+    // Cheap candidate list, not the authority — see the class docstring (#271). A cycle that a
+    // concurrent submission has already resumed by the time the transaction below runs will simply
+    // fail its guarded write and drop out of `resumptions`.
+    const candidates = await this.prisma.failureCycle.findMany({
       where: {
         cycleId: { in: [...reportByCycle.keys()] },
         slaPaused: true,
         slaPauseReason: 'VEHICLE_UNAVAILABLE',
         slaPausedAt: { not: null },
       },
-      select: { cycleId: true, slaPausedAt: true, slaAccumulatedPauseSeconds: true },
+      select: { cycleId: true },
     });
-    if (cycles.length === 0) return { resumed: 0 };
+    if (candidates.length === 0) return { resumed: 0 };
 
-    const resumptions = cycles.map((c) => ({
-      cycle: c,
-      report: reportByCycle.get(c.cycleId)!,
-      addSeconds: Math.floor((now.getTime() - c.slaPausedAt!.getTime()) / 1000),
-    }));
-
+    const resumptions: { cycleId: string; report: (typeof due)[number]; addedSeconds: number }[] = [];
     await this.prisma.$transaction(async (tx) => {
-      for (const { cycle, addSeconds } of resumptions) {
-        await tx.failureCycle.update({
-          where: { cycleId: cycle.cycleId },
-          data: {
-            slaPaused: false,
-            slaPauseReason: null,
-            slaPausedAt: null,
-            slaPauseSource: null,
-            slaAccumulatedPauseSeconds: cycle.slaAccumulatedPauseSeconds + BigInt(addSeconds),
-          },
-        });
+      for (const { cycleId } of candidates) {
+        const fold = await foldAndResumeSlaPause(tx, cycleId, now, { onlyReason: 'VEHICLE_UNAVAILABLE' });
+        if (fold.resumed) resumptions.push({ cycleId, report: reportByCycle.get(cycleId)!, addedSeconds: fold.addedSeconds });
       }
+      if (resumptions.length === 0) return;
       // Actor = system: a scheduled sweep, not a manager's decision. Batched like the tier-override
-      // and device-departure sweeps — one insert for however many rows this tick found.
+      // and device-departure sweeps — one insert for however many rows this tick actually resumed
+      // (not however many candidates it started with — a candidate a concurrent writer got to first
+      // gets no audit row here, because this tick did nothing to it).
       await tx.auditLog.createMany({
-        data: resumptions.map(({ cycle, report, addSeconds }) => ({
+        data: resumptions.map(({ cycleId, report, addedSeconds }) => ({
           actorId: 'SYSTEM',
           actorRole: 'SYSTEM',
           action: 'VU_SLA_AUTO_RESUMED',
           entityType: 'failure_cycles',
-          entityId: cycle.cycleId,
+          entityId: cycleId,
           metadata: {
             ticketId: report.ticketId,
             reportId: report.id.toString(),
             expectedFrom: report.expectedFrom.toISOString(),
-            pausedAt: cycle.slaPausedAt!.toISOString(),
-            addedPauseSeconds: addSeconds,
+            addedPauseSeconds: addedSeconds,
           },
         })),
       });

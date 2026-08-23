@@ -390,7 +390,7 @@ Time targets enforced on each inactive-device Ticket: `submit_within_minutes` (S
 _Avoid_: SLA breach (use SLA escalation — the system escalates, not formally "breaches" unless reported); auto-pausing SLA from readiness state without a documented Vehicle Unavailability Report.
 
 **Vehicle Unavailability Report**:
-A documented field signal the SE files from the mobile app when they physically reach the Plant and find the vehicle not available to work. It is the **only** trigger that pauses SLA with `pause_reason = VEHICLE_UNAVAILABLE`. To support it, Ticket Detail must surface the **Transporter name and contact number** (the SE contacts the Transporter directly from the Ticket). The SE records: `reason_code` (`VEHICLE_ON_TRIP | VEHICLE_NOT_AT_PLANT | DRIVER_NOT_AVAILABLE | CUSTOMER_REFUSED | OTHER`), `transporter_contacted` (yes/no), the transporter name/number used, `expected_available_from` and `expected_available_to` (expected return date/time), optional notes, and SE GPS/location if available. On submit, the primary SLA clock pauses and the Ticket displays *"Vehicle unavailable — expected back on [date/time]"*. The Zonal Manager can edit/confirm the expected-availability window. When the expected-availability date arrives, the system **resurfaces the Ticket** for scheduling/reassignment. SLA **resumes** when any of: (1) the expected-availability date arrives and a manager/system marks it available, (2) the SE reaches ON_SITE / access is confirmed, (3) the Zonal Manager manually resumes it, or (4) fresh AutoPlant DB readiness data confirms availability where business rules trust it. Raw readiness alone never resumes-by-itself without one of these documented events.
+A documented field signal the SE files from the mobile app when they physically reach the Plant and find the vehicle not available to work. It is the **only** trigger that pauses SLA with `pause_reason = VEHICLE_UNAVAILABLE`. To support it, Ticket Detail must surface the **Transporter name and contact number** (the SE contacts the Transporter directly from the Ticket). The SE records: `reason_code` (`VEHICLE_ON_TRIP | VEHICLE_NOT_AT_PLANT | DRIVER_NOT_AVAILABLE | CUSTOMER_REFUSED | OTHER`), `transporter_contacted` (yes/no), the transporter name/number used, `expected_available_from` and `expected_available_to` (expected return date/time), optional notes, and SE GPS/location if available. On submit, the primary SLA clock pauses and the Ticket displays *"Vehicle unavailable — expected back on [date/time]"*. The Zonal Manager can edit/confirm the expected-availability window. When the expected-availability date arrives, the system **resurfaces the Ticket** for scheduling/reassignment. SLA **resumes** when any of: (1) the expected-availability date arrives with no submission yet — a scheduled sweep resumes it and leaves the report OPEN (the vehicle being *due* is not the SE finding it there), (2) the SE **submits the troubleshooting form** while the Ticket is still active — the pause folds in at that moment rather than waiting for the date (Decisions §20), (3) the Zonal Manager manually resumes it, or (4) fresh AutoPlant DB readiness data confirms availability where business rules trust it. Raw readiness alone never resumes-by-itself without one of these documented events.
 _Avoid_: pausing SLA on readiness state without this report; treating it as the same pause as `WAITING_COMPONENT` — the two are distinct `pause_reason` values.
 
 **Secondary SLA Clock**:
@@ -815,6 +815,43 @@ Activation triggers (same for each layer): the role-holder sets their own planne
 **Consequences.** `utcDayStart` and its call sites move to an IST-day helper; deferral gates, SLA day maths and report cubes shift by 5h30m across one transition day. The dispatch cron must pin its timezone explicitly — it currently pins none, so its real firing hour depends on the host's `TZ` and on a UTC host it lands at 10:30 IST, hours *into* the field day it is meant to precede. The dispatch schedule moves into the `system_settings` registry with the environment variable demoted to a bootstrap default; a change takes effect without a restart, an invalid expression is rejected at write time leaving the previous schedule intact, and every change is logged with its actor. The existing manual **"Run Dispatch Now"** trigger (Operations Head / Central Service Manager, fully audited) is retained for master-sync, emergency and unexpected-change cases, and gains a guard so it cannot start a run that overlaps one already in flight for that zone. Admin's planner, which independently defines "today" in **device-local** time, aligns to the same definition — the two currently disagree for the first 5h30m of every IST day. Implementation: **#204** (day boundary), **#213** (schedule configurability + overlap guard). Ruled 2026-08-04; see `.scratch/fsm-platform-v1/issues/198-decision-day-boundary-and-dispatch-clock.md` for the options considered and the evidence.
 
 **Addendum — the analytics day moves too, and history is recomputed (ruled 2026-08-04, during #204).** Implementing the above surfaced that the reporting cubes bucket a "day" independently of the operational reads: `business-sweep-scheduler.service.ts:89` carries its own `previousUtcDayStart` feeding `SystemEfficiencyAggregationService.computeDay`, so a ticket closed at 02:00 IST would sit on today's Day Plan but in **yesterday's** efficiency cube. Ruled: analytics moves to the **same IST day**, and the affected cubes are **recomputed** so the series is consistent end to end — explicitly accepting that recompute rewrites already-recorded rows for the affected range. Rejected leaving analytics on UTC (reports and the floor would disagree for 5h30m of every day, permanently, and the question would simply be re-asked later) and rejected a cutover-date seam (a kink in the series is a trap for whoever reads it in six months, and the seam would have to be explained on every cube). Scope is wider than the one cube that was audited: `system_efficiency_summary_daily`, plus `fleet uptime`, `root cause`, `zm performance` and `soft inactive`, which were **not** audited and must be before anything is recomputed. Implementation: **#214**.
+
+## 20. SLA resume follows the TICKET's own outcome, not the Vehicle Unavailability Report's resolution
+
+**Decision.** The primary SLA clock resumes at whichever boundary the Ticket actually reaches next, not
+at a single fixed event. A Vehicle Unavailability pause ends the moment the vehicle condition is no
+longer true — but what happens to the *clock* depends on whether the Ticket is still active at that
+moment: (1) **Ticket still active** (the SE submits the troubleshooting form — normal or
+component-unavailable path — and the Ticket is not yet terminal): the pause folds into the accumulated
+total and the clock resumes running immediately, because there is more work ahead of it to measure. (2)
+**Ticket reaches a terminal outcome at Verification** (closed or failed): nothing restarts the clock,
+because there is nothing left to measure — the clock's job was to time the work, and the work is over.
+This supersedes Decisions §7-adjacent #247's original invariant that the nightly sweep was the *only*
+automatic resumer; the sweep remains the resumer for exactly one case — the vehicle becomes due back
+with **no submission yet** — and is otherwise unaffected.
+
+**Why this and not the alternative.** The original design paused at submission until the report itself
+resolved a different way, believing submission time was the natural boundary. It is not: `submit()`
+resolves the OPEN vehicle report as a side effect of ending the SE's absence, but the ticket the report
+belongs to is **not terminal at that instant** — `VERIFICATION_PENDING` is an active state, and refusing
+to resume the clock there means measuring a Ticket's SLA performance using a clock that has stopped
+counting the very work still in front of it. The corrected rule ties the resume to what the SLA clock
+is actually *for* (timing open work) rather than to which document happened to close. A pre-existing
+accounting defect fell out of the same review: the component-unavailable submission path overwrote the
+vehicle pause's columns to open the component pause **without folding the elapsed interval first**, so
+those seconds vanished from the record rather than merely staying paused.
+
+**Consequences.** One shared fold-and-resume implementation (`sla-pause.ts`) replaces three
+near-identical, independently-race-prone spellings and adds two new call sites — the troubleshoot
+submission (folds a running Vehicle Unavailability pause before any component-unavailable re-pause) and
+the verification terminal path (a defensive clear so a cycle reaching `VERIFIED` can never carry a live
+pause into closed work — expected to be a no-op given the first fix, kept as a backstop). The nightly
+sweep's `status: OPEN` report selection, which looked like a trap (a report resolved at submission
+becomes invisible to it), is now simply correct — submission owns the case the sweep can no longer see.
+Every writer keeps `WAITING_COMPONENT`'s pause off-limits to Vehicle-Unavailability-triggered resumes
+(#247's original asymmetry fix, generalised rather than re-derived). Ruled 2026-08-20 as Decision Q7 in
+`.scratch/fsm-platform-v1/issues/258-decision-scheduler-production-readiness.md`; implemented as
+[#271](.scratch/fsm-platform-v1/issues/271-sla-resume-outcome-boundary.md).
 
 ---
 

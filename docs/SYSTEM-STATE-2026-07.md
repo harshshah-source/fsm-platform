@@ -836,7 +836,7 @@ MV up to a day stale. Same defect #240 fixed for closure, still live here → fi
 | `ingestion-telemetry` | `*/30 * * * *` | `INGESTION_TELEMETRY_CRON` | `INGESTION_SCHEDULER_ENABLED` | `ingestTelemetry()` = snapshot→recompute→ticket-create |
 | `ingestion-masters` | `0 2 * * *` | `INGESTION_MASTERS_CRON` | `INGESTION_SCHEDULER_ENABLED` | `syncMastersTick()` |
 | partition maintenance | daily tick inside ingestion scheduler `[INFERRED — gated separately]` | — | `PARTITION_MAINTENANCE_ENABLED` | `PartitionMaintenanceService.tick()` |
-| `vu-auto-resume` **(IST)** | `30 3 * * *` | `VU_AUTO_RESUME_CRON` | `BUSINESS_SWEEPS_ENABLED` | #247 `VehicleReturnResumeService.sweepReturnedVehicles` — OPEN vehicle reports whose authoritative `expected_from` has reached today's IST day: primary SLA resumed, interval folded in once, batched `VU_SLA_AUTO_RESUMED` SYSTEM audit. Reason-checked (a `WAITING_COMPONENT` pause is never touched) and idempotent through that same check. **Does not resolve the report** (Decision 16) |
+| `vu-auto-resume` **(IST)** | `30 3 * * *` | `VU_AUTO_RESUME_CRON` | `BUSINESS_SWEEPS_ENABLED` | #247 `VehicleReturnResumeService.sweepReturnedVehicles` — OPEN vehicle reports whose authoritative `expected_from` has reached today's IST day: primary SLA resumed, interval folded in once, batched `VU_SLA_AUTO_RESUMED` SYSTEM audit. Reason-checked (a `WAITING_COMPONENT` pause is never touched) and idempotent through that same check. **Since #271, this is the resumer for exactly the "vehicle due back, no submission yet" case** — a submission resolves its own report and folds the pause directly, so this sweep can no longer see that report at all (correctly, not as a gap). **Does not resolve the report** (Decision 16) |
 | `schedule-closure` **(IST)** | `0 4 * * *` | `SCHEDULE_CLOSURE_CRON` | `BUSINESS_SWEEPS_ENABLED` | #147 S2 + #242 — yesterday's plans to `COMPLETED`/`PARTIAL` under the per-zone dispatch lock, recycling unresolved assignments (`PLAN_EXPIRED`) |
 | `plant-eligibility-refresh` **(UNPINNED — see #254)** | `30 4 * * *` | `PLANT_ELIGIBILITY_REFRESH_CRON` | `BUSINESS_SWEEPS_ENABLED` | #138 S3 — `REFRESH … CONCURRENTLY` on `plant_eligible_floating_se`, meant to run before the morning batch consumes it. On a UTC host it fires **after** it |
 | `business-dispatch` **(IST)** | `0 5 * * *` | `BUSINESS_SWEEP_DISPATCH_CRON` (bootstrap only — `system_settings.dispatch_cron` is the source of truth, #213) | `BUSINESS_SWEEPS_ENABLED` | `DispatchRunService.runForActiveZones` (per active zone: runForZone → dispatchForZone, per-zone error contained) |
@@ -937,21 +937,29 @@ POSTs) drive identical code paths with no cron.
 - **Troubleshoot submission** (#16, `troubleshoot-submission.service.ts` header): one transaction —
   Ticket OPEN→VERIFICATION_PENDING, cycle OPEN→SUBMITTED, SE's active soft states resolved, audit +
   lifecycle event; idempotent on `(se_id, client_submission_id)` (duplicate returns the original,
-  `duplicate=true`). `component_unavailable=true` → auto-raises a `component_request`, cycle →
-  WAITING_COMPONENT, primary SLA pauses (#22). It also **resolves** any OPEN vehicle report (#245 AC5)
-  and deliberately does not resume the clock — see the stranded-pause edge under #253 below.
-- **The primary SLA clock: two pausers, two resumers, one reason check** (#247). It pauses for
-  `WAITING_COMPONENT` (the line above) or `VEHICLE_UNAVAILABLE` (filing a report), and `fileReport`
-  refuses to re-pause an already-paused cycle, so whichever reason was standing survives. Resuming now
-  mirrors that: `resumeSla` (the manual path) and `VehicleReturnResumeService` (the 03:30 IST sweep,
-  the only *automatic* resumer) both clear a pause **only when its reason is `VEHICLE_UNAVAILABLE`** —
-  before #247 the manual path cleared any pause, so resolving a vehicle report on a component-paused
-  cycle silently restarted the clock on a ticket nobody could work. The reason check is also what makes
-  the sweep idempotent: after the flip the cycle is not paused, so the next night finds nothing.
-  Auto-resume does **not** resolve the report (Decision 16). The **secondary** clock is derived from
-  `failure_cycles.opened_at`, is structurally unpausable, and is manager-only by type omission.
-  **Known edge → [#253]**: a submission that resolves a vehicle report *before* the return date leaves
-  the cycle paused with no automatic resumer left, since the sweep only looks at OPEN reports.
+  `duplicate=true`). It **resolves** any OPEN vehicle report (#245 AC5) and — since #271 — folds and
+  resumes a running `VEHICLE_UNAVAILABLE` pause right there, because the Ticket is still active
+  (`VERIFICATION_PENDING` is not terminal). `component_unavailable=true` → the fold happens FIRST, THEN
+  a `component_request` is raised, cycle → WAITING_COMPONENT, primary SLA re-pauses for the new reason
+  (#22) — closing the accounting bug where the VU interval was silently overwritten rather than folded.
+- **The primary SLA clock resumes at whichever boundary the Ticket reaches next — outcome-driven, not
+  event-driven** (#271, Decision Q7 / CONTEXT.md §20, superseding #247's "the sweep is the only
+  automatic resumer"). It pauses for `WAITING_COMPONENT` or `VEHICLE_UNAVAILABLE`, and `fileReport`
+  refuses to re-pause an already-paused cycle, so whichever reason was standing survives. **One shared
+  implementation** now performs every fold (`ticketing/sla-pause.ts`, `foldAndResumeSlaPause` —
+  replacing three independent, race-prone spellings), called from four sites: the submission fold above
+  (reason-guarded `VEHICLE_UNAVAILABLE`, new), `resumeSla` (the manual ZM path, reason-guarded), the
+  03:30 IST sweep (reason-guarded, now the resumer only for "vehicle due back, no submission yet" —
+  #253's stranded-pause scenario is closed by the submission fold owning that case instead), and a
+  defensive clear inside `verification.service.ts`'s CLOSED finalize (unguarded — a cycle reaching
+  `VERIFIED` must never carry a live pause into closed work; expected to be a no-op given the first
+  three, kept as a backstop). Verification **failure** (`FAILED_VERIFICATION`) takes no SLA action at
+  all — the clock has been running since submission, and nothing new needs to restart it. The write is
+  a `transitionOrConflict`-guarded `updateMany` keyed on the exact `(paused, pausedAt[, reason])` triple
+  just read, so two writers racing the same pause (submission vs. the sweep) can produce at most one
+  fold — the loser's guard matches zero rows and it adds nothing. Auto-resume does **not** resolve the
+  report (Decision 16). The **secondary** clock is derived from `failure_cycles.opened_at`, is
+  structurally unpausable, and is manager-only by type omission.
 - **Verification** (#18, `verification.service.ts` header): re-entrant scan of VERIFICATION_PENDING
   tickets; Phase 1 = first ping ±500 m of the SE's form GPS (skipped without fraud when
   `presence_source=NONE`), Phase 2 = continued pinging; terminal outcomes CLOSED /

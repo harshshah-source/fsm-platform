@@ -5,6 +5,7 @@ import { type VehicleUnavailReason } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 import { deferralDateFor } from './deferral';
+import { foldAndResumeSlaPause } from './sla-pause';
 
 export interface VuActor {
   userId: string;
@@ -438,21 +439,13 @@ export class VehicleUnavailabilityService {
     let slaResumed = false;
     await this.prisma.$transaction(async (tx) => {
       if (report.failureCycleId) {
-        const cycle = await tx.failureCycle.findUnique({ where: { cycleId: report.failureCycleId } });
-        if (cycle?.slaPaused && cycle.slaPausedAt && cycle.slaPauseReason === 'VEHICLE_UNAVAILABLE') {
-          const addSeconds = Math.floor((now.getTime() - cycle.slaPausedAt.getTime()) / 1000);
-          await tx.failureCycle.update({
-            where: { cycleId: report.failureCycleId },
-            data: {
-              slaPaused: false,
-              slaPauseReason: null,
-              slaPausedAt: null,
-              slaPauseSource: null,
-              slaAccumulatedPauseSeconds: cycle.slaAccumulatedPauseSeconds + BigInt(addSeconds),
-            },
-          });
-          slaResumed = true;
-        }
+        // #271 — routed through the shared helper; still reason-guarded to VEHICLE_UNAVAILABLE (the
+        // asymmetry this method's own docstring explains), now also race-safe against a concurrent
+        // submission or the nightly sweep resuming the same pause.
+        const fold = await foldAndResumeSlaPause(tx, report.failureCycleId, now, {
+          onlyReason: 'VEHICLE_UNAVAILABLE',
+        });
+        slaResumed = fold.resumed;
       }
       await tx.vehicleUnavailabilityReport.update({
         where: { id: BigInt(reportId) },

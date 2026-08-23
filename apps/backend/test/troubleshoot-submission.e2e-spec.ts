@@ -12,6 +12,8 @@ import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-sub
  */
 const NS = Date.now();
 const NOW = new Date('2026-06-23T09:00:00Z');
+/** Three hours before NOW — an unambiguous 10800-second pause interval, for #271's fold cases. */
+const PAUSED_AT = new Date('2026-06-23T06:00:00Z');
 
 describe('Issue 16 slices 2–3 — troubleshoot submission', () => {
   let prisma: PrismaService;
@@ -47,6 +49,60 @@ describe('Issue 16 slices 2–3 — troubleshoot submission', () => {
     return { ticketId: ticket.ticketId, cycleId: cycle.cycleId };
   };
 
+  /**
+   * #271 — a ticket whose cycle is already paused (reason `pauseReason`, opened `PAUSED_AT`), with an
+   * OPEN vehicle-unavailability report standing over it when `pauseReason === 'VEHICLE_UNAVAILABLE'`.
+   * The report/pause pair is written directly, the same way `vu-sla-resume-correctness.e2e-spec.ts`
+   * does it — the behaviour under test is what submission does to a pause that already stands, not how
+   * it came to stand.
+   */
+  const makePausedTicket = async (
+    pauseReason: 'VEHICLE_UNAVAILABLE' | 'WAITING_COMPONENT',
+  ): Promise<{ ticketId: string; cycleId: string }> => {
+    const deviceId = String(11_450_000_000 + (NS % 100_000) * 10 + deviceIds.length);
+    deviceIds.push(deviceId);
+    await prisma.device.create({ data: { deviceId } });
+    const cycle = await prisma.failureCycle.create({
+      data: {
+        deviceId,
+        state: pauseReason === 'WAITING_COMPONENT' ? 'WAITING_COMPONENT' : 'OPEN',
+        openedAt: PAUSED_AT,
+        slaPaused: true,
+        slaPauseReason: pauseReason,
+        slaPausedAt: PAUSED_AT,
+        slaPauseSource: pauseReason === 'WAITING_COMPONENT' ? 'SE_COMPONENT_UNAVAILABLE' : 'SE_VEHICLE_UNAVAILABLE',
+      },
+    });
+    const ticket = await prisma.ticket.create({
+      data: {
+        workType: 'TROUBLESHOOT',
+        status: 'OPEN',
+        failureCycleId: cycle.cycleId,
+        deviceId,
+        plantId,
+        companyId,
+        companyTier: 'GOLD',
+        lastStateChangedAt: PAUSED_AT,
+      },
+    });
+    ticketIds.push(ticket.ticketId);
+    if (pauseReason === 'VEHICLE_UNAVAILABLE') {
+      await prisma.vehicleUnavailabilityReport.create({
+        data: {
+          ticketId: ticket.ticketId,
+          failureCycleId: cycle.cycleId,
+          seId: se,
+          reasonCode: 'VEHICLE_ON_TRIP',
+          transporterContacted: false,
+          proposedFrom: NOW,
+          expectedFrom: NOW,
+          status: 'OPEN',
+        },
+      });
+    }
+    return { ticketId: ticket.ticketId, cycleId: cycle.cycleId };
+  };
+
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
@@ -71,9 +127,13 @@ describe('Issue 16 slices 2–3 — troubleshoot submission', () => {
 
   afterAll(async () => {
     await prisma.seCoverage.deleteMany({ where: { seId: se } });
+    await prisma.componentRequest.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await prisma.vehicleUnavailabilityReport.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: { in: ticketIds } } });
+    const cycleIds = await prisma.failureCycle.findMany({ where: { deviceId: { in: deviceIds } }, select: { cycleId: true } });
+    await prisma.auditLog.deleteMany({ where: { entityType: 'failure_cycles', entityId: { in: cycleIds.map((c) => c.cycleId) } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
@@ -194,5 +254,131 @@ describe('Issue 16 slices 2–3 — troubleshoot submission', () => {
       await prisma.engineerMaster.deleteMany({ where: { engineerId: winnerUser.userId } });
       await prisma.user.deleteMany({ where: { userId: winnerUser.userId } });
     }
+  });
+
+  /**
+   * #271 — the fold-and-resume half. The ticket is still active at submission (VERIFICATION_PENDING is
+   * not terminal — Q7 Case 2), so a running VU pause is folded here rather than left to the 03:30
+   * sweep, which can no longer see a report this submission just resolved (#253's dead scenario).
+   */
+  describe('#271 — SLA fold-and-resume at submission', () => {
+    it('AC-1 — normal path: the VU pause folds exactly once and the ticket continues under SLA', async () => {
+      const { ticketId, cycleId } = await makePausedTicket('VEHICLE_UNAVAILABLE');
+
+      const outcome = await svc.submit({
+        ticketId,
+        seId: se,
+        clientSubmissionId: randomUUID(),
+        rootCauseCategory: 'POWER_ISSUE',
+        actor: actor(),
+        now: NOW,
+      });
+      expect(outcome.result).toBe('OK');
+
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
+      expect(ticket.status).toBe('VERIFICATION_PENDING');
+
+      const cycle = await prisma.failureCycle.findUniqueOrThrow({ where: { cycleId } });
+      expect(cycle.slaPaused).toBe(false);
+      expect(cycle.slaPauseReason).toBeNull();
+      expect(cycle.slaPausedAt).toBeNull();
+      // PAUSED_AT -> NOW is exactly three hours.
+      expect(Number(cycle.slaAccumulatedPauseSeconds)).toBe(10800);
+
+      const report = await prisma.vehicleUnavailabilityReport.findFirstOrThrow({ where: { ticketId } });
+      expect(report.status).toBe('RESOLVED');
+
+      // The ledger distinguishes this writer from the nightly sweep.
+      const audits = await prisma.auditLog.findMany({
+        where: { entityType: 'failure_cycles', entityId: cycleId, action: 'VU_SLA_AUTO_RESUMED' },
+      });
+      expect(audits).toHaveLength(1);
+      expect(audits[0].actorId).toBe(se);
+      expect(audits[0].metadata).toMatchObject({ resumedBy: 'SUBMISSION', addedPauseSeconds: 10800 });
+    });
+
+    it('AC-2 — component-unavailable path: the VU interval folds BEFORE the WAITING_COMPONENT pause opens', async () => {
+      const { ticketId, cycleId } = await makePausedTicket('VEHICLE_UNAVAILABLE');
+
+      const outcome = await svc.submit({
+        ticketId,
+        seId: se,
+        clientSubmissionId: randomUUID(),
+        rootCauseCategory: 'POWER_ISSUE',
+        componentUnavailable: true,
+        componentUnavailableItem: 1n,
+        actor: actor(),
+        now: NOW,
+      });
+      expect(outcome.result).toBe('OK');
+
+      // The ticket stays OPEN (ADR-0008); the cycle now carries a DIFFERENT, correctly-attributed pause.
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
+      expect(ticket.status).toBe('OPEN');
+
+      const cycle = await prisma.failureCycle.findUniqueOrThrow({ where: { cycleId } });
+      expect(cycle.state).toBe('WAITING_COMPONENT');
+      expect(cycle.slaPaused).toBe(true);
+      expect(cycle.slaPauseReason).toBe('WAITING_COMPONENT');
+      expect(cycle.slaPausedAt?.toISOString()).toBe(NOW.toISOString());
+      expect(cycle.slaPauseSource).toBe('SE_COMPONENT_UNAVAILABLE');
+      // The overwrite bug, pinned dead: the VU interval is not lost, it is in the running total.
+      expect(Number(cycle.slaAccumulatedPauseSeconds)).toBe(10800);
+
+      const report = await prisma.vehicleUnavailabilityReport.findFirstOrThrow({ where: { ticketId } });
+      expect(report.status).toBe('RESOLVED');
+
+      const audits = await prisma.auditLog.findMany({
+        where: { entityType: 'failure_cycles', entityId: cycleId, action: 'VU_SLA_AUTO_RESUMED' },
+      });
+      expect(audits).toHaveLength(1);
+      expect(audits[0].metadata).toMatchObject({ resumedBy: 'SUBMISSION', addedPauseSeconds: 10800 });
+    });
+
+    it('AC-6 — a WAITING_COMPONENT pause is never touched by the submission fold (reason-guard)', async () => {
+      const { ticketId, cycleId } = await makePausedTicket('WAITING_COMPONENT');
+
+      // The component arrived and the SE resubmits on the still-OPEN ticket.
+      const outcome = await svc.submit({
+        ticketId,
+        seId: se,
+        clientSubmissionId: randomUUID(),
+        rootCauseCategory: 'POWER_ISSUE',
+        submissionType: 'COMPONENT_RESUBMIT',
+        actor: actor(),
+        now: NOW,
+      });
+      expect(outcome.result).toBe('OK');
+
+      const cycle = await prisma.failureCycle.findUniqueOrThrow({ where: { cycleId } });
+      expect(cycle.slaPaused).toBe(true);
+      expect(cycle.slaPauseReason).toBe('WAITING_COMPONENT');
+      expect(cycle.slaPausedAt?.toISOString()).toBe(PAUSED_AT.toISOString());
+      expect(Number(cycle.slaAccumulatedPauseSeconds)).toBe(0);
+
+      const audits = await prisma.auditLog.findMany({
+        where: { entityType: 'failure_cycles', entityId: cycleId, action: 'VU_SLA_AUTO_RESUMED' },
+      });
+      expect(audits).toHaveLength(0);
+    });
+
+    it('is a no-op on a ticket with no active pause (the ordinary, unpaused case)', async () => {
+      const { ticketId, cycleId } = await makeTicket();
+
+      const outcome = await svc.submit({
+        ticketId,
+        seId: se,
+        clientSubmissionId: randomUUID(),
+        rootCauseCategory: 'POWER_ISSUE',
+        actor: actor(),
+        now: NOW,
+      });
+      expect(outcome.result).toBe('OK');
+
+      const audits = await prisma.auditLog.findMany({
+        where: { entityType: 'failure_cycles', entityId: cycleId, action: 'VU_SLA_AUTO_RESUMED' },
+      });
+      expect(audits).toHaveLength(0);
+    });
   });
 });

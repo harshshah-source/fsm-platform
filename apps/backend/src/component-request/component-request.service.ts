@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client';
 import { type ComponentRequestStatus, type CoverageType, type DeliveryDestination } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { REMOVAL_REASONS } from '../scheduling/removal-reason';
+import { foldAndResumeSlaPause } from '../ticketing/sla-pause';
 
 /**
  * Component Request — the Warehouse Manager flow (ADR-0008, CONTEXT §Component Request, Issue 22).
@@ -312,19 +313,11 @@ export class ComponentRequestService {
    * Shared by Confirm-Receipt (switch ON) and the ZM-confirmed resubmit (slice 5).
    */
   private async resumeSla(tx: Prisma.TransactionClient, cycleId: string, now: Date): Promise<void> {
-    const cycle = await tx.failureCycle.findUniqueOrThrow({ where: { cycleId } });
-    if (!cycle.slaPaused || !cycle.slaPausedAt) return;
-    const addSeconds = Math.floor((now.getTime() - cycle.slaPausedAt.getTime()) / 1000);
-    await tx.failureCycle.update({
-      where: { cycleId },
-      data: {
-        slaPaused: false,
-        slaPauseReason: null,
-        slaPausedAt: null,
-        slaPauseSource: null,
-        slaAccumulatedPauseSeconds: cycle.slaAccumulatedPauseSeconds + BigInt(addSeconds),
-      },
-    });
+    // #271 — routed through the shared helper. Unconditional (no `onlyReason`): this fires only where
+    // this flow's own component-request lifecycle already guarantees the standing pause is the
+    // `WAITING_COMPONENT` one it opened — unlike the VU writers, which must not clear a pause they do
+    // not own.
+    await foldAndResumeSlaPause(tx, cycleId, now);
   }
 
   private async transition(

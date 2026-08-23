@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client';
 import { type PresenceSource, type RootCauseCategory, type SubmissionType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
+import { foldAndResumeSlaPause } from './sla-pause';
 
 /** A component the SE physically consumed on this visit (Issue 24 inventory ledger). */
 export interface ConsumedComponent {
@@ -161,9 +162,7 @@ export class TroubleshootSubmissionService {
       // …and it ends the vehicle's absence (#245 AC5, Decision 16). Someone worked the vehicle, so a
       // report still saying "expect it back on <date>" is now describing a wait that has been
       // overtaken by events — and #246 is about to read that date to defer real dispatch. Applies to
-      // the component-unavailable path too: the SE reached the vehicle either way. The paused SLA is
-      // deliberately NOT resumed here — pause-reason-aware resumption is #247's slice, and guessing
-      // at it from this writer would resume clocks paused for a different reason entirely.
+      // the component-unavailable path too: the SE reached the vehicle either way.
       await tx.vehicleUnavailabilityReport.updateMany({
         where: { ticketId: input.ticketId, status: 'OPEN' },
         data: {
@@ -173,6 +172,37 @@ export class TroubleshootSubmissionService {
           resolvedAt: now,
         },
       });
+
+      // #271 (Q7 Case 2) — the ticket is still active here (VERIFICATION_PENDING is not terminal, and
+      // neither is staying OPEN for the component-unavailable branch below), so this is the boundary
+      // that owns resuming a running VEHICLE_UNAVAILABLE pause, not the 03:30 sweep: submission just
+      // resolved the report above, so the sweep's `status: 'OPEN'` selection can no longer see it
+      // (#253's dead scenario). Deliberately BEFORE the `componentUnavailable` branch below — item 2's
+      // "fold before re-pausing" — so a component-unavailable submission still gets full credit for the
+      // VU interval instead of it being silently overwritten by the WAITING_COMPONENT pause that opens
+      // next (the accounting bug this issue found and closes). Reason-guarded to VEHICLE_UNAVAILABLE:
+      // if the cycle is already paused for WAITING_COMPONENT (a resubmit on a still-OPEN ticket), this
+      // is not this writer's pause to end (#247 AC1's asymmetry rule, generalised).
+      const vuFold = await foldAndResumeSlaPause(tx, ticket.failureCycleId!, now, {
+        onlyReason: 'VEHICLE_UNAVAILABLE',
+      });
+      if (vuFold.resumed) {
+        await tx.auditLog.create({
+          data: {
+            actorId: input.actor.userId,
+            actorRole: input.actor.role,
+            action: 'VU_SLA_AUTO_RESUMED',
+            entityType: 'failure_cycles',
+            entityId: ticket.failureCycleId!,
+            metadata: {
+              ticketId: input.ticketId,
+              // Distinguishes this writer from the nightly sweep's SYSTEM-actor rows in the same ledger.
+              resumedBy: 'SUBMISSION',
+              addedPauseSeconds: vuFold.addedSeconds,
+            },
+          },
+        });
+      }
 
       if (input.componentUnavailable) {
         // Component-unavailable path (ADR-0008, CONTEXT §8): the Ticket stays OPEN, the Failure Cycle

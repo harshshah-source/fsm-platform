@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
+import { foldAndResumeSlaPause } from '../ticketing/sla-pause';
 import { evaluatePhase1, evaluatePhase2 } from './verification-criteria';
 
 /**
@@ -317,6 +318,12 @@ export class VerificationService {
       // the highest-volume closure in the product and the largest source of the phantom live rows.
       await retireAssignmentOnClosure(tx, [ticket.ticketId], now);
       if (outcome === 'CLOSED' && ticket.failureCycleId) {
+        // #271 (Q7 Case 1) — terminal bookkeeping only. By this point submission has already folded
+        // any running pause, so this is expected to be a no-op on every real path; it exists so a
+        // cycle reaching VERIFIED can never carry `sla_paused = true` into closed work, whatever wrote
+        // it. Generic (no `onlyReason`) on purpose — a defensive backstop that only cleared ONE reason
+        // would still leave the other able to leak into downtime maths on closed work.
+        await foldAndResumeSlaPause(tx, ticket.failureCycleId, now);
         await tx.failureCycle.update({ where: { cycleId: ticket.failureCycleId }, data: { state: 'VERIFIED', closedAt: now } });
         await tx.deviceState.updateMany({ where: { deviceId: ticket.deviceId }, data: { hasOpenFailureCycle: false } });
       }
