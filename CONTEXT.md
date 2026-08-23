@@ -7,7 +7,7 @@ Operations-side system for keeping a fleet of installed GPS devices ≥98% activ
 - **Installed fleet:** ~50,000 GPS devices, pan-India.
 - **Field workforce:** ~40 Service Engineers (mixed coverage types — see below).
 - **Master service target:** **≥98% Fleet Uptime** — measured monthly, eligibility-gated. See *Decisions* §5.
-- **Management posture:** the system **assigns** schedules directly to SEs; the **Zonal Manager monitors and can override** (reassign, split, defer, reorder) at any time. System-generated Plant-wise Batch Assignments dispatch to the SE Day Plan without a pre-approval gate. Urgent intra-day CRITICAL/HIGH_CRITICAL insertions still require explicit **SE Acceptance** before they commit.
+- **Management posture:** the system **assigns** schedules directly to SEs; the **Zonal Manager monitors and can override** (reassign, split, defer, reorder) at any time. System-generated Plant-wise Batch Assignments dispatch to the SE Day Plan without a pre-approval gate. Urgent intra-day CRITICAL/HIGH_CRITICAL insertions are **assigned directly**, the same as normal batch work — SE Acceptance was retired from this path (Decisions §21, #268).
 
 ## Language
 
@@ -215,10 +215,10 @@ The SE's primary mobile work view, showing their assigned Plant-wise Batch Assig
 _Avoid_: treating Day Plan as synonymous with a single daily cycle approved at 08:00 — it reflects the current Work Schedule state, which may be updated at any cadence.
 
 **Formal Assignment**:
-A system-committed binding SE↔Ticket link, generated from Plant-wise Batch Assignments in the Work Schedule and appearing **directly** in the SE's Day Plan under "Assigned to Me" — **no Zonal Manager pre-approval is required**. The Zonal Manager can override, reassign, split, defer, or reorder it at any time (audited, reason-coded). Distinct from the urgent intra-day insertion path, which still requires SE Acceptance.
+A system-committed binding SE↔Ticket link, generated from Plant-wise Batch Assignments in the Work Schedule and appearing **directly** in the SE's Day Plan under "Assigned to Me" — **no Zonal Manager pre-approval is required**. The Zonal Manager can override, reassign, split, defer, or reorder it at any time (audited, reason-coded). The urgent intra-day insertion path used to differ here (SE Acceptance); since Decisions §21 (#268) it does not — a CRITICAL insertion becomes a Formal Assignment exactly like batch work, direct and immediate.
 
-**SE cannot reject normal assigned work.** The SE gets **no Reject option** for normally assigned Tickets, Plant-wise Batch Assignments, or Work Schedules — those are committed and immediately actionable. The only affirmative-or-negative response an SE makes is **SE Acceptance / Decline on a system-triggered intra-day CRITICAL/HIGH_CRITICAL insertion** (see *SE Acceptance*) — this is the acceptance of an urgent same-day insertion, **not** rejection of normal assigned work, and must be kept distinct from it. An SE who cannot work an assigned Ticket in the field files a **Vehicle Unavailability Report** or marks incomplete/unable with a mandatory reason; they do not "reject" the assignment.
-_Avoid_: a Reject action on normal assigned Tickets/Batches/Schedules; conflating intra-day CRITICAL Decline with rejecting normal work.
+**SE cannot reject any system-assigned work — normal or CRITICAL.** The SE gets **no Reject/Decline option** anywhere: not for normally assigned Tickets, Plant-wise Batch Assignments, or Work Schedules, and — since Decisions §21 (#268) retired SE Acceptance from the intra-day CRITICAL path — not for a system-triggered CRITICAL/HIGH_CRITICAL insertion either, which is now assigned directly like any other Formal Assignment. An SE who cannot work an assigned Ticket in the field files a **Vehicle Unavailability Report** or marks incomplete/unable with a mandatory reason; they do not "reject" the assignment.
+_Avoid_: a Reject/Decline action anywhere in the SE flow; describing a CRITICAL insertion as something the SE accepts or declines (superseded — see Decisions §21).
 
 **Shared Pool**:
 The set of open Tickets at an SE's **mapped/covered Plants** that the SE can see in the mobile app as **secondary / open work**, visible **regardless of Formal Assignment**. Formal Assignment / Assigned Work takes UI priority; the Shared Pool remains visible alongside it as additional pickable work for the SE's own Plants. An SE must **not** see Tickets outside their mapped/covered Plants unless **explicitly assigned by an authorized override**.
@@ -229,18 +229,18 @@ _Avoid_: gating Shared Pool visibility on "SE has no Formal Assignments / cleare
 The Zonal Manager (or acting role) post-hoc adjustment of a system-dispatched Work Schedule or Plant-wise Batch Assignment — change the assigned SE, split a batch across SEs, remove specific Tickets, defer Tickets, or reorder work, before or after the SE has started. There is **no Approve gate**: system-generated batches are already live in the SE's Day Plan when the ZM sees them. If an SE holds an ON_SITE Soft State on a Ticket in the batch, the dashboard surfaces a conflict warning before committing the override. All overrides are audited with mandatory reason codes.
 _Avoid_: an "Approve before actionable" step on normal system-generated batches — that gate is removed.
 
-**SE Acceptance**:
-The explicit affirmative response an SE gives to an **urgent same-day dispatch** — a system-triggered intra-day CRITICAL/HIGH_CRITICAL insertion or a Zonal Manager manual same-day assignment that requires explicit SE confirmation. SE Acceptance is **not required for normal Plant-wise Batch Assignments** — those appear directly in the SE's Day Plan and are immediately actionable. On acceptance of an urgent dispatch, a **WhatsApp Confirmation** is sent to the SE as a redundant detail message.
+**SE Acceptance** _(retired from the system-triggered CRITICAL path — Decisions §21, #268)_:
+Historical: the explicit affirmative response an SE gave to a system-triggered intra-day CRITICAL/HIGH_CRITICAL insertion before committing it — described in full in the now-superseded Decisions §16. As of #268 (Decision Q3, ratified 2026-08-20), a CRITICAL/HIGH_CRITICAL insertion is **assigned directly**, exactly like a normal Plant-wise Batch Assignment: no offer, no accept/decline, no acceptance window. This entry is kept (rather than deleted) because `SE Acceptance` and `Acceptance Timeout` still appear as historical values on old ledger rows and as a concept in ADR-era docs — a reader hitting either term elsewhere should land here and learn it no longer describes live behaviour.
 
 **Acceptance Timeout**:
-The bounded interval (default 10 min) for the chosen SE to accept an Intra-day insertion. On timeout, the system auto-reroutes to the next-best SE per precedence and retries. After 3 unsuccessful retries, the insertion escalates to the acting Zonal Manager for explicit assignment.
+_(retired — Decisions §21, #268)._ Historical: the bounded interval (default 10 min) for the chosen SE to accept an Intra-day insertion, with auto-reroute on timeout and escalation after 3 retries. No insertion is offered any more, so there is nothing to time out — a CRITICAL/HIGH_CRITICAL ticket with no capacity-eligible SE escalates to the Zonal Manager immediately (Decisions §21's Q-B), not after a chain of unanswered offers.
 
 **WhatsApp Confirmation**:
-The detail message sent to an SE over WhatsApp once they've accepted an Intra-day insertion in-app. Carries ticket number, vehicle, plant, expected component (if any), and a deeplink back into the mobile app. Redundant against app notification — for situations where the SE later loses app context. **Always sent on SE Acceptance regardless of push notification success** — first-class channel for this event type, not a fallback.
+_(the SE-Acceptance trigger for this message is retired — Decisions §21, #268)._ Historical: the detail message sent to an SE over WhatsApp once they'd accepted an Intra-day insertion in-app, first-class regardless of push success. A direct-assigned CRITICAL ticket now gets the same informational notification any other Formal Assignment gets — see Decisions §21; nothing about it is a confirmation of an acceptance that no longer happens.
 
 **Notification Delivery**:
-Two distinct delivery models coexist. **General notifications** (new ticket, SLA warning, failed verification, soft-state timeout, etc.) follow a fallback chain: mobile push → SMS → WhatsApp → email; in-app notification always fires. **SE Acceptance confirmation** always delivers WhatsApp Confirmation as a first-class channel in addition to the in-app push — not as fallback.
-_Avoid_: treating WhatsApp as fallback-only; it is first-class for SE Acceptance events
+Two distinct delivery models coexist. **General notifications** (new ticket, SLA warning, failed verification, soft-state timeout, CRITICAL direct-assignment, etc.) follow a fallback chain: mobile push → SMS → WhatsApp → email; in-app notification always fires. **SE Acceptance confirmation** — historical, retired by Decisions §21 (#268) — used to deliver WhatsApp Confirmation as a first-class channel in addition to the in-app push; nothing currently live uses that model, since there is no acceptance event left to confirm.
+_Avoid_: assuming a live event still uses the SE-Acceptance first-class-WhatsApp model — it was retired with the flow it served (Decisions §21)
 
 ### Recommender
 
@@ -256,7 +256,7 @@ _Avoid_: confusing SE Planner (plant visit intent, manager-authored) with Day Pl
 
 **Intra-day Re-plan**:
 A re-run triggered only by a **Qualifying Event**, never on a fixed cron. Two sub-types:
-- **System-triggered CRITICAL insertion**: fired automatically when a new Ticket enters CRITICAL or HIGH_CRITICAL bucket; follows SE Acceptance flow (Decisions §16).
+- **System-triggered CRITICAL insertion**: fired automatically when a new Ticket enters CRITICAL or HIGH_CRITICAL bucket; **assigned directly** to the best eligible SE (Decisions §21, #268 — SE Acceptance retired from this path).
 - **Zonal Manager manual same-day update**: ZM can add, remove, or reorder Tickets in an SE's current Day Plan at any time during the shift. No SE Acceptance is required for a manual ZM-initiated same-day update; the updated plan appears in the SE's Day Plan immediately. If the SE holds an ON_SITE Soft State on a Ticket being removed, the dashboard surfaces a conflict warning before committing.
 
 **Qualifying Event**:
@@ -447,13 +447,13 @@ A backend signal recorded when the SE performs any deliberate action in the mobi
 
 **Purpose: dashboard visibility and audit only.** The timestamp answers "when did this SE last interact with the app?" It must not gate Soft States, must not auto-clear ON_SITE or TROUBLESHOOT_STARTED, and must not be treated as proof the SE is present or absent. An SE may be working offline or in a no-network area; an absent ping means the system has not received a signal — not that the SE has stopped working.
 
-**`last_activity_at` is visibility and audit only — it never gates scoring or assignment.** It must **not** exclude an SE from Morning Batch, Day Plan, Formal Assignment, intra-day Re-plan/update, or CRITICAL insertion, even when stale. An unreachable SE offered an urgent intra-day insertion is handled by the **Acceptance Timeout + reroute** (Decisions §16), not by a pre-emptive ping filter. *(This supersedes the earlier 15-min Recommender Hard Filter and ADR-0024 on that point; ADR-0024 is historical.)*
+**`last_activity_at` is visibility and audit only — it never gates scoring or assignment.** It must **not** exclude an SE from Morning Batch, Day Plan, Formal Assignment, intra-day Re-plan/update, or CRITICAL insertion, even when stale. Since Decisions §21 (#268) a CRITICAL/HIGH_CRITICAL insertion is assigned directly and carries no acceptance step for an unreachable SE to miss — the historical Acceptance Timeout + reroute handler this paragraph used to point to (Decisions §16) is retired along with the flow it served. *(This supersedes the earlier 15-min Recommender Hard Filter and ADR-0024 on that point; ADR-0024 is historical.)*
 
 Drives one threshold:
 - **1-hour threshold (SE Activity Status):** if `last_activity_at < now − 1 h`, the SE's derived **SE Activity Status** label flips to `OFFLINE` on the Zonal Manager dashboard — meaning "app not recently used", not "SE is not working." This is a display label only; it does not affect candidate scoring.
 
 Activity-ping-derived `OFFLINE` rows in `SE_AVAILABILITY` are short-lived, tagged as activity-sourced, and must not appear as leave in reports or be treated as approved absence for batch scheduling purposes.
-_Avoid_: implementing as a continuous background timer; using `last_activity_at` to auto-clear Soft States; **using `last_activity_at` to gate Recommender scoring, candidate filtering, or assignment (Morning Batch, Day Plan, intra-day, CRITICAL insertion)**; treating a missing ping as absence; confusing SE Activity Pings with **Device GPS Pings** (separate concept — see below).
+_Avoid_: implementing as a continuous background timer; using `last_activity_at` to auto-clear Soft States; **using `last_activity_at` to gate Recommender scoring, candidate filtering, or assignment (Morning Batch, Day Plan, intra-day, CRITICAL insertion)**; treating a missing ping as absence; confusing SE Activity Pings with **Device GPS Pings** (separate concept — see below); referencing the retired Acceptance Timeout as if an unreachable SE still blocks a CRITICAL insertion (Decisions §21).
 
 **Device GPS Ping**:
 A location and status packet transmitted by a GPS device to the **AutoPlant DB** platform and captured in the Snapshot. Used for auto-verification (checking device recovery pings after SE form submission), auto-recovery detection, and Technical Hints telemetry. Entirely separate from SE Activity Pings — a Device GPS Ping carries no information about SE reachability or field activity.
@@ -571,7 +571,9 @@ _Avoid_: serving Device lifetime trend, Root Cause %, System Efficiency, or the 
 >
 > **Engineering:** "Same Plant P, same SE on leave, but the device entered CRITICAL bucket at 14:00 — mid-shift. Does it wait for tomorrow's Morning Batch?"
 >
-> **Operations:** "No — a new CRITICAL Ticket is a **Qualifying Event**, so an Intra-day Re-plan fires. The system sends an in-app notification to the nearest AVAILABLE SE asking them to **Accept**. If they don't accept within 10 minutes (Acceptance Timeout), it auto-reroutes to the next-best SE. On acceptance a **WhatsApp Confirmation** is sent. The Zonal Manager sees the assignment as it's accepted and can still override."
+> **Operations:** "No — a new CRITICAL Ticket is a **Qualifying Event**, so an Intra-day Re-plan fires. Since Decisions §21 (#268), the system assigns it **directly** to the best eligible SE — same tier-and-score discipline as the Morning Batch, capacity-checked, no offer step. If nobody eligible is under capacity, it escalates to the Zonal Manager immediately instead of chasing a chain of accept-or-timeout offers. The Zonal Manager sees the assignment (or the escalation) right away and can still override."
+>
+> _(Historical — this answer described the pre-#268 SE-Acceptance flow until 2026-08-24: "The system sends an in-app notification to the nearest AVAILABLE SE asking them to Accept. If they don't accept within 10 minutes (Acceptance Timeout), it auto-reroutes to the next-best SE. On acceptance a WhatsApp Confirmation is sent." Superseded, not deleted, so a reader who finds this quoted elsewhere knows what it used to mean.)_
 >
 > **Engineering:** "What if the SE is already at Daily Capacity?"
 >
@@ -649,11 +651,11 @@ A monthly metric is too lagging to drive intraday operations, so the Recommender
 
 **Decision.** System-generated **Plant-wise Batch Assignments** are **dispatched directly to the SE Day Plan** as Formal Assignments — there is **no Zonal Manager approval gate** for normal system-generated assignment. The Zonal Manager (or acting role per Decisions §15) sees the dispatched assignments and can **override post-hoc** at a **Schedule Cadence** that suits operational need (daily, alternate day, 2–3 times per week, or weekly): swap SE, split batch across SEs, remove specific Tickets, defer Tickets, reorder work, or reassign — before or after the SE has started. Batch status is **`AUTO_ASSIGNED`** on dispatch and **`OVERRIDDEN`** after any ZM change; there is no `PENDING_REVIEW` gate and no "approve before actionable" step. The SE can act on assigned Tickets the moment they appear — there is no pre-approval pending-but-visible lock on normal batch work.
 
-**Intra-day urgent dispatches** (system-triggered CRITICAL/HIGH_CRITICAL insertions or ZM manual same-day urgent assignments) follow the separate SE-acceptance flow detailed in Decisions §16 — those require explicit SE confirmation because they land on an SE who is already mid-route.
+**Intra-day urgent dispatches** (ZM manual same-day urgent assignments) still land on an SE who may already be mid-route, but that no longer means an acceptance step: **system-triggered CRITICAL/HIGH_CRITICAL insertions are assigned directly** (Decisions §21, #268 — superseding the SE-acceptance flow Decisions §16 originally described here).
 
-**Why this and not the alternative.** An earlier design imposed a strict daily 08:00 IST approval gate with a "pending-but-visible" state; a later revision relaxed it to a flexible-cadence per-SE one-click Approve. This revision removes the approval gate entirely for normal system-generated batches: at ~40 SEs / pan-India, requiring the ZM to approve every batch before the SE can act is manual overhead with no operational justification — the Recommender's plant-clustered output is good enough to action directly, and the ZM's real lever is correcting the occasional bad assignment, which post-hoc override already provides. Rejected keeping the Approve gate (slows every SE's day waiting on a manager, and contradicts how Zonal Heads actually manage field work). Rejected an optional per-SE "review-first hold" (extra state and UI for a case the override path already covers). The Manager Revert Window concept remains **removed** — manager override happens through the normal override UI at any time, with the dashboard surfacing conflict warnings when an SE holds an ON_SITE Soft State on a Ticket being overridden. Urgent intra-day insertions are the exception — they land on an SE mid-route and still require explicit SE Acceptance (Decisions §16).
+**Why this and not the alternative.** An earlier design imposed a strict daily 08:00 IST approval gate with a "pending-but-visible" state; a later revision relaxed it to a flexible-cadence per-SE one-click Approve. This revision removes the approval gate entirely for normal system-generated batches: at ~40 SEs / pan-India, requiring the ZM to approve every batch before the SE can act is manual overhead with no operational justification — the Recommender's plant-clustered output is good enough to action directly, and the ZM's real lever is correcting the occasional bad assignment, which post-hoc override already provides. Rejected keeping the Approve gate (slows every SE's day waiting on a manager, and contradicts how Zonal Heads actually manage field work). Rejected an optional per-SE "review-first hold" (extra state and UI for a case the override path already covers). The Manager Revert Window concept remains **removed** — manager override happens through the normal override UI at any time, with the dashboard surfacing conflict warnings when an SE holds an ON_SITE Soft State on a Ticket being overridden. Urgent intra-day insertions used to be the exception here, landing on an SE mid-route and requiring explicit SE Acceptance (Decisions §16) — Decisions §21 (#268) removed that exception for the system-triggered CRITICAL path specifically: it is now dispatched exactly like normal batch work, direct and immediate.
 
-**Consequences.** No `PENDING_REVIEW` / `pending-but-visible` state exists for normal batch assignments — the concepts are removed. Batch status is `AUTO_ASSIGNED → OVERRIDDEN`. The 08:00 IST gate, the one-click Approve action, and any auto-approve trigger are all removed from the batch flow. A configurable **Schedule Cadence reminder** notification may still fire to prompt the ZM to *review* the dispatched batch, but it is advisory only — it locks nothing and the SE's Day Plan already reflects the live assignments. The `RECOMMENDATION_HISTORY` immutable rows track `Recommendation → AutoAssigned → (Overridden?) → OnSite → Closed` for the batch path, and `Recommendation → SEAccepted (or retried) → OnSite → Closed` for the intra-day CRITICAL path. Override of an in-progress batch (SE already ON_SITE on a Ticket in the batch) surfaces a dashboard conflict warning requiring explicit confirmation, with the override audited and reason-coded. The ZM dashboard shows a "recently dispatched / unreviewed" indicator — informational only; it does not gate SE actions.
+**Consequences.** No `PENDING_REVIEW` / `pending-but-visible` state exists for normal batch assignments — the concepts are removed. Batch status is `AUTO_ASSIGNED → OVERRIDDEN`. The 08:00 IST gate, the one-click Approve action, and any auto-approve trigger are all removed from the batch flow. A configurable **Schedule Cadence reminder** notification may still fire to prompt the ZM to *review* the dispatched batch, but it is advisory only — it locks nothing and the SE's Day Plan already reflects the live assignments. The `RECOMMENDATION_HISTORY` immutable rows track `Recommendation → AutoAssigned → (Overridden?) → OnSite → Closed` for the batch path; since Decisions §21 (#268) the intra-day CRITICAL path follows the identical shape (`Recommendation → AutoAssigned → OnSite → Closed`) rather than the retired `SEAccepted (or retried)` chain Decisions §16 described. Override of an in-progress batch (SE already ON_SITE on a Ticket in the batch) surfaces a dashboard conflict warning requiring explicit confirmation, with the override audited and reason-coded. The ZM dashboard shows a "recently dispatched / unreviewed" indicator — informational only; it does not gate SE actions.
 
 ---
 
@@ -778,6 +780,13 @@ The first candidate processed at any given Plant is the *seed* of that Plant's c
 
 ## 16. Intra-day CRITICAL insertions require SE Acceptance + WhatsApp Confirmation; offline SEs auto-reroute on Acceptance Timeout
 
+> **SUPERSEDED 2026-08-24 by Decision §21 (#268, Decision #258 Q3).** A CRITICAL/HIGH_CRITICAL
+> insertion is now assigned **directly** — no offer, no accept/decline, no acceptance timeout, no
+> retry chain. Kept below verbatim as the historical record: the reasoning that justified this shape
+> at the time, and the exact mechanism `SE Acceptance`/`Acceptance Timeout`/`WhatsApp Confirmation`
+> describe wherever those terms still appear (old ledger rows, ADR-era docs). Do not implement
+> against this section — read §21.
+
 **Decision.** When an Intra-day Re-plan (Decisions §2) selects an SE for a new CRITICAL insertion, the system sends an **in-app notification** asking the SE to **accept** the assignment. The assignment is **not committed** until the SE taps Accept in the mobile app. On acceptance, a **WhatsApp Confirmation** message is sent to the SE with ticket detail and a deeplink — redundant context for when the SE later opens WhatsApp instead of the app. If the SE does not respond within the **Acceptance Timeout** (default 10 minutes), the system auto-reroutes the insertion to the next-best SE per the strict-precedence rule (Decisions §1) and the cycle repeats. After 3 unsuccessful retries (no SE accepts), the insertion escalates to the acting Zonal Manager for explicit assignment.
 
 Offline-SE handling is layered on top:
@@ -852,6 +861,52 @@ Every writer keeps `WAITING_COMPONENT`'s pause off-limits to Vehicle-Unavailabil
 (#247's original asymmetry fix, generalised rather than re-derived). Ruled 2026-08-20 as Decision Q7 in
 `.scratch/fsm-platform-v1/issues/258-decision-scheduler-production-readiness.md`; implemented as
 [#271](.scratch/fsm-platform-v1/issues/271-sla-resume-outcome-boundary.md).
+
+---
+
+## 21. CRITICAL/HIGH_CRITICAL insertions are assigned directly — SE Acceptance retired from this path
+
+**Decision.** A CRITICAL or HIGH_CRITICAL ticket is assigned to the best eligible SE **directly**,
+the same discipline the Morning Batch uses (hard eligibility — availability, capacity as an automatic
+constraint — then coverage tier, then score) and lands at stop 1 of that SE's Day Plan. There is no
+offer, no Accept/Decline, no Acceptance Timeout, no reroute chain, no 3-retry escalation threshold.
+When every eligible candidate is at `daily_capacity` (or none exist), the ticket escalates to the
+Zonal Manager immediately — one evaluation, not three exhausted offers first. The system never
+self-authorises an overload: automatic assignment always respects capacity. A human retains the
+administrative right to exceed it — the Zonal Manager's manual assignment from the escalation queue
+may push an SE past `daily_capacity` with no block and no forced confirmation, exactly as before.
+
+**Why this and not the alternative.** Decisions §16 chose Accept/Decline because a mid-day insertion
+lands on an SE who may already be mid-route, and the SE was made the commit authority to respect that
+field reality. Revisited under #258 (Q3) and found not to hold operationally: the offer/timeout/retry
+machinery added a 10-minute floor to every CRITICAL response *by design*, existed with **no automatic
+caller** for its own qualifying-event trigger (`fireForZone` had to be invoked manually — Issue 29/30
+shipped the offer engine but nothing ever fired it on a schedule), and its candidate pick had no
+capacity check and no score — every CRITICAL ticket in a zone targeted the same first candidate
+(`passed[0]`), stacking on one SE while others sat idle. Direct assignment removes the floor (a
+CRITICAL ticket lands within one sweep tick, not up to 30+ minutes of chained offers), fixes the
+distribution (capacity and score choose the SE, so N criticals spread across eligible SEs instead of
+queueing on one), and simplifies the invariant a reader has to hold: "the system decides fast, a
+human decides when the system can't" is one rule, not a rule plus a fallback chain. Q2 governs the
+capacity question directly: automatic never bypasses `daily_capacity`; a human may, because that is a
+deliberate administrative act, not the system quietly generating an overload.
+
+**Consequences.** SE Acceptance (Decisions §16, superseded above) no longer exists on any path — an
+SE has no Accept/Decline action anywhere in the product. `intraday_insertions` remains the ledger:
+`ASSIGNED_DIRECT` for a direct assignment, `ESCALATION_REQUIRED` — spelled exactly as before, meaning
+narrowed from "3 SEs declined or timed out" to "no capacity-eligible SE exists" — for an escalation;
+`system_efficiency_summary_daily.auto_escalations` keeps counting from the same status value, so the
+report's continuity holds across the change. `PENDING_ACCEPTANCE` / `ACCEPTED` / `DECLINED` /
+`TIMED_OUT` remain in the status vocabulary for historical rows only — nothing writes them any more.
+The mobile Accept/Decline screen and its endpoints (`GET /me/intraday-insertions`,
+`POST /intraday-insertions/:id/{accept,decline}`) are removed, not versioned — acceptable because the
+pilot was not live when this landed (#197/#209 open); tracked as its own record,
+[#279](.scratch/fsm-platform-v1/issues/279-retire-intraday-offer-accept-mobile.md). The tier+score
+chooser is the SAME implementation the Morning Batch uses (`chooseWithinTier`,
+`recommender/tier-score-chooser.ts`) — extracted so the two paths cannot independently drift on what
+"best eligible SE" means. Ratified 2026-08-20 as Decision Q3 (+ Q-B, the no-candidate escalation
+ruling) in `.scratch/fsm-platform-v1/issues/258-decision-scheduler-production-readiness.md`;
+implemented as [#268](.scratch/fsm-platform-v1/issues/268-critical-direct-assignment.md).
 
 ---
 

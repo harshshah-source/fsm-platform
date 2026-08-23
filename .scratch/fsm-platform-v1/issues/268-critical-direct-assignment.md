@@ -1,6 +1,6 @@
 # 268 — CRITICAL direct assignment: retire acceptance from the critical path, wire the automatic trigger
 
-Status: ready-for-agent
+Status: done (2026-08-24) — see `docs/progress/268-critical-direct-assignment.md`
 Type: AFK · Backend + Admin + Mobile (contract retirement)
 Decision: #258 Q3 (no PENDING_ACCEPTANCE / no 10-min window / no accept-decline / no
 acceptance-driven retry for CRITICAL) + Q2 (system path respects capacity; manual overload remains
@@ -84,6 +84,12 @@ paths; `transitionOrConflict` for insertion-row state flips; audit vocabulary `C
 `intraday_insertions.status` enum gains `ASSIGNED_DIRECT`, `ESCALATED_NO_CANDIDATE` (or reuse
 existing ESCALATION_REQUIRED); offer-specific columns stay for history. One migration.
 
+**Corrected during implementation:** `offered_se_id` and `acceptance_deadline` could not stay
+`NOT NULL`. Q-B's escalation can now fire with **no SE ever offered anything** (zero candidates, or
+every candidate at capacity, on the very first evaluation) — there is no SE to name and no acceptance
+window to bound. Both columns made nullable in the same migration
+(`20260824120000_critical_direct_assign`); no sentinel value invented. See the completion report §4.
+
 ## API
 
 Remove: `POST .../accept`, `POST .../decline`, `GET /me/intraday-insertions` (contract change,
@@ -101,23 +107,27 @@ normal day-plan flow (#66 cues; #201 signal).
 
 ## Acceptance criteria
 
-- [ ] A CRITICAL ticket becomes assigned within one sweep tick with NO acceptance state ever
+- [x] A CRITICAL ticket becomes assigned within one sweep tick with NO acceptance state ever
       created; it sits at stop 1 of the chosen SE's plan.
-- [ ] SE choice honours tier precedence and score (#266 chooser — one shared implementation,
+- [x] SE choice honours tier precedence and score (#266 chooser — one shared implementation,
       asserted by construction/test), skips unavailable AND at-capacity SEs.
-- [ ] **Q-B**: every eligible SE at capacity → ticket is NOT auto-assigned to anyone; an
+- [x] **Q-B**: every eligible SE at capacity → ticket is NOT auto-assigned to anyone; an
       `ESCALATION_REQUIRED` row + ZM alert appear; the ZM's `manualAssign` then succeeds and pushes
       that SE past capacity with no block and no forced confirm (Q2 pinned as a test).
-- [ ] No code path lets the system assign a CRITICAL ticket to an over-capacity SE (asserted
+- [x] No code path lets the system assign a CRITICAL ticket to an over-capacity SE (asserted
       negatively: capacity map exhausted → zero new `batch_assignment_tickets` rows written by the
       sweep).
-- [ ] `system_efficiency_summary_daily.auto_escalations` still populates from
-      `ESCALATION_REQUIRED` rows after the change (cube-continuity regression).
-- [ ] A deferred CRITICAL ticket is never system-assigned (deferral honoured; #249 override remains
+- [x] `system_efficiency_summary_daily.auto_escalations` still populates from
+      `ESCALATION_REQUIRED` rows after the change (cube-continuity regression). **Found and fixed in
+      passing: `manual_assignments` needed the same protection** — a SYSTEM-actor `CRITICAL_ASSIGN`
+      row would otherwise have counted as a human's manual assignment; excluded by `actor_role`.
+- [x] A deferred CRITICAL ticket is never system-assigned (deferral honoured; #249 override remains
       human-only).
-- [ ] N criticals spread across eligible SEs by capacity/score instead of stacking on `[0]`.
-- [ ] Cron wiring pin updated; retired endpoints return 404 and the mobile contract change is
-      recorded per #169's process.
+- [x] N criticals spread across eligible SEs by capacity/score instead of stacking on `[0]`.
+- [x] Cron wiring pin updated (`business-intraday-timeout` → `business-critical-assign`); retired
+      endpoints return 404; the mobile retirement is recorded as its own issue,
+      [#279](./279-retire-intraday-offer-accept-mobile.md), and #169 has a dated comment recording
+      the four route removals per its own process.
 
 ## Tests
 

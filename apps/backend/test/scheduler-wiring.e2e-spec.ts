@@ -31,6 +31,9 @@ import { AutoRecoveryService } from '../src/ticketing/auto-recovery.service';
  * point: the list is a decision record, and changing it should be deliberate and reviewed.
  */
 const EXPECTED_CRON_JOBS = [
+  // #268 — renamed from `business-intraday-timeout`: the offer/accept/timeout machinery it drove is
+  // retired, and the tick now direct-assigns CRITICAL/HIGH_CRITICAL tickets across every active zone.
+  'business-critical-assign',
   'business-cross-zone',
   'business-dispatch',
   // #261 — the reap sweep. Separate from `business-dispatch` on purpose: it frees the zones of runs
@@ -39,7 +42,6 @@ const EXPECTED_CRON_JOBS = [
   'business-dispatch-reaper',
   'business-fleet-uptime',
   'business-install-verification',
-  'business-intraday-timeout',
   'business-repeat-escalation',
   'business-root-cause',
   'business-soft-inactive',

@@ -517,52 +517,10 @@ describe('#265 — lost-race hygiene', () => {
     expect(await liveRows(ticketId)).toHaveLength(0);
   });
 
-  /**
-   * Slice 7 — **item 4's other half.** An SE accepting a ticket that went on hold mid-flight escalates
-   * it, instead of burning the retry chain against a hold nobody can see.
-   *
-   * `accept` treats every non-OK answer from `assignTicket` the same way: release the claim back to
-   * `PENDING_ACCEPTANCE` so the timeout sweep re-offers it (`intraday-insertion.service.ts:198-205`).
-   * For "the ticket was assigned out from under us" that is right. For `CONFLICT_DEFERRED` it is
-   * useless in a specific and costly way: **no Service Engineer can clear a deferral.** The next SE
-   * hits the identical refusal, and the one after that, until the retry chain is exhausted and the
-   * ticket escalates anyway — hours later, with a trail that records several SEs declining nothing.
-   *
-   * A hold only a manager can override should reach a manager immediately. That path now exists and
-   * works: slice 5 gave the escalation queue's manual assign the `CONFLICT_DEFERRED` answer and the
-   * confirm-with-reason flow to resolve it, so escalating here hands the ZM something they can act on
-   * rather than another dead end.
-   *
-   * Asserted on the persisted row rather than the return value, because the re-offer is the harm and
-   * `AcceptOutcome` needs no new member to express it.
-   */
-  it('escalates an accept refused by a deferral instead of re-offering it to the next engineer', async () => {
-    const ticketId = await makeTicket();
-    await prisma.ticket.update({
-      where: { ticketId },
-      data: { deferredUntil: new Date(TODAY.getTime() + 5 * 86_400_000) },
-    });
-
-    const insertion = await prisma.intradayInsertion.create({
-      data: {
-        ticketId,
-        zoneId,
-        status: 'PENDING_ACCEPTANCE',
-        slaBucket: 'CRITICAL',
-        offeredSeId: seA,
-        offeredAt: NOW,
-        acceptanceDeadline: new Date(NOW.getTime() + 15 * 60_000),
-        retryCount: 0,
-      },
-    });
-
-    await intraday.accept(insertion.insertionId, seA, NOW);
-
-    const after = await prisma.intradayInsertion.findUniqueOrThrow({ where: { insertionId: insertion.insertionId } });
-    expect(after.status).toBe('ESCALATION_REQUIRED');
-    // Not re-offered, and no retry spent on an engineer who could never have succeeded.
-    expect(after.retryCount).toBe(0);
-    expect(await liveRows(ticketId)).toHaveLength(0);
-  });
-
+  // Slice 7 ("an SE accepting a ticket that went on hold mid-flight escalates it") retired with
+  // `IntradayInsertionService.accept` — #268 removed the SE-Acceptance step entirely, so there is no
+  // longer an accept call that can race a deferral. The property it protected (a deferral reaching a
+  // manager rather than being silently re-offered) is now structural: the direct-assign sweep never
+  // selects a deferred ticket in the first place (`notDeferredOn` — pinned in
+  // `deferral-override-confirm.e2e-spec.ts`), so there is nothing for this slice to guard.
 });

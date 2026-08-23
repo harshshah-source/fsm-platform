@@ -228,7 +228,7 @@ dual-confirm, recovery lifecycle, install create+lifecycle | 8 controllers |
 | `recommender` | Candidate selection, hard filters, scoring, canonical sort → `recommendations` | consumed by SchedulingModule |
 | `scheduling` | Batch dispatch, day-plan/schedule queries, ZM override, same-day update, dispatch-run + daily dispatch cron, **daily work-schedule closure cron** (#147, recycling unresolved assignments since #242) | `SchedulingModule` imports `RecommenderModule` (#113) |
 | `business-sweep-scheduler` (in `scheduling/`) | 11 env-gated `@Cron` sweeps: verification, install-verification, intraday-timeout, cross-zone, repeat-escalation, tier-override-expiry, soft-inactive, system-efficiency, 3 month-start cubes | leaf module (#108) |
-| `intraday` | CRITICAL insertion offer state machine, accept/decline/timeout | #29/#30/#101 |
+| `intraday` | CRITICAL direct-assignment sweep (#268 — retired the offer/accept/decline/timeout state machine) | #29/#30/#101/#268 |
 | `cross-zone` | Platinum auto-escalation + manual flag, approve/deny/defer/re-escalate | #32 |
 | `shared-pool` | SE shared ticket pool | #12 |
 | `planner` | SE planner grid CRUD + recommender bias | #14 |
@@ -321,7 +321,7 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 | `work_schedules` | Per-SE Day-Plan container (no approval gate — ADR-0007/0019 superseded). **Lifecycle now terminates** (#147): `ScheduleClosureScheduler` writes `COMPLETED`/`PARTIAL` onto past-dated rows under the zone's dispatch advisory lock, so schedules stop accreting as permanently live; the day-plan read is date-bounded independently of it. **Closure also ends the day's *assignments*** (#242): unresolved rows on the closing schedules are stamped `PLAN_EXPIRED` and their tickets returned to `UNASSIGNED`, so a terminal schedule no longer strands live work | partial unique `work_schedules_one_active_per_se_zone_day (se_id, zone_id, date_from) WHERE ACTIVE` — **zone_id deliberately in the key** vs the #100 spec, to allow cross-zone plans (INDEX.md:97) |
 | `plant_batch_assignments` / `batch_assignment_tickets` | **Also the attempt ledger** (#244 — one row = one attempt *window*; `soft_states` inside it = **reached**, a `troubleshooting_submissions` row = **success**). Plant-stop batches + per-ticket rows with override history (`removed_at`, `deferred_to_date`, **`removal_reason`** — #241: why the row stopped being live, closed vocabulary in `scheduling/removal-reason.ts`, NULL ⟺ still live; `removed_by IS NULL` is auto-recovery's signature and must **not** be read as "system" generally) | partial unique `batch_assignment_tickets_one_active_per_ticket WHERE removed_at IS NULL` (`20260621180000:78`); plain `(ticket_id)` for the per-ticket history read (#241). #242's nightly recycle writes `PLAN_EXPIRED` (unresolved, ticket also flipped to `UNASSIGNED`) and `RESOLVED_AT_CLOSURE` (a straggler row on an already-resolved ticket — stamped, never unassigned) |
 | `se_planner` | ZM plant-visit intent; **soft bias** to the recommender, never a constraint | unique `(se_id, plant_id, planned_date)` |
-| `intraday_insertions` | Mutable CRITICAL-insertion offer state machine + `retry_chain` JSONB | partial unique `intraday_insertions_one_live_offer_per_ticket WHERE PENDING_ACCEPTANCE` (#101, `20260709120000`) |
+| `intraday_insertions` | CRITICAL-insertion ledger — `ASSIGNED_DIRECT`/`ESCALATION_REQUIRED` written going forward (#268); `PENDING_ACCEPTANCE`/`ACCEPTED`/`DECLINED`/`TIMED_OUT` + `retry_chain` JSONB remain for historical rows only, nothing writes them any more. `offered_se_id`/`acceptance_deadline` nullable since #268 (an escalation with no candidate never had an SE to name) | partial unique `intraday_insertions_one_live_offer_per_ticket WHERE PENDING_ACCEPTANCE` (#101, `20260709120000`) — inert going forward, kept for the historical rows it still guards |
 | `cross_zone_escalations` | Parallel escalation record — ticket never leaves home queue | indexes on `(status, escalation_type)`, `home_zone_id` |
 | `cron_tick_claims` | #263 — one row per (cron job, UTC-minute window) that some instance has taken responsibility for. The `ON CONFLICT DO NOTHING` insert IS the admission test that makes a second sweeps-enabled instance a safe no-op; `claimed_by` (host/pid@build-fingerprint) is diagnosis only, never a predicate. Append-mostly, pruned to 7 days by the `partition-maintenance` tick | PK `(job_name, window_start)` — the arbitration itself; index on `window_start` for the prune (`20260823150000`) |
 
@@ -500,11 +500,18 @@ wall-clock time.
 
 ### 3d. Ticket creation (#05/#08/#112)
 
-**Algorithm** (`ticket-creation.service.ts:27-108`): select `device_states` WHERE inactive AND
-eligible AND no open cycle AND has plant+company → per device, one `$transaction` creating
+**Algorithm** (`ticket-creation.service.ts`): select `device_states` WHERE
+`inactivity_hours >= se_assignment_threshold_hours` AND eligible AND no open cycle AND has
+plant+company → per device, one `$transaction` creating
 `failure_cycle` (OPEN, or REPEAT if a VERIFIED cycle closed ≤24h prior — ADR-0021), the parented
 TROUBLESHOOT `ticket` (tier denormalised), the OPEN `ticket_event`, and the
 `has_open_failure_cycle` flip. Invariant I1 partial-unique backstops races — P2002 ⇒ silent skip.
+- **Silence gate (#238, 2026-08-13)**: the predicate is the configurable `se_assignment_threshold_hours`
+  (default 24), **not** `is_inactive`. The two agree at the shipped default, so nothing changed on
+  deploy; they diverge the moment an operator moves the key. `is_inactive` stays the *measurement*
+  (Fleet-Uptime denominator, graded Soft Inactive Count) and this is the *policy*. `AutoRecoveryService`
+  reads the same setting and scans the exact complement — they must move together, or a device below
+  the Inactive line is ticketed and auto-closed on every tick forever (see the issue file).
 - **Gate**: candidates exist only if `eligible_for_uptime` is true. **Corrected 2026-08-10 (#229
   §3.3):** the long-standing "`eligibility_mode='pgi'` over an empty `pgi_history` ⇒ **0 tickets
   created today**" framing is **wrong for the dev database as configured** — `system_settings.
@@ -578,6 +585,15 @@ its two neighbours because they route to different teams: `unassignable` = the e
 nobody (Ops), `withheld_below_threshold` = it deliberately did not look yet (policy), `bucketless_dropped`
 = it could not look (data). **Neither of the last two is rendered anywhere yet — the transparency zone
 card projects neither → #252.**
+**Silence gate (#238)**: the ticket pool excludes any device with *positive* evidence of being below
+`se_assignment_threshold_hours`. Redundant on a steady configuration (creation already applied it) and
+load-bearing when an operator **raises** the threshold — the existing OPEN/UNASSIGNED backlog then
+stops dispatching on the next run, which is what "changed the threshold" has to mean. Withheld tickets
+are counted apart from `unassignable` (that means *the engine found nobody*, a coverage/capacity
+failure to act on; this means *it deliberately did not look yet*) and stamped on the ledger as
+`dispatch_runs.withheld_below_threshold` + `dispatch_run_zones.{withheld_below_threshold,
+assignment_threshold_hours}`. Manual/intraday assignment is **not** gated — the queue badges
+`HELD · n/Nh` and the operator keeps their judgement.
 **Component-blocked work is excluded from BOTH automatic pools, and counted (#177).** A ticket whose
 failure cycle is `WAITING_COMPONENT` stays OPEN by design (ADR-0008) — the failure is real, the part is
 on order — and until this slice neither the morning selection nor the intraday CRITICAL sweep
@@ -821,15 +837,14 @@ calendar day* is pinned to `Asia/Kolkata` instead (`BUSINESS_TIMEZONE`), because
 compose/Dockerfile/env here and an unpinned daily cron fires in host time: #240's bug, where `0 4 * * *`
 landed at 09:30 IST — **after** the 05:00 IST dispatch it was supposed to precede. The intended daily
 chain is 03:30 → 04:00 → 04:30 → 05:00, and where it is pinned it is asserted behaviourally (absolute
-next-firing instant) rather than by reading back stored options. `scheduler-wiring.e2e-spec.ts` pins the
-**exact** registered cron-name set (18) against the real `AppModule`, so a job that stops registering is
-a test failure.
+next-firing instant) rather than by reading back stored options.
 
 **One link in that chain is still unpinned: `plant-eligibility-refresh`** (`:59` — no `timeZone`), and
 its own docstring shows the confusion, calling `30 4 * * *` "04:30 UTC … shortly before the default
 05:00 dispatch tick". 05:00 dispatch is **IST** (23:30 UTC), so on a UTC host the refresh fires at
 10:00 IST — five hours *after* the batch it exists to feed, which consumes a `plant_eligible_floating_se`
-MV up to a day stale. Same defect #240 fixed for closure, still live here → filed as **#254**.
+MV up to a day stale. Same defect #240 fixed for closure, still live here → filed as **#254**. `scheduler-wiring.e2e-spec.ts` pins the **exact** registered
+cron-name set (18) against the real `AppModule`, so a job that stops registering is a test failure.
 
 | Cron name | Default | Env override | Master switch | Calls |
 |---|---|---|---|---|
@@ -842,7 +857,7 @@ MV up to a day stale. Same defect #240 fixed for closure, still live here → fi
 | `business-dispatch` **(IST)** | `0 5 * * *` | `BUSINESS_SWEEP_DISPATCH_CRON` (bootstrap only — `system_settings.dispatch_cron` is the source of truth, #213) | `BUSINESS_SWEEPS_ENABLED` | `DispatchRunService.runForActiveZones` (per active zone: runForZone → dispatchForZone, per-zone error contained) |
 | `business-verification` | `*/5 * * * *` | `BUSINESS_SWEEP_VERIFICATION_CRON` | `BUSINESS_SWEEPS_ENABLED` | verification sweep |
 | `business-install-verification` | `*/5 * * * *` | … | 〃 | install first-ping sweep |
-| `business-intraday-timeout` | `*/2 * * * *` | … | 〃 | `sweepTimeouts` |
+| `business-critical-assign` **(#268 — renamed from `business-intraday-timeout`)** | `*/2 * * * *` | `BUSINESS_SWEEP_CRITICAL_ASSIGN_CRON` | 〃 | `assignCriticalForActiveZones` — direct-assigns CRITICAL/HIGH_CRITICAL tickets across every active zone, or escalates |
 | `business-cross-zone` | `*/15 * * * *` | … | 〃 | `sweepAutoEscalations` |
 | `business-repeat-escalation` | `*/15 * * * *` | … | 〃 | repeat escalation |
 | `business-tier-override-expiry` | `0 * * * *` | `BUSINESS_SWEEP_TIER_OVERRIDE_EXPIRY_CRON` | 〃 | tier-override expiry sweep (#157 S4): ACTIVE→EXPIRED past `expires_at` + `TIER_OVERRIDE_EXPIRED` audit — status-truth only, resolver keys on `expires_at` |
@@ -917,14 +932,24 @@ POSTs) drive identical code paths with no cron.
 - **Same-day update** (#31, `same-day-update.service.ts` header): ZM add/remove/reorder mid-shift;
   applies immediately (no SE acceptance); logged `MANUAL_ZM_UPDATE`; the **Intra-day Queue is a view
   over AuditLog** (2026-06-25 decision — no new model); reuses the #13 override engine.
-- **Intraday CRITICAL insertion** (#29/#30, `intraday-insertion.service.ts`): CRITICAL+ bucket fires
-  `fireForZone` → best AVAILABLE candidate by strict precedence (ping staleness never filters) →
-  `intraday_insertions` PENDING_ACCEPTANCE offer (10-min `ACCEPTANCE_TIMEOUT_MIN`) + push +
-  first-class SE_ACCEPTANCE WhatsApp record. Accept → `assignTicket(insertAtTop)` (top of Day Plan);
-  decline (reason code) or timeout → reroute to next SE, `retry_chain` appended; 3 retries →
-  ESCALATION_REQUIRED + ZM "Manual assignment needed" (`availableSesForManualAssign`/`manualAssign`).
-  **Accept-vs-timeout race guarded** by `transitionOrConflict` + the one-live-offer partial unique
-  (#101 leg, commit `9940534`).
+- **Intraday CRITICAL insertion** (#29/#30, retired to **direct assignment** by **#268** / Decision
+  #258 Q3, `intraday-insertion.service.ts`): CRITICAL+ bucket fires `assignCriticalForZone` → hard
+  eligibility (availability, capacity as an automatic constraint) → coverage tier → score — the SAME
+  `chooseWithinTier` (`recommender/tier-score-chooser.ts`) the morning batch uses — →
+  `assignTicket(insertAtTop)` (top of Day Plan) with a SYSTEM actor, `intraday_insertions` row written
+  **ASSIGNED_DIRECT**, informational push. **No offer, no accept/decline, no timeout, no retry chain**
+  — those are gone with the machinery that drove them. No capacity-eligible candidate → **immediate**
+  `intraday_insertions` **ESCALATION_REQUIRED** row (`offered_se_id`/`acceptance_deadline` now
+  nullable — no SE was ever offered anything) + ZM "Manual assignment needed"
+  (`availableSesForManualAssign`/`manualAssign`, unchanged — Q2's administrative right to exceed
+  capacity is preserved). `ESCALATION_REQUIRED` keeps its spelling (the
+  `system_efficiency_summary_daily.auto_escalations` cube counts it) but its MEANING narrows to "no
+  capacity-eligible SE", not "3 declines/timeouts". The 2-min sweep tick is renamed
+  `business-critical-assign` (was `business-intraday-timeout`). Mobile Accept/Decline screen +
+  `/me/intraday-insertions` + `/intraday-insertions/:id/{accept,decline}` retired outright (404) —
+  tracked as **#279**. `system_efficiency_summary_daily.manual_assignments` now excludes
+  SYSTEM-actor `CRITICAL_ASSIGN` audit rows (`actor_role != 'SYSTEM'`) so an automatic direct-assign
+  is not counted as a human's manual one.
 - **Cross-zone escalation** (#32, `cross-zone-escalation.service.ts`): `sweepAutoEscalations` —
   Platinum unassigned 1h in CRITICAL+ or 4h OPEN → one AUTO_PLATINUM row to the CSM/OH queue;
   ZM `flag` for Gold/Silver (manual). Decider approve (target zone + SE → cross-zone assignment) /
@@ -1019,7 +1044,17 @@ explicit `BODY_LIMIT_JSON` (1mb) + `INSTALL_CSV_MAX_ROWS` (1000) cap payloads.
 `ZoneScopeGuard` rejects a ZM targeting another zone via `:zoneId`/`zone_id` param (403
 ZONE_SCOPE_VIOLATION); **deeper zone clamping is service-level and uneven** — e.g. install scope
 was only closed by #102; cross-zone/CSM acting scope threads through `acting-context.ts` +
-`RequestActor` (#47). No rate limiting anywhere (#110): `/auth/login` scrypt is a CPU-DoS vector.
+`RequestActor` (#47).
+**Acting-as-ZM has two halves and only the audit half is complete** (corrected 2026-08-17): `RequestActor`
+stamps `acted_as_role`/`acting_zone` on audited writes, but manager **reads** built their scope as
+`{ role: user.role, zoneId: user.zone_id }` off the claims — a shape that cannot carry acting — so an
+acting CSM/OH received pan-India rows while the UI rendered the Zone Operations view. Read scope now
+resolves through `common/manager-scope.ts` (`resolveManagerScope` + `@CurrentScope()`), which collapses
+an acting caller to `{ role: 'ZONAL_MANAGER', zoneId: actingZone }`; **converted so far: the 9
+`/api/dashboard/*` reads and `reports/fleet-uptime`** (proof: `test/dashboard-acting-scope.e2e-spec.ts`).
+**61 claims-only scopes remain across ~20 controllers → #239**, and the frontend half is per-client —
+only clients using `api/authHeaders.ts` send `X-Acting-As-Zone` at all (`api/dashboard.ts` and
+`api/reports.ts` were switched to it; `api/devices.ts` / `api/client.ts` still hand-roll a bearer). No rate limiting anywhere (#110): `/auth/login` scrypt is a CPU-DoS vector.
 **Admin FE session** (#109, done): single-flight rotating refresh on 401 with one retry
 (`apps/admin/src/api/http.ts`), reload rehydration via `/me` behind a loading gate, honest login
 errors; tokens in memory/storage (httpOnly-cookie upgrade deferred to #91).
@@ -1101,7 +1136,11 @@ Radix dropdown over CSV/Excel/PDF/PNG) — a deliberate DOM read (`lib/tableExpo
 read, so the export can only ever contain what is already rendered (the zone-scoping proof) and always
 matches the on-screen post-filter/post-sort view (fixing a real bug: every #122-era export silently
 ignored the active column sort). The five page-level `ExportMenu` instances this made redundant were
-removed.
+removed. **The top bar's global search was decorative until 2026-08-17** — a bare `<input>` with no
+state, handler or target, reported by the operator as "not functional" — and now submits to
+`/reports/device?search=`, which `DeviceDetailPage` seeds its query from; manager roles only (the
+target route is `RoleRoute`-gated), and the placeholder names what `/devices` actually matches (device
+id / vehicle no / plant / company — never ticket ids).
 
 **#176 dashboard KPI transparency (done, 2026-07-29):** every operational count on the dashboard —
 fleet KPI strip, zone rows, company×plant rows, Fleet Directory companies and plants — is now selected
@@ -1361,10 +1400,38 @@ question. Grain differs by design and is stated on both — the cohort counts **
 counts **devices**, and 6.4% of cohort devices carry more than one fitment in 90 days.
 Report: `docs/progress/235-commissioning-drillthrough.md`.
 
-**Still open:** neither page has **ever been opened in a browser against a live backend**; both are
-proven by tests over payload shapes taken from the live probe's real output, which is not the same as
-having watched them render. The *reason* is gone as of 2026-08-13 — #194 landed `npm run seed:dev`,
-so a dev login is now reproducible on any machine — but the eyeball pass itself has not been done.
+**Device list + Assign SE (#236, done 2026-08-13):** operator-directed follow-up. The Commissioning
+Cohort's plant/installer breakdown tables are unchanged; three things on the page changed. The
+resolution curve, previously a `BarList` (stacked horizontal bars — read as five disconnected
+categories), is now a `TrendChart` line — it is a cumulative series and needed the primitive that
+actually draws one. The curve/install-quality panels, previously paired half-width via `ReportGrid`
+(matching `21-reports.png`'s pairing), are now full-width — a deliberate, recorded departure from that
+reference for this page only, on direct operator instruction. And the cohort's devices are now listed
+inline (search/sort/status/paging via the existing `GET /api/devices`, unchanged from #235) rather than
+requiring the #235 drill-through link to leave the page; plant rows gained a second, in-place "Filter
+list" affordance alongside the unchanged #235 link. Each row with an open ticket offers **Assign SE**
+against the live roster, through the same `POST /api/schedules/assign` primitive `CriticalQueue.tsx`'s
+one-click assign already uses — frontend-only, no backend change. A row with no open ticket reads
+"No open ticket" and offers no control, rather than a button that silently no-ops. **No backend
+change; no new endpoint.** 26 tests (was 18), `tsc` clean. Report:
+`docs/progress/236-commissioning-device-list-and-dispatch.md`.
+
+**Exposed by #236, filed separately as #237:** devices that failed to commission and carry no open
+ticket are invisible to dispatch — measured live against the dev DB, **79 of a 200-row sample (40%)**
+of `NEVER_REPORTED`-within-90-days devices carry no open ticket at all (573 such devices exist
+server-side; the sample is a lower bound). The mechanism to investigate is
+`TicketCreationService.createForInactiveEligible`, **not** #229's auto-recovery — #229 only *closes*
+tickets (re-checks staleness on already-open ones); it creates nothing. That correction was made while
+filing #237, not after.
+
+**Still open:** neither #232's nor #235's page has **ever been opened in a browser against a live
+backend** — and now nor has #236's. #194 landed `npm run seed:dev` on 2026-08-13, so a dev login is
+reproducible on any machine, and the same session that built #236 tried the browser pass: both the
+backend (`:3000`) and the admin dev server (`:5174`) were live and `curl`-verified correct throughout,
+but the Chrome extension could not load `localhost` ("Frame with ID 0 is showing error page," on two
+ports, a fresh tab, and a permission-grant retry — while it screenshotted an external site fine). All
+three commissioning surfaces are proven by tests over payload shapes taken from live probe/API output,
+which is not the same as having watched them render.
 Full investigation: `audit/recently-commissioned-devices-investigation-2026-08-13.md`.
 
 ---
@@ -1681,12 +1748,24 @@ findings from this audit are filed as **#115** and **#116** (stubs in
 
 ## 6. ACTIVATION & OPERATIONS STATE
 
-### 6.1 Settings (`system_settings`, OH-owned, audited)
+### 6.1 Settings (`system_settings`, OH-owned unless noted, audited)
+
+> **#238 — the registry is no longer uniformly OH-only.** `se_assignment_threshold_hours` is co-owned
+> by the Operations Head and the CSM (`SETTING_WRITE_ROLES`, `settings/setting-authority.ts`); the ZM
+> can read it and never write it. `system_settings` gained lock columns (`locked_at`/`locked_by`/
+> `locked_by_role`/`lock_reason`): a locked key refuses every writer but the OH, which is the
+> mechanism behind "the OH has the final decision" — a reversible veto, not an approval queue. Value
+> history lives in `setting_changes` (append-only, carries the replaced value, backs revert);
+> `audit_logs` still records that a change happened but has never carried a previous value.
+> Writes to this key go through `PUT /api/settings/assignment-threshold`; the generic
+> `PUT /api/settings/:key` refuses it (`SPECIALISED_SETTING_WRITERS`, the same #213 guard as
+> `dispatch_cron`).
 
 | Key | Default / effect | Current live value |
 |---|---|---|
 | `eligibility_mode` | `pgi` (canonical — requires PGI feed, i.e. 0 eligible today) \| `all-deployed` (interim proxy: vehicle status ∈ ACTIVE/DEPLOYED). Applied at next recompute; harmless to set while schedulers OFF | **`all-deployed`** — set 2026-07-10 via audited `PUT /api/settings/eligibility_mode` (audit id 16, OPERATIONS_HEAD). Effect verified live: 100% of inactive devices (5,505/5,505) are eligible, i.e. all sit on ACTIVE/DEPLOYED vehicles. |
-| `inactivity_threshold_hours` | 24 (`device-state.service.ts:8`) | **24** (verified via `GET /api/settings`) |
+| `inactivity_threshold_hours` | 24 (`device-state.service.ts:11`). **Measurement, not policy** — sets `is_inactive`, the Fleet-Uptime denominator and the graded Soft Inactive Count. Never move it to change dispatch; move the key below | **24** (verified via `GET /api/settings`) |
+| `se_assignment_threshold_hours` (#238) | 24. **Policy, not measurement** — hours of silence before a Troubleshoot Ticket opens *and* an SE may be auto-dispatched. Selectable only on `SLA_BANDS` boundaries (4/8/12/24/48/72/120/168). Read per run by ticket creation, auto-recovery and the recommender — an edit takes effect on the next tick, no restart | **24** — shipped equal to `inactivity_threshold_hours`, so the feature is inert until an operator moves it |
 | `telemetry_retention_days` | drives partition drops (`partition-maintenance.service.ts:62`) | **7** (verified via `GET /api/settings`) |
 | soft-inactive `threshold_pct` | 2% default (#40) — DEFICIT/PREVENTIVE switch | not present in `system_settings` registry (defaults to 2% in code) — recommender ran in `DEFICIT` mode for every ticket this session |
 
@@ -1841,7 +1920,7 @@ lifecycle entry and the `docs/progress/218-*.md` completion report, which should
 | `DISPATCH_RETRY_INTERVAL_MS` | #260 — how often the patient CRON re-asks for a contended zone (default 60 000) |
 | `DISPATCH_RETRY_DEADLINE_MS` | #260 — how long it stays patient (default 900 000). **0 = try-once**, the documented rollback. Never applies to a MANUAL run |
 | `BUSINESS_SWEEPS_ENABLED=true` | dispatch cron + the field-loop/aggregation sweeps **and** the daily chain (§3g): `vu-auto-resume` 03:30 IST, `schedule-closure` 04:00 IST, `plant-eligibility-refresh` 04:30 **unpinned — #254**, `business-dispatch` 05:00 IST |
-| `VU_AUTO_RESUME_CRON`, `SCHEDULE_CLOSURE_CRON`, `PLANT_ELIGIBILITY_REFRESH_CRON` | per-job overrides for the daily chain — `VU_AUTO_RESUME_CRON` and `SCHEDULE_CLOSURE_CRON` are read as **IST** expressions |
+| `VU_AUTO_RESUME_CRON`, `SCHEDULE_CLOSURE_CRON`, `PLANT_ELIGIBILITY_REFRESH_CRON` | per-job overrides for the IST-pinned chain — read as **IST** expressions, not host time |
 | `BUSINESS_SWEEP_*_CRON`, `INGESTION_*_CRON` | per-tick overrides (§3g table) |
 | `AUTOPLANT_*` (MySQL host/creds/schemas, `AUTOPLANT_SOURCE_UTC_OFFSET_MIN`) | unset ⇒ mock/empty sources, app boots fine |
 | `JWT_ACCESS_SECRET` | **required at boot** — fail-fast validation, no fallback (#98 slice 1, `25a46d4`) |

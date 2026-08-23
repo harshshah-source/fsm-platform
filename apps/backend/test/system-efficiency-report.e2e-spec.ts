@@ -174,4 +174,34 @@ describe('Issue 42 — System Efficiency Report', () => {
     expect(report.fleet.autoAssignments).toBe(1);
     expect(report.fleet.overrides).toBe(1);
   });
+
+  /**
+   * #268 — a SYSTEM-actor `CRITICAL_ASSIGN` row (the new direct-assign sweep) must NOT count as a
+   * "manual" assignment. Before #268 every `CRITICAL_ASSIGN` audit row was a human action (an SE's
+   * one-tap Accept, or a ZM's escalation-queue manual assign), so `manual_assignments` counting the
+   * whole set was correct by construction. #268 adds a third writer with a SYSTEM actor; left
+   * uncorrected, this cube would silently relabel every automatic direct-assign as manual — the same
+   * class of metric corruption `auto_escalations`' own continuity requirement exists to prevent for
+   * the sibling figure.
+   */
+  it('a SYSTEM-actor CRITICAL_ASSIGN row (#268 direct-assign) is excluded from manual_assignments', async () => {
+    const before = (await reports.systemEfficiency(ohScope, { from: DAY, to: DAY, zoneId: Number(zoneId) })).fleet
+      .manualAssignments;
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: 'SYSTEM',
+        actorRole: 'SYSTEM',
+        action: 'CRITICAL_ASSIGN',
+        entityType: 'ticket',
+        entityId: tsTicketId,
+        createdAt: at(4, 0),
+      },
+    });
+    await agg.computeDay(new Date(DAY + 'T00:00:00Z'));
+
+    const after = (await reports.systemEfficiency(ohScope, { from: DAY, to: DAY, zoneId: Number(zoneId) })).fleet
+      .manualAssignments;
+    expect(after).toBe(before); // unchanged — the SYSTEM row did not join the human-actor count
+  });
 });

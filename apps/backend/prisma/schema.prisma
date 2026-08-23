@@ -516,6 +516,8 @@ enum IntradayInsertionStatus {
   DECLINED
   TIMED_OUT
   ESCALATION_REQUIRED
+  /// #268 — the system assigned this ticket directly, no offer/accept step ever existed for it.
+  ASSIGNED_DIRECT
 
   @@map("intraday_insertion_status")
 }
@@ -526,9 +528,14 @@ model IntradayInsertion {
   zoneId             BigInt                  @map("zone_id")
   insertionType      String                  @default("SYSTEM_CRITICAL") @map("insertion_type")
   slaBucket          SlaBucket?              @map("sla_bucket")
-  offeredSeId        String                  @map("offered_se_id") @db.Uuid
+  /// #268 — nullable since the pre-implementation review: an ESCALATION_REQUIRED row from Q-B's
+  /// "no capacity-eligible SE" path never had an SE to name. Still NOT NULL on every ASSIGNED_DIRECT
+  /// row (the assigned SE) and every historical offer-machinery row.
+  offeredSeId        String?                 @map("offered_se_id") @db.Uuid
   offeredAt          DateTime                @map("offered_at") @db.Timestamptz(6)
-  acceptanceDeadline DateTime                @map("acceptance_deadline") @db.Timestamptz(6)
+  /// #268 — nullable for the same reason as `offeredSeId`: a direct-assign/no-candidate escalation
+  /// has no acceptance window to bound.
+  acceptanceDeadline DateTime?               @map("acceptance_deadline") @db.Timestamptz(6)
   status             IntradayInsertionStatus @default(PENDING_ACCEPTANCE)
   respondedAt        DateTime?               @map("responded_at") @db.Timestamptz(6)
   declineReasonCode  String?                 @map("decline_reason_code")

@@ -16,6 +16,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import {
+  type CriticalAssignOutcome,
   IntradayInsertionRow,
   IntradayInsertionService,
 } from './intraday-insertion.service';
@@ -23,11 +24,15 @@ import {
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 
 /**
- * `/api/intraday-insertions/*` — the system-triggered intra-day CRITICAL insertion + SE Acceptance
- * surface (Issues 29/30). `GET` is the Intra-day Queue read (zone-scoped). The SE acts on an offer with
- * `accept` / `decline`; managers trigger the qualifying-event `fire` + the 10-min `sweep-timeouts` (the
- * on-demand worker seam, mirroring the reports recompute posture) and resolve an escalation via
- * `available-ses` + `manual-assign`. Distinct from the ZM manual same-day `/intraday-updates` (Issue 31).
+ * `/api/intraday-insertions/*` — the system-triggered intra-day CRITICAL insertion surface (Issues
+ * 29/30, retired to direct-assignment by #268 / #258 Q3). `GET` is the Intra-day Queue read
+ * (zone-scoped). `fire` is the manual trigger for the qualifying-event sweep (mirrors the manual
+ * trigger every other business sweep has — `POST /api/schedules/dispatch-run`,
+ * `POST /api/integration/run-pipeline`); managers resolve an escalation via `available-ses` +
+ * `manual-assign`. Distinct from the ZM manual same-day `/intraday-updates` (Issue 31).
+ *
+ * `accept`, `decline` and `sweep-timeouts` are gone with the offer machinery they served — a CRITICAL
+ * ticket is assigned directly, with no SE veto and no acceptance window to time out.
  */
 @Controller('intraday-insertions')
 @UseGuards(AuthGuard, RoleGuard)
@@ -40,53 +45,17 @@ export class IntradayInsertionController {
     return this.svc.listForScope({ role: user.role, zoneId: user.zone_id });
   }
 
-  /** Qualifying-event sweep — offer newly-CRITICAL tickets in a zone to their best available candidate. */
+  /** Qualifying-event sweep — direct-assign newly-CRITICAL tickets in a zone, or escalate. */
   @Post('fire')
   @HttpCode(200)
   @Roles(...MANAGER_ROLES)
   async fire(
     @CurrentUser() user: AccessTokenClaims,
     @Body() body: { zoneId?: number | string },
-  ): Promise<{ offered: number; skipped: number }> {
+  ): Promise<CriticalAssignOutcome> {
     const zoneId = user.role === 'ZONAL_MANAGER' ? user.zone_id : body.zoneId;
     if (zoneId == null) throw new BadRequestException({ code: 'ZONE_REQUIRED' });
-    return this.svc.fireForZone(BigInt(zoneId));
-  }
-
-  /** Acceptance-timeout sweep — reroute every offer past its 10-min deadline (worker seam). */
-  @Post('sweep-timeouts')
-  @HttpCode(200)
-  @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
-  sweepTimeouts(): Promise<{ timedOut: number; rerouted: number; escalated: number }> {
-    return this.svc.sweepTimeouts();
-  }
-
-  @Post(':id/accept')
-  @HttpCode(200)
-  @Roles('SERVICE_ENGINEER')
-  async accept(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string) {
-    const out = await this.svc.accept(BigInt(id), user.user_id);
-    if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'INSERTION_NOT_FOUND' });
-    if (out.result === 'NOT_OFFERED') throw new ConflictException({ code: 'NOT_OFFERED_TO_YOU' });
-    if (out.result === 'NOT_PENDING') throw new ConflictException({ code: 'INSERTION_NOT_PENDING', status: out.status });
-    return out;
-  }
-
-  @Post(':id/decline')
-  @HttpCode(200)
-  @Roles('SERVICE_ENGINEER')
-  async decline(
-    @CurrentUser() user: AccessTokenClaims,
-    @Param('id') id: string,
-    @Body() body: { reasonCode: string },
-  ) {
-    if (!body.reasonCode) throw new BadRequestException({ code: 'REASON_REQUIRED' });
-    const out = await this.svc.decline(BigInt(id), user.user_id, body.reasonCode);
-    if (out.result === 'INVALID_REASON') throw new BadRequestException({ code: 'INVALID_REASON_CODE' });
-    if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'INSERTION_NOT_FOUND' });
-    if (out.result === 'NOT_OFFERED') throw new ConflictException({ code: 'NOT_OFFERED_TO_YOU' });
-    if (out.result === 'NOT_PENDING') throw new ConflictException({ code: 'INSERTION_NOT_PENDING', status: out.status });
-    return out;
+    return this.svc.assignCriticalForZone(BigInt(zoneId));
   }
 
   /** AVAILABLE SEs for the ZM manual-assignment modal (Issue 30 — availability only, never ping age). */

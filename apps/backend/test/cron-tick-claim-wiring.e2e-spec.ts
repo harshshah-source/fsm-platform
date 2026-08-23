@@ -37,7 +37,7 @@ const FIRED_B = new Date('2026-08-23T05:00:41.577Z');
 /** Every scheduler's collaborators, stubbed; one pair per instance so the spies cannot be confused. */
 const sweepStubs = () => ({
   verification: { runVerification: vi.fn(async () => ({ closed: 0, failed: 0, fraud: 0, pending: 0 })) },
-  intraday: { sweepTimeouts: vi.fn(async () => ({ timedOut: 0, rerouted: 0, escalated: 0 })) },
+  intraday: { assignCriticalForActiveZones: vi.fn(async () => ({ assigned: 0, escalated: 0 })) },
   crossZone: { sweepAutoEscalations: vi.fn(async () => ({ escalated: 0 })) },
   installLifecycle: { runInstallVerification: vi.fn(async () => ({ verified: 0, failed: 0, pending: 0 })) },
   repeatEscalation: { runEscalationScan: vi.fn(async () => ({ escalated: 0 })) },

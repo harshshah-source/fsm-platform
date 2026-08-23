@@ -16,7 +16,7 @@ import {
   DEFAULT_CROSS_ZONE_CRON,
   DEFAULT_FLEET_UPTIME_CRON,
   DEFAULT_INSTALL_VERIFICATION_CRON,
-  DEFAULT_INTRADAY_TIMEOUT_CRON,
+  DEFAULT_CRITICAL_ASSIGN_CRON,
   DEFAULT_REPEAT_ESCALATION_CRON,
   DEFAULT_ROOT_CAUSE_CRON,
   DEFAULT_SOFT_INACTIVE_CRON,
@@ -29,7 +29,7 @@ import {
 
 /**
  * Issue 108 — BusinessSweepSchedulerService. The business-facing periodic loops (verification,
- * intraday acceptance-timeout, cross-zone auto-escalation, install verification, repeat escalation,
+ * the CRITICAL direct-assign sweep, cross-zone auto-escalation, install verification, repeat escalation,
  * and the report cubes) shipped as on-demand HTTP-triggered workers with "cron deferred". This
  * scheduler mirrors IntegrationSchedulerService (Issue 97): env-gated master switch
  * (`BUSINESS_SWEEPS_ENABLED`, default OFF), one `@Cron` handler per sweep, a tick that NEVER throws
@@ -41,7 +41,7 @@ import {
 /** All 11 sweep collaborators as vi.fn() stubs — every method returns a benign shape. */
 const makeSweeps = () => ({
   verification: { runVerification: vi.fn(async () => ({ closed: 0, failed: 0, fraud: 0, pending: 0 })) },
-  intraday: { sweepTimeouts: vi.fn(async () => ({ timedOut: 0, rerouted: 0, escalated: 0 })) },
+  intraday: { assignCriticalForActiveZones: vi.fn(async () => ({ assigned: 0, escalated: 0 })) },
   crossZone: { sweepAutoEscalations: vi.fn(async () => ({ escalated: 0 })) },
   installLifecycle: { runInstallVerification: vi.fn(async () => ({ verified: 0, failed: 0, pending: 0 })) },
   repeatEscalation: { runEscalationScan: vi.fn(async () => ({ escalated: 0 })) },
@@ -79,7 +79,7 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
         enabled: false,
         verificationCron: DEFAULT_VERIFICATION_CRON,
         installVerificationCron: DEFAULT_INSTALL_VERIFICATION_CRON,
-        intradayTimeoutCron: DEFAULT_INTRADAY_TIMEOUT_CRON,
+        criticalAssignCron: DEFAULT_CRITICAL_ASSIGN_CRON,
         crossZoneCron: DEFAULT_CROSS_ZONE_CRON,
         repeatEscalationCron: DEFAULT_REPEAT_ESCALATION_CRON,
         tierOverrideExpiryCron: DEFAULT_TIER_OVERRIDE_EXPIRY_CRON,
@@ -100,11 +100,11 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
     it('every cron is env-overridable', () => {
       const cfg = readBusinessSweepSchedulerConfig({
         BUSINESS_SWEEP_VERIFICATION_CRON: '*/7 * * * *',
-        BUSINESS_SWEEP_INTRADAY_TIMEOUT_CRON: '*/3 * * * *',
+        BUSINESS_SWEEP_CRITICAL_ASSIGN_CRON: '*/3 * * * *',
         BUSINESS_SWEEP_FLEET_UPTIME_CRON: '0 4 2 * *',
       });
       expect(cfg.verificationCron).toBe('*/7 * * * *');
-      expect(cfg.intradayTimeoutCron).toBe('*/3 * * * *');
+      expect(cfg.criticalAssignCron).toBe('*/3 * * * *');
       expect(cfg.fleetUptimeCron).toBe('0 4 2 * *');
       // untouched keys keep their defaults
       expect(cfg.crossZoneCron).toBe(DEFAULT_CROSS_ZONE_CRON);
@@ -265,7 +265,7 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
         for (const name of [
           'business-verification',
           'business-install-verification',
-          'business-intraday-timeout',
+          'business-critical-assign',
           'business-cross-zone',
           'business-repeat-escalation',
           'business-tier-override-expiry',

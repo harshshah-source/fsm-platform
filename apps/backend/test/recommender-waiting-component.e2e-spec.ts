@@ -213,29 +213,29 @@ describe('#177 — the recommender does not dispatch component-blocked tickets',
     expect(summary.unassignable).toBe(0);
   });
 
-  it('the intraday CRITICAL sweep does not offer a component-blocked ticket either', async () => {
+  it('the intraday CRITICAL direct-assign sweep does not assign a component-blocked ticket either', async () => {
     // Both tickets are CRITICAL, OPEN and UNASSIGNED, so both are exactly what this sweep exists to
-    // push out fast. The blocked one is the case where speed is the problem: an Accept/Decline lands
-    // on the SE's phone for a job whose part is still on order, and the fastest possible response is
-    // a wasted trip. `fireForZone` had no cycle filter at all — the same blind spot as the morning
-    // pool, reached by a different query.
-    const outcome = await intraday.fireForZone(zoneId, NOW);
+    // push out fast. The blocked one is the case where speed is the problem: a direct assignment lands
+    // on the SE's Day Plan for a job whose part is still on order, and the fastest possible dispatch is
+    // a wasted trip. `assignCriticalForZone` had no cycle filter at all — the same blind spot as the
+    // morning pool, reached by a different query.
+    const outcome = await intraday.assignCriticalForZone(zoneId, NOW);
 
-    const offeredTickets = await prisma.intradayInsertion.findMany({
+    const assignedTickets = await prisma.intradayInsertion.findMany({
       where: { ticketId: { in: ticketIds } },
       select: { ticketId: true },
     });
-    const offered = offeredTickets.map((i) => i.ticketId);
+    const touched = assignedTickets.map((i) => i.ticketId);
 
-    expect(offered).toContain(tOpen);
-    expect(offered).not.toContain(tBlocked);
+    expect(touched).toContain(tOpen);
+    expect(touched).not.toContain(tBlocked);
 
-    // `skipped` means "no available candidate" — the ZM Grouped Critical Queue picks those up. A
-    // blocked ticket must not land there either: it is not an Ops coverage problem to be solved by
-    // finding somebody, it is work that is correctly waiting. Excluded from the read, so neither
+    // `escalated` means "no capacity-eligible candidate" — the ZM Grouped Critical Queue picks those
+    // up. A blocked ticket must not land there either: it is not an Ops coverage problem to be solved
+    // by finding somebody, it is work that is correctly waiting. Excluded from the read, so neither
     // counter moves for it.
-    expect(outcome.offered).toBe(1);
-    expect(outcome.skipped).toBe(0);
+    expect(outcome.assigned).toBe(1);
+    expect(outcome.escalated).toBe(0);
   });
 
   it('AC-3 — the run ledger reports the withheld work instead of swallowing it', async () => {

@@ -235,7 +235,10 @@ describe('TicketsScreen', () => {
       mockApiGetMyTickets.mockResolvedValue({
         items: [
           row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' }),
-          row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B' }),
+          // Non-critical bucket, deliberately: this test is about the GENERIC "Newly Added" label,
+          // which the #268 rewrite of `badgeFor` now derives from the bucket (see the describe block
+          // below) — a CRITICAL/HIGH_CRITICAL default here would silently test the other label instead.
+          row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B', slaBucket: 'WARNING' }),
         ],
         cursor: null,
       });
@@ -270,8 +273,8 @@ describe('TicketsScreen', () => {
     });
   });
 
-  describe('#77 — CRITICAL INSERTION badge override', () => {
-    it('badges the justAcceptedTicketId row CRITICAL INSERTION instead of the generic Newly Added label', async () => {
+  describe('#268 — CRITICAL INSERTION badge, derived from the ticket\'s own SLA bucket', () => {
+    it('badges a newly-added CRITICAL/HIGH_CRITICAL ticket CRITICAL INSERTION instead of the generic Newly Added label', async () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetConnectivityState.mockResolvedValue('online');
       mockApiGetMyTickets.mockResolvedValue({
@@ -285,18 +288,20 @@ describe('TicketsScreen', () => {
       mockApiGetMyTickets.mockResolvedValue({
         items: [
           row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' }),
+          // row()'s default slaBucket is HIGH_CRITICAL — the same bucket that made this ticket
+          // eligible for the backend's direct-assign sweep in the first place (#268's TRIGGER_BUCKETS).
           row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B' }),
         ],
         cursor: null,
       });
-      render(<TicketsScreen justAcceptedTicketId="b" />);
+      render(<TicketsScreen />);
 
       await waitFor(() => expect(screen.getByText('V-B')).toBeTruthy());
       expect(screen.getByText('CRITICAL INSERTION')).toBeTruthy();
       expect(screen.queryByText('Newly Added')).toBeNull();
     });
 
-    it('does not badge anything CRITICAL INSERTION when justAcceptedTicketId is not given', async () => {
+    it('does not badge CRITICAL INSERTION on first load, even for a CRITICAL/HIGH_CRITICAL ticket — nothing is "newly added" without a prior fetch to diff against', async () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetConnectivityState.mockResolvedValue('online');
       mockApiGetMyTickets.mockResolvedValue({

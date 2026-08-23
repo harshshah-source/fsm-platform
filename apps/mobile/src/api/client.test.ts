@@ -14,14 +14,11 @@ import type {
   VerificationView,
 } from '@fsm/shared';
 import {
-  apiAcceptIntradayInsertion,
   apiConfirmReceipt,
   apiCreateVoucher,
-  apiDeclineIntradayInsertion,
   apiGetDayPlan,
   apiGetMyComponentRequests,
   apiGetMyAvailability,
-  apiGetMyIntradayOffers,
   apiGetMyLeaveRequests,
   apiGetMyTickets,
   apiGetMyVouchers,
@@ -765,76 +762,10 @@ describe('#71 — install action endpoints', () => {
   });
 });
 
-describe('#77 — intraday insertion endpoints', () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('apiGetMyIntradayOffers GETs /me/intraday-insertions with a Bearer token', async () => {
-    keychain.getGenericPassword.mockResolvedValue(false);
-    const fetchMock = installFetchMock();
-    const view = { items: [], cursor: null };
-    fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
-
-    const result = await apiGetMyIntradayOffers('token');
-
-    expect(result).toEqual(view);
-    const [url] = fetchMock.mock.calls[0];
-    expect(String(url)).toMatch(/\/me\/intraday-insertions$/);
-  });
-
-  it('apiAcceptIntradayInsertion POSTs to /intraday-insertions/:id/accept with no body', async () => {
-    keychain.getGenericPassword.mockResolvedValue(false);
-    const fetchMock = installFetchMock();
-    const response = { result: 'OK', insertionId: 'i-1', scheduleId: 's-1', batchId: 'b-1', ticketId: 't-1', seId: 'se-1' };
-    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
-
-    const result = await apiAcceptIntradayInsertion('token', 'i-1');
-
-    expect(result).toEqual(response);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toMatch(/\/intraday-insertions\/i-1\/accept$/);
-    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({}) });
-  });
-
-  it('apiAcceptIntradayInsertion throws INSERTION_NOT_PENDING verbatim on a 409', async () => {
-    keychain.getGenericPassword.mockResolvedValue(false);
-    installFetchMock().mockResolvedValue({
-      ok: false,
-      status: 409,
-      json: async () => ({ code: 'INSERTION_NOT_PENDING', status: 'ACCEPTED' }),
-    } as unknown as Response);
-
-    await expect(apiAcceptIntradayInsertion('token', 'i-1')).rejects.toThrow('INSERTION_NOT_PENDING');
-  });
-
-  it('apiDeclineIntradayInsertion POSTs the reason code to /intraday-insertions/:id/decline', async () => {
-    keychain.getGenericPassword.mockResolvedValue(false);
-    const fetchMock = installFetchMock();
-    const response = { result: 'OK', status: 'PENDING_ACCEPTANCE', nextSeId: 'se-2' };
-    fetchMock.mockResolvedValue({ ok: true, json: async () => response } as unknown as Response);
-
-    const result = await apiDeclineIntradayInsertion('token', 'i-1', { reasonCode: 'AT_CAPACITY' });
-
-    expect(result).toEqual(response);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toMatch(/\/intraday-insertions\/i-1\/decline$/);
-    expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ reasonCode: 'AT_CAPACITY' }) });
-  });
-
-  it('apiDeclineIntradayInsertion throws INVALID_REASON_CODE verbatim on a 400', async () => {
-    keychain.getGenericPassword.mockResolvedValue(false);
-    installFetchMock().mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: async () => ({ code: 'INVALID_REASON_CODE' }),
-    } as unknown as Response);
-
-    await expect(
-      apiDeclineIntradayInsertion('token', 'i-1', { reasonCode: 'OTHER' }),
-    ).rejects.toThrow('INVALID_REASON_CODE');
-  });
-});
+// #268 — the "#77 — intraday insertion endpoints" describe block (apiGetMyIntradayOffers,
+// apiAcceptIntradayInsertion, apiDeclineIntradayInsertion) is retired with the backend routes it
+// pinned: GET /me/intraday-insertions, POST /intraday-insertions/:id/accept and .../decline all now
+// 404 (#169). SE Acceptance no longer exists on the CRITICAL path (#258 Q3).
 
 describe('#77 — notifications endpoints', () => {
   afterEach(() => {

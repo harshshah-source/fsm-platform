@@ -174,3 +174,24 @@ fleet, not an OTA push. The surviving mitigations are exactly this issue's remai
 vocabularies, the 8 by-omission routes) plus #170's `X-App-Version` floor — the floor can *refuse* a
 stale client, but only this issue's work prevents shipping a wrong shape in the first place.
 **Treat the remaining items as pilot-gating, not P0-in-name-only.**
+
+### 2026-08-24 — #268 removes four SE-facing routes (recorded per this issue's own process)
+
+`#268` (CRITICAL direct assignment, #258 Q3) retires SE Acceptance from the intra-day CRITICAL path
+entirely. Four routes this issue's contract would otherwise track are **removed, not versioned**:
+`GET /api/me/intraday-insertions`, `POST /api/intraday-insertions/:id/accept`, `.../decline`,
+`POST /api/intraday-insertions/sweep-timeouts` — all now 404. The corresponding `@fsm/shared` types
+(`IntradayInsertionOffer`, `MyIntradayOffersView`, `DeclineIntradayInsertionRequest`,
+`AcceptIntradayInsertionResponse`, `DeclineIntradayInsertionResponse`, `IntradayDeclineReasonCode`,
+`INTRADAY_DECLINE_REASON_CODES`) are deleted, with zero remaining references confirmed by grep across
+the monorepo before deletion. `POST /api/intraday-insertions/fire` (the manual sweep trigger) and
+`GET /api/intraday-insertions` (the manager queue read) are unaffected — they survive with a changed
+response/row shape (`{assigned, escalated}`, `ASSIGNED_DIRECT`/`ESCALATION_REQUIRED` status values),
+not a removal.
+
+This is a genuine breaking removal, made acceptable by the same reasoning #268 itself gives: the
+pilot is not live (#197/#209 open), so there is no shipped client depending on the four routes. The
+mobile-side retirement (screen, client functions, `SeTabShell`'s offer gate) is filed as its own
+record: **[#279](./279-retire-intraday-offer-accept-mobile.md)**, done in the same change as #268 per
+its "ship together" sequencing rule. Nothing here changes this issue's own remaining scope (items
+1, 2, 4–8) — recorded per this issue's stated process for a contract removal, not as new work.

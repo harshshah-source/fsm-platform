@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '../src/audit/audit.service';
 import { SeAvailabilityService } from '../src/engineers/se-availability.service';
-import { ACCEPTANCE_TIMEOUT_MIN, IntradayInsertionService } from '../src/intraday/intraday-insertion.service';
+import { IntradayInsertionService } from '../src/intraday/intraday-insertion.service';
 import { NotificationService } from '../src/notifications/notification.service';
 import { alwaysClaims } from './support/tick-claims';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -21,17 +21,16 @@ import type { RepeatEscalationService } from '../src/ticketing/repeat-escalation
 import type { VerificationService } from '../src/verification/verification.service';
 
 /**
- * Issue 108 AC#5(a) — the regression the whole scheduler exists for: an intra-day CRITICAL offer is
- * created, the clock advances past ACCEPTANCE_TIMEOUT_MIN, and a SCHEDULER TICK (not the
- * `POST /api/intraday-insertions/sweep-timeouts` controller) reroutes the offer to the next-best SE.
- * The scheduler wraps the real IntradayInsertionService; the other nine sweeps are unused stubs.
+ * Issue 108 AC#5(a), updated for #268 — the regression the whole scheduler exists for: a newly-CRITICAL
+ * ticket is created, and a SCHEDULER TICK (not the retired `POST /api/intraday-insertions/sweep-timeouts`
+ * controller — that route is gone with the offer machinery) direct-assigns it. The scheduler wraps the
+ * real `IntradayInsertionService`; the other ten sweeps are unused stubs.
  */
 const NS = Date.now();
 const BASE = new Date('2026-06-28T06:00:00Z');
-const afterDeadline = (offeredAt: Date) => new Date(offeredAt.getTime() + (ACCEPTANCE_TIMEOUT_MIN + 1) * 60_000);
 const unused = <T>() => ({}) as unknown as T;
 
-describe('Issue 108 AC#5(a) — intraday acceptance-timeout runs on the scheduler tick', () => {
+describe('Issue 108 AC#5(a) — CRITICAL direct-assign runs on the scheduler tick', () => {
   let prisma: PrismaService;
   let intraday: IntradayInsertionService;
   let scheduler: BusinessSweepSchedulerService;
@@ -121,6 +120,14 @@ describe('Issue 108 AC#5(a) — intraday acceptance-timeout runs on the schedule
 
   afterAll(async () => {
     await prisma.intradayInsertion.deleteMany({ where: { zoneId } });
+    const schedules = await prisma.workSchedule.findMany({ where: { zoneId }, select: { scheduleId: true } });
+    const batches = await prisma.plantBatchAssignment.findMany({
+      where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } },
+      select: { batchId: true },
+    });
+    await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
+    await prisma.plantBatchAssignment.deleteMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } } });
+    await prisma.workSchedule.deleteMany({ where: { zoneId } });
     await prisma.notification.deleteMany({ where: { recipientUserId: { in: userIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: { in: ['intraday_insertion', 'ticket'] }, entityId: { in: [...ticketIds] } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
@@ -138,25 +145,21 @@ describe('Issue 108 AC#5(a) — intraday acceptance-timeout runs on the schedule
     await prisma.onModuleDestroy();
   });
 
-  it('offer past its acceptance deadline is rerouted to the next-best SE when the scheduler tick fires', async () => {
+  it('a newly-CRITICAL ticket is assigned directly when the scheduler tick fires', async () => {
     const ticketId = await makeCriticalTicket();
-    await intraday.fireForZone(zoneId, BASE);
-    const ins = await latestInsertion(ticketId);
-    const firstOfferedTo = ins.offeredSeId;
-    expect(ins.status).toBe('PENDING_ACCEPTANCE');
 
-    // The scheduler tick drives the sweep with an injected clock past the deadline — no HTTP call.
-    const outcome = await scheduler.intradayTimeoutTick(afterDeadline(ins.offeredAt));
+    const outcome = await scheduler.criticalAssignTick(BASE);
     expect(outcome).toEqual({ ran: true });
 
-    const after = await prisma.intradayInsertion.findUniqueOrThrow({ where: { insertionId: ins.insertionId } });
-    expect(after.status).toBe('PENDING_ACCEPTANCE');
-    expect(after.offeredSeId).not.toBe(firstOfferedTo);
-    expect(after.retryCount).toBe(1);
-    expect((after.retryChain as Array<{ outcome: string }>)[0].outcome).toBe('TIMED_OUT');
+    const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
+    expect(ticket.assignmentState).toBe('FORMALLY_ASSIGNED');
+
+    const ins = await latestInsertion(ticketId);
+    expect(ins.status).toBe('ASSIGNED_DIRECT');
+    expect(ins.offeredSeId).not.toBeNull();
   });
 
-  it('is dormant when the master switch is off — a stale offer is left untouched', async () => {
+  it('is dormant when the master switch is off — an OPEN CRITICAL ticket is left untouched', async () => {
     const off = new BusinessSweepSchedulerService(
       unused<VerificationService>(), intraday, unused<CrossZoneEscalationService>(), unused<InstallLifecycleService>(),
       unused<RepeatEscalationService>(), unused<TierOverrideExpiryService>(), unused<SoftInactiveCountService>(),
@@ -165,13 +168,10 @@ describe('Issue 108 AC#5(a) — intraday acceptance-timeout runs on the schedule
       { enabled: false },
     );
     const ticketId = await makeCriticalTicket();
-    await intraday.fireForZone(zoneId, BASE);
-    const ins = await latestInsertion(ticketId);
 
-    expect(await off.intradayTimeoutTick(afterDeadline(ins.offeredAt))).toEqual({ ran: false, reason: 'DISABLED' });
+    expect(await off.criticalAssignTick(BASE)).toEqual({ ran: false, reason: 'DISABLED' });
 
-    const after = await prisma.intradayInsertion.findUniqueOrThrow({ where: { insertionId: ins.insertionId } });
-    expect(after.offeredSeId).toBe(ins.offeredSeId);
-    expect(after.retryCount).toBe(0);
+    const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
+    expect(ticket.assignmentState).toBe('UNASSIGNED');
   });
 });

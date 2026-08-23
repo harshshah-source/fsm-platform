@@ -45,23 +45,27 @@ function toCardData(row: MeTicketRow) {
   };
 }
 
-/** #77 — an intraday-CRITICAL-insertion-accepted ticket rides the existing #66 addedIds mechanism
- *  (it's newly `assigned:true` the moment it lands) but needs its own label, not the generic
- *  "Newly Added" — the caller (`SeTabShell`) passes the ticketId it just watched get accepted. */
-function badgeFor(ticketId: string, justAcceptedTicketId: string | null | undefined, addedIds: Set<string>) {
-  if (justAcceptedTicketId && ticketId === justAcceptedTicketId) return { label: 'CRITICAL INSERTION', status: 'critical' as const };
-  if (addedIds.has(ticketId)) return { label: 'Newly Added', status: 'info' as const };
-  return undefined;
-}
+/**
+ * #268 — a CRITICAL/HIGH_CRITICAL ticket the system just direct-assigned rides the existing #66
+ * `addedIds` mechanism (it's newly `assigned:true` the moment it lands) but earns its own label
+ * instead of the generic "Newly Added". Previously this was `SeTabShell` threading down the ticketId
+ * it had just watched an SE Accept; #268 retired that step, so the same distinction is now derived
+ * from data every row already carries — the ticket's own SLA bucket — rather than from a flag with
+ * no more source. Mirrors the backend's `TRIGGER_BUCKETS`
+ * (`intraday-insertion.service.ts`) — the same two buckets that make a ticket CRITICAL-path eligible.
+ */
+const CRITICAL_BUCKETS = new Set(['CRITICAL', 'HIGH_CRITICAL']);
 
-export interface TicketsScreenProps {
-  justAcceptedTicketId?: string | null;
+function badgeFor(slaBucket: string | null, addedIds: boolean) {
+  if (!addedIds) return undefined;
+  if (slaBucket !== null && CRITICAL_BUCKETS.has(slaBucket)) return { label: 'CRITICAL INSERTION', status: 'critical' as const };
+  return { label: 'Newly Added', status: 'info' as const };
 }
 
 /** #56 (M2) — per #172 Decision 3, one merged list grouped by urgency, no assigned/pool visual
  *  split. "Visit Now" = workState VISIT_NOW; "Other Tickets" = PLAN/IN_WORK/VERIFY. Row tap opens
  *  Ticket Detail (M3/#57) via local state, not a stack navigator — none wraps this tab yet. */
-export function TicketsScreen({ justAcceptedTicketId }: TicketsScreenProps = {}) {
+export function TicketsScreen() {
   const [state, setState] = useState<TicketsState>({ status: 'loading', items: [], offline: false, cues: NO_CUES });
   const [filter, setFilter] = useState<TicketFilter>('ALL');
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
@@ -153,7 +157,7 @@ export function TicketsScreen({ justAcceptedTicketId }: TicketsScreenProps = {})
                     key={row.ticketId}
                     ticket={toCardData(row)}
                     onPress={() => setSelectedTicketId(row.ticketId)}
-                    badge={badgeFor(row.ticketId, justAcceptedTicketId, state.cues.addedIds)}
+                    badge={badgeFor(row.slaBucket, state.cues.addedIds.has(row.ticketId))}
                   />
                 ))}
               </>
@@ -176,7 +180,7 @@ export function TicketsScreen({ justAcceptedTicketId }: TicketsScreenProps = {})
                     key={row.ticketId}
                     ticket={toCardData(row)}
                     onPress={() => setSelectedTicketId(row.ticketId)}
-                    badge={badgeFor(row.ticketId, justAcceptedTicketId, state.cues.addedIds)}
+                    badge={badgeFor(row.slaBucket, state.cues.addedIds.has(row.ticketId))}
                   />
                 ))}
               </>

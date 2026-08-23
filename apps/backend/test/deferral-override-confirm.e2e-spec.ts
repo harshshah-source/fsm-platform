@@ -225,15 +225,16 @@ describe('#249 — explicit override of a return-date deferral', () => {
   });
 
   /**
-   * AC1 — the branch is unreachable from the intraday accept path, pinned rather than assumed.
+   * AC1 — the branch is unreachable from the intraday direct-assign path, pinned rather than assumed.
    *
-   * `fireForZone` selects with `notDeferredOn` (`intraday-insertion.service.ts:107`), so a deferred
-   * ticket is never offered and therefore never accepted. That is a property of a *different* file,
-   * which is exactly why it is asserted here: the accept path calls `assignTicket` with no deferral
-   * argument, so if the sweep ever stopped spreading the predicate, the accept would start failing
-   * silently with CONFLICT_DEFERRED and nothing else would notice.
+   * `IntradayInsertionService.assignCriticalForZone` selects with `notDeferredOn`
+   * (`intraday-insertion.service.ts`), so a deferred ticket is never even considered — #268's own AC
+   * ("a deferred CRITICAL ticket is never system-assigned"). That is a property of a *different* file,
+   * which is exactly why it is asserted here: the direct-assign path calls `assignTicket` with no
+   * deferral override, so if the sweep ever stopped spreading the predicate, the assignment would start
+   * failing silently with CONFLICT_DEFERRED and nothing else would notice.
    */
-  it('AC1 — the intraday sweep never offers a deferred ticket, so its accept cannot reach the branch', async () => {
+  it('AC1 — the intraday sweep never selects a deferred ticket, so its direct-assign cannot reach the branch', async () => {
     const deferred = await makeTicket(FUTURE);
     const open = await makeTicket(null);
     const offered = await prisma.ticket.findMany({

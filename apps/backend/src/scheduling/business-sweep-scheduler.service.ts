@@ -18,8 +18,8 @@ import { VerificationService } from '../verification/verification.service';
  * overridable by the matching `BUSINESS_SWEEP_*_CRON` env var. Cadence rationale:
  *   - verification / install-verification: minutes-scale — a VERIFICATION_PENDING ticket must resolve
  *     quickly; a 5-min lag is invisible to the field.
- *   - intraday timeouts: 2-min — the Issue 30 contract is a 10-min acceptance window, so sub-window
- *     granularity keeps reroute latency small.
+ *   - critical-assign: 2-min — #268's direct-assignment sweep; sub-5-min so a newly-CRITICAL ticket
+ *     is on an SE's Day Plan within minutes, not the verification sweep's cadence.
  *   - cross-zone / repeat escalation: ~15-min — SLA-breach detection, not real-time.
  *   - tier-override-expiry (Issue 157): hourly — status truthfulness for the report/audit trail
  *     only, never for correctness (the effective-tier resolver predicates on `expiresAt`, not
@@ -39,7 +39,7 @@ import { VerificationService } from '../verification/verification.service';
 export const BUSINESS_SWEEP_JOBS = {
   verification: 'business-verification',
   installVerification: 'business-install-verification',
-  intradayTimeout: 'business-intraday-timeout',
+  criticalAssign: 'business-critical-assign',
   crossZone: 'business-cross-zone',
   repeatEscalation: 'business-repeat-escalation',
   tierOverrideExpiry: 'business-tier-override-expiry',
@@ -52,7 +52,7 @@ export const BUSINESS_SWEEP_JOBS = {
 
 export const DEFAULT_VERIFICATION_CRON = '*/5 * * * *';
 export const DEFAULT_INSTALL_VERIFICATION_CRON = '*/5 * * * *';
-export const DEFAULT_INTRADAY_TIMEOUT_CRON = '*/2 * * * *';
+export const DEFAULT_CRITICAL_ASSIGN_CRON = '*/2 * * * *';
 export const DEFAULT_CROSS_ZONE_CRON = '*/15 * * * *';
 export const DEFAULT_REPEAT_ESCALATION_CRON = '*/15 * * * *';
 export const DEFAULT_TIER_OVERRIDE_EXPIRY_CRON = '0 * * * *';
@@ -67,7 +67,7 @@ export interface BusinessSweepSchedulerConfig {
   enabled: boolean;
   verificationCron: string;
   installVerificationCron: string;
-  intradayTimeoutCron: string;
+  criticalAssignCron: string;
   crossZoneCron: string;
   repeatEscalationCron: string;
   tierOverrideExpiryCron: string;
@@ -86,7 +86,7 @@ export function readBusinessSweepSchedulerConfig(
     enabled: env.BUSINESS_SWEEPS_ENABLED === 'true',
     verificationCron: env.BUSINESS_SWEEP_VERIFICATION_CRON?.trim() || DEFAULT_VERIFICATION_CRON,
     installVerificationCron: env.BUSINESS_SWEEP_INSTALL_VERIFICATION_CRON?.trim() || DEFAULT_INSTALL_VERIFICATION_CRON,
-    intradayTimeoutCron: env.BUSINESS_SWEEP_INTRADAY_TIMEOUT_CRON?.trim() || DEFAULT_INTRADAY_TIMEOUT_CRON,
+    criticalAssignCron: env.BUSINESS_SWEEP_CRITICAL_ASSIGN_CRON?.trim() || DEFAULT_CRITICAL_ASSIGN_CRON,
     crossZoneCron: env.BUSINESS_SWEEP_CROSS_ZONE_CRON?.trim() || DEFAULT_CROSS_ZONE_CRON,
     repeatEscalationCron: env.BUSINESS_SWEEP_REPEAT_ESCALATION_CRON?.trim() || DEFAULT_REPEAT_ESCALATION_CRON,
     tierOverrideExpiryCron: env.BUSINESS_SWEEP_TIER_OVERRIDE_EXPIRY_CRON?.trim() || DEFAULT_TIER_OVERRIDE_EXPIRY_CRON,
@@ -121,7 +121,7 @@ function previousUtcDayStart(now: Date): Date {
 
 /**
  * Issue 108 — in-process `@nestjs/schedule` scheduler for the business-facing periodic loops
- * (verification, intraday acceptance-timeout, cross-zone auto-escalation, install verification,
+ * (verification, the CRITICAL direct-assign sweep, cross-zone auto-escalation, install verification,
  * repeat escalation, the Issue 157 tier-override expiry sweep, and the report cubes). Mirrors
  * {@link IntegrationSchedulerService}: the master
  * switch (`BUSINESS_SWEEPS_ENABLED`) is re-checked on every tick, each handler returns a structured
@@ -208,9 +208,11 @@ export class BusinessSweepSchedulerService {
     return this.runGuarded(BUSINESS_SWEEP_JOBS.installVerification, now, () => this.installLifecycle.runInstallVerification(now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().intradayTimeoutCron, { name: BUSINESS_SWEEP_JOBS.intradayTimeout })
-  intradayTimeoutTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded(BUSINESS_SWEEP_JOBS.intradayTimeout, now, () => this.intraday.sweepTimeouts(now));
+  @Cron(readBusinessSweepSchedulerConfig().criticalAssignCron, { name: BUSINESS_SWEEP_JOBS.criticalAssign })
+  criticalAssignTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
+    // #268 — renamed from `intradayTimeoutTick`: the offer/timeout machinery this drove is retired,
+    // and the tick now direct-assigns CRITICAL/HIGH_CRITICAL tickets across every active zone.
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.criticalAssign, now, () => this.intraday.assignCriticalForActiveZones(now));
   }
 
   @Cron(readBusinessSweepSchedulerConfig().crossZoneCron, { name: BUSINESS_SWEEP_JOBS.crossZone })

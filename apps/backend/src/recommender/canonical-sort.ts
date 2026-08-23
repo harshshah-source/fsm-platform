@@ -65,6 +65,18 @@ const tierRank = (t: CompanyTier): number => TIER_ORDER.indexOf(t);
 // a real test failure, not two copies of the same literal (Issue 157 AC-1 spec-pin).
 export const TIER_ORDER_EFFECTIVE_PRIORITY_DESC: CompanyTier[] = [...TIER_ORDER].reverse();
 const bucketRank = (b: DeviceBucket): number => BUCKET_ORDER.indexOf(b);
+
+/**
+ * Device-bucket → dispatch urgency (0..1), monotonic in severity. Shared by `RecommenderService`
+ * (scoring the morning batch's `dispatchUrgency` feature) and #268's intraday direct-assign, which
+ * scores CRITICAL/HIGH_CRITICAL tickets through the identical scoring path and must derive urgency the
+ * identical way. Derived from `BUCKET_ORDER` above rather than a second literal array, for the same
+ * reason `TIER_ORDER_EFFECTIVE_PRIORITY_DESC` is derived from `TIER_ORDER`: a drift between two copies
+ * of "bucket severity order" would be silent everywhere except a score.
+ */
+export function urgencyFromBucket(b: DeviceBucket): number {
+  return bucketRank(b) / (BUCKET_ORDER.length - 1);
+}
 // A device with no GPS timestamp sorts last among "oldest inactive" ties (treated as newest).
 const inactiveKey = (d: Date | null): number => (d === null ? Number.POSITIVE_INFINITY : d.getTime());
 

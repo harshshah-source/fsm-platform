@@ -23,7 +23,7 @@ describe('Issue 108 — BusinessSweepSchedulerModule boots and registers every c
       for (const name of [
         'business-verification',
         'business-install-verification',
-        'business-intraday-timeout',
+        'business-critical-assign',
         'business-cross-zone',
         'business-repeat-escalation',
         'business-tier-override-expiry',

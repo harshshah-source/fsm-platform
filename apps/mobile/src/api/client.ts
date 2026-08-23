@@ -1,13 +1,10 @@
 import Constants from 'expo-constants';
 import type {
-  AcceptIntradayInsertionResponse,
   ConfirmReceiptConflictBody,
   ConfirmReceiptResponse,
   CreateVoucherRequest,
   CreateVoucherResponse,
   DayPlanView,
-  DeclineIntradayInsertionRequest,
-  DeclineIntradayInsertionResponse,
   FileVehicleUnavailabilityRequest,
   InstallActionResponse,
   LoginRequest,
@@ -23,7 +20,6 @@ import type {
   MeVouchersView,
   MeWorkHistoryView,
   MyAvailabilityView,
-  MyIntradayOffersView,
   MyLeaveRequestsView,
   NotificationList,
   RecoveryActionResponse,
@@ -422,40 +418,10 @@ export async function apiInstallFitted(
   return installPost(accessToken, ticketId, 'fitted', body);
 }
 
-export async function apiGetMyIntradayOffers(accessToken: string): Promise<MyIntradayOffersView> {
-  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });
-  const res = await fetch(`${BASE_URL}/me/intraday-insertions`, { headers });
-  if (!res.ok) {
-    throw new Error('UNAUTHORIZED');
-  }
-  return (await res.json()) as MyIntradayOffersView;
-}
-
-async function intradayPost(accessToken: string, insertionId: string, action: string, body?: object): Promise<unknown> {
-  const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' });
-  const res = await fetch(`${BASE_URL}/intraday-insertions/${insertionId}/${action}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body ?? {}),
-  });
-  if (!res.ok) {
-    const { code } = (await res.json()) as { code: string };
-    throw new Error(code);
-  }
-  return res.json();
-}
-
-export async function apiAcceptIntradayInsertion(accessToken: string, insertionId: string): Promise<AcceptIntradayInsertionResponse> {
-  return intradayPost(accessToken, insertionId, 'accept') as Promise<AcceptIntradayInsertionResponse>;
-}
-
-export async function apiDeclineIntradayInsertion(
-  accessToken: string,
-  insertionId: string,
-  body: DeclineIntradayInsertionRequest,
-): Promise<DeclineIntradayInsertionResponse> {
-  return intradayPost(accessToken, insertionId, 'decline', body) as Promise<DeclineIntradayInsertionResponse>;
-}
+// #268 — `apiGetMyIntradayOffers`, `apiAcceptIntradayInsertion`, `apiDeclineIntradayInsertion` and the
+// `intradayPost` helper they shared are retired with the backend endpoints they called
+// (`GET /me/intraday-insertions`, `POST /intraday-insertions/:id/accept`, `.../decline` — all now 404,
+// #169). SE Acceptance no longer exists on the CRITICAL path (#258 Q3): a ticket is assigned directly.
 
 export async function apiGetNotifications(accessToken: string, opts: { unreadOnly?: boolean } = {}): Promise<NotificationList> {
   const headers = await buildHeaders({ Authorization: `Bearer ${accessToken}` });

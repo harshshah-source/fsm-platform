@@ -4,8 +4,10 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 
 /**
- * Issues 29/30 — the `/api/intraday-insertions/*` HTTP surface (RBAC + routing + input validation). The
- * accept/decline/reroute behaviours themselves are covered by the IntradayInsertionService e2e spec.
+ * Issues 29/30, retired to direct-assignment by #268 — the `/api/intraday-insertions/*` HTTP surface
+ * (RBAC + routing + input validation). The direct-assign/escalation behaviour itself is covered by the
+ * `IntradayInsertionService` e2e spec. `accept`/`decline`/`sweep-timeouts` are retired with the offer
+ * machinery they served and must 404 (#268 AC: "retired endpoints return 404").
  */
 describe('/api/intraday-insertions (e2e)', () => {
   let app: INestApplication;
@@ -46,15 +48,25 @@ describe('/api/intraday-insertions (e2e)', () => {
       .expect(403);
   });
 
-  it('forbids a manager from accepting (SE-only action)', async () => {
-    const token = await login('zm.north@fsm.test');
+  it('forbids an SE from triggering the manual sweep (manager-only)', async () => {
+    const token = await login('se.north@fsm.test');
     await request(app.getHttpServer())
-      .post('/api/intraday-insertions/999999999/accept')
+      .post('/api/intraday-insertions/fire')
       .set('Authorization', `Bearer ${token}`)
       .expect(403);
   });
 
-  it('404s an SE accept on an unknown insertion', async () => {
+  it('lets a ZM trigger the manual sweep for their own zone with no body', async () => {
+    const token = await login('zm.north@fsm.test');
+    const res = await request(app.getHttpServer())
+      .post('/api/intraday-insertions/fire')
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(200);
+    expect(res.body).toEqual({ assigned: expect.any(Number), escalated: expect.any(Number) });
+  });
+
+  it('404s the retired accept endpoint — the offer machinery it served is gone', async () => {
     const token = await login('se.north@fsm.test');
     await request(app.getHttpServer())
       .post('/api/intraday-insertions/999999999/accept')
@@ -62,22 +74,29 @@ describe('/api/intraday-insertions (e2e)', () => {
       .expect(404);
   });
 
-  it('400s a decline with a missing reason code', async () => {
+  it('404s the retired decline endpoint', async () => {
     const token = await login('se.north@fsm.test');
     await request(app.getHttpServer())
       .post('/api/intraday-insertions/999999999/decline')
       .set('Authorization', `Bearer ${token}`)
-      .send({})
-      .expect(400);
+      .send({ reasonCode: 'AT_CAPACITY' })
+      .expect(404);
   });
 
-  it('400s a decline with an invalid reason code', async () => {
+  it('404s the retired sweep-timeouts endpoint', async () => {
+    const token = await login('zm.north@fsm.test');
+    await request(app.getHttpServer())
+      .post('/api/intraday-insertions/sweep-timeouts')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
+  });
+
+  it('404s the retired /me/intraday-insertions endpoint — the SE never had an offer to poll for', async () => {
     const token = await login('se.north@fsm.test');
     await request(app.getHttpServer())
-      .post('/api/intraday-insertions/999999999/decline')
+      .get('/api/me/intraday-insertions')
       .set('Authorization', `Bearer ${token}`)
-      .send({ reasonCode: 'NOT_A_CODE' })
-      .expect(400);
+      .expect(404);
   });
 
   it('rejects an unauthenticated request', async () => {

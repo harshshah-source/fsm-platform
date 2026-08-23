@@ -121,6 +121,16 @@ export class SystemEfficiencyAggregationService {
         GROUP BY p.zone_id, t.company_id, t.plant_id, dv.device_type, r.se_id`);
 
       // 6) Manual assignments — one-click / same-day / cross-zone assignment audit rows (entity = ticket).
+      //
+      // #268 — `actor_role != 'SYSTEM'` is new. Before #268, every `CRITICAL_ASSIGN` audit row was a
+      // human action (the SE's one-tap Accept, or a ZM's escalation-queue manual assign), so the label
+      // "manual" was simply true of the whole set. #268's direct-assign sweep now writes `CRITICAL_ASSIGN`
+      // rows too — the issue's own instruction, so the same discipline as the morning batch's audit
+      // vocabulary — but with a SYSTEM actor, and an automatic assignment counted as "manual" is exactly
+      // the silent metric corruption `auto_escalations`' continuity requirement (this same issue) exists
+      // to prevent for the sibling figure. Automatic CRITICAL_ASSIGN rows belong nowhere in this cube
+      // today (there is no `auto_assignments`-equivalent bucket for the intraday path yet); excluding
+      // them is the correct fix, not a reason to invent one this issue never asked for.
       await tx.$executeRaw(Prisma.sql`
         INSERT INTO system_efficiency_summary_daily
           (day, zone_id, company_id, plant_id, device_type, manual_assignments, computed_at)
@@ -132,6 +142,7 @@ export class SystemEfficiencyAggregationService {
         WHERE al.created_at >= ${dayStart} AND al.created_at < ${dayEnd}
           AND al.entity_type = 'ticket'
           AND al.action IN ('CRITICAL_ASSIGN', 'MANUAL_ZM_UPDATE', 'CROSS_ZONE_ASSIGN')
+          AND al.actor_role != 'SYSTEM'
         GROUP BY p.zone_id, t.company_id, t.plant_id, dv.device_type`);
 
       // 7) Overrides — batch-override audit rows (entity = plant_batch_assignment), attributed to the SE.

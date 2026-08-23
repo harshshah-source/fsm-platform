@@ -12,8 +12,8 @@ jest.mock('./AuthProvider', () => ({ useAuth: jest.fn() }));
 jest.mock('../api/connectivity', () => ({
   getConnectivityState: jest.fn<() => Promise<'online' | 'offline'>>().mockResolvedValue('offline'),
 }));
-// #77 — SeTabShell's one-time intraday-offer/ghost-toast check on mount. No token here, so it
-// short-circuits before touching the client — see SeTabShell's own test file for that behavior.
+// TicketsScreen/HomeScreen read the access token on mount for their own data fetches. No token
+// here, so both short-circuit before touching the client.
 jest.mock('../auth/tokenStore', () => ({ getAccessToken: jest.fn<() => Promise<string | null>>().mockResolvedValue(null) }));
 
 const mockUseAuth = jest.mocked(useAuth);

@@ -16,34 +16,32 @@ import {
 import { notDeferredOn, returnDateArrivedBefore } from '../ticketing/deferral';
 import { componentBlockedTickets, notComponentBlocked } from '../ticketing/component-blocked';
 import { CandidateSelectionService, type CoverageType } from './candidate-selection.service';
-import { type CandidateTicket, type CompanyTier, type DeviceBucket, canonicalSort, installSort } from './canonical-sort';
+import {
+  type CandidateTicket,
+  type CompanyTier,
+  type DeviceBucket,
+  canonicalSort,
+  installSort,
+  urgencyFromBucket,
+} from './canonical-sort';
 import { buildCandidateReadiness } from './candidate-readiness';
 import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
 import { type ScoringWeights, scoreCandidate } from './scoring';
+import { chooseWithinTier } from './tier-score-chooser';
+import {
+  PREVENTIVE_SUFFIX,
+  readBaseActiveWeights,
+  readEngineerCapacity,
+  readPlantClusterMultiplier,
+} from './scoring-config';
 
-const DEFAULT_CLUSTER_MULTIPLIER = 1.25;
-const DEFAULT_WEIGHT_SET = 'v1';
 /** Bounded trace: at most this many runners-up are recorded per ticket (drop COUNTS cover the rest). */
 const TRACE_RUNNERS_UP = 5;
 // PREVENTIVE-mode code defaults (Issue 72), used when no `<ref>_preventive` set is configured in
 // `priority_rule_config`. Repeat-failure flips from penalty to bonus and aged devices add — biasing the
 // planner toward repeat-offenders and aged devices (CONTEXT §5). Tunable via the DB set.
-const PREVENTIVE_SUFFIX = '_preventive';
 const PREVENTIVE_REPEAT_BONUS = 0.5;
 const PREVENTIVE_AGE_WEIGHT = 0.5;
-
-// Device-bucket → dispatch urgency (0..1), monotonic in severity.
-const BUCKET_SEVERITY: DeviceBucket[] = [
-  'WARNING',
-  'EARLY_RISK',
-  'RISK',
-  'CRITICAL',
-  'HIGH_CRITICAL',
-  'SEVERE',
-  'VERY_SEVERE',
-  'LONG_PENDING',
-];
-const urgencyFromBucket = (b: DeviceBucket): number => BUCKET_SEVERITY.indexOf(b) / (BUCKET_SEVERITY.length - 1);
 
 /** Why an unassignable ticket's candidate pool ended up empty (transparency trace). */
 export type PoolEmptyReason = 'NO_COVERAGE' | 'ALL_DROPPED';
@@ -562,13 +560,6 @@ export class RecommenderService {
       const planned = plannerByPlant.get(String(t.plantId));
       const ticketPlant = String(t.plantId);
 
-      // #266 step 1 — the WINNING TIER is the first non-empty tier in precedence order. `passed` is
-      // already in precedence order, so this is a scan, not a sort, and a lower tier is reached only
-      // when every higher-tier candidate was filtered out. A FLOATING SE can therefore never out-score
-      // an eligible DEDICATED one: the score is only ever consulted *within* one tier.
-      const winningTier = passed[0]?.coverageType ?? null;
-      const tierCandidates = passed.filter((c) => c.coverageType === winningTier);
-
       // #266 Q-A — the multiplier is per candidate, and means what its name says: does THIS engineer
       // already go to this plant today? (The old test asked whether ANY SE had been seeded at the
       // plant this run — one value applied to every candidate, so it cancelled out of every comparison
@@ -576,15 +567,11 @@ export class RecommenderService {
       const clusterFor = (seId: string): number =>
         plantsBySe.get(seId)?.has(ticketPlant) ? clusterMultiplier : 1;
 
-      // #266 step 2 — score every candidate in the winning tier. Note that `features` below is built
-      // from the TICKET, so `baseScore` is identical across these candidates and the cluster term is
-      // the only thing that separates them until #267 gives `distance` a real per-candidate value.
-      const tierScores = new Map<string, number>(
-        tierCandidates.map((c) => [c.seId, scoreCandidate(featuresFor(t), weights, clusterFor(c.seId)).score]),
-      );
-
-      // #266 step 3 — selection order, ratified: the SE Planner pin, then the winning tier, then score,
-      // then `se_id` ascending.
+      // #266/#268 — winning tier, within-tier score, pin-or-top-score selection: one shared
+      // implementation (`chooseWithinTier`), so the morning batch and the CRITICAL direct-assign sweep
+      // choose an SE by the identical discipline. `features` is built from the TICKET, so `baseScore`
+      // is identical across candidates and the cluster term is the only thing separating them until
+      // #267 gives `distance` a real per-candidate value.
       //
       // **The pin is searched across ALL passing candidates, not just the winning tier, and that is a
       // deliberate operator ruling rather than an oversight.** ADR-0022's bias has crossed tiers since
@@ -593,16 +580,11 @@ export class RecommenderService {
       // overriding a manager's explicit choice with an SE they did not name and giving them no signal
       // their pin was discarded. So Q1's "precedence is inviolable" binds the SCORE, which is all this
       // issue needed: a higher score can never cross a tier, while a human's pin still can.
-      const pinned = planned ? passed.find((c) => planned.has(c.seId)) : undefined;
-      const chosen =
-        pinned ??
-        [...tierCandidates].sort((a, b) => {
-          const byScore = (tierScores.get(b.seId) ?? 0) - (tierScores.get(a.seId) ?? 0);
-          // Ties break on `se_id` ascending — deterministic rather than "whatever the database
-          // returned first", which is what a run has to be if two runs on one fixture must agree.
-          return byScore !== 0 ? byScore : a.seId.localeCompare(b.seId);
-        })[0] ??
-        null;
+      const { chosen, winningTier, tierCandidates, tierScores } = chooseWithinTier({
+        passed,
+        scoreFor: (c) => scoreCandidate(featuresFor(t), weights, clusterFor(c.seId)).score,
+        pinnedSeIds: planned,
+      });
 
       const multiplier = chosen ? clusterFor(chosen.seId) : 1;
       // Retained for the trace/preview field of the same name, now with its Q-A meaning: this decision
@@ -1043,26 +1025,23 @@ export class RecommenderService {
    * penalty dropped, a repeat-failure **bonus** and a device-age term added (biasing repeat-offenders +
    * aged devices). The base/DEFICIT set is never mutated, so DEFICIT scoring is unchanged.
    */
+  /**
+   * #268 — the base/DEFICIT read is {@link readBaseActiveWeights}, shared with intraday direct-assign;
+   * this layers the PREVENTIVE-mode branch on top, which stays private to the morning batch (no other
+   * caller runs in PREVENTIVE mode).
+   */
   private async activeWeights(mode: RecommenderMode): Promise<{ weights: ScoringWeights; weightSetRef: string }> {
-    const active = await this.prisma.priorityRuleConfig.findMany({ where: { active: true }, orderBy: { id: 'asc' } });
-    const baseRef =
-      active.find((r) => r.component === 'company_priority_rank' && !r.weightSetRef.endsWith(PREVENTIVE_SUFFIX))?.weightSetRef ??
-      active.find((r) => !r.weightSetRef.endsWith(PREVENTIVE_SUFFIX))?.weightSetRef ??
-      DEFAULT_WEIGHT_SET;
-    const weightsFor = (ref: string): ScoringWeights => {
-      const w: ScoringWeights = {};
-      for (const r of active) if (r.weightSetRef === ref) w[r.component] = Number(r.weight);
-      return w;
-    };
-
-    if (mode !== 'PREVENTIVE') return { weights: weightsFor(baseRef), weightSetRef: baseRef };
+    const { weights: baseWeights, weightSetRef: baseRef } = await readBaseActiveWeights(this.prisma);
+    if (mode !== 'PREVENTIVE') return { weights: baseWeights, weightSetRef: baseRef };
 
     const preventiveRef = `${baseRef}${PREVENTIVE_SUFFIX}`;
-    const configured = weightsFor(preventiveRef);
+    const active = await this.prisma.priorityRuleConfig.findMany({ where: { active: true }, orderBy: { id: 'asc' } });
+    const configured: ScoringWeights = {};
+    for (const r of active) if (r.weightSetRef === preventiveRef) configured[r.component] = Number(r.weight);
     if (Object.keys(configured).length > 0) return { weights: configured, weightSetRef: preventiveRef };
 
     const weights: ScoringWeights = {
-      ...weightsFor(baseRef),
+      ...baseWeights,
       repeat_failure_penalty: 0,
       repeat_failure_bonus: PREVENTIVE_REPEAT_BONUS,
       device_age: PREVENTIVE_AGE_WEIGHT,
@@ -1070,17 +1049,12 @@ export class RecommenderService {
     return { weights, weightSetRef: preventiveRef };
   }
 
-  private async plantClusterMultiplier(): Promise<number> {
-    const row = await this.prisma.systemSetting.findUnique({ where: { key: 'plant_cluster_multiplier' } });
-    const v = Number(row?.value);
-    return Number.isFinite(v) && v > 0 ? v : DEFAULT_CLUSTER_MULTIPLIER;
+  private plantClusterMultiplier(): Promise<number> {
+    return readPlantClusterMultiplier(this.prisma);
   }
 
-  private async engineerCapacity(): Promise<Map<string, { dailyCapacity: number; isActive: boolean }>> {
-    const rows = await this.prisma.engineerMaster.findMany({
-      select: { engineerId: true, dailyCapacity: true, isActive: true },
-    });
-    return new Map(rows.map((r) => [r.engineerId, { dailyCapacity: r.dailyCapacity, isActive: r.isActive }]));
+  private engineerCapacity(): Promise<Map<string, { dailyCapacity: number; isActive: boolean }>> {
+    return readEngineerCapacity(this.prisma);
   }
 
   /**
