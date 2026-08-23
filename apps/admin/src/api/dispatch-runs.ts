@@ -16,7 +16,13 @@ async function get<T>(path: string): Promise<T> {
 }
 
 export type DispatchRunTrigger = 'CRON' | 'MANUAL';
-export type DispatchRunStatus = 'RUNNING' | 'SUCCESS' | 'PARTIAL' | 'FAILED';
+/**
+ * #261 — `ABORTED` is written only by the reaper: the run's process stopped existing, so nobody knows
+ * what it did. Kept distinct from FAILED, which is a statement about the WORK (every zone tried, every
+ * zone failed) — collapsing them would make "the dispatcher is broken" and "the box was restarted"
+ * the same row on this list.
+ */
+export type DispatchRunStatus = 'RUNNING' | 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'ABORTED';
 export type DispatchZoneMode = 'DEFICIT' | 'PREVENTIVE';
 export type PoolEmptyReason = 'NO_COVERAGE' | 'ALL_DROPPED';
 

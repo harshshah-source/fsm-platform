@@ -8,7 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RecommenderService, type RunSummary, type ZoneProjection } from '../recommender/recommender.service';
 import { SE_ASSIGNMENT_THRESHOLD_KEY } from '../settings/assignment-threshold';
 import { BatchAssignmentService, type DispatchSummary } from './batch-assignment.service';
-import { DISPATCH_CRON_SETTING_KEY, bootstrapDispatchCron } from './dispatch-cron';
+import { DISPATCH_CRON_SETTING_KEY, bootstrapDispatchCron, staleDispatchRunFilter } from './dispatch-cron';
 
 export interface DispatchRunError {
   zoneId: string;
@@ -119,6 +119,13 @@ export interface DispatchRunSummary {
  * is taken between that read and the insert, and rolling the transaction back is what keeps "409 with
  * zero rows" true in both.
  */
+/**
+ * Stamped on a claim the reaper freed (#261). A distinct sentence from the one
+ * {@link DispatchRunService.releaseStrandedClaims} writes, because the two are different events: that
+ * one means the run ended and forgot a zone, this one means nobody ended the run at all.
+ */
+export const ABANDONED_CLAIM_ERROR = 'ABANDONED — the run holding this zone stopped reporting';
+
 class AllZonesHeldError extends Error {
   /**
    * The holders are carried on the error rather than re-read after the rollback, because by then the
@@ -188,6 +195,12 @@ export class DispatchRunService {
     // concurrent admissions therefore take their claims in the same order and cannot deadlock on each
     // other's speculative inserts.
     const zoneIds = opts.zoneId != null ? [opts.zoneId] : await this.activeZoneIds();
+
+    // #261 — before asking who holds these zones, free the ones nobody is holding any more. Placed
+    // here rather than inside `admit` for the reason `snapshot-run.service.ts` puts it before its own
+    // guard: the pre-read in `admit` is what turns a held zone into a 409, and a reap that ran after it
+    // would answer with a refusal it had itself just made obsolete.
+    await this.reapStaleDispatchRuns(now);
 
     // #259 — admission is the database's answer now, not a private field's. See {@link admit}.
     const admission = await this.admit(now, opts, { trigger, zoneIds });
@@ -264,6 +277,9 @@ export class DispatchRunService {
             // is the empty string" — a stored '' would render as a present-but-useless note.
             reason: opts.reason?.trim() || null,
             startedAt: now,
+            // #261 — the opening beat. Without it the run is born silent and the reaper would judge its
+            // whole first window on `started_at`, which is the very thing the beat replaces.
+            heartbeatAt: now,
             configSnapshot,
             ...buildStampFields(),
           },
@@ -368,6 +384,61 @@ export class DispatchRunService {
       actor: r.actor_role ?? 'SYSTEM',
       runId: r.run_id.toString(),
     }));
+  }
+
+  /**
+   * Free the zones of runs whose process stopped existing (#261).
+   *
+   * This is the half {@link releaseStrandedClaims} cannot do. That runs in a `finally`, so it covers a
+   * run that throws, is cancelled, or otherwise *unwinds*. A process that is killed unwinds nothing: it
+   * leaves a RUNNING `dispatch_runs` row and RUNNING claims under it, and because #259 made the claim
+   * durable those claims now refuse their zones to every future run permanently. Nothing else in the
+   * system will ever close them.
+   *
+   * Two writes, deliberately in this order: the run first, then its claims. If the process running the
+   * reaper dies between them the claims are still RUNNING under an ABORTED run, which the next reap
+   * pass finds and finishes — whereas freeing the claims first would leave a RUNNING run holding
+   * nothing, which reads as a live run doing no work and is a state no later pass would correct.
+   *
+   * Both writes carry the status predicate for #265's reason: a write by primary key silently
+   * resurrects a state somebody else already closed. Here that somebody is a run that woke up and
+   * finalized itself in the gap, and overwriting its result would be the zombie-resurrect defect in
+   * reverse.
+   */
+  async reapStaleDispatchRuns(now: Date = new Date()): Promise<{ runs: number; claims: number }> {
+    const stale = await this.prisma.dispatchRun.findMany({
+      where: { status: 'RUNNING', ...staleDispatchRunFilter(now) },
+      select: { runId: true },
+    });
+    if (stale.length === 0) return { runs: 0, claims: 0 };
+    const runIds = stale.map((r) => r.runId);
+
+    const { count: runs } = await this.prisma.dispatchRun.updateMany({
+      where: { runId: { in: runIds }, status: 'RUNNING' },
+      data: { status: 'ABORTED', finishedAt: now },
+    });
+    const { count: claims } = await this.prisma.dispatchRunZone.updateMany({
+      where: { runId: { in: runIds }, status: 'RUNNING' },
+      data: { status: 'ERROR', error: ABANDONED_CLAIM_ERROR, finishedAt: now },
+    });
+    this.logger.warn(
+      `reaped ${runs} abandoned dispatch run(s) [${runIds.join(', ')}], freeing ${claims} zone claim(s)`,
+    );
+    return { runs, claims };
+  }
+
+  /**
+   * Say this run is still alive (#261) — stamped after every zone, so a run's silence is bounded by its
+   * slowest single zone rather than by its total length. A single-column write outside any transaction.
+   *
+   * Scoped to `status = 'RUNNING'`: a run the reaper already gave up on must not beat its way back into
+   * looking alive, and a terminal run with a fresh beat would mislead every human who read it.
+   */
+  private async touchHeartbeat(runId: bigint, now: Date = new Date()): Promise<void> {
+    await this.prisma.dispatchRun.updateMany({
+      where: { runId, status: 'RUNNING' },
+      data: { heartbeatAt: now },
+    });
   }
 
   /**
@@ -526,6 +597,10 @@ export class DispatchRunService {
       // unassignable, batches and schedules reconcile by construction. `undefined ?? 0` covers a zone
       // whose dispatch threw (no `out`) or whose recommender threw (no `rec`).
       await this.finalizeZoneClaim(runId, zoneId, rec, out, error);
+      // #261 — one beat per zone. A run over many zones is legitimately long, and this is what stops
+      // the reaper mistaking length for death. It follows the finalize rather than preceding it so the
+      // beat attests to work completed, not work merely started.
+      await this.touchHeartbeat(runId);
       zoneOutcomes.push({ zoneId: zoneId.toString(), outcome: error === null ? 'DONE' : 'ERROR' });
       summary.schedules += out?.schedules ?? 0;
       summary.tickets += out?.tickets ?? 0;
@@ -547,8 +622,12 @@ export class DispatchRunService {
         : contended.length === 0 && admitted.length > 0 && summary.errors.length >= admitted.length
           ? 'FAILED'
           : 'PARTIAL';
-    await this.prisma.dispatchRun.update({
-      where: { runId },
+    // #261 — conditional on the run still being RUNNING. The reaper presumes a silent run is dead and
+    // is usually right; when it is wrong, the run wakes up here. An unconditional update would overwrite
+    // ABORTED with SUCCESS after the zones had already been handed to somebody else — a ledger asserting
+    // two runs dispatched the same zone, which is worse than either state on its own.
+    const { count: finalized } = await this.prisma.dispatchRun.updateMany({
+      where: { runId, status: 'RUNNING' },
       data: {
         finishedAt: new Date(),
         status,
@@ -563,6 +642,9 @@ export class DispatchRunService {
         componentBlockedWithheld,
       },
     });
+    if (finalized === 0) {
+      this.logger.warn(`dispatch run ${runId} finished after being reaped — ${status} not recorded`);
+    }
     await this.audit.record({
       actorId,
       actorRole,
@@ -607,8 +689,13 @@ export class DispatchRunService {
     out: DispatchSummary | undefined,
     error: string | null,
   ): Promise<void> {
-    await this.prisma.dispatchRunZone.update({
-      where: { runId_zoneId: { runId, zoneId } },
+    // #261 — `updateMany` keyed on the claim still being RUNNING, not `update` by `runId_zoneId`. The
+    // primary key is still there in the `where`, so this addresses exactly one row; what the status
+    // predicate adds is that the row must still be this run's to close. A reaper freed it means the
+    // zone is already somebody else's, and writing this run's totals over that would credit its work
+    // to a claim it no longer holds. The same rule as #265's `liveScheduleFilter()`.
+    const { count } = await this.prisma.dispatchRunZone.updateMany({
+      where: { runId, zoneId, status: 'RUNNING' },
       data: {
         // Same discriminator the backfill used, and the same one `error` has always carried: a benign
         // skip (lock contention, a residual schedule conflict) stamps it too, and that is deliberate —
@@ -639,6 +726,9 @@ export class DispatchRunService {
         finishedAt: new Date(),
       },
     });
+    if (count === 0) {
+      this.logger.warn(`dispatch run ${runId}: zone ${zoneId} finalized after its claim was released`);
+    }
   }
 
   /**

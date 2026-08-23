@@ -1,7 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import type { SchedulerTickOutcome } from './business-sweep-scheduler.service';
-import { BUSINESS_TIMEZONE, DEFAULT_DISPATCH_CRON, DISPATCH_JOB_NAME, bootstrapDispatchCron } from './dispatch-cron';
+import {
+  BUSINESS_TIMEZONE,
+  DEFAULT_DISPATCH_CRON,
+  DEFAULT_DISPATCH_REAPER_CRON,
+  DISPATCH_JOB_NAME,
+  DISPATCH_REAPER_JOB_NAME,
+  bootstrapDispatchCron,
+} from './dispatch-cron';
 import { DispatchRunService } from './dispatch-run.service';
 
 // Re-exported for the callers that predate `dispatch-cron.ts` (#213 moved the definitions there so the
@@ -76,6 +83,31 @@ export class DispatchSchedulerService {
       return { ran: true };
     } catch (e) {
       this.logger.error(`dispatch tick failed: ${e instanceof Error ? e.message : String(e)}`);
+      return { ran: false, reason: 'ERROR' };
+    }
+  }
+
+  /**
+   * #261 — free the zones of runs whose process stopped existing, on a timer.
+   *
+   * `runForActiveZones` already reaps before it admits, which covers a busy system completely. It
+   * covers a quiet one not at all: if nothing asks for a zone until 05:00 tomorrow, a claim abandoned
+   * at 05:02 today spends a whole day refusing that zone, and the only reason it eventually clears is
+   * that somebody happened to ask. This tick removes the dependence on somebody asking.
+   *
+   * It deliberately does **not** dispatch. A reaper that also ran the zones it freed would turn "clean
+   * up after a crash" into an unscheduled dispatch run at an arbitrary minute of the day, which is the
+   * schedule's decision to make, not the janitor's — #260 owns retrying a zone that was contended.
+   */
+  @Cron(DEFAULT_DISPATCH_REAPER_CRON, { name: DISPATCH_REAPER_JOB_NAME, timeZone: BUSINESS_TIMEZONE })
+  async dispatchReaperTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
+    if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
+    try {
+      const { runs, claims } = await this.dispatchRun.reapStaleDispatchRuns(now);
+      if (runs > 0) this.logger.warn(`dispatch reaper tick: aborted ${runs} run(s), freed ${claims} claim(s)`);
+      return { ran: true };
+    } catch (e) {
+      this.logger.error(`dispatch reaper tick failed: ${e instanceof Error ? e.message : String(e)}`);
       return { ran: false, reason: 'ERROR' };
     }
   }

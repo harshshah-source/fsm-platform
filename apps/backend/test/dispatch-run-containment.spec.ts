@@ -21,7 +21,14 @@ describe('Issue 113 — DispatchRunService per-zone error containment', () => {
   it('records the failing zone and still dispatches the healthy one', async () => {
     const prisma = {
       plant: { findMany: vi.fn(async () => [{ zoneId: 1n }, { zoneId: 2n }]) },
-      dispatchRun: { create: vi.fn(async () => ({ runId: 99n })), update: vi.fn(async () => ({})) },
+      dispatchRun: {
+        create: vi.fn(async () => ({ runId: 99n })),
+        update: vi.fn(async () => ({})),
+        // #261 — the run finalize is now conditional on the row still being RUNNING, and admission
+        // reaps before it claims. Nothing is stale in this fake, so the reap finds no rows.
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findMany: vi.fn(async () => []),
+      },
       dispatchRunZone: {
         create: vi.fn(async () => ({})),
         update: vi.fn(async () => ({})),
@@ -67,10 +74,21 @@ describe('Issue 113 — DispatchRunService per-zone error containment', () => {
 
     // Both zones were claimed at admission, and both claims were closed — the contained failure as an
     // error row — and the run finalized.
+    //
+    // #261 re-pointed these three counts, not their meaning: both the per-zone finalize and the run
+    // finalize became `updateMany` keyed on the row still being RUNNING, so a run reaped mid-flight
+    // cannot overwrite the reaper's verdict. The zone count is 3 rather than 2 because the `finally`
+    // release runs on the clean path too and matches nothing — which is the property #259 relies on.
     expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
-    expect(prisma.dispatchRunZone.update).toHaveBeenCalledTimes(2);
+    expect(prisma.dispatchRunZone.updateMany).toHaveBeenCalledTimes(3);
+    expect(prisma.dispatchRunZone.update).not.toHaveBeenCalled();
     expect(prisma.dispatchRunZone.create).not.toHaveBeenCalled(); // no zone was contended
-    expect(prisma.dispatchRun.update).toHaveBeenCalledTimes(1);
+    // Three writes to the run row: one beat per zone finished (#261 — a run's silence is bounded by its
+    // slowest single zone, not by its whole length) plus the one conditional finalize.
+    expect(prisma.dispatchRun.updateMany).toHaveBeenCalledTimes(3);
+    expect(prisma.dispatchRun.update).not.toHaveBeenCalled();
+    // Nothing was stale, so the admission reap read the ledger and wrote nothing.
+    expect(prisma.dispatchRun.findMany).toHaveBeenCalledTimes(1);
     expect(audit.record).toHaveBeenCalledTimes(2);
   });
 });

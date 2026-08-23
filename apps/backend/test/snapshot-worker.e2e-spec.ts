@@ -87,7 +87,10 @@ describe('Issue 04 slice 5 — SnapshotIngestionWorker', () => {
   let realWriter: SnapshotIngestionService;
   const created: bigint[] = [];
 
-  const makeWorker = (writer: ChunkWriter, source: InMemorySourceReader) =>
+  // Typed as the interface the worker actually takes. It was narrowed to the in-memory implementation,
+  // which every reader-substituting test in this file already had to violate; #261's probe made that a
+  // compile error rather than a latent one.
+  const makeWorker = (writer: ChunkWriter, source: SourceReader) =>
     new SnapshotIngestionWorker(runs, writer, source, prisma);
 
   beforeAll(async () => {

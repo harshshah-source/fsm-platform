@@ -156,13 +156,24 @@ describe('#213 slice 2 — one shared per-zone dispatch in-flight guard (e2e)', 
    * claim is the one that fails.
    */
   it('releases the guard even when the run throws, so one failure does not wedge dispatch forever', async () => {
-    const prismaLike = (dispatchRun as unknown as { prisma: { dispatchRunZone: { update: unknown } } }).prisma;
-    const originalUpdate = prismaLike.dispatchRunZone.update;
-    prismaLike.dispatchRunZone.update = async () => {
-      throw new Error('ledger write exploded');
+    // #261 re-aimed this break, for the reason its own comment above already gives: it has to land on
+    // the write that closes a claim, and that write is now an `updateMany` conditional on the claim
+    // still being RUNNING. Breaking `updateMany` outright would also break `releaseStrandedClaims` —
+    // the release this test exists to prove — so the patch discriminates on what separates them: the
+    // per-zone finalize names a `zoneId`, the release does not. Patched by assignment with an explicit
+    // restore rather than `vi.spyOn`, because a Prisma delegate's methods are not own properties and
+    // `restoreAllMocks` deletes rather than restores them.
+    type ZoneWrite = { where?: { zoneId?: bigint } };
+    const prismaLike = (
+      dispatchRun as unknown as { prisma: { dispatchRunZone: { updateMany: (a: ZoneWrite) => unknown } } }
+    ).prisma;
+    const originalUpdateMany = prismaLike.dispatchRunZone.updateMany;
+    prismaLike.dispatchRunZone.updateMany = async (args: ZoneWrite) => {
+      if (args.where?.zoneId != null) throw new Error('ledger write exploded');
+      return originalUpdateMany.call(prismaLike.dispatchRunZone, args);
     };
     await expect(dispatchRun.runForActiveZones(new Date(), { zoneId: 1n })).rejects.toThrow('ledger write exploded');
-    prismaLike.dispatchRunZone.update = originalUpdate;
+    prismaLike.dispatchRunZone.updateMany = originalUpdateMany;
 
     const outcome = await dispatchRun.runForActiveZones(new Date(), { zoneId: 1n });
     expect(outcome.result).toBe('RAN');

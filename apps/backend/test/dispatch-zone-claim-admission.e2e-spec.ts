@@ -441,15 +441,22 @@ describe('#259 — DB-backed per-zone dispatch claims (e2e)', () => {
    * (`#261`'s reaper covers what this cannot — a process that never unwinds at all.)
    */
   it('finalizes its claims even when the run throws while holding one, so one failure does not wedge the zone', async () => {
-    const rows = (prismaA as unknown as { dispatchRunZone: { update: unknown } }).dispatchRunZone;
-    const originalUpdate = rows.update;
-    rows.update = async () => {
-      throw new Error('zone finalize exploded');
+    // #261 re-aimed this wedge. It used to break `dispatchRunZone.update`, which was then the per-zone
+    // finalize's only writer; that finalize is now an `updateMany` conditional on the claim still being
+    // RUNNING. Breaking `updateMany` wholesale would also break `releaseStrandedClaims` — the very
+    // release this test exists to prove — so the patch discriminates on the argument that separates
+    // them: the finalize names a single `zoneId`, the release does not.
+    type ZoneWrite = { where?: { zoneId?: bigint } };
+    const rows = (prismaA as unknown as { dispatchRunZone: { updateMany: (a: ZoneWrite) => unknown } }).dispatchRunZone;
+    const originalUpdateMany = rows.updateMany;
+    rows.updateMany = async (args: ZoneWrite) => {
+      if (args.where?.zoneId != null) throw new Error('zone finalize exploded');
+      return originalUpdateMany.call(rows, args);
     };
     await expect(serviceA.runForActiveZones(new Date(), { zoneId, trigger: 'MANUAL' })).rejects.toThrow(
       'zone finalize exploded',
     );
-    rows.update = originalUpdate;
+    rows.updateMany = originalUpdateMany;
 
     expect(await prismaA.dispatchRunZone.findFirst({ where: { zoneId, status: 'RUNNING' } })).toBeNull();
     const outcome = await serviceA.runForActiveZones(new Date(), { zoneId, trigger: 'MANUAL' });

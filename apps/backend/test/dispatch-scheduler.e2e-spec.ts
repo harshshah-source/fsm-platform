@@ -17,7 +17,10 @@ const ran = (summary: Partial<{ zones: number; schedules: number; tickets: numbe
   result: 'RAN' as const,
   summary: { zones: 1, schedules: 1, tickets: 2, errors: [], runId: '1', ...summary },
 });
-const makeRun = () => ({ runForActiveZones: vi.fn(async () => ran()) });
+const makeRun = () => ({
+  runForActiveZones: vi.fn(async () => ran()),
+  reapStaleDispatchRuns: vi.fn(async () => ({ runs: 0, claims: 0 })),
+});
 const makeScheduler = (run: ReturnType<typeof makeRun>, enabled: boolean): DispatchSchedulerService =>
   new DispatchSchedulerService(run as unknown as DispatchRunService, { enabled });
 
@@ -43,6 +46,37 @@ describe('Issue 113 — DispatchSchedulerService', () => {
     const run = makeRun();
     expect(await makeScheduler(run, false).dispatchTick()).toEqual({ ran: false, reason: 'DISABLED' });
     expect(run.runForActiveZones).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #261 — reaping at admission covers a busy system, and covers nothing at all on a quiet one. If the
+   * 05:00 run is the next thing to ask for a zone, a claim abandoned at 05:02 sits there refusing until
+   * tomorrow morning: the operator who presses "Run dispatch" at 09:00 does get a reap, but only
+   * because they asked, and the intervening four hours the system spent knowingly holding a dead
+   * claim are invisible. This tick is what makes an idle system heal itself.
+   */
+  it('reapTick frees abandoned claims on an idle system, with the tick clock', async () => {
+    const run = makeRun();
+    run.reapStaleDispatchRuns.mockResolvedValueOnce({ runs: 2, claims: 3 } as never);
+    const now = new Date('2026-07-08T09:07:00.000Z');
+
+    const outcome = await makeScheduler(run, true).dispatchReaperTick(now);
+
+    expect(run.reapStaleDispatchRuns).toHaveBeenCalledWith(now);
+    expect(outcome).toEqual({ ran: true });
+    // A reap tick must never start work of its own — that is the dispatch cron's job, and a reaper
+    // that also dispatched would turn "clean up after a crash" into an unscheduled 09:07 dispatch run.
+    expect(run.runForActiveZones).not.toHaveBeenCalled();
+  });
+
+  it('reapTick is dormant under the same master switch, and never throws out of cron', async () => {
+    const off = makeRun();
+    expect(await makeScheduler(off, false).dispatchReaperTick()).toEqual({ ran: false, reason: 'DISABLED' });
+    expect(off.reapStaleDispatchRuns).not.toHaveBeenCalled();
+
+    const broken = makeRun();
+    broken.reapStaleDispatchRuns.mockRejectedValueOnce(new Error('db down') as never);
+    expect(await makeScheduler(broken, true).dispatchReaperTick()).toEqual({ ran: false, reason: 'ERROR' });
   });
 
   it('a throwing run never escapes the cron context — reported as ERROR', async () => {

@@ -33,6 +33,10 @@ import { AutoRecoveryService } from '../src/ticketing/auto-recovery.service';
 const EXPECTED_CRON_JOBS = [
   'business-cross-zone',
   'business-dispatch',
+  // #261 — the reap sweep. Separate from `business-dispatch` on purpose: it frees the zones of runs
+  // whose process died and deliberately dispatches nothing, so an idle system heals itself without an
+  // unscheduled dispatch run appearing at an arbitrary minute of the day.
+  'business-dispatch-reaper',
   'business-fleet-uptime',
   'business-install-verification',
   'business-intraday-timeout',
@@ -74,11 +78,11 @@ describe('#229 AC-2 — scheduled-work wiring, asserted on the real AppModule', 
     await app.close();
   });
 
-  it('registers exactly the 18 expected cron jobs — no more, no fewer', () => {
+  it('registers exactly the 19 expected cron jobs — no more, no fewer', () => {
     const registered = [...app.get(SchedulerRegistry).getCronJobs().keys()].sort();
 
     expect(registered).toEqual(EXPECTED_CRON_JOBS);
-    expect(registered).toHaveLength(18);
+    expect(registered).toHaveLength(19);
   });
 
   it('reaches the auto-recovery pre-check from the telemetry tick, and surfaces its result', async () => {

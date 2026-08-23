@@ -108,7 +108,9 @@ describe('Issue 126 — dispatch zone-wedge via orphaned SUGGESTED recs', () => 
     return { zoneId, plantId, seId, ticketIds: tIds };
   };
 
-  const newRun = async (status: 'RUNNING' | 'PARTIAL' | 'SUCCESS' | 'FAILED' = 'RUNNING'): Promise<bigint> => {
+  const newRun = async (
+    status: 'RUNNING' | 'PARTIAL' | 'SUCCESS' | 'FAILED' | 'ABORTED' = 'RUNNING',
+  ): Promise<bigint> => {
     const run = await prisma.dispatchRun.create({
       data: { trigger: 'MANUAL', startedAt: NOW, configSnapshot: {}, status, finishedAt: status === 'RUNNING' ? null : NOW },
     });
@@ -213,6 +215,47 @@ describe('Issue 126 — dispatch zone-wedge via orphaned SUGGESTED recs', () => 
     const live = await suggestedFor(s.ticketIds);
     expect(live).toHaveLength(1); // exactly the fresh set, stale orphan gone
     expect(live[0].runId).toBe(freshRun);
+  });
+
+  /**
+   * #261 item 6 — recovery semantics after the reaper aborts a run, **verified rather than assumed**.
+   *
+   * The claim is that ABORTED needs no new cleanup because `clearFinalizedOrphans` already collects
+   * SUGGESTED recs whose run is not RUNNING. That is true only by construction of a predicate written
+   * before ABORTED existed, and it is precisely the sort of thing a new enum value silently breaks: had
+   * the predicate been an allow-list of terminal statuses instead of `not: 'RUNNING'`, an aborted run's
+   * orphans would be immortal and would wedge the zone exactly the way Issue 126 describes.
+   *
+   * G1 (a ticket is dispatched at most once) is asserted on the ticket's own rows, not on the counter:
+   * the ticket must end with exactly one live recommendation and one schedule entry.
+   */
+  it('#261: an ABORTED run’s orphan is cleared, and its ticket is dispatched exactly once', async () => {
+    const s = await seedScenario('aborted-orphan', 1);
+
+    // The wreckage a reaped run leaves: it got as far as suggesting, then its process stopped existing
+    // and the reaper marked it ABORTED without ever dispatching the suggestion.
+    const abortedRun = await newRun('ABORTED');
+    await prisma.recommendation.create({
+      data: { ticketId: s.ticketIds[0], seId: s.seId, status: 'SUGGESTED', path: 'MORNING_BATCH', scoreBreakdown: {}, runId: abortedRun },
+    });
+
+    const freshRun = await newRun();
+    const out = await rec.runForZone(s.zoneId, { now: NOW, runId: freshRun });
+    expect(out.recommended).toBe(1);
+
+    // Re-evaluated, not inherited: the surviving suggestion belongs to the new run.
+    const live = await suggestedFor(s.ticketIds);
+    expect(live).toHaveLength(1);
+    expect(live[0].runId).toBe(freshRun);
+
+    // And dispatching it lands the ticket on exactly one day plan — the aborted run contributed no
+    // second assignment, which is G1 stated on the rows rather than on a count the run reported.
+    const dispatched = await dispatch.dispatchForZone(s.zoneId, { dateFrom: DAY, dateTo: DAY, now: NOW, runId: freshRun });
+    expect(dispatched.tickets).toBe(1);
+    const placed = await prisma.batchAssignmentTicket.findMany({
+      where: { ticketId: s.ticketIds[0], removedAt: null },
+    });
+    expect(placed).toHaveLength(1);
   });
 
   it('guard-path: a RUNNING-run orphan is left intact and its ticket is skipped (no throw)', async () => {

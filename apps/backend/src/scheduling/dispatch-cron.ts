@@ -25,6 +25,18 @@ export const DISPATCH_CRON_SETTING_KEY = 'dispatch_cron';
 export const DISPATCH_JOB_NAME = 'business-dispatch';
 
 /**
+ * #261 — the reap sweep's own job name and cadence. Deliberately NOT settings-backed the way
+ * `dispatch_cron` is: the dispatch hour is a business decision an operator owns, while how often the
+ * system checks for its own wreckage is an implementation detail with one right answer.
+ *
+ * Every three minutes against a ten-minute threshold: frequent enough that an abandoned claim is freed
+ * in about the time a human takes to notice it, and cheap enough to ignore — the query is an indexed
+ * scan of the RUNNING dispatch runs, of which there is normally zero or one.
+ */
+export const DISPATCH_REAPER_JOB_NAME = 'business-dispatch-reaper';
+export const DEFAULT_DISPATCH_REAPER_CRON = '*/3 * * * *';
+
+/**
  * The **bootstrap** default, consulted only when no setting row exists yet (#213 AC-1). After the row
  * is created the environment variable is not a parallel source and is never read again — which is the
  * whole point of the ruling: changing the dispatch hour must not require a redeploy.
@@ -90,4 +102,46 @@ export function validateDispatchCron(expression: unknown, CronTime: CronTimeCtor
 export function nextFireAt(job: ReschedulableCronJob): Date {
   const next = job.nextDate();
   return typeof next.toJSDate === 'function' ? next.toJSDate() : (next as unknown as Date);
+}
+
+/**
+ * #261 / #260 — the two dispatch timing thresholds, stated together because they are only correct
+ * relative to each other.
+ *
+ * The reap threshold is how long a dispatch run may go silent before it is presumed dead and its zone
+ * claims are freed. #260's retry deadline is how long the 05:00 cron keeps re-attempting a zone that
+ * was contended. **The invariant is `reap <= retry deadline`:** if a crashed holder could outlive the
+ * cron's whole retry window, the morning run would spend that window being refused by a zombie and
+ * then give up — the exact starvation the reaper exists to prevent. 10 against 15 leaves the retry
+ * window a full reap cycle of slack.
+ *
+ * Ten minutes is well above any observed real run: the beat is stamped at admission and after every
+ * zone, so a live run of any length is silent only for as long as its slowest single zone takes.
+ */
+export const DEFAULT_DISPATCH_STALE_RUN_MIN = 10;
+
+/** #260's bounded-retry deadline, in minutes. Stated here so the invariant above is checkable. */
+export const DEFAULT_DISPATCH_RETRY_DEADLINE_MIN = 15;
+
+/** Reap cutoff in ms, env-overridable via `DISPATCH_STALE_RUN_MIN` (minutes). */
+export function readDispatchStaleRunMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number(env.DISPATCH_STALE_RUN_MIN);
+  const minutes = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DISPATCH_STALE_RUN_MIN;
+  return minutes * 60_000;
+}
+
+/**
+ * The liveness half of the dispatch reaper's `where` — the direct analogue of the ingestion
+ * `staleRunFilter`, kept separate because the two carry different thresholds for good reason: an
+ * AutoPlant sync waits on a remote system, a dispatch run does not.
+ *
+ * A run that has never beaten falls back to `started_at`, so the reaper still covers every row written
+ * before `heartbeat_at` existed.
+ */
+export function staleDispatchRunFilter(
+  now: Date,
+  env: NodeJS.ProcessEnv = process.env,
+): { OR: [{ heartbeatAt: { lt: Date } }, { heartbeatAt: null; startedAt: { lt: Date } }] } {
+  const cutoff = new Date(now.getTime() - readDispatchStaleRunMs(env));
+  return { OR: [{ heartbeatAt: { lt: cutoff } }, { heartbeatAt: null, startedAt: { lt: cutoff } }] };
 }

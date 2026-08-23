@@ -753,6 +753,10 @@ enum DispatchRunStatus {
   SUCCESS
   PARTIAL
   FAILED
+  /// #261 — the run's process stopped existing. Distinct from FAILED, which is a statement about the
+  /// WORK (every zone tried, every zone failed); ABORTED says nobody knows what the run did, because
+  /// whoever was running it went away. Written only by the reaper, never by a run about itself.
+  ABORTED
 
   @@map("dispatch_run_status")
 }
@@ -796,6 +800,10 @@ model DispatchRun {
   reason            String?
   startedAt         DateTime           @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt        DateTime?          @map("finished_at") @db.Timestamptz(6)
+  /// #261 — last time the run said it was alive: stamped at admission and after every zone. The reaper
+  /// judges staleness on THIS, never on `started_at`, so a run that is merely slow is never reaped out
+  /// from under itself. NULL for runs that predate the column; the reaper falls back to `started_at`.
+  heartbeatAt       DateTime?          @map("heartbeat_at") @db.Timestamptz(6)
   status            DispatchRunStatus  @default(RUNNING)
   zones             Int                @default(0)
   schedules         Int                @default(0)

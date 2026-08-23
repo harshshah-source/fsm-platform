@@ -44,6 +44,27 @@ const runs = [
     unassignable: 40,
     errorCount: 2,
   },
+  {
+    // #261 — a run the reaper aborted: its process stopped existing, so nothing it may have done is
+    // credited to it and every total stayed at the value it was opened with. The row has to render, and
+    // has to render as ABORTED — an operator who cannot see that a run died has no way to tell a
+    // dispatcher outage from a quiet morning.
+    runId: '40',
+    trigger: 'CRON',
+    actorRole: null,
+    actorName: null,
+    startedAt: '2026-07-13T05:00:00Z',
+    finishedAt: '2026-07-13T05:11:00Z',
+    durationMs: 660000,
+    status: 'ABORTED',
+    zones: 0,
+    schedules: 0,
+    batches: 0,
+    ticketsDispatched: 0,
+    recommended: 0,
+    unassignable: 0,
+    errorCount: 0,
+  },
 ];
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -80,6 +101,13 @@ describe('Dispatch Runs — runs list (Issue 123)', () => {
     // Scoped to the errors cell's distinctive styling — S.No. #160 also renders a bare "2" (this row's
     // own serial number) that a plain getByText('2') would now ambiguously match.
     expect(cron.getByText('2', { selector: '.text-critical' })).toBeInTheDocument(); // errors
+
+    // #261 — the reaped run is listed and named, not silently absent or mis-labelled as a failure.
+    // The tone is asserted, not just the text: an unmapped status still *renders*, it just falls back to
+    // the neutral pill, so a status-text-only assertion passes on a badge that reads as unremarkable.
+    // A run whose process died is not unremarkable.
+    const aborted = within(await screen.findByTestId('dispatch-run-40'));
+    expect(aborted.getByText('ABORTED')).toHaveClass('text-critical');
   });
 
   it('exposes the manager-scoped Dispatch Runs nav entry', () => {

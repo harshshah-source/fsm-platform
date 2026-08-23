@@ -7,6 +7,9 @@ export const STATUS_TONE: Record<DispatchRunStatus, BadgeTone> = {
   PARTIAL: 'warning',
   FAILED: 'critical',
   RUNNING: 'info',
+  // #261 — critical, alongside FAILED. The two mean different things (see DispatchRunStatus) but carry
+  // the same urgency: in both cases the day's dispatch did not happen and somebody has to look.
+  ABORTED: 'critical',
 };
 
 export const MODE_TONE: Record<DispatchZoneMode, BadgeTone> = {
