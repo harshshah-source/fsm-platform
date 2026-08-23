@@ -34,6 +34,45 @@ the operator wants P8 finished first.
 **Commits this session:** `cf6f9de` `5a044ee` `b115bfd` (#261 + #132) · `cf5c799` `460d2f8` (#260) ·
 `f4684b9` + docs (#262). Reports: `docs/progress/{261,260,262}-*.md`. Do not re-derive them.
 
+## 0b. What remains of the scheduler engine, and what is actually blocked
+
+**Nothing in P8 is blocked any more.** That is the substantive result of these three days, and it is
+not visible from the issue files themselves — each still carries a `Dependencies / Blocked by` line
+written when the chain existed.
+
+| Issue | Scope | Was blocked by | Now | Size |
+|---|---|---|---|---|
+| **#271** | SLA fold+resume at submission, terminal at verification | — (never blocked) | ready | M |
+| **#263** | DB cron tick claims — duplicate-instance safety | — (never blocked) | ready | S |
+| **#270** | Tri-state filter honesty (`NOT_ENFORCED`) + eligibility-proxy doc | — (never blocked) | ready | S/M |
+| **#264** | Durable notification outbox (executes #189) | #262 | **cleared** | M |
+| **#267** | Admin SE home/base + route-chain distance | #266 | **cleared** | M |
+| **#268** | CRITICAL direct assignment + Q-B escalation | #266, #265 | **cleared** | L |
+
+Plus the docs tail on **#258** (record its rulings in `CONTEXT.md`) — small, unowned, carried by seven
+handoffs.
+
+**The concurrency and correctness substrate is finished.** Admission, reaping, patience, per-SE
+transactions and race hygiene were the interlocking part, and the part where being wrong is invisible
+until production. What is left is largely independent feature work over a settled foundation: one L,
+three M, two S/M.
+
+**Two connections worth knowing before planning:**
+
+- **#267 is not merely a feature — it is what makes scoring discriminate.** #266 recorded its own
+  **AC-2 as UNBUILDABLE**: every candidate for a ticket shares one `baseScore`, so no weight can
+  reorder them until distance exists. #267 is the missing input, and #266's AC-2 should be revisited
+  when it lands.
+- **#264 builds durability, not delivery.** Its channels (FCM/APNs/WhatsApp) are still
+  external-blocked, so it is the outbox and the re-drain sweep over the per-SE buffer #262 left in
+  memory — the seam stays a seam.
+
+**Suggested order if nobody rules otherwise: `#263` then `#271`.** #263 is small and closes a live
+production-safety gap — a second sweeps-enabled instance currently double-runs every cron — and it sat
+behind a queue it never actually depended on. #271 is the largest remaining piece of *correctness*
+(SLA boundaries) as opposed to new surface. #268 is the last piece of scheduler *behaviour* and the
+only L; it is worth having #267 in first so its scoring is not still degenerate.
+
 ## 1. The dispatch path, as it now stands
 
 Five issues have rebuilt this path in four days. The whole shape, because no single issue's doc has it:
