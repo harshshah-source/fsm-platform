@@ -24,8 +24,10 @@ Do not re-derive any of it — each issue has a frozen completion report.
 | **#260** bounded cron retry | `cf5c799` `460d2f8` | `docs/progress/260-dispatch-cron-bounded-retry.md` |
 | **#262** per-SE dispatch transactions | `f4684b9` `949d874` | `docs/progress/262-per-se-dispatch-transactions.md` |
 
-**P8 is 12 of 16. The #275 chain the operator ruled must be cleared in order
-(#265 → #259 → #261 → #260 → #262) is COMPLETE — #275 is unblocked.**
+**P8: 9 of its 16 rows are implementation-DONE; `#258` is the decision record (delivered, `CONTEXT.md`
+tail outstanding); six implementation issues remain — `#264` `#263` `#268` `#267` `#270` `#271`.
+The #275 chain the operator ruled must be cleared in order (#265 → #259 → #261 → #260 → #262) is
+COMPLETE — #275 is unblocked.**
 
 ## 2. Working-tree state — the thing most likely to cause harm
 

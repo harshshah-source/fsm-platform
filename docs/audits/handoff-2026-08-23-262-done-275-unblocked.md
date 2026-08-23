@@ -18,8 +18,12 @@ only our own hunks. Do the same.
 
 ## 0. Where the track stands
 
-- **P8: 12 of 16 done** — `#258`, `#178`, `#269`, `#177`, `#266`, `#265`, `#259` (+`#252`), `#261`
-  (+`#132`), `#260`, **`#262` (new)**. Still open: `#264` · `#263` · `#268` · `#267` · `#270` · `#271`.
+- **P8: 9 of its 16 rows are implementation-DONE** — `#259`, `#261`, `#260`, `#262`, `#265`, `#177`,
+  `#266`, `#178`, `#269`. Row 1 (**`#258`**) is the decision record: delivered, with one docs task
+  still outstanding (record its rulings in `CONTEXT.md`). **Six implementation issues remain:**
+  `#264` · `#263` · `#268` · `#267` · `#270` · `#271`. (`#252` and `#132` were absorbed into `#259`
+  and `#261` respectively — they are not P8 rows and must not be counted toward this tally, which is
+  the arithmetic error the first version of this handoff made.)
 - **P9: 3 of 6** — `#272`, `#273`, `#274`. **`#275` is UNBLOCKED.**
 
 **The operator's ruling was to clear the #275 chain in order — #265 → #259 → #261 → #260 → #262 —
