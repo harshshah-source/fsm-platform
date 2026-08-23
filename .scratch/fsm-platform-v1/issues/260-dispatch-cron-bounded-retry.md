@@ -1,6 +1,6 @@
 # 260 — The 05:00 run waits out brief contention instead of skipping a zone until tomorrow
 
-Status: ready-for-agent
+Status: done (2026-08-23) — see `docs/progress/260-dispatch-cron-bounded-retry.md`
 Type: AFK · Backend
 Decision: #258 Q8.6 (G2)
 
@@ -39,12 +39,12 @@ None / none / n/a (ledger already shows the outcome).
 
 ## Acceptance criteria
 
-- [ ] Zone held for 90s at 05:00 (fake timers): cron's first pass records CONTENDED, retry admits
+- [x] Zone held for 90s at 05:00 (fake timers): cron's first pass records CONTENDED, retry admits
       and dispatches within the window, same runId, run finalizes with the zone DONE.
-- [ ] Zone held past the deadline: zone stays CONTENDED on the ledger; run PARTIAL; a log line
+- [x] Zone held past the deadline: zone stays CONTENDED on the ledger; run PARTIAL; a log line
       states the give-up.
-- [ ] Manual runs never wait (timing-asserted).
-- [ ] Retry never starts a second `dispatch_runs` row.
+- [x] Manual runs never wait (timing-asserted).
+- [x] Retry never starts a second `dispatch_runs` row.
 
 ## Tests
 

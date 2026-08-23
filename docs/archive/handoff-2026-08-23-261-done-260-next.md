@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-08-23.** Spent within the same session: #260 landed (`cf5c799`). Nothing here is
+> current — see `.scratch/fsm-platform-v1/INDEX.md`, `docs/SYSTEM-STATE-2026-07.md` and the successor handoff.
+
 # Handoff — #261 is DONE (and #132 with it); next is **#260 → #262** (session of 2026-08-23)
 
 **Repo:** `C:\fsm-platform-backup` · branch `feat/autoplant-integration` · **nothing pushed**

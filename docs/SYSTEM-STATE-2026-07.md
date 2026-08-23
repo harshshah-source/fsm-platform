@@ -721,6 +721,31 @@ and on a 3-minute `business-dispatch-reaper` cron. What matters about the shape:
   and re-evaluated. That holds *only* because the predicate is a negation — rewritten as an allow-list
   of terminal statuses those orphans become immortal and wedge the zone (Issue 126).
 
+**The automatic run is patient; a manual one is not (#260, 2026-08-23).** A zone contended at 05:00:00
+by something that finishes at 05:00:20 used to get nothing that day, because the cron asked once and
+the next attempt was tomorrow. A CRON run now re-asks every `DISPATCH_RETRY_INTERVAL_MS` (default 60 s)
+until `DISPATCH_RETRY_DEADLINE_MS` (default 15 min); a MANUAL run never waits, because an operator
+pressing a button wants an answer rather than a queue (#258 Q8.6).
+
+- **Patience lives in two places.** When *every* requested zone is held, #259 opens no run row at all,
+  so there is nothing for an in-run retry to retry under — the waiting has to happen at **admission**
+  as well as inside the run. Both share one deadline measured from the original fire time, and the
+  admission loop keeps #259's rule intact: while everything is held, still nothing is written.
+- **A zone recovered late has its CONTENDED row promoted in place**, never a second row: a run gets
+  exactly one row per zone (`@@unique([runId, zoneId])`), so the zone's whole story — refused at
+  05:00:00, dispatched at 05:03 — lives on one row. **`contended_with_run_id` survives the promotion**
+  deliberately; every reader discriminates on `status`, so carrying it onto a DONE row costs nothing
+  and keeps the only trace of the collision.
+- **Both loops reap before re-asking**, or a patient run spends its whole deadline behind a claim
+  nobody is holding — which is why #261 was #260's hard prerequisite. The run also **beats while it
+  waits**, or it would be reaped by its own reaper.
+- **Run status is measured against the zones still held when the run finished**, not those held at
+  admission: a run that waited out every collision is SUCCESS, not PARTIAL.
+- **`DISPATCH_RETRY_DEADLINE_MS=0` restores try-once**, and is the documented rollback. The policy is
+  carried on `DispatchSchedulerConfig` rather than re-read from the environment inside the run, so a
+  spec overrides it through the constructor (#182 R5) — and `DISPATCH_` is in `test/setup-env.ts`'s
+  allowlist prefixes so no developer's `.env` reaches the suite.
+
 ### 3g. Schedulers (#97-A1 / #108 / #113)
 
 All in-process `@nestjs/schedule`; cron expressions resolved from env **once at decorator
@@ -1743,7 +1768,9 @@ lifecycle entry and the `docs/progress/218-*.md` completion report, which should
 | `INGESTION_SCHEDULER_ENABLED=true` | self-running pipeline: masters daily 02:00, telemetry */30 |
 | `PARTITION_MAINTENANCE_ENABLED=true` | **must flip together with the above** — else pings pile into the DEFAULT partition after the 3-day runway and retention never runs |
 | `INGESTION_STALE_RUN_MIN` | ingestion reaper threshold (default 30) — judged on `heartbeat_at`, not `started_at` (#261) |
-| `DISPATCH_STALE_RUN_MIN` | dispatch reaper threshold (default 10, #261). **Must stay ≤ #260's retry deadline (15)** or a crashed holder starves the cron's retry window |
+| `DISPATCH_STALE_RUN_MIN` | dispatch reaper threshold (default 10, #261). **Must stay ≤ #260's retry deadline** or a crashed holder starves the cron's retry window |
+| `DISPATCH_RETRY_INTERVAL_MS` | #260 — how often the patient CRON re-asks for a contended zone (default 60 000) |
+| `DISPATCH_RETRY_DEADLINE_MS` | #260 — how long it stays patient (default 900 000). **0 = try-once**, the documented rollback. Never applies to a MANUAL run |
 | `BUSINESS_SWEEPS_ENABLED=true` | dispatch cron + the field-loop/aggregation sweeps **and** the daily chain (§3g): `vu-auto-resume` 03:30 IST, `schedule-closure` 04:00 IST, `plant-eligibility-refresh` 04:30 **unpinned — #254**, `business-dispatch` 05:00 IST |
 | `VU_AUTO_RESUME_CRON`, `SCHEDULE_CLOSURE_CRON`, `PLANT_ELIGIBILITY_REFRESH_CRON` | per-job overrides for the daily chain — `VU_AUTO_RESUME_CRON` and `SCHEDULE_CLOSURE_CRON` are read as **IST** expressions |
 | `BUSINESS_SWEEP_*_CRON`, `INGESTION_*_CRON` | per-tick overrides (§3g table) |
