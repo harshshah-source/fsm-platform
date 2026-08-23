@@ -323,6 +323,7 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 | `se_planner` | ZM plant-visit intent; **soft bias** to the recommender, never a constraint | unique `(se_id, plant_id, planned_date)` |
 | `intraday_insertions` | Mutable CRITICAL-insertion offer state machine + `retry_chain` JSONB | partial unique `intraday_insertions_one_live_offer_per_ticket WHERE PENDING_ACCEPTANCE` (#101, `20260709120000`) |
 | `cross_zone_escalations` | Parallel escalation record — ticket never leaves home queue | indexes on `(status, escalation_type)`, `home_zone_id` |
+| `cron_tick_claims` | #263 — one row per (cron job, UTC-minute window) that some instance has taken responsibility for. The `ON CONFLICT DO NOTHING` insert IS the admission test that makes a second sweeps-enabled instance a safe no-op; `claimed_by` (host/pid@build-fingerprint) is diagnosis only, never a predicate. Append-mostly, pruned to 7 days by the `partition-maintenance` tick | PK `(job_name, window_start)` — the arbitration itself; index on `window_start` for the prune (`20260823150000`) |
 
 ### 2.5 Inventory
 
@@ -788,6 +789,30 @@ All in-process `@nestjs/schedule`; cron expressions resolved from env **once at 
 evaluation** (flag flips need a restart — `integration-scheduler.service.ts:46-47`); the
 enabled/dormant gate is re-checked every tick; every handler has a per-name single-in-flight guard
 and never throws out of cron context.
+
+**Correctness no longer depends on the master switch being set on exactly one instance (#263).** Every
+`@Cron` below fires wherever its flag is truthy, and the single-in-flight guards are process-local — a
+`Set` on a singleton, or a boolean field — so two enabled instances ran every sweep twice: report cubes
+racing delete-then-insert, doubled notification sends, duplicate dispatch runs degraded to
+`LOCK_CONTENDED` noise. Each tick now claims its window before doing anything: a `cron_tick_claims
+(job_name, window_start)` row written with `INSERT … ON CONFLICT DO NOTHING`, the insert *being* the
+admission test rather than a check followed by an act. One instance runs; the rest log the holder and
+return `{ ran: false, reason: 'TICK_CLAIMED' }` — a no-op, never an `ERROR` (G7). `window_start` is the
+fire instant truncated to its **UTC minute**, and the claim is taken inside each scheduler's shared
+guard (`runGuarded` plus the six equivalent single-flight wrappers), not in the nineteen decorated
+handlers, so a sweep added later inherits the property without its author knowing it exists.
+
+- **Manual HTTP triggers are deliberately NOT tick-claimed.** They are operator actions, arbitrated by
+  the guards the run itself carries (#259's per-zone claim, #213's shared in-flight guard). No
+  controller calls a `*Tick` method, and an operator pressing the button must not be silenced because
+  the cron happened to fire in the same minute.
+- **Retention rides the daily `partition-maintenance` tick** — claims older than 7 days
+  (`CRON_TICK_CLAIM_RETENTION_DAYS`) are deleted there rather than by a cron of their own. #263 adds
+  **no** job: `scheduler-wiring.e2e-spec.ts` still pins the same **19** registered cron names.
+- **It assumes the instances agree on the time to within a minute.** Clock skew above 60 s puts two
+  instances in different windows and both would run — an NTP assumption, recorded here because nothing
+  in the code enforces it. Every downstream claim still holds when it happens (the per-zone dispatch
+  claim, the partial uniques), so the failure mode is duplicated *work*, not corrupted state.
 
 **Two timezone regimes, and the difference is load-bearing.** The `business-*` sweeps on
 `BusinessSweepSchedulerService` are registered **unpinned** — correct for cadences that mean "every N

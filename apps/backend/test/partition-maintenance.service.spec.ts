@@ -1,3 +1,4 @@
+import { alwaysClaims } from './support/tick-claims';
 import { PartitionMaintenanceService } from '../src/ingestion/partition-maintenance.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import type { SettingsService } from '../src/settings/settings.service';
@@ -33,7 +34,7 @@ describe('PartitionMaintenanceService', () => {
       'raw_device_snapshots_y2026m07d06', // 9 days old → expired under 7d
       'raw_device_snapshots_y2026m07d15', // today → kept
     ]);
-    const svc = new PartitionMaintenanceService(prisma, fakeSettings(undefined));
+    const svc = new PartitionMaintenanceService(prisma, fakeSettings(undefined), alwaysClaims() as never);
 
     const res = await svc.runMaintenance(NOW);
 
@@ -49,7 +50,7 @@ describe('PartitionMaintenanceService', () => {
       'raw_device_snapshots_default',
       'raw_device_snapshots_y2026m07d06',
     ]);
-    const svc = new PartitionMaintenanceService(prisma, fakeSettings(14));
+    const svc = new PartitionMaintenanceService(prisma, fakeSettings(14), alwaysClaims() as never);
 
     const res = await svc.runMaintenance(NOW);
 
@@ -60,7 +61,7 @@ describe('PartitionMaintenanceService', () => {
 
   it('creates create-ahead partitions that do not yet exist', async () => {
     const { prisma, executed } = fakePrisma(['raw_device_snapshots_y2026m07d15']);
-    const svc = new PartitionMaintenanceService(prisma, fakeSettings(7));
+    const svc = new PartitionMaintenanceService(prisma, fakeSettings(7), alwaysClaims() as never);
 
     const res = await svc.runMaintenance(NOW);
 

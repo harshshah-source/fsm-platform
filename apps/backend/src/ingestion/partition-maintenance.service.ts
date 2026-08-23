@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronTickClaimService } from '../scheduling/cron-tick-claim.service';
 import { SettingsService } from '../settings/settings.service';
 import {
   planPartitionMaintenance,
@@ -9,11 +10,21 @@ import {
   type MaintenancePlan,
 } from './partition-planner';
 
+/** #263 — the registered cron-job name, shared by the decorator and the tick claim. */
+export const PARTITION_MAINTENANCE_JOB_NAME = 'partition-maintenance';
+
 /** UTC days of partitions to keep ahead of today so ingestion never falls back to the DEFAULT catch-all. */
 const CREATE_AHEAD_DAYS = 3;
 
 /** Generated partition names must match this before ever reaching DDL — defence against interpolation. */
 const SAFE_NAME_RE = /^raw_device_snapshots_y\d{4}m\d{2}d\d{2}$/;
+
+/**
+ * What the daily tick reports. It used to return `void`; #263 gave it the same structured outcome the
+ * other schedulers carry, because "another instance owns this window" is a third state that a `void`
+ * return cannot express and an operator cannot otherwise distinguish from "the flag is off".
+ */
+export type MaintenanceTickOutcome = { ran: true } | { ran: false; reason: 'DISABLED' | 'TICK_CLAIMED' | 'ERROR' };
 
 export interface MaintenanceResult {
   retentionDays: number;
@@ -41,6 +52,10 @@ export class PartitionMaintenanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    // The concrete service rather than the `TickClaimant`/`TickClaimPruner` ports the other six
+    // schedulers take: this one is plain-DI (no factory), and Nest resolves a constructor param by its
+    // emitted class token — a structural type would leave nothing to inject.
+    private readonly claims: CronTickClaimService,
   ) {}
 
   /**
@@ -48,13 +63,26 @@ export class PartitionMaintenanceService {
    * enabling is an ops step, same posture as the ingestion scheduler); a failure is logged, never thrown
    * out of the cron context. The cron expression is env-overridable (`PARTITION_MAINTENANCE_CRON`).
    */
-  @Cron(process.env.PARTITION_MAINTENANCE_CRON?.trim() || '10 0 * * *', { name: 'partition-maintenance' })
-  async scheduledMaintenance(): Promise<void> {
-    if (process.env.PARTITION_MAINTENANCE_ENABLED !== 'true') return;
+  @Cron(process.env.PARTITION_MAINTENANCE_CRON?.trim() || '10 0 * * *', { name: PARTITION_MAINTENANCE_JOB_NAME })
+  async scheduledMaintenance(firedAt: Date = new Date()): Promise<MaintenanceTickOutcome> {
+    if (process.env.PARTITION_MAINTENANCE_ENABLED !== 'true') return { ran: false, reason: 'DISABLED' };
     try {
-      await this.runMaintenance();
+      if (!(await this.claims.claimTickOrLog(PARTITION_MAINTENANCE_JOB_NAME, firedAt))) {
+        return { ran: false, reason: 'TICK_CLAIMED' };
+      }
+      await this.runMaintenance(firedAt);
+      // #263 AC-4 — the claim table's retention rides here rather than on a cron of its own. A
+      // nineteenth job would have to be added to `scheduler-wiring.e2e-spec.ts`, and that list is a
+      // decision record: a table of a few thousand rows a week does not justify an entry in it. This
+      // tick is the natural host — it is already the daily janitor, and it already owns a retention
+      // horizon. It runs after the DDL and is therefore skipped on a day the DDL throws; that is the
+      // right trade, because a day of unpruned claims is invisible and a partition that never got
+      // created is not.
+      await this.claims.pruneExpiredClaims(firedAt);
+      return { ran: true };
     } catch (e) {
       this.logger.error(`partition maintenance tick failed: ${e instanceof Error ? e.message : String(e)}`);
+      return { ran: false, reason: 'ERROR' };
     }
   }
 

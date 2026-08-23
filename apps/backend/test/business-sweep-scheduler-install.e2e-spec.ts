@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '../src/audit/audit.service';
+import { alwaysClaims } from './support/tick-claims';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { BusinessSweepSchedulerService } from '../src/scheduling/business-sweep-scheduler.service';
 import { InstallLifecycleService } from '../src/ticketing/install-lifecycle.service';
@@ -70,7 +71,8 @@ describe('Issue 108 AC#5(b) — install verification runs on the scheduler tick'
       unused<VerificationService>(), unused<IntradayInsertionService>(), unused<CrossZoneEscalationService>(),
       install, unused<RepeatEscalationService>(), unused<TierOverrideExpiryService>(), unused<SoftInactiveCountService>(),
       unused<FleetUptimeAggregationService>(), unused<RootCauseAnalyticsAggregationService>(),
-      unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), { enabled: true },
+      unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), alwaysClaims(),
+      { enabled: true },
     );
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-bssi-' + NS } })).zoneId;
@@ -109,7 +111,8 @@ describe('Issue 108 AC#5(b) — install verification runs on the scheduler tick'
       unused<VerificationService>(), unused<IntradayInsertionService>(), unused<CrossZoneEscalationService>(),
       install, unused<RepeatEscalationService>(), unused<TierOverrideExpiryService>(), unused<SoftInactiveCountService>(),
       unused<FleetUptimeAggregationService>(), unused<RootCauseAnalyticsAggregationService>(),
-      unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), { enabled: false },
+      unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), alwaysClaims(),
+      { enabled: false },
     );
     const { ticketId, deviceId } = await makeActivated();
     await ping(deviceId, new Date(T_ACT.getTime() + 30 * 60_000));

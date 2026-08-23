@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { BUSINESS_TIMEZONE } from '../scheduling/dispatch-cron';
+import type { TickClaimant } from '../scheduling/cron-tick-claim';
 import { VehicleReturnResumeService } from './vehicle-return-resume.service';
 
 /**
@@ -18,6 +19,9 @@ import { VehicleReturnResumeService } from './vehicle-return-resume.service';
  */
 export const DEFAULT_VU_AUTO_RESUME_CRON = '30 3 * * *';
 
+/** #263 — the registered cron-job name, shared by the decorator and the tick claim. */
+export const VU_AUTO_RESUME_JOB_NAME = 'vu-auto-resume';
+
 export interface VehicleReturnResumeConfig {
   /** Shares the pipeline master switch — `BUSINESS_SWEEPS_ENABLED === 'true'`. Default OFF. */
   enabled: boolean;
@@ -33,7 +37,9 @@ export function readVehicleReturnResumeConfig(env: NodeJS.ProcessEnv = process.e
 }
 
 /** What the tick reports — a cron body NEVER throws out of the cron context. */
-export type VuAutoResumeTickOutcome = { ran: true } | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'ERROR' };
+export type VuAutoResumeTickOutcome =
+  | { ran: true }
+  | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'TICK_CLAIMED' | 'ERROR' };
 
 /**
  * #247 slice 3 — the tick that drives {@link VehicleReturnResumeService}.
@@ -55,12 +61,13 @@ export class VehicleReturnResumeScheduler {
 
   constructor(
     private readonly resume: VehicleReturnResumeService,
+    private readonly claims: TickClaimant,
     config?: Partial<VehicleReturnResumeConfig>,
   ) {
     this.config = { ...readVehicleReturnResumeConfig(), ...config };
   }
 
-  @Cron(readVehicleReturnResumeConfig().resumeCron, { name: 'vu-auto-resume', timeZone: BUSINESS_TIMEZONE })
+  @Cron(readVehicleReturnResumeConfig().resumeCron, { name: VU_AUTO_RESUME_JOB_NAME, timeZone: BUSINESS_TIMEZONE })
   async resumeTick(now: Date = new Date()): Promise<VuAutoResumeTickOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     if (this.inFlight) {
@@ -69,6 +76,9 @@ export class VehicleReturnResumeScheduler {
     }
     this.inFlight = true;
     try {
+      if (!(await this.claims.claimTickOrLog(VU_AUTO_RESUME_JOB_NAME, now))) {
+        return { ran: false, reason: 'TICK_CLAIMED' };
+      }
       const { resumed } = await this.resume.sweepReturnedVehicles(now);
       if (resumed > 0) this.logger.log(`vu-auto-resume resumed ${resumed} paused SLA clock(s)`);
       return { ran: true };

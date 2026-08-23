@@ -2762,3 +2762,24 @@ model NonOperationalMarking {
   @@index([state, awaitingSince])
   @@map("non_operational_markings")
 }
+
+/// #263 — one row per (cron job, UTC-minute window) that some instance has taken responsibility for.
+/// Written by `CronTickClaimService.claimTick` with `ON CONFLICT DO NOTHING`, so the insert IS the
+/// admission test: the instance whose insert lands runs the sweep, every other instance logs the
+/// holder and no-ops. Append-mostly and self-pruned (a daily delete piggybacked on the
+/// partition-maintenance tick keeps `CRON_TICK_CLAIM_RETENTION_DAYS` of history for diagnosis).
+///
+/// Not a ledger: a pruned window is re-claimable, which is correct — nothing reads a claim after its
+/// tick, and the horizon is far beyond any window that could still be contended.
+model CronTickClaim {
+  jobName     String   @map("job_name")
+  /// The fire instant truncated to its UTC minute (`tickWindowStart`). Timezone-free on purpose.
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+  /// hostname/pid@build-fingerprint — for a human reading a log line, never a predicate.
+  claimedBy   String   @map("claimed_by")
+  claimedAt   DateTime @default(now()) @map("claimed_at") @db.Timestamptz(3)
+
+  @@id([jobName, windowStart], map: "cron_tick_claims_pkey")
+  @@index([windowStart], map: "ix_cron_tick_claims_window_start")
+  @@map("cron_tick_claims")
+}

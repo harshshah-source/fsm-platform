@@ -12,6 +12,8 @@ import { CandidateQueryService } from './candidate-query.service';
 import { BulkUnassignService } from './bulk-unassign.service';
 import { DAY_PLAN_NOTIFIER, SpineDayPlanNotifier } from './day-plan-notifier';
 import { DayPlanQueryService } from './day-plan-query.service';
+import { CronTickClaimModule } from './cron-tick-claim.module';
+import { CronTickClaimService } from './cron-tick-claim.service';
 import { DispatchRunService } from './dispatch-run.service';
 import { DispatchScheduleService } from './dispatch-schedule.service';
 import { DispatchSchedulerService } from './dispatch-scheduler.service';
@@ -30,7 +32,16 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
  * no approval gate (Decision §7). Read surfaces (/api/schedules/*) build on this service.
  */
 @Module({
-  imports: [PrismaModule, AuditModule, RecommenderModule, NotificationsModule, EngineersModule, InventoryModule],
+  imports: [
+    PrismaModule,
+    AuditModule,
+    RecommenderModule,
+    NotificationsModule,
+    EngineersModule,
+    InventoryModule,
+    // #263 — the cross-instance tick arbiter both schedulers below consult.
+    CronTickClaimModule,
+  ],
   providers: [
     BatchAssignmentService,
     // #251 — the Scheduler Preview's read + the two hold writes. Plain DI: it composes
@@ -49,8 +60,8 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
     DispatchRunService,
     {
       provide: DispatchSchedulerService,
-      useFactory: (run: DispatchRunService) => new DispatchSchedulerService(run),
-      inject: [DispatchRunService],
+      useFactory: (run: DispatchRunService, claims: CronTickClaimService) => new DispatchSchedulerService(run, claims),
+      inject: [DispatchRunService, CronTickClaimService],
     },
     // #213 — owns the registered job's lifecycle: applies the stored schedule at boot and re-points the
     // live job on every write, so an operator's change takes effect without a restart. DI-resolved (it
@@ -60,8 +71,8 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
     // factory-provided shape and the same reason: its optional `config` param reads the environment.
     {
       provide: ScheduleClosureScheduler,
-      useFactory: (prisma: PrismaService) => new ScheduleClosureScheduler(prisma),
-      inject: [PrismaService],
+      useFactory: (prisma: PrismaService, claims: CronTickClaimService) => new ScheduleClosureScheduler(prisma, claims),
+      inject: [PrismaService, CronTickClaimService],
     },
     AssignableWorkQueryService,
     // #274 — the candidate column's read. Composes the recommender's own `orderedCandidatesForPlant`

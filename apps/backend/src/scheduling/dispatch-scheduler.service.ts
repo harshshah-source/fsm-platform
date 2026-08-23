@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import type { SchedulerTickOutcome } from './business-sweep-scheduler.service';
+import type { TickClaimant } from './cron-tick-claim';
 import {
   BUSINESS_TIMEZONE,
   DEFAULT_DISPATCH_CRON,
@@ -64,6 +65,7 @@ export class DispatchSchedulerService {
 
   constructor(
     private readonly dispatchRun: DispatchRunService,
+    private readonly claims: TickClaimant,
     config?: Partial<DispatchSchedulerConfig>,
   ) {
     this.config = { ...readDispatchSchedulerConfig(), ...config };
@@ -81,6 +83,12 @@ export class DispatchSchedulerService {
   async dispatchTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     try {
+      // #263 — the tick's window, claimed once, before anything is admitted. It covers the whole run
+      // INCLUDING #260's patience loop: waiting out a contended zone can carry this tick past the
+      // minute boundary, and re-claiming per retry would hand the second instance the very window this
+      // one is still working. The zone claim (#259) is what arbitrates the retries themselves; this
+      // arbitrates whether a second instance starts a parallel run at all.
+      if (!(await this.claims.claimTickOrLog(DISPATCH_JOB_NAME, now))) return { ran: false, reason: 'TICK_CLAIMED' };
       // #213 — the in-flight guard is no longer a private field here. It moved into
       // `runForActiveZones`, the one path this tick and the manual HTTP trigger share, so neither can
       // start a run over the other; this tick just reports the refusal it is handed.
@@ -120,6 +128,9 @@ export class DispatchSchedulerService {
   async dispatchReaperTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     try {
+      // Its own job name, so the reaper and the dispatch it accompanies never contend for one window.
+      if (!(await this.claims.claimTickOrLog(DISPATCH_REAPER_JOB_NAME, now)))
+        return { ran: false, reason: 'TICK_CLAIMED' };
       const { runs, claims } = await this.dispatchRun.reapStaleDispatchRuns(now);
       if (runs > 0) this.logger.warn(`dispatch reaper tick: aborted ${runs} run(s), freed ${claims} claim(s)`);
       return { ran: true };

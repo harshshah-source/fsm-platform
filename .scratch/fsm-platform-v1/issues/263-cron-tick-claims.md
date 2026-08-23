@@ -1,6 +1,6 @@
 # 263 — DB-side cron tick claims: a second sweeps-enabled instance becomes a safe no-op
 
-Status: ready-for-agent
+Status: done (2026-08-24) — see `docs/progress/263-cron-tick-claims.md`
 Type: AFK · Backend
 Decision: #258 Q8.7 (G6)
 
@@ -50,11 +50,12 @@ None. Mobile: n/a.
 
 ## Acceptance criteria
 
-- [ ] Two app instances against one DB, same job firing in the same minute window: exactly one
+- [x] Two app instances against one DB, same job firing in the same minute window: exactly one
       executes (asserted on the job's side effect), the other logs the holder and no-ops.
-- [ ] A skipped claim never marks the sweep errored (G7: a no-op is not a failure).
-- [ ] Claims older than the retention horizon are pruned.
-- [ ] `scheduler-wiring.e2e-spec.ts` still pins 18 jobs (this issue adds no cron).
+- [x] A skipped claim never marks the sweep errored (G7: a no-op is not a failure).
+- [x] Claims older than the retention horizon are pruned.
+- [x] `scheduler-wiring.e2e-spec.ts` still pins **19** jobs (this issue adds no cron). The `18`
+      written here predates #261's `business-dispatch-reaper`; the criterion holds, the number did not.
 
 ## Tests
 

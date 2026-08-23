@@ -19,6 +19,8 @@ import { TicketCreationService } from './ticket-creation.service';
 import { TicketQueryService } from './ticket-query.service';
 import { SpecialTicketQueryService } from './special-ticket.query';
 import { TroubleshootSubmissionService } from './troubleshoot-submission.service';
+import { CronTickClaimModule } from '../scheduling/cron-tick-claim.module';
+import { CronTickClaimService } from '../scheduling/cron-tick-claim.service';
 import { VehicleReturnResumeService } from './vehicle-return-resume.service';
 import { VehicleReturnResumeScheduler } from './vehicle-return-resume-scheduler.service';
 import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
@@ -31,7 +33,9 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
  * Shared Pool surfaces are layered on by later issues.
  */
 @Module({
-  imports: [PrismaModule, AuditModule, SharedPoolModule, NotificationsModule],
+  // CronTickClaimModule (#263) supplies the tick arbiter to the vu-auto-resume scheduler below. It
+  // imports nothing itself, so it cannot introduce a cycle here.
+  imports: [PrismaModule, AuditModule, SharedPoolModule, NotificationsModule, CronTickClaimModule],
   providers: [
     TicketCreationService,
     TicketQueryService,
@@ -46,8 +50,9 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
     VehicleReturnResumeService,
     {
       provide: VehicleReturnResumeScheduler,
-      useFactory: (resume: VehicleReturnResumeService) => new VehicleReturnResumeScheduler(resume),
-      inject: [VehicleReturnResumeService],
+      useFactory: (resume: VehicleReturnResumeService, claims: CronTickClaimService) =>
+        new VehicleReturnResumeScheduler(resume, claims),
+      inject: [VehicleReturnResumeService, CronTickClaimService],
     },
     NonOperationalService,
     // #76 — the customer confirmation link has no internal recipient User row (external party, no

@@ -3,6 +3,7 @@ import { AuditService } from '../src/audit/audit.service';
 import { SeAvailabilityService } from '../src/engineers/se-availability.service';
 import { ACCEPTANCE_TIMEOUT_MIN, IntradayInsertionService } from '../src/intraday/intraday-insertion.service';
 import { NotificationService } from '../src/notifications/notification.service';
+import { alwaysClaims } from './support/tick-claims';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { CandidateSelectionService } from '../src/recommender/candidate-selection.service';
 import { BusinessSweepSchedulerService } from '../src/scheduling/business-sweep-scheduler.service';
@@ -104,6 +105,7 @@ describe('Issue 108 AC#5(a) — intraday acceptance-timeout runs on the schedule
       unused<RootCauseAnalyticsAggregationService>(),
       unused<ZmPerformanceAggregationService>(),
       unused<SystemEfficiencyAggregationService>(),
+      alwaysClaims(),
       { enabled: true },
     );
 
@@ -159,7 +161,8 @@ describe('Issue 108 AC#5(a) — intraday acceptance-timeout runs on the schedule
       unused<VerificationService>(), intraday, unused<CrossZoneEscalationService>(), unused<InstallLifecycleService>(),
       unused<RepeatEscalationService>(), unused<TierOverrideExpiryService>(), unused<SoftInactiveCountService>(),
       unused<FleetUptimeAggregationService>(), unused<RootCauseAnalyticsAggregationService>(),
-      unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), { enabled: false },
+      unused<ZmPerformanceAggregationService>(), unused<SystemEfficiencyAggregationService>(), alwaysClaims(),
+      { enabled: false },
     );
     const ticketId = await makeCriticalTicket();
     await intraday.fireForZone(zoneId, BASE);

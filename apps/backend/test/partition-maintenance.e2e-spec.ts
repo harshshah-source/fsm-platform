@@ -1,3 +1,4 @@
+import { alwaysClaims } from './support/tick-claims';
 import { PartitionMaintenanceService } from '../src/ingestion/partition-maintenance.service';
 import { dailyPartitionName, startOfUtcDay } from '../src/ingestion/partition-planner';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -41,7 +42,7 @@ describe('R3 — raw_device_snapshots daily partitioning + retention', () => {
   });
 
   it('routes an ingested ping to its day partition, not the DEFAULT catch-all', async () => {
-    const svc = new PartitionMaintenanceService(prisma, settings7);
+    const svc = new PartitionMaintenanceService(prisma, settings7, alwaysClaims() as never);
     await svc.runMaintenance(); // guarantee today's partition exists (create-ahead)
 
     const run = await prisma.snapshotRun.create({ data: { status: 'SUCCESS' } });
@@ -63,7 +64,7 @@ describe('R3 — raw_device_snapshots daily partitioning + retention', () => {
         `FOR VALUES FROM ('2000-01-01 00:00:00+00') TO ('2000-01-02 00:00:00+00')`,
     );
 
-    const svc = new PartitionMaintenanceService(prisma, settings7);
+    const svc = new PartitionMaintenanceService(prisma, settings7, alwaysClaims() as never);
     const res = await svc.runMaintenance(new Date());
     const names = await partitions();
 

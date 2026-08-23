@@ -17,6 +17,8 @@ import { RepeatEscalationService } from '../ticketing/repeat-escalation.service'
 import { VerificationModule } from '../verification/verification.module';
 import { VerificationService } from '../verification/verification.service';
 import { BusinessSweepSchedulerService } from './business-sweep-scheduler.service';
+import { CronTickClaimModule } from './cron-tick-claim.module';
+import { CronTickClaimService } from './cron-tick-claim.service';
 
 /**
  * Issue 108 — a leaf module that wires {@link BusinessSweepSchedulerService} to the business sweeps it
@@ -30,7 +32,16 @@ import { BusinessSweepSchedulerService } from './business-sweep-scheduler.servic
  * left to read the environment rather than being DI-resolved.
  */
 @Module({
-  imports: [VerificationModule, IntradayModule, CrossZoneModule, TicketingModule, ReportsModule, OrgModule],
+  imports: [
+    VerificationModule,
+    IntradayModule,
+    CrossZoneModule,
+    TicketingModule,
+    ReportsModule,
+    OrgModule,
+    // #263 — `runGuarded` consults this before every one of the eleven sweeps.
+    CronTickClaimModule,
+  ],
   providers: [
     {
       provide: BusinessSweepSchedulerService,
@@ -46,6 +57,7 @@ import { BusinessSweepSchedulerService } from './business-sweep-scheduler.servic
         rootCause: RootCauseAnalyticsAggregationService,
         zmPerformance: ZmPerformanceAggregationService,
         systemEfficiency: SystemEfficiencyAggregationService,
+        claims: CronTickClaimService,
       ) =>
         new BusinessSweepSchedulerService(
           verification,
@@ -59,6 +71,7 @@ import { BusinessSweepSchedulerService } from './business-sweep-scheduler.servic
           rootCause,
           zmPerformance,
           systemEfficiency,
+          claims,
         ),
       inject: [
         VerificationService,
@@ -72,6 +85,7 @@ import { BusinessSweepSchedulerService } from './business-sweep-scheduler.servic
         RootCauseAnalyticsAggregationService,
         ZmPerformanceAggregationService,
         SystemEfficiencyAggregationService,
+        CronTickClaimService,
       ],
     },
   ],

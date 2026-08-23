@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
+import { CronTickClaimModule } from '../scheduling/cron-tick-claim.module';
+import { CronTickClaimService } from '../scheduling/cron-tick-claim.service';
 import { CommonKitService } from './common-kit.service';
 import { CompaniesService } from './companies.service';
 import { GeographyService } from './geography.service';
@@ -39,7 +41,9 @@ const services = [
 ];
 
 @Module({
-  imports: [AuditModule],
+  // CronTickClaimModule (#263) supplies the tick arbiter to the refresh scheduler below. It imports
+  // nothing itself, so it cannot introduce a cycle into a module this widely imported.
+  imports: [AuditModule, CronTickClaimModule],
   providers: [
     ...services,
     // The periodic MV-refresh scheduler (Issue 138 slice 3). Factory-provided — like
@@ -47,8 +51,9 @@ const services = [
     // DI-resolved. Its `@Cron` is discovered by the global ScheduleModule explorer.
     {
       provide: PlantEligibilityRefreshScheduler,
-      useFactory: (eligibility: PlantEligibleFloatingSeService) => new PlantEligibilityRefreshScheduler(eligibility),
-      inject: [PlantEligibleFloatingSeService],
+      useFactory: (eligibility: PlantEligibleFloatingSeService, claims: CronTickClaimService) =>
+        new PlantEligibilityRefreshScheduler(eligibility, claims),
+      inject: [PlantEligibleFloatingSeService, CronTickClaimService],
     },
   ],
   exports: services,

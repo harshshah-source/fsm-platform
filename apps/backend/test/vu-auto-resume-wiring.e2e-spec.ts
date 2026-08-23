@@ -1,5 +1,6 @@
 import { ScheduleModule, SchedulerRegistry } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
+import { alwaysClaims } from './support/tick-claims';
 import { TicketingModule } from '../src/ticketing/ticketing.module';
 import {
   DEFAULT_VU_AUTO_RESUME_CRON,
@@ -81,11 +82,11 @@ describe('#247 — TicketingModule registers the vehicle-return auto-resume cron
         }),
     };
 
-    const off = new VehicleReturnResumeScheduler(sweep as never, { enabled: false });
+    const off = new VehicleReturnResumeScheduler(sweep as never, alwaysClaims(), { enabled: false });
     expect(await off.resumeTick()).toEqual({ ran: false, reason: 'DISABLED' });
     expect(calls).toBe(0);
 
-    const on = new VehicleReturnResumeScheduler(sweep as never, { enabled: true });
+    const on = new VehicleReturnResumeScheduler(sweep as never, alwaysClaims(), { enabled: true });
     const first = on.resumeTick();
     const second = await on.resumeTick();
     expect(second).toEqual({ ran: false, reason: 'RUN_IN_PROGRESS' });
@@ -96,6 +97,7 @@ describe('#247 — TicketingModule registers the vehicle-return auto-resume cron
     // A sweep that throws is an ERROR outcome, not an unhandled rejection out of the cron context.
     const boom = new VehicleReturnResumeScheduler(
       { sweepReturnedVehicles: () => Promise.reject(new Error('boom')) } as never,
+      alwaysClaims(),
       { enabled: true },
     );
     expect(await boom.resumeTick()).toEqual({ ran: false, reason: 'ERROR' });

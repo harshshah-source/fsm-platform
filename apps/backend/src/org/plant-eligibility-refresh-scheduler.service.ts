@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { BUSINESS_TIMEZONE } from '../scheduling/dispatch-cron';
+import type { TickClaimant } from '../scheduling/cron-tick-claim';
 import { PlantEligibleFloatingSeService } from './plant-eligible-floating-se.service';
 
 /**
@@ -13,6 +14,9 @@ import { PlantEligibleFloatingSeService } from './plant-eligible-floating-se.ser
  * job that fix did not cover).
  */
 export const DEFAULT_PLANT_ELIGIBILITY_REFRESH_CRON = '30 4 * * *';
+
+/** #263 — the registered cron-job name, shared by the decorator and the tick claim. */
+export const PLANT_ELIGIBILITY_REFRESH_JOB_NAME = 'plant-eligibility-refresh';
 
 export interface PlantEligibilityRefreshConfig {
   /** Shares the pipeline master switch — `BUSINESS_SWEEPS_ENABLED === 'true'`. Default OFF. */
@@ -31,7 +35,9 @@ export function readPlantEligibilityRefreshConfig(
 }
 
 /** What the tick reports — a cron body NEVER throws out of the cron context. */
-export type RefreshTickOutcome = { ran: true } | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'ERROR' };
+export type RefreshTickOutcome =
+  | { ran: true }
+  | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'TICK_CLAIMED' | 'ERROR' };
 
 /**
  * Issue 138 slice 3 — the periodic backstop that keeps `plant_eligible_floating_se` fresh (AC#3).
@@ -56,13 +62,17 @@ export class PlantEligibilityRefreshScheduler {
 
   constructor(
     private readonly eligibility: PlantEligibleFloatingSeService,
+    private readonly claims: TickClaimant,
     config?: Partial<PlantEligibilityRefreshConfig>,
   ) {
     this.config = { ...readPlantEligibilityRefreshConfig(), ...config };
   }
 
-  @Cron(readPlantEligibilityRefreshConfig().refreshCron, { name: 'plant-eligibility-refresh', timeZone: BUSINESS_TIMEZONE })
-  async refreshTick(): Promise<RefreshTickOutcome> {
+  @Cron(readPlantEligibilityRefreshConfig().refreshCron, {
+    name: PLANT_ELIGIBILITY_REFRESH_JOB_NAME,
+    timeZone: BUSINESS_TIMEZONE,
+  })
+  async refreshTick(firedAt: Date = new Date()): Promise<RefreshTickOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     if (this.inFlight) {
       this.logger.log('plant-eligibility refresh skipped — a refresh is already in flight');
@@ -70,6 +80,12 @@ export class PlantEligibilityRefreshScheduler {
     }
     this.inFlight = true;
     try {
+      // #263 — `REFRESH MATERIALIZED VIEW CONCURRENTLY` on two instances at once is not merely wasted
+      // work: the second is serialised behind the first and rebuilds the same rows from the same
+      // inputs, doubling the window in which the MV holds its refresh lock.
+      if (!(await this.claims.claimTickOrLog(PLANT_ELIGIBILITY_REFRESH_JOB_NAME, firedAt))) {
+        return { ran: false, reason: 'TICK_CLAIMED' };
+      }
       await this.eligibility.refresh();
       return { ran: true };
     } catch (e) {

@@ -4,6 +4,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { RecommenderService } from '../src/recommender/recommender.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
+import { alwaysClaims } from './support/tick-claims';
 import { DispatchSchedulerService } from '../src/scheduling/dispatch-scheduler.service';
 
 /**
@@ -72,7 +73,7 @@ describe('#213 slice 2 — one shared per-zone dispatch in-flight guard (e2e)', 
     // refusal it always did. The patient behaviour has its own spec,
     // `dispatch-cron-bounded-retry.e2e-spec.ts`. Passed through the config param rather than the
     // environment, per #182 R5.
-    scheduler = new DispatchSchedulerService(dispatchRun, {
+    scheduler = new DispatchSchedulerService(dispatchRun, alwaysClaims(), {
       enabled: true,
       retry: { intervalMs: 60_000, deadlineMs: 0 },
     });

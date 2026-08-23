@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import type { TickClaimant } from './cron-tick-claim';
 import { CrossZoneEscalationService } from '../cross-zone/cross-zone-escalation.service';
 import { IntradayInsertionService } from '../intraday/intraday-insertion.service';
 import { TierOverrideExpiryService } from '../org/tier-override-expiry.service';
@@ -28,6 +29,27 @@ import { VerificationService } from '../verification/verification.service';
  *   - fleet-uptime / root-cause / zm-performance: month-start (03:00-03:30 on the 1st) — finalise the
  *     month just ended; staggered so three heavy recomputes never start the same minute.
  */
+/**
+ * #263 — the registered cron-job names, in the ONE place the decorator and the tick claim can share
+ * them. They were literals in eleven `@Cron` options objects; the claim key has to be globally unique
+ * across the whole app (`cron_tick_claims` is one table for nineteen jobs), and the registered name
+ * already is — it is what `scheduler-wiring.e2e-spec.ts` pins. Re-deriving it as a second literal
+ * beside the first is how the two drift.
+ */
+export const BUSINESS_SWEEP_JOBS = {
+  verification: 'business-verification',
+  installVerification: 'business-install-verification',
+  intradayTimeout: 'business-intraday-timeout',
+  crossZone: 'business-cross-zone',
+  repeatEscalation: 'business-repeat-escalation',
+  tierOverrideExpiry: 'business-tier-override-expiry',
+  softInactive: 'business-soft-inactive',
+  systemEfficiency: 'business-system-efficiency',
+  fleetUptime: 'business-fleet-uptime',
+  rootCause: 'business-root-cause',
+  zmPerformance: 'business-zm-performance',
+} as const;
+
 export const DEFAULT_VERIFICATION_CRON = '*/5 * * * *';
 export const DEFAULT_INSTALL_VERIFICATION_CRON = '*/5 * * * *';
 export const DEFAULT_INTRADAY_TIMEOUT_CRON = '*/2 * * * *';
@@ -77,9 +99,16 @@ export function readBusinessSweepSchedulerConfig(
 }
 
 /** What a manually-invokable cron handler reports — a tick NEVER throws out of a cron context. */
+/**
+ * `TICK_CLAIMED` (#263) is deliberately its own reason and deliberately not `ERROR`: another instance
+ * won this window, the work IS being done, and G7 says a no-op is not a failure. It is also not
+ * `RUN_IN_PROGRESS`, which means something quite different — that *this* process is still inside the
+ * previous tick. Collapsing the two would make "we are running two instances, as designed" and "a
+ * sweep is overrunning its cadence" indistinguishable in the one place an operator looks.
+ */
 export type SchedulerTickOutcome =
   | { ran: true }
-  | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'ERROR' };
+  | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'TICK_CLAIMED' | 'ERROR' };
 
 /** Previous UTC month-start relative to `now` — the month a month-start tick finalises. */
 function previousUtcMonthStart(now: Date): Date {
@@ -122,16 +151,35 @@ export class BusinessSweepSchedulerService {
     private readonly rootCause: RootCauseAnalyticsAggregationService,
     private readonly zmPerformance: ZmPerformanceAggregationService,
     private readonly systemEfficiency: SystemEfficiencyAggregationService,
+    private readonly claims: TickClaimant,
     config?: Partial<BusinessSweepSchedulerConfig>,
   ) {
     this.config = { ...readBusinessSweepSchedulerConfig(), ...config };
   }
 
   /**
-   * The uniform tick body: dormant-gate → single-in-flight guard → run the sweep in a try/catch →
-   * structured outcome. `name` is both the guard key and the log label.
+   * The uniform tick body: dormant-gate → single-in-flight guard → **tick claim** → run the sweep in a
+   * try/catch → structured outcome. `name` is the registered cron-job name, and therefore the guard
+   * key, the log label and the claim key all at once (#263 — see {@link BUSINESS_SWEEP_JOBS}).
+   *
+   * Eleven sweeps, one place. That is the point of putting the claim here rather than in the decorated
+   * handlers: a twelfth sweep added to this class inherits cross-instance safety without its author
+   * having to know the property exists, which is the only way a guarantee like this survives.
+   *
+   * **Order matters.** The dormant gate comes first so a disabled instance never writes a claim it has
+   * no intention of honouring — a claim taken and abandoned would silence the instance that WOULD have
+   * run. The in-flight guard comes next, so a process still inside its own previous tick does not spend
+   * a database round trip to discover it. The claim comes last, immediately before the work.
+   *
+   * `claimTickOrLog` sits inside the try: a claim failure is a database failure, which is a genuine
+   * ERROR and belongs in the same channel as a sweep that threw. A *refusal* is not — it returns false
+   * and leaves through `TICK_CLAIMED`.
    */
-  private async runGuarded(name: string, run: () => Promise<unknown>): Promise<SchedulerTickOutcome> {
+  private async runGuarded(
+    name: string,
+    firedAt: Date,
+    run: () => Promise<unknown>,
+  ): Promise<SchedulerTickOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     if (this.inFlight.has(name)) {
       this.logger.log(`${name} tick skipped — a run is already in flight`);
@@ -139,6 +187,7 @@ export class BusinessSweepSchedulerService {
     }
     this.inFlight.add(name);
     try {
+      if (!(await this.claims.claimTickOrLog(name, firedAt))) return { ran: false, reason: 'TICK_CLAIMED' };
       await run();
       return { ran: true };
     } catch (e) {
@@ -149,58 +198,58 @@ export class BusinessSweepSchedulerService {
     }
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().verificationCron, { name: 'business-verification' })
+  @Cron(readBusinessSweepSchedulerConfig().verificationCron, { name: BUSINESS_SWEEP_JOBS.verification })
   verificationTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('verification', () => this.verification.runVerification(now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.verification, now, () => this.verification.runVerification(now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().installVerificationCron, { name: 'business-install-verification' })
+  @Cron(readBusinessSweepSchedulerConfig().installVerificationCron, { name: BUSINESS_SWEEP_JOBS.installVerification })
   installVerificationTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('install-verification', () => this.installLifecycle.runInstallVerification(now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.installVerification, now, () => this.installLifecycle.runInstallVerification(now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().intradayTimeoutCron, { name: 'business-intraday-timeout' })
+  @Cron(readBusinessSweepSchedulerConfig().intradayTimeoutCron, { name: BUSINESS_SWEEP_JOBS.intradayTimeout })
   intradayTimeoutTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('intraday-timeout', () => this.intraday.sweepTimeouts(now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.intradayTimeout, now, () => this.intraday.sweepTimeouts(now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().crossZoneCron, { name: 'business-cross-zone' })
+  @Cron(readBusinessSweepSchedulerConfig().crossZoneCron, { name: BUSINESS_SWEEP_JOBS.crossZone })
   crossZoneTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('cross-zone', () => this.crossZone.sweepAutoEscalations(now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.crossZone, now, () => this.crossZone.sweepAutoEscalations(now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().repeatEscalationCron, { name: 'business-repeat-escalation' })
+  @Cron(readBusinessSweepSchedulerConfig().repeatEscalationCron, { name: BUSINESS_SWEEP_JOBS.repeatEscalation })
   repeatEscalationTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('repeat-escalation', () => this.repeatEscalation.runEscalationScan(now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.repeatEscalation, now, () => this.repeatEscalation.runEscalationScan(now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().tierOverrideExpiryCron, { name: 'business-tier-override-expiry' })
+  @Cron(readBusinessSweepSchedulerConfig().tierOverrideExpiryCron, { name: BUSINESS_SWEEP_JOBS.tierOverrideExpiry })
   tierOverrideExpiryTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('tier-override-expiry', () => this.tierOverrideExpiry.sweepExpiredOverrides(now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.tierOverrideExpiry, now, () => this.tierOverrideExpiry.sweepExpiredOverrides(now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().softInactiveCron, { name: 'business-soft-inactive' })
+  @Cron(readBusinessSweepSchedulerConfig().softInactiveCron, { name: BUSINESS_SWEEP_JOBS.softInactive })
   softInactiveTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('soft-inactive', () => this.softInactive.recompute(now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.softInactive, now, () => this.softInactive.recompute(now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().systemEfficiencyCron, { name: 'business-system-efficiency' })
+  @Cron(readBusinessSweepSchedulerConfig().systemEfficiencyCron, { name: BUSINESS_SWEEP_JOBS.systemEfficiency })
   systemEfficiencyTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('system-efficiency', () => this.systemEfficiency.computeDay(previousUtcDayStart(now), now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.systemEfficiency, now, () => this.systemEfficiency.computeDay(previousUtcDayStart(now), now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().fleetUptimeCron, { name: 'business-fleet-uptime' })
+  @Cron(readBusinessSweepSchedulerConfig().fleetUptimeCron, { name: BUSINESS_SWEEP_JOBS.fleetUptime })
   fleetUptimeTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('fleet-uptime', () => this.fleetUptime.computeMonth(previousUtcMonthStart(now), now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.fleetUptime, now, () => this.fleetUptime.computeMonth(previousUtcMonthStart(now), now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().rootCauseCron, { name: 'business-root-cause' })
+  @Cron(readBusinessSweepSchedulerConfig().rootCauseCron, { name: BUSINESS_SWEEP_JOBS.rootCause })
   rootCauseTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('root-cause', () => this.rootCause.computeMonth(previousUtcMonthStart(now), now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.rootCause, now, () => this.rootCause.computeMonth(previousUtcMonthStart(now), now));
   }
 
-  @Cron(readBusinessSweepSchedulerConfig().zmPerformanceCron, { name: 'business-zm-performance' })
+  @Cron(readBusinessSweepSchedulerConfig().zmPerformanceCron, { name: BUSINESS_SWEEP_JOBS.zmPerformance })
   zmPerformanceTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded('zm-performance', () => this.zmPerformance.computeMonth(previousUtcMonthStart(now), now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.zmPerformance, now, () => this.zmPerformance.computeMonth(previousUtcMonthStart(now), now));
   }
 }

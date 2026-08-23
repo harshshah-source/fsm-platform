@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import { alwaysClaims } from './support/tick-claims';
 import type { DispatchRunService } from '../src/scheduling/dispatch-run.service';
 import {
   DEFAULT_DISPATCH_RETRY_DEADLINE_MIN,
@@ -26,7 +27,7 @@ const makeRun = () => ({
   reapStaleDispatchRuns: vi.fn(async () => ({ runs: 0, claims: 0 })),
 });
 const makeScheduler = (run: ReturnType<typeof makeRun>, enabled: boolean): DispatchSchedulerService =>
-  new DispatchSchedulerService(run as unknown as DispatchRunService, { enabled });
+  new DispatchSchedulerService(run as unknown as DispatchRunService, alwaysClaims(), { enabled });
 
 describe('Issue 113 — DispatchSchedulerService', () => {
   it('readDispatchSchedulerConfig: OFF by default; cron defaults and env-overrides', () => {

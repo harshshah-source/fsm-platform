@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import type { TickClaimant } from '../../scheduling/cron-tick-claim';
 import { IntegrationSyncService } from './integration-sync.service';
 
 /**
@@ -22,6 +23,10 @@ export const DEFAULT_MASTERS_CRON = '0 2 * * *';
 /** Telemetry + device-state recompute — 30 min, comfortably above the recompute run time (risk A7). */
 export const DEFAULT_TELEMETRY_CRON = '*/30 * * * *';
 
+/** #263 — the registered cron-job names, shared by the decorators and the tick claims. */
+export const INGESTION_TELEMETRY_JOB_NAME = 'ingestion-telemetry';
+export const INGESTION_MASTERS_JOB_NAME = 'ingestion-masters';
+
 /** The two ops knobs + enable flag in one place (the issue's REFACTOR step, done up front). */
 export function readIngestionSchedulerConfig(env: NodeJS.ProcessEnv = process.env): IngestionSchedulerConfig {
   return {
@@ -34,7 +39,7 @@ export function readIngestionSchedulerConfig(env: NodeJS.ProcessEnv = process.en
 /** What a manually-invokable cron handler reports — a tick NEVER throws out of a cron context. */
 export type SchedulerTickOutcome =
   | { ran: true }
-  | { ran: false; reason: 'DISABLED' | 'UNCONFIGURED' | 'RUN_IN_PROGRESS' | 'ERROR' };
+  | { ran: false; reason: 'DISABLED' | 'UNCONFIGURED' | 'RUN_IN_PROGRESS' | 'TICK_CLAIMED' | 'ERROR' };
 
 /**
  * In-process ingestion scheduler (Issue 97 Slice 7 / review A1) — the piece that turns the pipeline
@@ -55,6 +60,7 @@ export class IntegrationSchedulerService {
   constructor(
     private readonly sync: IntegrationSyncService,
     private readonly gate: SchedulerSourceGate,
+    private readonly claims: TickClaimant,
     config?: IngestionSchedulerConfig,
   ) {
     this.config = config ?? readIngestionSchedulerConfig();
@@ -67,11 +73,16 @@ export class IntegrationSchedulerService {
     return null;
   }
 
-  @Cron(readIngestionSchedulerConfig().telemetryCron, { name: 'ingestion-telemetry' })
-  async telemetryTick(): Promise<SchedulerTickOutcome> {
+  @Cron(readIngestionSchedulerConfig().telemetryCron, { name: INGESTION_TELEMETRY_JOB_NAME })
+  async telemetryTick(firedAt: Date = new Date()): Promise<SchedulerTickOutcome> {
     const dormant = this.dormantReason();
     if (dormant) return { ran: false, reason: dormant };
     try {
+      // #263 — claimed AFTER the dormant gate, so an instance with no AutoPlant route (dev, CI, a box
+      // that lost the VPN) never takes a window it cannot serve and silences the instance that can.
+      if (!(await this.claims.claimTickOrLog(INGESTION_TELEMETRY_JOB_NAME, firedAt))) {
+        return { ran: false, reason: 'TICK_CLAIMED' };
+      }
       const result = await this.sync.ingestTelemetry();
       if (result.skipped) {
         this.logger.log('telemetry tick skipped — run already in flight');
@@ -84,11 +95,14 @@ export class IntegrationSchedulerService {
     }
   }
 
-  @Cron(readIngestionSchedulerConfig().mastersCron, { name: 'ingestion-masters' })
-  async mastersTick(): Promise<SchedulerTickOutcome> {
+  @Cron(readIngestionSchedulerConfig().mastersCron, { name: INGESTION_MASTERS_JOB_NAME })
+  async mastersTick(firedAt: Date = new Date()): Promise<SchedulerTickOutcome> {
     const dormant = this.dormantReason();
     if (dormant) return { ran: false, reason: dormant };
     try {
+      if (!(await this.claims.claimTickOrLog(INGESTION_MASTERS_JOB_NAME, firedAt))) {
+        return { ran: false, reason: 'TICK_CLAIMED' };
+      }
       const result = await this.sync.syncMastersTick();
       if (result.skipped) {
         this.logger.log('masters tick skipped — run already in flight');

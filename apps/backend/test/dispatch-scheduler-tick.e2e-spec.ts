@@ -4,6 +4,7 @@ import { CandidateSelectionService } from '../src/recommender/candidate-selectio
 import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { DispatchRunService } from '../src/scheduling/dispatch-run.service';
+import { alwaysClaims } from './support/tick-claims';
 import { DispatchSchedulerService } from '../src/scheduling/dispatch-scheduler.service';
 
 /**
@@ -80,13 +81,13 @@ describe('Issue 113 — a scheduler tick dispatches without an HTTP call', () =>
 
   it('dormant tick (master switch off) leaves the ticket UNASSIGNED', async () => {
     const ticketId = await makeTicket();
-    const off = new DispatchSchedulerService(run, { enabled: false });
+    const off = new DispatchSchedulerService(run, alwaysClaims(), { enabled: false });
     expect(await off.dispatchTick(NOW)).toEqual({ ran: false, reason: 'DISABLED' });
     expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).assignmentState).toBe('UNASSIGNED');
   });
 
   it('an enabled tick dispatches the ticket to a Day Plan', async () => {
-    const enabled = new DispatchSchedulerService(run, { enabled: true });
+    const enabled = new DispatchSchedulerService(run, alwaysClaims(), { enabled: true });
     expect(await enabled.dispatchTick(NOW)).toEqual({ ran: true });
 
     const schedules = await prisma.workSchedule.findMany({ where: { zoneId, seId } });

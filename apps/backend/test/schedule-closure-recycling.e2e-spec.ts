@@ -6,6 +6,7 @@ import { MeTicketsQueryService } from '../src/me-tickets/me-tickets-query.servic
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
 import { dispatchZoneLockKey } from '../src/scheduling/dispatch-zone-lock';
 import { REMOVAL_REASONS } from '../src/scheduling/removal-reason';
+import { alwaysClaims } from './support/tick-claims';
 import { ScheduleClosureScheduler } from '../src/scheduling/schedule-closure-scheduler.service';
 import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 
@@ -168,7 +169,7 @@ describe('#242 — unresolved assignments recycle at schedule closure', () => {
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
-    closer = new ScheduleClosureScheduler(prisma, { enabled: true });
+    closer = new ScheduleClosureScheduler(prisma, alwaysClaims(), { enabled: true });
     rec = new RecommenderService(prisma, new CandidateSelectionService(prisma));
     dispatch = new BatchAssignmentService(prisma);
     meTickets = new MeTicketsQueryService(prisma, new SeCoverageService(prisma));

@@ -7,6 +7,8 @@ import { DeviceDepartureModule } from '../device-departure/device-departure.modu
 import { DeviceStateModule } from '../device-state/device-state.module';
 import { OrgModule } from '../org/org.module';
 import { PrismaService } from '../prisma/prisma.service';
+import { CronTickClaimModule } from '../scheduling/cron-tick-claim.module';
+import { CronTickClaimService } from '../scheduling/cron-tick-claim.service';
 import { SettingsModule } from '../settings/settings.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import {
@@ -75,6 +77,9 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
     // OrgModule supplies PlantEligibleFloatingSeService to MasterSyncService (Issue 138 slice 2 — the
     // post-sync MV refresh). No cycle: OrgModule imports only AuditModule.
     OrgModule,
+    // #263 — supplies the tick arbiter to both schedulers this module owns (the AutoPlant sync ticks
+    // and the daily partition maintenance, which also hosts the claim table's retention prune).
+    CronTickClaimModule,
     ScheduleModule.forRoot(),
   ],
   controllers: [IntegrationHealthController, IntegrationSyncController],
@@ -142,9 +147,9 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
     // dev/test/CI boot exactly as before while a configured+enabled runtime self-runs the pipeline.
     {
       provide: IntegrationSchedulerService,
-      useFactory: (sync: IntegrationSyncService, client: AutoPlantMysqlClient) =>
-        new IntegrationSchedulerService(sync, client),
-      inject: [IntegrationSyncService, AutoPlantMysqlClient],
+      useFactory: (sync: IntegrationSyncService, client: AutoPlantMysqlClient, claims: CronTickClaimService) =>
+        new IntegrationSchedulerService(sync, client, claims),
+      inject: [IntegrationSyncService, AutoPlantMysqlClient, CronTickClaimService],
     },
     // Connection seam to the read-only AutoPlant MySQL source. Bound now so the app can reach and
     // read AutoPlant; the real SourceReader (JSON mapping + normalization) still swaps in behind

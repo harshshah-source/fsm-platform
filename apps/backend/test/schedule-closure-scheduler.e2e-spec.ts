@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { dispatchZoneLockKey } from '../src/scheduling/dispatch-zone-lock';
+import { alwaysClaims } from './support/tick-claims';
 import { ScheduleClosureScheduler } from '../src/scheduling/schedule-closure-scheduler.service';
 
 /**
@@ -107,7 +108,7 @@ describe('Issue 147 slice 2 — ScheduleClosureScheduler.closeTick', () => {
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
-    closer = new ScheduleClosureScheduler(prisma, { enabled: true });
+    closer = new ScheduleClosureScheduler(prisma, alwaysClaims(), { enabled: true });
     companyId = (
       await prisma.company.create({ data: { name: 'Co-cl-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })
     ).companyId;
@@ -232,7 +233,7 @@ describe('Issue 147 slice 2 — ScheduleClosureScheduler.closeTick', () => {
     const plantId = await makePlant(zoneId);
     const stale = await makeSchedule(zoneId, plantId, await makeSe(zoneId), YESTERDAY, 'ACTIVE', 'OPEN');
 
-    const off = new ScheduleClosureScheduler(prisma, { enabled: false });
+    const off = new ScheduleClosureScheduler(prisma, alwaysClaims(), { enabled: false });
     expect(await off.closeTick({ now: NOW })).toEqual({ ran: false, reason: 'DISABLED' });
     expect(await statusOf(stale)).toBe('ACTIVE');
 

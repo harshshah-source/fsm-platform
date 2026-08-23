@@ -1,3 +1,4 @@
+import { alwaysClaims } from './support/tick-claims';
 import { vi } from 'vitest';
 import type { CrossZoneEscalationService } from '../src/cross-zone/cross-zone-escalation.service';
 import type { IntradayInsertionService } from '../src/intraday/intraday-insertion.service';
@@ -67,6 +68,7 @@ const makeScheduler = (sweeps: Sweeps, enabled: boolean): BusinessSweepScheduler
     sweeps.rootCause as unknown as RootCauseAnalyticsAggregationService,
     sweeps.zmPerformance as unknown as ZmPerformanceAggregationService,
     sweeps.systemEfficiency as unknown as SystemEfficiencyAggregationService,
+    alwaysClaims(),
     { enabled },
   );
 

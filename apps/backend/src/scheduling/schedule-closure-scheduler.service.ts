@@ -4,6 +4,7 @@ import { type TicketStatus } from '../generated/prisma/enums';
 import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { BUSINESS_TIMEZONE } from './dispatch-cron';
+import type { TickClaimant } from './cron-tick-claim';
 import { dispatchZoneLockKey } from './dispatch-zone-lock';
 import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
@@ -16,6 +17,9 @@ import { liveScheduleFilter } from './schedule-status';
  * gets 04:00 in the business timezone on any host.
  */
 export const DEFAULT_SCHEDULE_CLOSURE_CRON = '0 4 * * *';
+
+/** #263 — the registered cron-job name, shared by the decorator and the tick claim. */
+export const SCHEDULE_CLOSURE_JOB_NAME = 'schedule-closure';
 
 export interface ScheduleClosureConfig {
   /** Shares the pipeline master switch — `BUSINESS_SWEEPS_ENABLED === 'true'`. Default OFF. */
@@ -41,7 +45,7 @@ export function readScheduleClosureConfig(env: NodeJS.ProcessEnv = process.env):
  */
 export type ScheduleClosureOutcome =
   | { ran: true; closed: number; zonesSkipped: number; recycled: number }
-  | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'ERROR' };
+  | { ran: false; reason: 'DISABLED' | 'RUN_IN_PROGRESS' | 'TICK_CLAIMED' | 'ERROR' };
 
 /** What one zone's closure did — `null` for the whole result when the zone's dispatch holds the lock. */
 interface ZoneClosure {
@@ -102,12 +106,13 @@ export class ScheduleClosureScheduler {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly claims: TickClaimant,
     config?: Partial<ScheduleClosureConfig>,
   ) {
     this.config = { ...readScheduleClosureConfig(), ...config };
   }
 
-  @Cron(readScheduleClosureConfig().closureCron, { name: 'schedule-closure', timeZone: BUSINESS_TIMEZONE })
+  @Cron(readScheduleClosureConfig().closureCron, { name: SCHEDULE_CLOSURE_JOB_NAME, timeZone: BUSINESS_TIMEZONE })
   async closeTick(opts: { now?: Date } = {}): Promise<ScheduleClosureOutcome> {
     if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
     if (this.inFlight) {
@@ -117,6 +122,13 @@ export class ScheduleClosureScheduler {
     this.inFlight = true;
     try {
       const now = opts.now ?? new Date();
+      // #263 — claimed before the zone scan, so the losing instance never takes the per-zone advisory
+      // locks. That matters more here than anywhere else: a second closer contending for
+      // `dispatch_zone_<id>` is exactly what makes a dispatch record LOCK_CONTENDED and leave a zone's
+      // SEs without a day plan (see the class docstring).
+      if (!(await this.claims.claimTickOrLog(SCHEDULE_CLOSURE_JOB_NAME, now))) {
+        return { ran: false, reason: 'TICK_CLAIMED' };
+      }
       const today = istDate(now);
 
       // Zone-at-a-time, because the lock is per zone: one zone mid-dispatch must not hold up the rest.

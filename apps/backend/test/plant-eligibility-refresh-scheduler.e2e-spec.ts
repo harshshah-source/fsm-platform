@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import { alwaysClaims } from './support/tick-claims';
 import type { PlantEligibleFloatingSeService } from '../src/org/plant-eligible-floating-se.service';
 import {
   DEFAULT_PLANT_ELIGIBILITY_REFRESH_CRON,
@@ -15,7 +16,7 @@ import {
  */
 const makeSvc = () => ({ refresh: vi.fn(async () => undefined) });
 const makeScheduler = (svc: ReturnType<typeof makeSvc>, enabled: boolean): PlantEligibilityRefreshScheduler =>
-  new PlantEligibilityRefreshScheduler(svc as unknown as PlantEligibleFloatingSeService, { enabled });
+  new PlantEligibilityRefreshScheduler(svc as unknown as PlantEligibleFloatingSeService, alwaysClaims(), { enabled });
 
 describe('Issue 138 slice 3 — PlantEligibilityRefreshScheduler', () => {
   it('readPlantEligibilityRefreshConfig: OFF by default; cron default + env override; enabled only on "true"', () => {

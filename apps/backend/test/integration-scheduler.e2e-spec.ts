@@ -8,6 +8,7 @@ import {
   readIngestionSchedulerConfig,
   type SchedulerSourceGate,
 } from '../src/ingestion/autoplant/integration-scheduler.service';
+import { alwaysClaims } from './support/tick-claims';
 import { IntegrationSyncService } from '../src/ingestion/autoplant/integration-sync.service';
 import type { MasterSyncService } from '../src/ingestion/autoplant/master-sync.service';
 import type { SnapshotIngestionWorker } from '../src/ingestion/snapshot-ingestion.worker';
@@ -29,7 +30,7 @@ describe('Issue 97 Slice 7 — IntegrationSchedulerService', () => {
   };
 
   const makeScheduler = (opts: { enabled: boolean; configured: boolean }): IntegrationSchedulerService =>
-    new IntegrationSchedulerService(sync as unknown as IntegrationSyncService, gate(opts.configured), {
+    new IntegrationSchedulerService(sync as unknown as IntegrationSyncService, gate(opts.configured), alwaysClaims(), {
       enabled: opts.enabled,
       mastersCron: '0 2 * * *',
       telemetryCron: '*/30 * * * *',
