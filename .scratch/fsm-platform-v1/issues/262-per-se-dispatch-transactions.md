@@ -1,6 +1,6 @@
 # 262 — Per-SE dispatch transactions with row-claimed recommendations
 
-Status: ready-for-agent
+Status: done (2026-08-23) — see `docs/progress/262-per-se-dispatch-transactions.md`
 Type: AFK · Backend
 Decision: #258 Q8 / Part 4 (G1, G3, G4). Supersedes the open half of #127 (whose "done via APPEND"
 INDEX note overstated it — the zone is still one all-or-nothing transaction).
@@ -74,20 +74,20 @@ zone card — fold into #252's rendering pass if it lands together). Mobile: n/a
 
 ## Acceptance criteria
 
-- [ ] A ZM `assignTicket` racing the dispatch of a 5-SE zone costs at most one SE's batch; the
+- [x] A ZM `assignTicket` racing the dispatch of a 5-SE zone costs at most one SE's batch; the
       other 4 SEs' plans commit; the skipped SE and the violated constraint are named on the ledger.
-- [ ] A zone with N tickets dispatches with per-tx duration independent of N (asserted: max tx
+- [x] A zone with N tickets dispatches with per-tx duration independent of N (asserted: max tx
       wall-clock bounded; e2e with a few hundred fixture tickets stays far under the 15s policy).
-- [ ] Re-invoke after partial failure dispatches only the remaining SEs' tickets (G1: no ticket
+- [x] Re-invoke after partial failure dispatches only the remaining SEs' tickets (G1: no ticket
       ever on two live batch rows — asserted table-wide, the #241 style).
-- [ ] Closure or bulk-unassign holding the zone advisory lock delays a per-SE tx by at most the
+- [x] Closure or bulk-unassign holding the zone advisory lock delays a per-SE tx by at most the
       lock_timeout and never deadlocks.
-- [ ] `SCHEDULE_CONFLICT` label appears only for the schedule unique; ticket-unique conflicts say so.
-- [ ] **Bulk-unassign cannot interleave**: a bulk-unassign issued while a zone dispatch is mid-run
+- [x] `SCHEDULE_CONFLICT` label appears only for the schedule unique; ticket-unique conflicts say so.
+- [x] **Bulk-unassign cannot interleave**: a bulk-unassign issued while a zone dispatch is mid-run
       (between SE transactions) is refused/skipped for that zone with its existing reporting, and the
       dispatch completes every SE it admitted. Closure interleaving is separately asserted as a
       no-op on today's schedules.
-- [ ] **Ledger reconciliation survives partial-zone outcomes** (#123's invariant): run totals
+- [x] **Ledger reconciliation survives partial-zone outcomes** (#123's invariant): run totals
       (`schedules`, `batches`, `ticketsDispatched`, `recommended`, `unassignable`) equal the sum of
       the run's zone rows even when some SEs were skipped and some zones CONTENDED (#259) — asserted
       on a fixture that produces at least one per-SE skip AND one contended zone in a single run.

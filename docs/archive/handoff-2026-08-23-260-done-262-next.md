@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-08-23.** Spent within the same session: #262 landed (`f4684b9`), which cleared the
+> last #275 prerequisite. Nothing here is current — see the successor handoff, `INDEX.md` and SYSTEM-STATE.
+
 # Handoff — #261 and #260 are DONE; next is **#262**, the last thing blocking #275 (session of 2026-08-23)
 
 **Repo:** `C:\fsm-platform-backup` · branch `feat/autoplant-integration` · **nothing pushed**

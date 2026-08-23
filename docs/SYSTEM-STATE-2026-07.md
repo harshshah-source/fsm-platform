@@ -721,6 +721,42 @@ and on a 3-minute `business-dispatch-reaper` cron. What matters about the shape:
   and re-evaluated. That holds *only* because the predicate is a negation — rewritten as an allow-list
   of terminal statuses those orphans become immortal and wedge the zone (Issue 126).
 
+**The dispatch write unit is the SE, not the zone (#262, 2026-08-23).** `dispatchForZone` was one
+transaction spanning every SE in the zone. It is now **one transaction per SE**, each claiming that
+SE's recommendation rows with `SELECT … FOR UPDATE SKIP LOCKED`. Three defects went with the old shape,
+and the first RED measured all of them at once: a second connection holding **one** SE's rows blocked
+the entire zone until the transaction timeout killed it — 15 s, nothing dispatched. The same test after
+the change is 360 ms and the other engineers get their plans.
+
+- **SKIP LOCKED, because a P2002 cannot be recovered in place** (#265 — it aborts its transaction).
+  Zone-wide consumption was a single `updateMany` at the end, so a concurrent claimer produced exactly
+  that collision. `FOR UPDATE **OF r**` names the recommendations alone; locking the joined ticket and
+  plant rows would block unrelated writers for the length of the SE's transaction.
+- **The idempotency guard moved inside the per-SE transaction**, which is what lets a re-invoke after a
+  partial dispatch see its own earlier progress. The zone-wide read happened once, before any SE
+  committed, so it structurally could not.
+- **Orphan cleanup is scoped to the SEs that FAILED, not to the zone.** A row this dispatch could not
+  *see* is a row somebody else has locked; a zone-wide sweep would delete work out from under its
+  claimant — a bug the old code could not have, having no notion of a row it could not see.
+- **A failure costs one SE and is named.** `dispatch_run_zones.se_skips` (JSONB) carries
+  `{seId, reason, constraint}`; `error` stays the whole-zone field. `SCHEDULE_CONFLICT` is now **earned**
+  by the `work_schedules` unique alone — before, every rollback cause was labelled that, so the ledger
+  asserted a checkable thing that was frequently untrue. The discriminator is `uniqueViolationModel`
+  (`meta.modelName`), **not** `e.meta.target`, which does not exist under this driver adapter.
+- **The advisory lock changed job rather than going away.** Run-vs-run exclusion is #259's claim, so
+  what it still guards is dispatch against closure and bulk-unassign — windows of milliseconds. It is
+  therefore **blocking** (a non-blocking `try` would abandon a zone free a moment later), bounded by
+  `SET LOCAL lock_timeout` (`ZONE_LOCK_TIMEOUT_MS`, 3 s), and a timeout is one SE's named skip.
+- **Bulk-unassign RESPECTS the zone claim** (skips `DISPATCH_IN_PROGRESS`). It cannot *hold* one: a
+  claim is a `dispatch_run_zones` row and needs a `dispatch_runs` parent. Respecting it closes the
+  window #262 opened — the gaps *between* per-SE transactions, where the transaction-scoped advisory
+  lock is not held at all. **Closure is deliberately not gated**: it targets `dateTo < today` while
+  dispatch writes today, so the row sets are disjoint however they interleave, and gating it would stop
+  past-dated work closing during every morning dispatch.
+- **`transactionOptions` are stated, not inherited** (`src/prisma/transaction-options.ts`): maxWait 5 s
+  (matching `DB_POOL_ACQUIRE_TIMEOUT_MS` — same question, one answer), timeout 15 s. Prisma's
+  unconfigured defaults were 2 s/5 s and set nowhere.
+
 **The automatic run is patient; a manual one is not (#260, 2026-08-23).** A zone contended at 05:00:00
 by something that finishes at 05:00:20 used to get nothing that day, because the cron asked once and
 the next attempt was tomorrow. A CRON run now re-asks every `DISPATCH_RETRY_INTERVAL_MS` (default 60 s)
