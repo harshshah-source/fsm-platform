@@ -442,8 +442,19 @@ finalize SUCCESS/PARTIAL/FAILED.
 - **Read-error fall-through** (`worker:64-68,102-104`): a mid-scan source read throw (VPN drop) no
   longer orphans the run — caught, run finalized PARTIAL/FAILED (the "run 456" fix).
 - **Run ledger + reaper**: `snapshot_runs_one_in_flight` partial unique; `reapStaleRuns()`
-  (`stale-run.ts`, wired in `snapshot-run.service.ts:43` per INDEX.md:91) fails runs stuck RUNNING
-  past `INGESTION_STALE_RUN_MIN`.
+  (`stale-run.ts`, wired in `snapshot-run.service.ts` before the guard is taken) fails runs stuck
+  RUNNING past `INGESTION_STALE_RUN_MIN`. **Staleness is a stale *heartbeat*, not an old `started_at`
+  (#261/#132, 2026-08-23):** `heartbeat_at` on both `snapshot_runs` and `master_sync_runs` is touched
+  per pipeline stage (per drained chunk; per numbered master-sync stage), and `staleRunFilter()` is the
+  one place that decides deadness. Keying on age reaped runs for being *slow* — the master sync is the
+  long one, and reaping it mid-flight both lost its result and freed the in-flight guard for a second
+  sync over the top of the first. The column is **nullable with no default**: rows written before it
+  existed never beat and fall back to `started_at`.
+- **`finishRun` is conditional on `status = 'RUNNING'`** on both ledgers (#261, closing #132's defect
+  half). It was an unconditional update, so a reaped-but-alive run reporting SUCCESS overwrote the
+  reaper's FAILED — advancing the snapshot display watermark on a run nobody was tracking, and nulling
+  `ORPHANED_RUN_ERROR` on the master-sync side, erasing the only record of what happened. First writer
+  wins; a late finish logs and writes nothing.
 - **Partitioning**: daily partitions + 3-day create-ahead + settings-driven retention, gated
   `PARTITION_MAINTENANCE_ENABLED` (§2.9).
 - **UTC normalization**: `AUTOPLANT_SOURCE_UTC_OFFSET_MIN` env feeds the reader
@@ -669,14 +680,46 @@ process. Consequences worth knowing:
 - **A contended zone is not an error**: `error` stays NULL, so the ledger's Errors column and the
   run-detail card's failure branch are unchanged. Both the runs list and the run detail exclude
   contended zones from their "Zones" count (the ZM slice included), while still showing the card.
-- **Not yet reaped.** A run that *unwinds* finalizes its own claims in a `finally`; a process that
-  **dies** leaves a `RUNNING` claim refusing that zone until somebody clears it. The reaper is
-  **#261** — and `in-flight` reporting a claim across a restart is an acceptance criterion here
-  precisely so #261 has something to reap.
+- **Reaped since #261 (2026-08-23).** A run that *unwinds* finalizes its own claims in a `finally`;
+  a process that **dies** unwinds nothing, and before #261 the `RUNNING` claim it left refused that
+  zone forever with no code path that would ever close it. See the reaper below.
 
 `GET /api/schedules/dispatch-run/in-flight` reads the RUNNING claim rows (same response shape, now
 truthful across instances and restarts). `POST /api/schedules/dispatch-run` gains
 `summary.zoneOutcomes` — per requested zone, `DONE | ERROR | CONTENDED` plus the holder.
+
+**Heartbeat, reaper and conditional finish (#261, 2026-08-23; closes #132).** `dispatch_runs` carries
+`heartbeat_at` and the status enum gains `ABORTED`. `DispatchRunService.reapStaleDispatchRuns(now)`
+marks RUNNING runs whose beat is older than `DISPATCH_STALE_RUN_MIN` (default 10) as `ABORTED` and
+their RUNNING claims as `ERROR('ABANDONED …')`, freeing admission. It runs **before every admission**
+and on a 3-minute `business-dispatch-reaper` cron. What matters about the shape:
+
+- **The beat is the reaper's precondition, not a refinement of it.** A dispatch run walks every active
+  zone and is legitimately long, so a reaper keyed on wall-clock age eventually frees the zones of a
+  **live** run and lets a second run write the same day plans — strictly worse than the wedge it fixes.
+  The beat is stamped at admission and after **every zone**, so a run's silence is bounded by its
+  slowest single zone rather than by its total length. Nullable/no-default, with the same
+  `started_at` fallback as the ingestion ledgers.
+- **`ABORTED` ≠ `FAILED`.** FAILED is a statement about the *work* (every zone tried, every zone
+  failed). ABORTED says nobody knows what the run did, because whoever was running it stopped
+  existing. The transparency list and run detail render it with a `critical` tone.
+- **Order is load-bearing:** the run row is written first, its claims second. Dying between them leaves
+  RUNNING claims under an ABORTED run, which the next pass finds and finishes; the reverse order leaves
+  a RUNNING run holding nothing, which reads as live and which no later pass corrects.
+- **The run finalize and the per-zone finalize are `updateMany` keyed on `status = 'RUNNING'`.**
+  Without that the reaper *creates* zombie-resurrect on the dispatch side rather than fixing it: a
+  reaped-but-alive run would report SUCCESS over a zone already handed to somebody else. Same rule as
+  #265's `liveScheduleFilter()` — **any new writer of a claim or run row must carry it.**
+- **The sweep does not dispatch.** It frees zones and stops. #260 owns retrying a contended zone;
+  a janitor that also ran what it freed would be an unscheduled dispatch run at an arbitrary minute.
+- **`DEFAULT_DISPATCH_STALE_RUN_MIN` (10) and `DEFAULT_DISPATCH_RETRY_DEADLINE_MIN` (15) sit together
+  in `dispatch-cron.ts`** under the invariant **reap ≤ retry deadline** — otherwise a crashed holder
+  starves #260's whole retry window. The ingestion threshold stays separate at 30 min: an AutoPlant
+  sync waits on a remote system, a dispatch run does not.
+- **Recovery after ABORTED needs no new cleanup**, verified rather than assumed:
+  `clearFinalizedOrphans` keys on `not: 'RUNNING'`, so an aborted run's SUGGESTED recs are collected
+  and re-evaluated. That holds *only* because the predicate is a negation — rewritten as an allow-list
+  of terminal statuses those orphans become immortal and wedge the zone (Issue 126).
 
 ### 3g. Schedulers (#97-A1 / #108 / #113)
 
@@ -1699,7 +1742,8 @@ lifecycle entry and the `docs/progress/218-*.md` completion report, which should
 |---|---|
 | `INGESTION_SCHEDULER_ENABLED=true` | self-running pipeline: masters daily 02:00, telemetry */30 |
 | `PARTITION_MAINTENANCE_ENABLED=true` | **must flip together with the above** — else pings pile into the DEFAULT partition after the 3-day runway and retention never runs |
-| `INGESTION_STALE_RUN_MIN` | reaper threshold — set above telemetry cadence |
+| `INGESTION_STALE_RUN_MIN` | ingestion reaper threshold (default 30) — judged on `heartbeat_at`, not `started_at` (#261) |
+| `DISPATCH_STALE_RUN_MIN` | dispatch reaper threshold (default 10, #261). **Must stay ≤ #260's retry deadline (15)** or a crashed holder starves the cron's retry window |
 | `BUSINESS_SWEEPS_ENABLED=true` | dispatch cron + the field-loop/aggregation sweeps **and** the daily chain (§3g): `vu-auto-resume` 03:30 IST, `schedule-closure` 04:00 IST, `plant-eligibility-refresh` 04:30 **unpinned — #254**, `business-dispatch` 05:00 IST |
 | `VU_AUTO_RESUME_CRON`, `SCHEDULE_CLOSURE_CRON`, `PLANT_ELIGIBILITY_REFRESH_CRON` | per-job overrides for the daily chain — `VU_AUTO_RESUME_CRON` and `SCHEDULE_CLOSURE_CRON` are read as **IST** expressions |
 | `BUSINESS_SWEEP_*_CRON`, `INGESTION_*_CRON` | per-tick overrides (§3g table) |

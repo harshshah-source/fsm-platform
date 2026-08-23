@@ -1,3 +1,6 @@
+> **ARCHIVED 2026-08-23.** Spent: #261 landed (`cf6f9de`, `5a044ee`). Nothing here is current —
+> see `.scratch/fsm-platform-v1/INDEX.md`, `docs/SYSTEM-STATE-2026-07.md` and the successor handoff.
+
 # Handoff — #259 is DONE; the road to #275 is now **#261 → #260 → #262** (session of 2026-08-21)
 
 **Repo:** `C:\fsm-platform-backup` · branch `feat/autoplant-integration` · **nothing pushed**

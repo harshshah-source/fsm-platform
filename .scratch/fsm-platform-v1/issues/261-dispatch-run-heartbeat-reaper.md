@@ -1,6 +1,6 @@
 # 261 — Dispatch-run heartbeat + reaper + conditional finish (and the same fix for the ingestion reaper)
 
-Status: ready-for-agent
+Status: done (2026-08-23) — see `docs/progress/261-dispatch-run-heartbeat-reaper.md`
 Type: AFK · Backend
 Decision: #258 Q8.8 (G5, G6). Folds in the defect half of #132.
 
@@ -54,12 +54,12 @@ Transparency run list shows ABORTED (existing status rendering — verify enum p
 
 ## Acceptance criteria
 
-- [ ] Kill mid-run (simulated: open run+claim, no process holding them): next admission reaps —
+- [x] Kill mid-run (simulated: open run+claim, no process holding them): next admission reaps —
       run ABORTED, claim freed, new run admits and dispatches; remaining SUGGESTED from the aborted
       run are re-evaluated, not double-dispatched (G1 asserted on ticket rows).
-- [ ] A reaped run's late `finalize` is a no-op; status stays ABORTED (zombie-resurrect pinned dead).
-- [ ] A slow-but-alive run (heartbeat fresh, wall-clock old) is NOT reaped.
-- [ ] Ingestion: same three assertions against `snapshot_runs` (closes #132's evidence).
+- [x] A reaped run's late `finalize` is a no-op; status stays ABORTED (zombie-resurrect pinned dead).
+- [x] A slow-but-alive run (heartbeat fresh, wall-clock old) is NOT reaped.
+- [x] Ingestion: same three assertions against `snapshot_runs` (closes #132's evidence).
 
 ## Tests
 
