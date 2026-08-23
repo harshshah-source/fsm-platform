@@ -9,6 +9,10 @@ only our own hunks. Do the same.
 
 > Placed in `docs/audits/` per the operator's standing request. Its three predecessors from this
 > session are in `docs/archive/` with ARCHIVED banners. **Apply the same when this one is spent.**
+>
+> **Companion:** `handoff-2026-08-23-session-notes.md` beside this file carries the operational half —
+> the state of the working tree (99 files that are NOT ours, and the partial-staging recipe for
+> `SYSTEM-STATE`), how to run the suite here, and suggested skills. Archive the pair together.
 
 ---
 
