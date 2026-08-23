@@ -49,6 +49,7 @@ const detail = {
       error: null,
       outcome: 'DONE',
       contendedWithRunId: null,
+      seSkips: [],
     },
   ],
   build: null,
@@ -211,5 +212,33 @@ describe('Dispatch run detail (Issue 123)', () => {
     expect(zone.getByText('Dispatched')).toBeInTheDocument();
     expect(zone.queryByText('CONTENDED')).not.toBeInTheDocument();
     expect(zone.queryByTestId('zone-contended-note')).not.toBeInTheDocument();
+  });
+
+  /**
+   * #262 — the dispatch write unit is the SE, so one engineer's conflict no longer costs the zone its
+   * day plan. It does still cost that engineer theirs, and the zone card is the only place that says
+   * so: without this the card renders a perfectly healthy zone that quietly dispatched fewer engineers
+   * than it had, which is indistinguishable from a zone with less work.
+   */
+  it('names engineers the zone could not dispatch, without calling the zone failed', async () => {
+    renderWith({
+      ...detail,
+      zones: [
+        {
+          ...detail.zones[0],
+          seSkips: [
+            { seId: 'se-1', reason: 'SCHEDULE_CONFLICT: this SE already holds an ACTIVE schedule', constraint: 'WorkSchedule' },
+          ],
+        },
+      ],
+    });
+
+    const zone = within(await screen.findByTestId('dispatch-zone-card-1'));
+    const skips = within(zone.getByTestId('zone-se-skips'));
+    expect(skips.getByText(/1 engineer not dispatched/i)).toBeInTheDocument();
+    expect(skips.getByText(/SCHEDULE_CONFLICT/)).toBeInTheDocument();
+    // Not an error: the zone worked, one engineer did not get a plan. `role="alert"` is reserved for a
+    // whole-zone failure, and borrowing it here would report a contained problem as an outage.
+    expect(zone.queryByRole('alert')).toBeNull();
   });
 });

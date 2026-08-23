@@ -886,6 +886,10 @@ model DispatchRunZone {
   batches             Int               @default(0)
   ticketsDispatched   Int               @default(0) @map("tickets_dispatched")
   error               String?
+  /// #262 — per-SE failures inside this zone: `[{ seId, reason, constraint }]`. `error` above stays the
+  /// WHOLE-zone field (lock/claim conditions); this is what makes "four of five engineers dispatched"
+  /// legible instead of looking like a zone that quietly did less work. NULL = no per-SE skip.
+  seSkips             Json?             @map("se_skips")
   startedAt           DateTime          @map("started_at") @db.Timestamptz(6)
   finishedAt          DateTime?         @map("finished_at") @db.Timestamptz(6)
 

@@ -73,6 +73,12 @@ export interface DispatchRunZoneCard {
   /** #259 — for a CONTENDED zone, the run that held it. */
   contendedWithRunId?: string | null;
   /**
+   * #262 — engineers this zone could not dispatch, and why. The dispatch write unit is now the SE, so
+   * one engineer's conflict no longer costs the zone its day plan — but it does cost that engineer
+   * theirs, and this is the only place that says so.
+   */
+  seSkips?: Array<{ seId: string; reason: string; constraint: string | null }>;
+  /**
    * #252 (landed with #259) — the three populations the engine did NOT decide on. Each is a different
    * team's problem, so they render apart from `unassignable` and from each other. The two nullable ones
    * are `null` when the run never measured them; that reads as "not recorded", never as 0. Optional:

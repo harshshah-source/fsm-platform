@@ -174,6 +174,83 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
     }
   });
 
+  /**
+   * #262 AC-6 — a bulk-unassign must not interleave with a zone dispatch.
+   *
+   * The advisory lock was enough while dispatch was ONE transaction for the whole zone: the lock was
+   * held for the entire write, so a rebalance either got there first or waited. #262 splits that into
+   * one transaction per SE, and the lock — `pg_advisory_xact_lock` — is released at each SE's commit.
+   * The gaps between SE transactions are therefore unguarded, and a bulk-unassign landing in one
+   * produces a half-rebalanced zone: SE1 dispatched → unassigned → SE2 dispatched fresh.
+   *
+   * What spans the whole dispatch is #259's zone claim, which is RUNNING from admission to completion.
+   * So the rebalance has to respect that claim, not just the lock.
+   */
+  it('#262: skips a zone a live dispatch run has claimed, even between its per-SE transactions', async () => {
+    const f = await makeFixture('claimed');
+    try {
+      const eligible = await f.makeTicket({});
+      await f.placeOnLiveBatch(eligible, NOW);
+
+      // A dispatch run holding the zone — the #259 claim, exactly as `runForActiveZones` opens it. No
+      // advisory lock is held here at all: between two per-SE transactions there would be none, which
+      // is the whole point.
+      const run = await prisma.dispatchRun.create({
+        data: { trigger: 'CRON', status: 'RUNNING', startedAt: NOW, heartbeatAt: new Date(), configSnapshot: {} },
+      });
+      await prisma.dispatchRunZone.create({
+        data: { runId: run.runId, zoneId: f.zoneId, status: 'RUNNING', startedAt: NOW },
+      });
+
+      try {
+        const outcome = await svc.execute({ scope: 'ZONE', zoneId: f.zoneId, reasonCode: 'ROUTINE_REBALANCE' }, OH_ACTOR, NOW);
+        if (outcome.result !== 'OK') throw new Error(`expected OK, got ${outcome.result}`);
+        const zoneResult = outcome.zones.find((z) => z.zoneId === f.zoneId.toString());
+        expect(zoneResult?.skipped).toBe(true);
+        expect(zoneResult?.skipReason).toBe('DISPATCH_IN_PROGRESS');
+        expect(zoneResult?.ticketsUnassigned).toBe(0);
+
+        // Nothing was touched — the dispatch keeps every SE it admitted.
+        const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: eligible } });
+        expect(ticket.assignmentState).toBe('FORMALLY_ASSIGNED');
+      } finally {
+        await prisma.dispatchRunZone.deleteMany({ where: { runId: run.runId } });
+        await prisma.dispatchRun.delete({ where: { runId: run.runId } });
+      }
+    } finally {
+      await f.teardown();
+    }
+  });
+
+  /** A claim that is finished holds nothing: the zone is free the moment the dispatch lets go. */
+  it('#262: a finished claim does not block a rebalance', async () => {
+    const f = await makeFixture('claim-done');
+    try {
+      const eligible = await f.makeTicket({});
+      await f.placeOnLiveBatch(eligible, NOW);
+
+      const run = await prisma.dispatchRun.create({
+        data: { trigger: 'CRON', status: 'SUCCESS', startedAt: NOW, finishedAt: NOW, configSnapshot: {} },
+      });
+      await prisma.dispatchRunZone.create({
+        data: { runId: run.runId, zoneId: f.zoneId, status: 'DONE', startedAt: NOW, finishedAt: NOW },
+      });
+
+      try {
+        const outcome = await svc.execute({ scope: 'ZONE', zoneId: f.zoneId, reasonCode: 'ROUTINE_REBALANCE' }, OH_ACTOR, NOW);
+        if (outcome.result !== 'OK') throw new Error(`expected OK, got ${outcome.result}`);
+        const zoneResult = outcome.zones.find((z) => z.zoneId === f.zoneId.toString());
+        expect(zoneResult?.skipped).toBe(false);
+        expect(zoneResult?.ticketsUnassigned).toBe(1);
+      } finally {
+        await prisma.dispatchRunZone.deleteMany({ where: { runId: run.runId } });
+        await prisma.dispatchRun.delete({ where: { runId: run.runId } });
+      }
+    } finally {
+      await f.teardown();
+    }
+  });
+
   it('unassigns eligible/on-site/component-blocked, excludes the rest, and writes the ticket/event/schedule contract', async () => {
     const f = await makeFixture('happy');
     try {

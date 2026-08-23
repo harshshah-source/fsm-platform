@@ -1,0 +1,13 @@
+-- #262 — per-SE dispatch failures, on the ledger.
+--
+-- The dispatch write unit was the whole zone: one transaction, so any conflict rolled back every SE's
+-- day plan and the zone row recorded a single `SCHEDULE_CONFLICT` whatever had actually gone wrong.
+-- With one transaction per SE, a failure costs exactly the SE it belongs to — and that is only useful
+-- if the zone card can say WHICH engineer missed out and why. `error` remains the whole-zone field;
+-- this is the per-SE one, so a zone that dispatched four of five engineers is no longer indistinguish-
+-- able from one that dispatched all five.
+--
+-- JSONB rather than a child table: the rows are a handful per zone at most, are written once and never
+-- queried across runs, and belong to the zone card that already reads this row. NULL means "no per-SE
+-- skip", which is also what every row written before this column existed honestly means.
+ALTER TABLE "dispatch_run_zones" ADD COLUMN "se_skips" JSONB;

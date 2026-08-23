@@ -107,6 +107,7 @@ export function DispatchRunDetailPage() {
 function ZoneCard({ zone, onOpen }: { zone: DispatchRunZoneCard; onOpen: () => void }) {
   const reasons = zone.unassignableReasons;
   const contended = zone.outcome === 'CONTENDED';
+  const seSkips = zone.seSkips ?? [];
   return (
     <Card
       className="cursor-pointer p-4 focus-ring"
@@ -125,6 +126,25 @@ function ZoneCard({ zone, onOpen }: { zone: DispatchRunZoneCard; onOpen: () => v
         <span className="font-semibold text-ink-strong">{zone.zoneName ?? `Zone ${zone.zoneId}`}</span>
         {contended ? <Badge tone="warning">CONTENDED</Badge> : zone.mode && <Badge tone={MODE_TONE[zone.mode]}>{zone.mode}</Badge>}
       </div>
+
+      {/* #262 — engineers this zone could not dispatch. Deliberately NOT an error: the zone worked, and
+          one engineer's conflict costing the whole zone its status is exactly what per-SE transactions
+          stopped happening. Without this line the card shows a healthy zone that quietly dispatched
+          fewer engineers than it had, which reads the same as a zone with less work. */}
+      {seSkips.length > 0 && (
+        <div className="mb-3 rounded border border-warning/30 bg-warning-bg/40 p-2" data-testid="zone-se-skips">
+          <p className="text-xs font-semibold text-warning">
+            {seSkips.length} engineer{seSkips.length === 1 ? '' : 's'} not dispatched
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {seSkips.map((skip) => (
+              <li key={skip.seId} className="text-xs text-ink-muted">
+                {skip.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* #259 — this run asked for the zone and another run already had it. Its counters are all zero,
           and showing them would read as "looked, found nothing" rather than "never looked". */}

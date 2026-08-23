@@ -146,6 +146,47 @@ describe('Issue 147 slice 2 — ScheduleClosureScheduler.closeTick', () => {
     expect(await statusOf(current)).toBe('ACTIVE');
   });
 
+  /**
+   * #262 AC-6, closure half. Splitting the zone dispatch into per-SE transactions opens gaps between
+   * them that the all-or-nothing transaction did not have, and the review asked which zone-shaping
+   * operations could now land in one.
+   *
+   * Closure is safe **by data**, and this pins the reason rather than the conclusion: it targets
+   * `dateTo < today` while dispatch writes today, so the two row sets are disjoint however they
+   * interleave. Asserted with a dispatch run holding the zone claim and a live schedule for today
+   * present — the closure runs, closes the past-dated schedule, and leaves today's untouched.
+   */
+  it('#262: closure interleaving is a no-op on today\u2019s schedules, even mid-dispatch', async () => {
+    const zoneId = await makeZone();
+    const plantId = await makePlant(zoneId);
+    const stale = await makeSchedule(zoneId, plantId, await makeSe(zoneId), YESTERDAY, 'ACTIVE', 'OPEN');
+    const today = await makeSchedule(zoneId, plantId, await makeSe(zoneId), TODAY, 'ACTIVE', 'OPEN');
+
+    // A dispatch run owns this zone right now — mid-run, between two per-SE transactions, so it holds
+    // the #259 claim and no advisory lock at all.
+    const run = await prisma.dispatchRun.create({
+      data: { trigger: 'CRON', status: 'RUNNING', startedAt: NOW, heartbeatAt: new Date(), configSnapshot: {} },
+    });
+    await prisma.dispatchRunZone.create({
+      data: { runId: run.runId, zoneId, status: 'RUNNING', startedAt: NOW },
+    });
+
+    try {
+      const outcome = await closer.closeTick({ now: NOW });
+      expect(outcome).toMatchObject({ ran: true });
+
+      // Today's schedule — the one the live dispatch is building — is untouched. That is the property
+      // that makes closure safe to interleave, and it holds because of the date scope, not because of
+      // any lock.
+      expect(await statusOf(today)).toBe('ACTIVE');
+      // The claim guard must not have made closure useless either: past-dated work still closes.
+      expect(await statusOf(stale)).not.toBe('ACTIVE');
+    } finally {
+      await prisma.dispatchRunZone.deleteMany({ where: { runId: run.runId } });
+      await prisma.dispatchRun.delete({ where: { runId: run.runId } });
+    }
+  });
+
   // AC#4 as an invariant rather than a count: after a tick, nothing live may remain past its dateTo.
   it('leaves no live schedule past its dateTo', async () => {
     const zoneId = await makeZone();

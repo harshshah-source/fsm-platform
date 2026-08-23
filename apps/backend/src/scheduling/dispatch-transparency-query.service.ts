@@ -47,6 +47,13 @@ export interface DispatchRunZoneCard {
   /** #259 — for a CONTENDED card, the run that held the zone, so the operator can go and read it. */
   contendedWithRunId: string | null;
   /**
+   * #262 — engineers this zone could not dispatch, and why. `error` above is the WHOLE-zone field; a
+   * zone that dispatched four of five SEs did not fail, and recording that as a zone error would put a
+   * contained single-engineer problem in the run's Errors column. Empty for every zone that dispatched
+   * every SE, and for every row written before per-SE transactions existed.
+   */
+  seSkips: Array<{ seId: string; reason: string; constraint: string | null }>;
+  /**
    * #252 (landed with #259) — the three populations the engine did **not** decide on, written to the
    * ledger by #238 / #242 / #177 and, until now, projected by nothing. Without them
    * `recommended + unassignable` reads as the whole funnel while a larger population sits outside it
@@ -229,6 +236,24 @@ export interface DispatchTicketTrace {
  * (list totals included); CSM / Operations Head see all zones. Read-only — nothing here mutates
  * dispatch state.
  */
+/**
+ * #262 — read `dispatch_run_zones.se_skips` back into the shape the card renders.
+ *
+ * Defensive because the column is untyped JSONB written by one producer: a row from before the column
+ * existed is NULL, and anything that is not the expected array shape is dropped rather than rendered
+ * as `[object Object]` on an operator's screen. An empty array and a NULL therefore mean the same
+ * thing to the reader — "no engineer was skipped" — which is the honest reading of both.
+ */
+function readSeSkips(raw: unknown): Array<{ seId: string; reason: string; constraint: string | null }> {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null) return [];
+    const { seId, reason, constraint } = entry as Record<string, unknown>;
+    if (typeof seId !== 'string' || typeof reason !== 'string') return [];
+    return [{ seId, reason, constraint: typeof constraint === 'string' ? constraint : null }];
+  });
+}
+
 @Injectable()
 export class DispatchTransparencyQueryService {
   constructor(private readonly prisma: PrismaService) {}
@@ -329,6 +354,7 @@ export class DispatchTransparencyQueryService {
         error: z.error,
         outcome: z.status,
         contendedWithRunId: z.contendedWithRunId?.toString() ?? null,
+        seSkips: readSeSkips(z.seSkips),
         withheldBelowThreshold: z.withheldBelowThreshold,
         bucketlessDropped: z.bucketlessDropped,
         componentBlockedWithheld: z.componentBlockedWithheld,
@@ -515,6 +541,7 @@ export class DispatchTransparencyQueryService {
         error: zoneRow.error,
         outcome: zoneRow.status,
         contendedWithRunId: zoneRow.contendedWithRunId?.toString() ?? null,
+        seSkips: readSeSkips(zoneRow.seSkips),
         withheldBelowThreshold: zoneRow.withheldBelowThreshold,
         bucketlessDropped: zoneRow.bucketlessDropped,
         componentBlockedWithheld: zoneRow.componentBlockedWithheld,

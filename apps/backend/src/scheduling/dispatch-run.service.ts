@@ -916,6 +916,10 @@ export class DispatchRunService {
         schedules: out?.schedules ?? 0,
         batches: out?.batches ?? 0,
         ticketsDispatched: out?.tickets ?? 0,
+        // #262 — per-SE failures, kept apart from `error`. A zone that dispatched four of five SEs did
+        // not fail; recording that as a zone error would put it in the run's Errors column and make a
+        // contained, named, single-engineer problem read as a zone outage.
+        ...(out?.seSkips?.length ? { seSkips: out.seSkips as unknown as Prisma.InputJsonValue } : {}),
         error,
         finishedAt: new Date(),
       },

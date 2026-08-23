@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { buildStampFields } from '../build-info/run-stamp';
 import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { dispatchZoneLockKey } from './dispatch-zone-lock';
 import { signPreviewToken, verifyPreviewToken } from './preview-token';
 import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
 import { SOFT_STATE_CONFLICT, type SoftStateConflictPort } from './soft-state-conflict';
+import { liveZoneClaimRunId } from './zone-claim';
 
 export interface ZoneClassCounts {
   eligible: number;
@@ -109,6 +111,8 @@ interface ZoneClassification {
  */
 @Injectable()
 export class BulkUnassignService {
+  private readonly logger = new Logger(BulkUnassignService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
@@ -219,8 +223,24 @@ export class BulkUnassignService {
     actor: BulkUnassignActor,
     now: Date,
   ): Promise<ExecuteZoneResult> {
-    const lockKey = 'dispatch_zone_' + zoneId.toString();
+    // #262 — named from `dispatch-zone-lock.ts` rather than hand-spelled here. The two strings agreed
+    // by luck; that module exists precisely because two spellings that drift by a character take
+    // DIFFERENT locks and contend with nothing, which no test would fail on.
+    const lockKey = dispatchZoneLockKey(zoneId);
     const buildFields = buildStampFields();
+
+    // #262 — a live dispatch run OWNS this zone for its whole duration (#259's claim), which is wider
+    // than the advisory lock below: that lock is transaction-scoped, and dispatch is now one
+    // transaction per SE, so it is released and retaken between engineers. A rebalance landing in one
+    // of those gaps would half-rebalance the zone — SE1 dispatched, then unassigned, then SE2
+    // dispatched fresh. Skipping a claimed zone is the same answer this already gives for lock
+    // contention, decided one level up.
+    const claimedBy = await liveZoneClaimRunId(this.prisma, zoneId);
+    if (claimedBy !== null) {
+      this.logger.log(`bulk unassign for zone ${zoneId} skipped — dispatch run ${claimedBy} holds the zone`);
+      await this.recordZoneSkip(zoneId, scope, targetDate, reasonCode, operationId, actor, buildFields, 'DISPATCH_IN_PROGRESS');
+      return { zoneId: zoneId.toString(), zoneName, skipped: true, skipReason: 'DISPATCH_IN_PROGRESS', ticketsUnassigned: 0 };
+    }
 
     // Same non-blocking per-zone advisory lock as dispatch (`batch-assignment.service.ts:68-73`) —
     // a concurrently dispatching (or concurrently rebalancing) zone is skipped, never blocked on.
@@ -292,27 +312,7 @@ export class BulkUnassignService {
     });
 
     if (outcome.skipped) {
-      // No mutation happened — a standalone audit row (AuditService.record, not withAudit) still
-      // records the skip so Pan-India history stays legible per zone.
-      await this.audit.record({
-        actorId: actor.userId,
-        actorRole: actor.role,
-        actingZone: Number(zoneId),
-        action: 'BULK_UNASSIGN_ZONE',
-        entityType: 'zones',
-        entityId: zoneId.toString(),
-        metadata: {
-          operationId,
-          scope,
-          dateScope: 'ALL_LIVE',
-          targetDate: targetDate.toISOString().slice(0, 10),
-          reasonCode,
-          skipped: true,
-          skipReason: 'LOCK_CONTENDED',
-          buildVersion: buildFields.buildVersion.toString(),
-          buildFingerprint: buildFields.buildFingerprint,
-        } as unknown as Prisma.InputJsonValue,
-      });
+      await this.recordZoneSkip(zoneId, scope, targetDate, reasonCode, operationId, actor, buildFields, 'LOCK_CONTENDED');
       return { zoneId: zoneId.toString(), zoneName, skipped: true, skipReason: 'LOCK_CONTENDED', ticketsUnassigned: 0 };
     }
 
@@ -337,6 +337,49 @@ export class BulkUnassignService {
       skipReason: null,
       ticketsUnassigned: outcome.classified.ticketIds.length,
     };
+  }
+
+  /**
+   * Record a zone this operation did not touch, and why (#179; second cause added by #262).
+   *
+   * A standalone audit row (`AuditService.record`, not `withAudit`) because no mutation happened and
+   * there is no transaction to attach to — Pan-India history still has to be legible per zone, and a
+   * zone that silently produced nothing is indistinguishable from one with no eligible work.
+   *
+   * Two causes now, deliberately named apart: `LOCK_CONTENDED` is "somebody held the zone lock at the
+   * instant we tried", `DISPATCH_IN_PROGRESS` is "a dispatch run owns this zone right now". They call
+   * for different responses — the first is worth retrying immediately, the second means waiting for a
+   * run to finish — so collapsing them would cost the operator the distinction.
+   */
+  private async recordZoneSkip(
+    zoneId: bigint,
+    scope: 'ZONE' | 'PAN_INDIA',
+    targetDate: Date,
+    reasonCode: string,
+    operationId: string,
+    actor: BulkUnassignActor,
+    buildFields: { buildVersion: bigint; buildFingerprint: string },
+    skipReason: 'LOCK_CONTENDED' | 'DISPATCH_IN_PROGRESS',
+  ): Promise<void> {
+    await this.audit.record({
+      actorId: actor.userId,
+      actorRole: actor.role,
+      actingZone: Number(zoneId),
+      action: 'BULK_UNASSIGN_ZONE',
+      entityType: 'zones',
+      entityId: zoneId.toString(),
+      metadata: {
+        operationId,
+        scope,
+        dateScope: 'ALL_LIVE',
+        targetDate: targetDate.toISOString().slice(0, 10),
+        reasonCode,
+        skipped: true,
+        skipReason,
+        buildVersion: buildFields.buildVersion.toString(),
+        buildFingerprint: buildFields.buildFingerprint,
+      } as unknown as Prisma.InputJsonValue,
+    });
   }
 
   private async resolveZoneIds(scope: 'ZONE' | 'PAN_INDIA', zoneId?: bigint): Promise<bigint[]> {

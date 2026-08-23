@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional, OnModuleDestroy, OnModuleInit } from '@ne
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../generated/prisma/client';
 import { assertRuntimeBuildGuards } from '../build-info/boot-guard';
+import { transactionOptions } from './transaction-options';
 
 /** Positive-integer env read with a default; a blank/garbage value falls back rather than NaN-ing. */
 function envInt(name: string, fallback: number): number {
@@ -79,6 +80,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         connectionString: process.env.DATABASE_URL,
         ...poolOptions(),
       }),
+      // #262 item 5 — a stated policy, not Prisma's unconfigured 2 s/5 s. See `transaction-options.ts`
+      // for the reasoning; the short version is that a zone-wide dispatch used to be one interactive
+      // transaction and 5 s was a production cliff nobody had chosen.
+      transactionOptions: transactionOptions(),
     });
     this.warnOnly = options.warnOnly ?? false;
   }
