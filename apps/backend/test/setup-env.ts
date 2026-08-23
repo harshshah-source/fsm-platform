@@ -43,6 +43,12 @@ const APP_NAMESPACE_PREFIXES = [
   'AUTO_RECOVERY_',
   'BUSINESS_SWEEP',
   'COMMISSIONING_',
+  // #261/#260 — `DISPATCH_STALE_RUN_MIN`, `DISPATCH_RETRY_INTERVAL_MS`, `DISPATCH_RETRY_DEADLINE_MS`.
+  // Both families decide suite outcomes, not just production behaviour: a raised stale threshold makes
+  // the reaper specs' hour-old fixtures no longer stale, and a leaked retry deadline makes every
+  // contended-zone assertion wait minutes for an answer it expects at once. `BUSINESS_SWEEP` already
+  // covers `BUSINESS_SWEEP_DISPATCH_CRON`; these are the ones outside that family.
+  'DISPATCH_',
   'INGESTION_',
   'PARTITION_',
   'PLANT_ELIGIBILITY_',

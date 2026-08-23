@@ -123,6 +123,37 @@ export const DEFAULT_DISPATCH_STALE_RUN_MIN = 10;
 /** #260's bounded-retry deadline, in minutes. Stated here so the invariant above is checkable. */
 export const DEFAULT_DISPATCH_RETRY_DEADLINE_MIN = 15;
 
+/** #260 — how often the patient CRON re-asks for a zone it was refused. */
+export const DEFAULT_DISPATCH_RETRY_INTERVAL_MS = 60_000;
+
+/** How long the automatic run stays patient, and how often it re-asks (#260). */
+export interface DispatchRetryPolicy {
+  intervalMs: number;
+  deadlineMs: number;
+}
+
+/**
+ * Resolve the patience policy (#260). `deadlineMs = 0` disables retrying entirely and restores
+ * try-once behaviour — the issue's stated rollback, so it is a supported configuration rather than a
+ * degenerate one.
+ *
+ * Read from the environment the way the rest of the scheduler config is, and **not** from
+ * `system_settings`: the dispatch *hour* is a business decision an operator owns and #213 moved it into
+ * the settings registry for that reason, whereas how long the run is willing to wait for a lock is an
+ * implementation detail of how it copes with itself.
+ */
+export function readDispatchRetryPolicy(env: NodeJS.ProcessEnv = process.env): DispatchRetryPolicy {
+  const interval = Number(env.DISPATCH_RETRY_INTERVAL_MS);
+  const deadline = Number(env.DISPATCH_RETRY_DEADLINE_MS);
+  return {
+    intervalMs: Number.isFinite(interval) && interval > 0 ? interval : DEFAULT_DISPATCH_RETRY_INTERVAL_MS,
+    // `>= 0` rather than `> 0`: zero is the documented off switch, so it must survive the fallback that
+    // rescues garbage. Anything unparseable still falls back to the default.
+    deadlineMs:
+      Number.isFinite(deadline) && deadline >= 0 ? deadline : DEFAULT_DISPATCH_RETRY_DEADLINE_MIN * 60_000,
+  };
+}
+
 /** Reap cutoff in ms, env-overridable via `DISPATCH_STALE_RUN_MIN` (minutes). */
 export function readDispatchStaleRunMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.DISPATCH_STALE_RUN_MIN);

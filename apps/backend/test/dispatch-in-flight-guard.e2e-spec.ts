@@ -66,7 +66,16 @@ describe('#213 slice 2 — one shared per-zone dispatch in-flight guard (e2e)', 
     dispatchRun = app.get(DispatchRunService);
     // The scheduled path, with the #108 master switch on so the tick actually runs. Shares the app's
     // DispatchRunService singleton, which is the point — the guard has to be common to both entries.
-    scheduler = new DispatchSchedulerService(dispatchRun, { enabled: true });
+    // #260 made the cron tick patient with a contended zone. This spec is about the GUARD — that a
+    // second run is never started over a first — not about how long the tick is willing to wait, so it
+    // pins patience OFF (`deadlineMs: 0`, the documented try-once switch) and keeps asserting the
+    // refusal it always did. The patient behaviour has its own spec,
+    // `dispatch-cron-bounded-retry.e2e-spec.ts`. Passed through the config param rather than the
+    // environment, per #182 R5.
+    scheduler = new DispatchSchedulerService(dispatchRun, {
+      enabled: true,
+      retry: { intervalMs: 60_000, deadlineMs: 0 },
+    });
   });
 
   // A test that fails mid-block must not leave a run hanging — the guard would still be held and every

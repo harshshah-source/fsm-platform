@@ -37,6 +37,8 @@ describe('setup-env allowlist (#182)', () => {
     env.COMMISSIONING_TTFR_EPOCH = '2020-01-01T00:00:00.000Z';
     env.DB_POOL_MAX = '1000';
     env.PLANT_ELIGIBILITY_REFRESH_CRON = '* * * * *';
+    env.DISPATCH_STALE_RUN_MIN = '120';
+    env.DISPATCH_RETRY_DEADLINE_MS = '900000';
     env.ALLOW_DEV_SEED = 'true';
     env.DEV_SEED_PASSWORD = 'something-the-developer-chose';
 
@@ -55,6 +57,12 @@ describe('setup-env allowlist (#182)', () => {
     expect(env.COMMISSIONING_TTFR_EPOCH).toBeUndefined();
     expect(env.DB_POOL_MAX).toBeUndefined();
     expect(env.PLANT_ELIGIBILITY_REFRESH_CRON).toBeUndefined();
+    // #261/#260 — both are load-bearing for suite outcomes, not just for production. A developer's
+    // raised `DISPATCH_STALE_RUN_MIN` makes the reaper specs' hour-old fixtures no longer stale, and a
+    // leaked `DISPATCH_RETRY_DEADLINE_MS` makes every contended-zone assertion wait minutes for an
+    // answer it expects immediately.
+    expect(env.DISPATCH_STALE_RUN_MIN).toBeUndefined();
+    expect(env.DISPATCH_RETRY_DEADLINE_MS).toBeUndefined();
     // #194 — a developer who has opted their own box into the dev-login seeder must not thereby
     // change what the suite does. `dev-seed.spec.ts` passes env in explicitly for the same reason.
     expect(env.ALLOW_DEV_SEED).toBeUndefined();

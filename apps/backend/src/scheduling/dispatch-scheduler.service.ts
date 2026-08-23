@@ -7,7 +7,9 @@ import {
   DEFAULT_DISPATCH_REAPER_CRON,
   DISPATCH_JOB_NAME,
   DISPATCH_REAPER_JOB_NAME,
+  type DispatchRetryPolicy,
   bootstrapDispatchCron,
+  readDispatchRetryPolicy,
 } from './dispatch-cron';
 import { DispatchRunService } from './dispatch-run.service';
 
@@ -19,6 +21,13 @@ export interface DispatchSchedulerConfig {
   /** Shares the #108 master switch — `BUSINESS_SWEEPS_ENABLED === 'true'`. Default OFF (an ops step). */
   enabled: boolean;
   dispatchCron: string;
+  /**
+   * #260 — how patient the automatic run is with a contended zone. Carried on the scheduler's config
+   * rather than read from the environment inside the run, for the reason #182 R5 gives: a spec that
+   * needs a different value passes it through this constructor param, never by setting an env var the
+   * suite's allowlist would (correctly) delete.
+   */
+  retry: DispatchRetryPolicy;
 }
 
 /**
@@ -33,6 +42,7 @@ export function readDispatchSchedulerConfig(env: NodeJS.ProcessEnv = process.env
   return {
     enabled: env.BUSINESS_SWEEPS_ENABLED === 'true',
     dispatchCron: bootstrapDispatchCron(env),
+    retry: readDispatchRetryPolicy(env),
   };
 }
 
@@ -74,10 +84,17 @@ export class DispatchSchedulerService {
       // #213 — the in-flight guard is no longer a private field here. It moved into
       // `runForActiveZones`, the one path this tick and the manual HTTP trigger share, so neither can
       // start a run over the other; this tick just reports the refusal it is handed.
-      const outcome = await this.dispatchRun.runForActiveZones(now);
+      // #260 — the tick is patient with a contended zone: a collision measured in seconds must not
+      // cost that zone its daily dispatch. The waiting happens inside `runForActiveZones`, so the
+      // manual trigger sharing this path is unaffected (it is never patient), and a CONFLICT reaching
+      // here now means the deadline expired rather than that the first attempt was refused.
+      const outcome = await this.dispatchRun.runForActiveZones(now, { retry: this.config.retry });
       if (outcome.result === 'CONFLICT') {
         const zones = outcome.inFlight.map((f) => f.zoneId).join(', ');
-        this.logger.log(`dispatch tick skipped — a run is already in flight for zone(s) ${zones}`);
+        this.logger.log(
+          `dispatch tick skipped — a run is still in flight for zone(s) ${zones} after waiting ` +
+            `${this.config.retry.deadlineMs} ms`,
+        );
         return { ran: false, reason: 'RUN_IN_PROGRESS' };
       }
       return { ran: true };

@@ -8,7 +8,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RecommenderService, type RunSummary, type ZoneProjection } from '../recommender/recommender.service';
 import { SE_ASSIGNMENT_THRESHOLD_KEY } from '../settings/assignment-threshold';
 import { BatchAssignmentService, type DispatchSummary } from './batch-assignment.service';
-import { DISPATCH_CRON_SETTING_KEY, bootstrapDispatchCron, staleDispatchRunFilter } from './dispatch-cron';
+import {
+  DISPATCH_CRON_SETTING_KEY,
+  type DispatchRetryPolicy,
+  bootstrapDispatchCron,
+  readDispatchRetryPolicy,
+  staleDispatchRunFilter,
+} from './dispatch-cron';
 
 export interface DispatchRunError {
   zoneId: string;
@@ -22,6 +28,9 @@ export interface DispatchRunError {
  * little ahead. It is not a window in which future-dating is permitted.
  */
 const FUTURE_DAY_SKEW_MS = 15 * 60 * 1000;
+
+/** #260 — the patient run's wait between attempts. Real timers: it is waiting on another process. */
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** What a preview answers with: the projected plan per zone, and nothing persisted (#250). */
 export interface DispatchPreview {
@@ -48,6 +57,12 @@ export interface DispatchRunOptions {
    * with a reason is worth a lot to whoever reads the audit trail three weeks later.
    */
   reason?: string | null;
+  /**
+   * #260 — override the patience policy for this run. Only consulted for a CRON run; a MANUAL run is
+   * never patient whatever this says, because an operator pressing a button wants an answer rather
+   * than a queue. Present for tests and for a caller that knows better than the environment.
+   */
+  retry?: DispatchRetryPolicy;
 }
 
 /** A run currently holding a zone, as reported to whoever was refused (#213). */
@@ -107,6 +122,28 @@ export interface DispatchRunSummary {
    * a three-zone run that dispatched three zones from a four-zone run that was refused one.
    */
   zoneOutcomes: DispatchZoneOutcomeRow[];
+}
+
+/**
+ * The run-level figures a zone contributes, accumulated across the zone loop (#260).
+ *
+ * Extracted from `execute`'s local variables when the retry pass gave the loop a *second* caller: two
+ * copies of ten `+=` lines would have drifted the moment a column was added, and the invariant these
+ * columns exist to hold — a run's totals equal the sum of its zone cards — is exactly the kind that
+ * drift breaks silently. One object, one place that folds a zone into it.
+ */
+interface RunTotals {
+  batches: number;
+  recommended: number;
+  unassignable: number;
+  /** #238 — tickets the SE-assignment threshold held back this run. */
+  withheldBelowThreshold: number;
+  /** #242 — `null` until some zone reports: "not measured" is not the same answer as "dropped none". */
+  bucketlessDropped: number | null;
+  /** #177 — `null` on the same terms as the line above. */
+  componentBlockedWithheld: number | null;
+  /** Zones that did not fully dispatch — a hard error OR a benign skip. Drives the run status. */
+  zonesWithIssue: number;
 }
 
 /**
@@ -202,9 +239,35 @@ export class DispatchRunService {
     // would answer with a refusal it had itself just made obsolete.
     await this.reapStaleDispatchRuns(now);
 
+    // #260 — the automatic run is patient; a manual one never is. Measured against the real clock, not
+    // the injected `now`: waiting is wall-clock behaviour, and a test that fast-forwards the business
+    // date must not thereby fast-forward a deadline.
+    const retry = this.retryPolicyFor(trigger, opts);
+    const patientUntil = retry === null ? 0 : Date.now() + retry.deadlineMs;
+
     // #259 — admission is the database's answer now, not a private field's. See {@link admit}.
-    const admission = await this.admit(now, opts, { trigger, zoneIds });
-    if (admission.result === 'CONFLICT') return { result: 'CONFLICT', inFlight: admission.inFlight };
+    let admission = await this.admit(now, opts, { trigger, zoneIds });
+    // Patience has to start HERE and not only after the run row exists. When every requested zone is
+    // held, #259 opens no run at all — that is its "a run which never happened leaves no history" rule
+    // and it is worth keeping — so there would be nothing for an in-run retry to retry under. Re-asking
+    // for admission preserves the rule exactly: while everything is held, still nothing is written.
+    while (admission.result === 'CONFLICT' && retry !== null && Date.now() + retry.intervalMs <= patientUntil) {
+      await sleep(retry.intervalMs);
+      // #261's reaper is what actually frees a *crashed* holder. Without this the patient run would
+      // spend its whole deadline waiting behind a claim nobody is holding, then give up — which is the
+      // risk #260's own issue names, and the reason #261 is its hard prerequisite.
+      await this.reapStaleDispatchRuns(new Date());
+      admission = await this.admit(now, opts, { trigger, zoneIds });
+    }
+    if (admission.result === 'CONFLICT') {
+      if (retry !== null) {
+        this.logger.warn(
+          `dispatch run gave up after ${retry.deadlineMs} ms: every requested zone is still held ` +
+            `by ${admission.inFlight.map((f) => `run ${f.runId} (zone ${f.zoneId})`).join(', ')}`,
+        );
+      }
+      return { result: 'CONFLICT', inFlight: admission.inFlight };
+    }
 
     try {
       return {
@@ -217,6 +280,8 @@ export class DispatchRunService {
           runId: admission.runId,
           admitted: admission.admitted,
           contended: admission.contended,
+          retry,
+          patientUntil,
         }),
       };
     } finally {
@@ -224,6 +289,22 @@ export class DispatchRunService {
       // covers the case this cannot — a process that dies without unwinding at all.
       await this.releaseStrandedClaims(admission.runId);
     }
+  }
+
+  /**
+   * How patient this run is allowed to be (#260), or `null` for none.
+   *
+   * The asymmetry is the ruling (#258 Q8.6), not an optimisation: **CRON is patient, MANUAL never is.**
+   * Nobody is watching the 05:00 run, so a zone briefly held at 05:00:00 costing that zone its whole
+   * day is a pure loss; an operator who pressed a button is watching, and turning their click into a
+   * silent fifteen-minute queue would be worse than telling them the truth immediately.
+   *
+   * A `deadlineMs` of 0 means no patience at all — the issue's documented rollback switch.
+   */
+  private retryPolicyFor(trigger: DispatchRunTrigger, opts: DispatchRunOptions): DispatchRetryPolicy | null {
+    if (trigger !== 'CRON') return null;
+    const policy = opts.retry ?? readDispatchRetryPolicy();
+    return policy.deadlineMs > 0 && policy.intervalMs > 0 ? policy : null;
   }
 
   /**
@@ -531,9 +612,13 @@ export class DispatchRunService {
       runId: bigint;
       admitted: bigint[];
       contended: Array<{ zoneId: bigint; holder: DispatchInFlight | null }>;
+      /** #260 — null for a manual run, which never waits. */
+      retry: DispatchRetryPolicy | null;
+      /** Real-clock instant the run stops asking. Meaningless when `retry` is null. */
+      patientUntil: number;
     },
   ): Promise<DispatchRunSummary> {
-    const { trigger, actorId, actorRole, day, runId, admitted, contended } = ctx;
+    const { trigger, actorId, actorRole, day, runId, admitted, contended, retry, patientUntil } = ctx;
 
     await this.audit.record({
       actorId,
@@ -544,11 +629,7 @@ export class DispatchRunService {
       metadata: { trigger, zonesClaimed: admitted.length, zonesContended: contended.length },
     });
 
-    const zoneOutcomes: DispatchZoneOutcomeRow[] = contended.map((c) => ({
-      zoneId: c.zoneId.toString(),
-      outcome: 'CONTENDED' as const,
-      ...(c.holder ? { holder: c.holder } : {}),
-    }));
+    const zoneOutcomes: DispatchZoneOutcomeRow[] = [];
     const summary: DispatchRunSummary = {
       zones: 0,
       schedules: 0,
@@ -557,69 +638,47 @@ export class DispatchRunService {
       runId: runId.toString(),
       zoneOutcomes,
     };
-    let batches = 0;
-    let recommended = 0;
-    let unassignable = 0;
-    // #238 — tickets the SE-assignment threshold held back this run, summed from the zone rows so the
-    // run total equals the sum of its cards by construction, exactly like every column beside it.
-    let withheldBelowThreshold = 0;
-    // #242 — tickets the recommender could not rank (no computed SLA bucket) and therefore dropped
-    // before deciding anything. `null` until some zone actually reports one, so a run in which no zone's
-    // recommender ever got that far records "not measured" rather than a fabricated 0.
-    let bucketlessDropped: number | null = null;
-    // #177 — tickets held back because a part is on order. `null` on the same terms as the line above:
-    // a run in which no zone's recommender reported records "not measured", never a fabricated 0.
-    let componentBlockedWithheld: number | null = null;
-    // Zones that did not fully dispatch — a hard error OR a benign skip (lock contention / a residual
-    // schedule conflict). Any such zone stamps its `dispatch_run_zones.error`, so this equals the list's
-    // "Errors" column and drives the run status: a run with an issue is never labelled SUCCESS.
-    let zonesWithIssue = 0;
+    const totals: RunTotals = {
+      batches: 0,
+      recommended: 0,
+      unassignable: 0,
+      withheldBelowThreshold: 0,
+      bucketlessDropped: null,
+      componentBlockedWithheld: null,
+      zonesWithIssue: 0,
+    };
 
     for (const zoneId of admitted) {
-      let rec: RunSummary | undefined;
-      let out: DispatchSummary | undefined;
-      let error: string | null = null;
-      try {
-        rec = await this.recommender.runForZone(zoneId, { now, runId });
-        out = await this.dispatch.dispatchForZone(zoneId, { dateFrom: day, dateTo: day, now, runId });
-        summary.zones++;
-        // #126 — a benign non-dispatch (residual schedule conflict / lock contention) is no longer
-        // silent: its reason is stamped on the zone row's `error`. A dispatched zone → skipReason
-        // undefined → null. Same-day new work now APPENDS to the SE's existing plan (no whole-zone drop).
-        error = out.skipReason ?? null;
-      } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
-        this.logger.error(`dispatch run failed for zone ${zoneId}: ${error}`);
-        summary.errors.push({ zoneId: zoneId.toString(), message: error });
-      }
-      // Accumulate run totals from EXACTLY what the zone row records (successes and contained failures
-      // alike), so a run's columns always equal the sum of its per-zone cards — recommended, dispatched,
-      // unassignable, batches and schedules reconcile by construction. `undefined ?? 0` covers a zone
-      // whose dispatch threw (no `out`) or whose recommender threw (no `rec`).
-      await this.finalizeZoneClaim(runId, zoneId, rec, out, error);
-      // #261 — one beat per zone. A run over many zones is legitimately long, and this is what stops
-      // the reaper mistaking length for death. It follows the finalize rather than preceding it so the
-      // beat attests to work completed, not work merely started.
-      await this.touchHeartbeat(runId);
-      zoneOutcomes.push({ zoneId: zoneId.toString(), outcome: error === null ? 'DONE' : 'ERROR' });
-      summary.schedules += out?.schedules ?? 0;
-      summary.tickets += out?.tickets ?? 0;
-      batches += out?.batches ?? 0;
-      recommended += rec?.recommended ?? 0;
-      unassignable += rec?.unassignable ?? 0;
-      withheldBelowThreshold += rec?.withheldBelowThreshold ?? 0;
-      if (rec) bucketlessDropped = (bucketlessDropped ?? 0) + rec.bucketlessDropped;
-      if (rec) componentBlockedWithheld = (componentBlockedWithheld ?? 0) + rec.componentBlockedWithheld;
-      if (error !== null) zonesWithIssue++;
+      await this.processZone(zoneId, { now, day, runId }, summary, totals);
+    }
+
+    // Whatever is still held once the run is done asking. For a MANUAL run that is every contended
+    // zone, because a manual run never asks twice.
+    const stillContended =
+      retry === null || contended.length === 0
+        ? contended
+        : await this.waitOutContention(contended, { now, day, runId }, retry, patientUntil, summary, totals);
+
+    for (const c of stillContended) {
+      zoneOutcomes.push({
+        zoneId: c.zoneId.toString(),
+        outcome: 'CONTENDED' as const,
+        ...(c.holder ? { holder: c.holder } : {}),
+      });
     }
 
     // #259 — a contended zone is neither a success nor a failure of this run: the work simply was not
     // this run's to do. It cannot be SUCCESS (the request was not fully served) and it cannot be FAILED
     // (nothing failed), which is exactly what PARTIAL already means on this ledger.
+    // #260 — measured against the zones still held when the run finished, not against the zones that
+    // were held at admission. A zone the retry waited out and then dispatched is a plain success; a run
+    // that recovered every contended zone is SUCCESS, and saying PARTIAL would report a collision the
+    // system absorbed as an outcome the operator has to interpret.
+    const processed = summary.zoneOutcomes.length - stillContended.length;
     const status: DispatchRunStatus =
-      contended.length === 0 && zonesWithIssue === 0
+      stillContended.length === 0 && totals.zonesWithIssue === 0
         ? 'SUCCESS'
-        : contended.length === 0 && admitted.length > 0 && summary.errors.length >= admitted.length
+        : stillContended.length === 0 && processed > 0 && summary.errors.length >= processed
           ? 'FAILED'
           : 'PARTIAL';
     // #261 — conditional on the run still being RUNNING. The reaper presumes a silent run is dead and
@@ -633,13 +692,13 @@ export class DispatchRunService {
         status,
         zones: summary.zones,
         schedules: summary.schedules,
-        batches,
+        batches: totals.batches,
         ticketsDispatched: summary.tickets,
-        recommended,
-        unassignable,
-        withheldBelowThreshold,
-        bucketlessDropped,
-        componentBlockedWithheld,
+        recommended: totals.recommended,
+        unassignable: totals.unassignable,
+        withheldBelowThreshold: totals.withheldBelowThreshold,
+        bucketlessDropped: totals.bucketlessDropped,
+        componentBlockedWithheld: totals.componentBlockedWithheld,
       },
     });
     if (finalized === 0) {
@@ -654,24 +713,159 @@ export class DispatchRunService {
       metadata: {
         status,
         zones: summary.zones,
-        zonesContended: contended.length,
+        zonesContended: stillContended.length,
         schedules: summary.schedules,
-        batches,
+        batches: totals.batches,
         ticketsDispatched: summary.tickets,
-        recommended,
-        unassignable,
-        withheldBelowThreshold,
-        bucketlessDropped,
-        componentBlockedWithheld,
+        recommended: totals.recommended,
+        unassignable: totals.unassignable,
+        withheldBelowThreshold: totals.withheldBelowThreshold,
+        bucketlessDropped: totals.bucketlessDropped,
+        componentBlockedWithheld: totals.componentBlockedWithheld,
         errorCount: summary.errors.length,
       },
     });
 
     this.logger.log(
       `dispatch run: ${summary.zones} zones, ${summary.schedules} schedules, ${summary.tickets} tickets, ` +
-        `${summary.errors.length} errors, ${contended.length} contended`,
+        `${summary.errors.length} errors, ${stillContended.length} contended`,
     );
     return summary;
+  }
+
+  /**
+   * Keep asking for the zones this run was refused, until it gets them or runs out of time (#260).
+   *
+   * A dispatch collision is usually seconds long — a zone-scoped rebalance that happens to overlap
+   * 05:00:00. Before this, that zone's daily dispatch was simply lost until tomorrow, which is a
+   * disproportionate price for a transient lock. Every zone recovered here dispatches under the SAME
+   * run row, so one morning's work stays one ledger entry.
+   *
+   * Bounded by construction: it sleeps only when the sleep would finish before the deadline, so the
+   * loop cannot overrun `patientUntil` and therefore cannot still be running at the next day's tick.
+   * Zones still held when time runs out keep their CONTENDED row — visible, never silent (G7).
+   */
+  private async waitOutContention(
+    contended: Array<{ zoneId: bigint; holder: DispatchInFlight | null }>,
+    ctx: { now: Date; day: Date; runId: bigint },
+    retry: DispatchRetryPolicy,
+    patientUntil: number,
+    summary: DispatchRunSummary,
+    totals: RunTotals,
+  ): Promise<Array<{ zoneId: bigint; holder: DispatchInFlight | null }>> {
+    let pending = contended;
+    while (pending.length > 0 && Date.now() + retry.intervalMs <= patientUntil) {
+      await sleep(retry.intervalMs);
+      // Same reason as the admission loop: a crashed holder is freed by the reaper, not by waiting.
+      await this.reapStaleDispatchRuns(new Date());
+      // The run is alive and working the whole time it waits, and the reaper must be told so — a
+      // patient run that stopped beating would reap itself.
+      await this.touchHeartbeat(ctx.runId);
+
+      const stillHeld: typeof pending = [];
+      for (const c of pending) {
+        if (await this.promoteContendedClaim(ctx.runId, c.zoneId)) {
+          await this.processZone(c.zoneId, ctx, summary, totals);
+        } else {
+          stillHeld.push(c);
+        }
+      }
+      pending = stillHeld;
+    }
+    if (pending.length > 0) {
+      this.logger.warn(
+        `dispatch run ${ctx.runId} gave up waiting after ${retry.deadlineMs} ms: zone(s) ` +
+          `${pending.map((c) => c.zoneId).join(', ')} still held, left CONTENDED on the ledger`,
+      );
+    }
+    return pending;
+  }
+
+  /**
+   * Turn this run's CONTENDED row for a zone back into a live claim, if the zone is free (#260).
+   *
+   * An UPDATE rather than #259's INSERT, because the row already exists: `@@unique([runId, zoneId])`
+   * means a run gets exactly one row per zone, so a late admission has to promote the refusal in place.
+   * That is also the better record — the zone's whole story stays on one row.
+   *
+   * `contended_with_run_id` is deliberately **not** cleared. This run genuinely was refused this zone,
+   * and who by is the only surviving trace of the collision; every reader discriminates on `status`, so
+   * carrying it forward onto a DONE row costs nothing and keeps the history.
+   *
+   * The `NOT EXISTS` is the ordinary path and the partial unique is the backstop for two runs promoting
+   * the same zone in the same instant. A P2002 here is safe to catch, unlike #265's: this is a single
+   * statement with no interactive transaction to abort.
+   */
+  private async promoteContendedClaim(runId: bigint, zoneId: bigint): Promise<boolean> {
+    try {
+      const promoted = await this.prisma.$executeRaw`
+        UPDATE "dispatch_run_zones" z
+           SET "status" = 'RUNNING'::"dispatch_zone_claim_status",
+               "started_at" = ${new Date()},
+               "finished_at" = NULL
+         WHERE z."run_id" = ${runId}
+           AND z."zone_id" = ${zoneId}
+           AND z."status" = 'CONTENDED'::"dispatch_zone_claim_status"
+           AND NOT EXISTS (
+             SELECT 1 FROM "dispatch_run_zones" h
+              WHERE h."zone_id" = z."zone_id"
+                AND h."status" = 'RUNNING'::"dispatch_zone_claim_status")`;
+      return promoted === 1;
+    } catch (e) {
+      if ((e as { code?: string }).code === 'P2002') return false;
+      throw e;
+    }
+  }
+
+  /**
+   * Recommend + dispatch one zone this run holds, close its claim, and fold its figures into the run.
+   *
+   * Extracted from `execute`'s loop by #260, which gave that loop a second caller (the retry pass) and
+   * therefore made an inline body a duplication waiting to happen. Behaviour is unchanged: a zone's
+   * failure is contained here, recorded, and the run continues.
+   *
+   * Totals are accumulated from EXACTLY what the zone row records — successes and contained failures
+   * alike — so a run's columns equal the sum of its per-zone cards by construction. `undefined ?? 0`
+   * covers a zone whose dispatch threw (no `out`) or whose recommender threw (no `rec`).
+   */
+  private async processZone(
+    zoneId: bigint,
+    ctx: { now: Date; day: Date; runId: bigint },
+    summary: DispatchRunSummary,
+    totals: RunTotals,
+  ): Promise<void> {
+    const { now, day, runId } = ctx;
+    let rec: RunSummary | undefined;
+    let out: DispatchSummary | undefined;
+    let error: string | null = null;
+    try {
+      rec = await this.recommender.runForZone(zoneId, { now, runId });
+      out = await this.dispatch.dispatchForZone(zoneId, { dateFrom: day, dateTo: day, now, runId });
+      summary.zones++;
+      // #126 — a benign non-dispatch (residual schedule conflict / lock contention) is no longer
+      // silent: its reason is stamped on the zone row's `error`. A dispatched zone → skipReason
+      // undefined → null. Same-day new work now APPENDS to the SE's existing plan (no whole-zone drop).
+      error = out.skipReason ?? null;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      this.logger.error(`dispatch run failed for zone ${zoneId}: ${error}`);
+      summary.errors.push({ zoneId: zoneId.toString(), message: error });
+    }
+    await this.finalizeZoneClaim(runId, zoneId, rec, out, error);
+    // #261 — one beat per zone. A run over many zones is legitimately long, and this is what stops the
+    // reaper mistaking length for death. It follows the finalize rather than preceding it so the beat
+    // attests to work completed, not work merely started.
+    await this.touchHeartbeat(runId);
+    summary.zoneOutcomes.push({ zoneId: zoneId.toString(), outcome: error === null ? 'DONE' : 'ERROR' });
+    summary.schedules += out?.schedules ?? 0;
+    summary.tickets += out?.tickets ?? 0;
+    totals.batches += out?.batches ?? 0;
+    totals.recommended += rec?.recommended ?? 0;
+    totals.unassignable += rec?.unassignable ?? 0;
+    totals.withheldBelowThreshold += rec?.withheldBelowThreshold ?? 0;
+    if (rec) totals.bucketlessDropped = (totals.bucketlessDropped ?? 0) + rec.bucketlessDropped;
+    if (rec) totals.componentBlockedWithheld = (totals.componentBlockedWithheld ?? 0) + rec.componentBlockedWithheld;
+    if (error !== null) totals.zonesWithIssue++;
   }
 
   /**

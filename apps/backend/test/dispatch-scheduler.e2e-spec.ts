@@ -1,6 +1,10 @@
 import { vi } from 'vitest';
 import type { DispatchRunService } from '../src/scheduling/dispatch-run.service';
 import {
+  DEFAULT_DISPATCH_RETRY_DEADLINE_MIN,
+  DEFAULT_DISPATCH_RETRY_INTERVAL_MS,
+} from '../src/scheduling/dispatch-cron';
+import {
   DEFAULT_DISPATCH_CRON,
   DispatchSchedulerService,
   readDispatchSchedulerConfig,
@@ -26,7 +30,17 @@ const makeScheduler = (run: ReturnType<typeof makeRun>, enabled: boolean): Dispa
 
 describe('Issue 113 — DispatchSchedulerService', () => {
   it('readDispatchSchedulerConfig: OFF by default; cron defaults and env-overrides', () => {
-    expect(readDispatchSchedulerConfig({})).toEqual({ enabled: false, dispatchCron: DEFAULT_DISPATCH_CRON });
+    // #260 — the patience policy joined this config so a spec can override it through the constructor
+    // rather than the environment (#182 R5); the defaults are the ones `dispatch-cron.ts` states.
+    expect(readDispatchSchedulerConfig({})).toEqual({
+      enabled: false,
+      dispatchCron: DEFAULT_DISPATCH_CRON,
+      retry: {
+        intervalMs: DEFAULT_DISPATCH_RETRY_INTERVAL_MS,
+        deadlineMs: DEFAULT_DISPATCH_RETRY_DEADLINE_MIN * 60_000,
+      },
+    });
+    expect(readDispatchSchedulerConfig({ DISPATCH_RETRY_DEADLINE_MS: '0' }).retry.deadlineMs).toBe(0);
     expect(readDispatchSchedulerConfig({ BUSINESS_SWEEPS_ENABLED: 'true' }).enabled).toBe(true);
     expect(readDispatchSchedulerConfig({ BUSINESS_SWEEPS_ENABLED: '1' }).enabled).toBe(false);
     expect(readDispatchSchedulerConfig({ BUSINESS_SWEEP_DISPATCH_CRON: '0 4 * * *' }).dispatchCron).toBe('0 4 * * *');
@@ -38,7 +52,14 @@ describe('Issue 113 — DispatchSchedulerService', () => {
     const outcome = await makeScheduler(run, true).dispatchTick(now);
 
     expect(run.runForActiveZones).toHaveBeenCalledTimes(1);
-    expect(run.runForActiveZones).toHaveBeenCalledWith(now);
+    // #260 — the tick hands its own patience policy down rather than letting the run re-read the
+    // environment, which is what makes the policy overridable in a test at all.
+    expect(run.runForActiveZones).toHaveBeenCalledWith(now, {
+      retry: {
+        intervalMs: DEFAULT_DISPATCH_RETRY_INTERVAL_MS,
+        deadlineMs: DEFAULT_DISPATCH_RETRY_DEADLINE_MIN * 60_000,
+      },
+    });
     expect(outcome).toEqual({ ran: true });
   });
 
