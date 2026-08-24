@@ -66,6 +66,17 @@ function primaryFactOther(silent: number, eligible: number): string {
 }
 
 /**
+ * The plain label alone, for a surface that knows a zone's mode but not its counts — the Scheduler
+ * Preview renders the mode the *projection* ran under (#281 AC10), which is not necessarily the live
+ * mode `apiOperatingMode` would report, so it cannot borrow a whole row. Same LABEL map as
+ * {@link operatingModeCopy}: the enum still never leaves this module.
+ */
+export function operatingModeLabel(mode: string | null | undefined): string | null {
+  if (mode == null) return null;
+  return LABEL[mode as OperatingMode] ?? null;
+}
+
+/**
  * Translate a zone's raw operating-mode row into everything the UI renders — label, reason, a
  * human-readable supporting fact, and a styling tone. `perspective` picks the ZM's own-zone voice
  * ("your zone") or the cross-zone strip's third-person voice.

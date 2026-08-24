@@ -269,6 +269,63 @@ describe('Dispatch batch detail (Issue 123)', () => {
     expect(row.getByText('RJ14-GA-1234')).toBeInTheDocument();
   });
 
+  /**
+   * #281 AC6/AC7 (#280 R4/R10) — the drill-down used to dead-end here. The page named an engineer, a
+   * plant and every ticket and linked none of them; its only two links pointed back UP the chain. To
+   * reach the day plan the batch produced, the operator went to the sidebar, opened Schedules and
+   * searched by name — for a route (`/schedules/:seId`) that was already live and already rendering
+   * exactly that.
+   */
+  describe('#281 — the chain reaches the work it produced', () => {
+    it('AC6: reaches the SE day plan this batch produced in one action', async () => {
+      renderPage();
+      const identity = within(await screen.findByTestId('batch-identity'));
+      const dayPlan = identity.getByRole('link', { name: /Ramesh Kumar/ });
+      expect(dayPlan).toHaveAttribute('href', '/schedules/se-uuid-1');
+      // The link states the question it moves to, per #280 R8 — not a bare name.
+      expect(identity.getByTestId('batch-se-link').textContent).toMatch(/day plan/i);
+    });
+
+    it('AC7: links the plant to its device investigation', async () => {
+      renderPage();
+      const identity = within(await screen.findByTestId('batch-identity'));
+      expect(identity.getByRole('link', { name: /Kotputli Works/ })).toHaveAttribute(
+        'href',
+        '/reports/device?plantId=10',
+      );
+    });
+
+    it('AC7: links every ticket row to its ticket', async () => {
+      renderPage();
+      const row = within(await screen.findByTestId('dispatch-assignment-row-t-uuid-1'));
+      expect(row.getByRole('link', { name: /DEV-9001/ })).toHaveAttribute('href', '/tickets/t-uuid-1');
+
+      const sparse = within(screen.getByTestId('dispatch-assignment-row-t-uuid-2'));
+      expect(sparse.getByRole('link', { name: /DEV-9002/ })).toHaveAttribute('href', '/tickets/t-uuid-2');
+    });
+
+    it('AC3: the batch never claims to be editable — it links out, it does not act', async () => {
+      renderPage();
+      const identity = within(await screen.findByTestId('batch-identity'));
+      // Dispatch Runs is the immutable ledger (#280 R3/#281 AC5). Every affordance on it is a link
+      // to somewhere else; a button here would be a write surface on history.
+      expect(identity.queryAllByRole('button')).toHaveLength(0);
+      expect(identity.getByTestId('batch-identity-note').textContent).toMatch(/what this run did/i);
+    });
+
+    it('keeps the day-plan link when the batch names no engineer, without showing a raw uuid', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => json({ ...batch, seName: null })));
+      renderPage();
+      const identity = within(await screen.findByTestId('batch-identity'));
+      // The destination is keyed by seId, so a missing NAME is no reason to drop the link — but the
+      // uuid is never the label (#281 AC10's rule, applied here too).
+      const link = identity.getByTestId('batch-se-link');
+      expect(link.querySelector('a')).toHaveAttribute('href', '/schedules/se-uuid-1');
+      expect(link.textContent).not.toContain('se-uuid-1');
+      expect(await screen.findByTestId('dispatch-assignment-row-t-uuid-1')).toBeInTheDocument();
+    });
+  });
+
   it('renders the trace without crashing when identity is absent (older backend / version skew)', async () => {
     const { identity: _omit, ...traceNoIdentity } = trace;
     vi.stubGlobal(

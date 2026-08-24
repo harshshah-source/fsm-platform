@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { apiListSchedules, apiZoneEngineers, type ScheduleRow, type ZoneEngineer } from '../../api/schedules';
 import {
   DataTable,
@@ -9,9 +9,11 @@ import {
   type Column,
   type Metric,
 } from '../../components/data';
+import { DispatchTimelineNote } from '../../components/domain';
 import { Badge, LoadBadge } from '../../components/ui';
 import type { BadgeTone } from '../../components/ui/Badge';
 import { IconCalendar } from '../../components/ui/icons';
+import { addIsoDays, istIsoDate } from '../../lib/datetime';
 
 /**
  * ZM Batch-Schedule list (Issue 13b AC#1 · FE-12 parity, reference 12). One row per SE Work Schedule with
@@ -22,6 +24,12 @@ import { IconCalendar } from '../../components/ui/icons';
  * FE-12 is a presentation-only refactor onto `PageHeader` + `MetricStrip` + the canonical `DataTable`;
  * the monitoring fetch, the `Batch Schedules` aria-label, the `schedule-status-*` test ids, the
  * row→`/schedules/:seId` navigation, and the absence of any Approve gate are all preserved.
+ *
+ * **#281 — the present tense of the dispatch timeline** (#280 R1/R3). The page says so itself now,
+ * because `PageHeader` renders screen-reader-only and its subtitle reached nobody looking at the
+ * screen. The per-row link out is the contextual, per-record mechanism #280 R8 ruled: this SE, on the
+ * projection for the next run. It is not a switcher — this page lists every SE's day plan and is not
+ * a single-date view, which is exactly why R8 rejected a shared date-anchored control.
  */
 // Work-schedule statuses as the list returns them: ACTIVE (auto-dispatched, untouched) or
 // OVERRIDDEN (a ZM adjusted it). Labels are operator-facing; test ids keep the raw status.
@@ -30,6 +38,15 @@ const STATUS_TONE: Record<string, BadgeTone> = {
   AUTO_ASSIGNED: 'neutral',
   OVERRIDDEN: 'warning',
 };
+
+/**
+ * The date a "what would the next run do for them" link should open. Tomorrow in IST — the same day
+ * `SchedulerPreviewPage` defaults to, derived through the same IST helpers (CONTEXT.md Decisions §19)
+ * rather than a device-local date, which disagrees with the backend for every session before 05:30.
+ */
+function nextRunDate(now: Date = new Date()): string {
+  return addIsoDays(istIsoDate(now), 1);
+}
 
 export function SchedulesPage() {
   const navigate = useNavigate();
@@ -136,6 +153,26 @@ export function SchedulesPage() {
       },
     },
     {
+      /*
+       * #281 AC8 (#280 R8) — the per-record cross-view link. `stopPropagation` because the row itself
+       * navigates to the day plan: the row is "what is committed for them", this link is "what the
+       * next run would do for them", and the two must not fire together.
+       */
+      key: 'next-run',
+      header: '',
+      exportable: false,
+      render: (r) => (
+        <Link
+          to={`/schedules/preview?date=${nextRunDate()}&se=${r.seId}`}
+          data-testid={`schedule-to-preview-${r.seId}`}
+          onClick={(e) => e.stopPropagation()}
+          className="whitespace-nowrap text-xs text-link hover:underline"
+        >
+          What the next run would do →
+        </Link>
+      ),
+    },
+    {
       key: 'status',
       header: 'Status',
       render: (r) => (
@@ -154,6 +191,7 @@ export function SchedulesPage() {
         title="Batch Schedule"
         subtitle="Each row is one Service Engineer's day plan: the plant stops and tickets the system auto-dispatched to them. Click a row to see the ordered stops. Monitoring only — batches dispatch automatically, no approval step."
       />
+      <DispatchTimelineNote position="present" />
       <MetricStrip metrics={metrics} />
       <DataTable
         ariaLabel="Batch Schedules"

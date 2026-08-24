@@ -85,6 +85,24 @@ export function resolveBreadcrumb(pathname: string, role: string): Crumb[] {
   // through to the generic "Console" crumb.
   const navItems = buildNav(role, { opsExplorer: true }).flatMap((group) => group.items);
 
+  /**
+   * #281 AC9 (audit §2.5 D1) — a LITERAL route always beats a param pattern that would also match it.
+   *
+   * `AppRoutes.tsx` guards this same collision in its route ordering, with a comment saying so: it
+   * declares `/schedules/preview` before `/schedules/:engineerId` or the literal is swallowed. This
+   * resolver carried no such guard, so `/^\/schedules\/([^/]+)$/` matched `/schedules/preview` first
+   * and the Scheduler Preview announced itself as `Dashboard › Schedules › Schedule Detail` — the
+   * committed day plan for an engineer named "preview", which is precisely the projection-read-as-a-
+   * commitment error #280 R2 forbids.
+   *
+   * Deliberately general rather than a `preview` special case: any literal nav route added under an
+   * existing `:param` route is covered from the moment it is added to `buildNav`.
+   */
+  const literal = navItems.find((item) => item.to === pathname);
+  if (literal && literal.to !== '/') {
+    return [{ label: 'Dashboard', to: '/' }, { label: literal.label }];
+  }
+
   for (const entry of DETAIL_CRUMBS) {
     const match = entry.pattern.exec(pathname);
     if (match) return entry.build(match, navItems);

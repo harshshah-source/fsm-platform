@@ -27,6 +27,20 @@ export interface NavLink {
   label: string;
   to: string;
   icon: Icon;
+  /**
+   * #281 AC2 — the operator question this destination answers, rendered as visible copy under the
+   * label. Only the Dispatch cluster carries one today: its four nouns are the set a new ZM provably
+   * cannot rank (`audit/frontend-ux-audit-2026-08-19.md` finding 10), and a hint on every row in the
+   * sidebar would be noise rather than ranking.
+   */
+  hint?: string;
+  /**
+   * #280 R9 — one indent, the smallest of the three presentational treatments that ruling names
+   * (divider / indent / copy), used to say Intra-day Queue hangs off Schedules rather than standing
+   * beside it as a fourth tense. Presentational only: the link, its route and its role gate are
+   * untouched (#281 AC12).
+   */
+  indent?: boolean;
 }
 export interface NavGroup {
   heading: string;
@@ -42,6 +56,12 @@ export interface NavFeatures {
   /** `OPS_EXPLORER_ENABLED` on the backend (#217). Off ⇒ the link must not render at all. */
   opsExplorer?: boolean;
 }
+
+/**
+ * #281 AC1 — the heading the four dispatch surfaces sit under. Exported so the pages that belong to
+ * the cluster and the tests that pin it name it from one place rather than repeating a string.
+ */
+export const DISPATCH_HEADING = 'Dispatch';
 
 /**
  * Role-scoped, grouped navigation (the `RoleNav` concern). Mirrors the reference sidebar grouping and
@@ -88,12 +108,8 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
       // is what the top-bar `Assign SE` button now opens.
       { label: 'Assign Work', to: '/assign', icon: IconPlus },
       { label: 'Create Install', to: '/install', icon: IconTruck },
-      { label: 'Schedules', to: '/schedules', icon: IconCalendar },
-      // #251 — the pre-run twin of Schedules (which shows what WAS dispatched). Same manager roles;
-      // a ZM's projection is zone-clamped server-side, so no extra nav gating is needed here.
-      { label: 'Scheduler Preview', to: '/schedules/preview', icon: IconCalendar },
-      { label: 'Dispatch Runs', to: '/dispatch-runs', icon: IconClipboard },
-      { label: 'Intra-day Queue', to: '/intraday', icon: IconClock },
+      // #281 — Schedules / Scheduler Preview / Dispatch Runs / Intra-day Queue left this list for the
+      // `Dispatch` group below. They were adjacent here only because they were added in that order.
       { label: 'SE Activity', to: '/engineers', icon: IconActivity },
       { label: 'Manage SEs', to: '/engineers/manage', icon: IconShield },
       { label: 'SE Planner', to: '/engineers/planner', icon: IconRoute },
@@ -109,6 +125,37 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
   }
 
   const groups: NavGroup[] = [{ heading: 'Operations', items: operations }];
+
+  // #281 (executes #280 R1/R8/R9) — the dispatch timeline as one named cluster, in the same grouped-rail
+  // pattern the Settings console uses. The four surfaces are one concept read at four points in time:
+  // what the next run WOULD do, what today's run committed, the changes made to that since, and the
+  // ledger of what already ran. Grouping them ranks the nouns; the hints keep them distinct, which is
+  // the constraint #280 R2 puts on any expression of the relationship — a projection must never read
+  // as a commitment.
+  if (isManager) {
+    groups.push({
+      heading: DISPATCH_HEADING,
+      items: [
+        // #251 — the pre-run twin of Schedules. Same manager roles; a ZM's projection is zone-clamped
+        // server-side, so no extra nav gating is needed here.
+        {
+          label: 'Scheduler Preview',
+          to: '/schedules/preview',
+          icon: IconCalendar,
+          hint: 'What the next run would do',
+        },
+        { label: 'Schedules', to: '/schedules', icon: IconCalendar, hint: "Today's committed day plans" },
+        {
+          label: 'Intra-day Queue',
+          to: '/intraday',
+          icon: IconClock,
+          hint: "Changes to today's plan",
+          indent: true,
+        },
+        { label: 'Dispatch Runs', to: '/dispatch-runs', icon: IconClipboard, hint: 'What past runs did' },
+      ],
+    });
+  }
 
   if (isManager) {
     groups.push({

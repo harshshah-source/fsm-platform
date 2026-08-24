@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildNav } from '../src/components/shell/nav';
 import { SchedulerPreviewPage } from '../src/pages/schedules/SchedulerPreviewPage';
@@ -59,9 +60,37 @@ const PREVIEW = {
   ],
 };
 
+const ENGINEERS = [
+  { engineerId: SE, name: 'Ramesh Kumar', coverageType: 'DEDICATED', zoneId: '1', committed: 1, dailyCapacity: 6, isActive: true },
+];
+const PLANTS = [{ plantId: '7', name: 'ACP-9106', zoneId: '1' }];
+const ZONE_MODES = [{ zoneId: '1', zoneName: 'Rajasthan North', mode: 'DEFICIT', silentCount: 4, eligibleCount: 40 }];
+
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 const fetchMock = vi.fn();
+
+/**
+ * #281 — the page links out now (AC8/AC10), so it needs a router. Route the name lookups explicitly:
+ * they are separate, best-effort reads and a catch-all mock would hand each of them the preview body.
+ */
+function renderPage(entry = '/schedules/preview') {
+  return render(
+    <MemoryRouter initialEntries={[entry]}>
+      <SchedulerPreviewPage />
+    </MemoryRouter>,
+  );
+}
+
+/** Wrap a preview-only mock so the three lookup reads answer with their own payloads. */
+function withLookups(handler: (url: string, init?: RequestInit) => Promise<Response>) {
+  return async (url: string, init?: RequestInit) => {
+    if (url.includes('/schedules/engineers')) return json(ENGINEERS);
+    if (url.includes('/planner/plants')) return json(PLANTS);
+    if (url.includes('/dashboard/operating-mode')) return json(ZONE_MODES);
+    return handler(url, init);
+  };
+}
 
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
@@ -89,8 +118,8 @@ describe('Scheduler Preview nav (#251)', () => {
 
 describe('Scheduler Preview page (#251)', () => {
   it('renders the projected plan and the as-of caveat with the real watermark', async () => {
-    fetchMock.mockImplementation(async () => json(PREVIEW));
-    render(<SchedulerPreviewPage />);
+    fetchMock.mockImplementation(withLookups(async () => json(PREVIEW)));
+    renderPage();
 
     await waitFor(() => expect(screen.getByTestId('preview-se-list')).toBeInTheDocument());
     expect(screen.getByTestId(`preview-se-${SE}`)).toBeInTheDocument();
@@ -103,7 +132,7 @@ describe('Scheduler Preview page (#251)', () => {
   });
 
   it('AC-4: a vehicle-return conflict asks before overwriting, and only confirms on demand', async () => {
-    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+    fetchMock.mockImplementation(withLookups(async (url: string, init?: RequestInit) => {
       if (url.includes('/schedules/preview')) return json(PREVIEW);
       if (url.includes('/schedules/holds')) {
         const body = JSON.parse(String(init?.body ?? '{}'));
@@ -112,8 +141,8 @@ describe('Scheduler Preview page (#251)', () => {
           : json({ result: 'CONFLICT_VEHICLE_UNAVAILABLE', expectedFrom: '2026-06-25T00:00:00.000Z', reportId: '9' });
       }
       return json({});
-    });
-    render(<SchedulerPreviewPage />);
+    }));
+    renderPage();
     await waitFor(() => expect(screen.getByTestId(`preview-ticket-${TICKET}`)).toBeInTheDocument());
 
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }));
@@ -136,11 +165,11 @@ describe('Scheduler Preview page (#251)', () => {
   });
 
   it('holds until the day AFTER the previewed date — the deferral predicate is inclusive', async () => {
-    fetchMock.mockImplementation(async (url: string) => {
+    fetchMock.mockImplementation(withLookups(async (url: string) => {
       if (url.includes('/schedules/preview')) return json(PREVIEW);
       return json({ result: 'OK', ticketId: TICKET, heldUntil: '2026-06-23' });
-    });
-    render(<SchedulerPreviewPage />);
+    }));
+    renderPage();
     await waitFor(() => expect(screen.getByTestId(`preview-ticket-${TICKET}`)).toBeInTheDocument());
 
     // The page defaults to tomorrow; set an explicit date so the assertion is about the arithmetic
@@ -158,19 +187,21 @@ describe('Scheduler Preview page (#251)', () => {
   });
 
   it('surfaces holds in force with a release action', async () => {
-    fetchMock.mockImplementation(async (url: string) =>
-      json(
-        url.includes('/schedules/preview')
-          ? {
-              ...PREVIEW,
-              holds: [
-                { ticketId: TICKET, heldUntil: '2026-06-24', zoneId: '1', plantName: 'Kotputli Works', deviceId: '900' },
-              ],
-            }
-          : { result: 'OK', ticketId: TICKET },
+    fetchMock.mockImplementation(
+      withLookups(async (url: string) =>
+        json(
+          url.includes('/schedules/preview')
+            ? {
+                ...PREVIEW,
+                holds: [
+                  { ticketId: TICKET, heldUntil: '2026-06-24', zoneId: '1', plantName: 'Kotputli Works', deviceId: '900' },
+                ],
+              }
+            : { result: 'OK', ticketId: TICKET },
+        ),
       ),
     );
-    render(<SchedulerPreviewPage />);
+    renderPage();
 
     const holds = await screen.findByTestId('preview-holds');
     expect(holds.textContent).toMatch(/Kotputli Works/);
@@ -183,18 +214,110 @@ describe('Scheduler Preview page (#251)', () => {
   });
 
   it('refuses a hold on an already-dispatched ticket by pointing at the override path', async () => {
-    fetchMock.mockImplementation(async (url: string) =>
-      json(
-        url.includes('/schedules/preview')
-          ? PREVIEW
-          : { result: 'NOT_HOLDABLE', status: 'OPEN', assignmentState: 'FORMALLY_ASSIGNED' },
+    fetchMock.mockImplementation(
+      withLookups(async (url: string) =>
+        json(
+          url.includes('/schedules/preview')
+            ? PREVIEW
+            : { result: 'NOT_HOLDABLE', status: 'OPEN', assignmentState: 'FORMALLY_ASSIGNED' },
+        ),
       ),
     );
-    render(<SchedulerPreviewPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByTestId(`preview-ticket-${TICKET}`)).toBeInTheDocument());
 
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }));
     const notice = await screen.findByTestId('preview-notice');
     expect(notice.textContent).toMatch(/already on a day plan/i);
+  });
+});
+
+/**
+ * #281 AC10 (audit §2.5 D2) — the screen whose entire purpose is letting a human read a plan was
+ * rendering `row.seId.slice(0, 8)`, `Plant {stop.plantId}` and `Zone {zoneId}`: three internal keys
+ * and not one name. It used `formatPlantDisplayName` zero times. This is the same defect #277 fixed
+ * on `PlannerPage`, still live one page away.
+ */
+describe('#281 AC10 — Scheduler Preview reads in names, not ids', () => {
+  beforeEach(() => {
+    fetchMock.mockImplementation(withLookups(async () => json(PREVIEW)));
+  });
+
+  it('shows the engineer by name in the rail and in the detail panel', async () => {
+    renderPage();
+    const rail = within(await screen.findByTestId('preview-se-list'));
+    expect(rail.getByText('Ramesh Kumar')).toBeInTheDocument();
+    expect(rail.queryByText(SE.slice(0, 8))).toBeNull();
+
+    const detail = within(screen.getByTestId('preview-detail'));
+    expect(detail.getByText('Ramesh Kumar')).toBeInTheDocument();
+  });
+
+  it('shows the plant and zone by name, and the operating mode in plain language', async () => {
+    renderPage();
+    const detail = within(await screen.findByTestId('preview-detail'));
+    // `formatPlantDisplayName` — the mapped name with the AutoPlant code preserved in parentheses.
+    expect(detail.getByText(/ARASMETA CEMENT PLANT \(ACP-9106\)/)).toBeInTheDocument();
+    expect(detail.queryByText('Plant 7')).toBeNull();
+    expect(detail.getByText(/Rajasthan North/)).toBeInTheDocument();
+    // Issue 136's vocabulary rule: the engine enum is never rendered raw.
+    expect(detail.queryByText(/DEFICIT/)).toBeNull();
+    expect(detail.getByText(/Catch-up/)).toBeInTheDocument();
+  });
+
+  it('falls back to the id without crashing when a name lookup returns nothing (#277 pattern)', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/schedules/preview')) return json(PREVIEW);
+      // Every lookup fails — the projection is the primary content and must still render.
+      return new Response('nope', { status: 500 });
+    });
+    renderPage();
+
+    const rail = within(await screen.findByTestId('preview-se-list'));
+    expect(rail.getByText(SE.slice(0, 8))).toBeInTheDocument();
+    expect(screen.getByTestId(`preview-ticket-${TICKET}`)).toBeInTheDocument();
+  });
+
+  it('opens a projected ticket by its real id rather than showing a truncated uuid alone', async () => {
+    renderPage();
+    const row = within(await screen.findByTestId(`preview-ticket-${TICKET}`));
+    const link = row.getByRole('link', { name: new RegExp(TICKET) });
+    expect(link).toHaveAttribute('href', `/tickets/${TICKET}`);
+  });
+});
+
+/**
+ * #281 AC8 / #280 R8 — contextual, per-record cross-view movement. Not a switcher and not a tab
+ * strip: where this view renders a specific SE, it offers that SE's record on the sibling view, and
+ * the link says which question it moves to.
+ */
+describe('#281 AC8 — Preview links to the committed plan for the same SE', () => {
+  beforeEach(() => {
+    fetchMock.mockImplementation(withLookups(async () => json(PREVIEW)));
+  });
+
+  it('offers the selected SE their committed day plan, labelled with the question it answers', async () => {
+    renderPage();
+    const detail = within(await screen.findByTestId('preview-detail'));
+    const link = detail.getByTestId('preview-to-schedule');
+    expect(link.querySelector('a')).toHaveAttribute('href', `/schedules/${SE}`);
+    expect(link.textContent).toMatch(/committed/i);
+  });
+
+  it('AC3: never presents the projection as a commitment', async () => {
+    renderPage();
+    const note = await screen.findByTestId('dispatch-timeline-note');
+    expect(note.textContent).toMatch(/would/i);
+    expect(note.textContent).toMatch(/not committed|nothing here is committed/i);
+  });
+
+  it('accepts a date and SE from the URL so a sibling view can link INTO a specific projection', async () => {
+    renderPage(`/schedules/preview?date=2026-06-22&se=${SE}`);
+    await waitFor(() => expect(screen.getByTestId('preview-date')).toHaveValue('2026-06-22'));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('date=2026-06-22'))).toBe(true),
+    );
+    const detail = within(screen.getByTestId('preview-detail'));
+    expect(detail.getByText('Ramesh Kumar')).toBeInTheDocument();
   });
 });

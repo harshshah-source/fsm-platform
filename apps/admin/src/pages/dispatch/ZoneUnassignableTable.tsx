@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { DispatchUnassignableRow } from '../../api/dispatch-runs';
 import { DataTable, EmptyState, FilterSelect, SearchInput, type Column } from '../../components/data';
 import { Badge } from '../../components/ui';
@@ -31,7 +32,23 @@ export function ZoneUnassignableTable({ rows }: { rows: DispatchUnassignableRow[
   }, [rows, term, reason, sortOrder]);
 
   const columns: Column<DispatchUnassignableRow>[] = [
-    { key: 'device', header: 'Device', render: (u) => u.deviceId ?? <span className="font-mono text-xs">{u.ticketId.slice(0, 8)}</span> },
+    {
+      // #281 AC7 — an unassignable ticket is the row an operator most needs to open, and
+      // `/tickets/:ticketId` is live. It was the one identifier on this drill-down left inert.
+      key: 'device',
+      header: 'Device',
+      render: (u) => (
+        <Link
+          to={`/tickets/${u.ticketId}`}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Open ticket ${u.deviceId ?? u.ticketId}`}
+          className="text-link hover:underline"
+        >
+          {u.deviceId ?? <span className="font-mono text-xs">{u.ticketId.slice(0, 8)}</span>}
+        </Link>
+      ),
+      exportValue: (u) => u.deviceId ?? u.ticketId,
+    },
     {
       key: 'plant',
       header: 'Plant',

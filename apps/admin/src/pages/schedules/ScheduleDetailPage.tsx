@@ -30,6 +30,12 @@ import { engineerOptionLabel } from '../../lib/capacity';
  * labels, the mandatory-reason gating, the override commands, and the conflict-confirm flow are all
  * preserved. The per-ticket Recommender *reasoning* stays gated behind "Why suggested?"; the ungated
  * ticket-state badges (SLA bucket / Company Tier / PARTIAL_RECOVERY) are a separate payload leg (#79).
+ *
+ * **#281 AC8 (#280 R8) — present → past, per record.** Each stop IS a batch, and `/batches/:batchId`
+ * is the dispatch record that produced it: the decision trace, the candidates considered, the run's
+ * configuration. That was reachable only by walking down from the runs ledger, which meant an operator
+ * asking "why is this stop on their day?" had to find the run first. The reverse direction — batch
+ * back to the day plan — is #281 AC6, on `DispatchBatchDetailPage`.
  */
 const STATUS_TONE: Record<string, BadgeTone> = {
   AUTO_ASSIGNED: 'neutral',
@@ -201,6 +207,15 @@ function Stop({
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-ink-muted">{stop.deviceCount} devices</span>
+          {/* A link, not a control: the batch record is read-only history (#280 R3 / #281 AC5). It sits
+              before the override buttons so "see why this was assigned" reads ahead of "change it". */}
+          <Link
+            to={`/batches/${stop.batchId}`}
+            data-testid={`stop-to-batch-${stop.batchId}`}
+            className="whitespace-nowrap text-xs text-link hover:underline"
+          >
+            Why dispatch chose this →
+          </Link>
           <Button type="button" size="sm" variant="secondary" onClick={() => setOpen((v) => (v === 'swap' ? null : 'swap'))}>
             Swap SE
           </Button>

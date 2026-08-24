@@ -12,6 +12,7 @@ import { DashboardHome } from './pages/dashboard/DashboardHome';
 import { HelpCenterPage } from './pages/help/HelpCenterPage';
 import { KitchenSink } from './pages/KitchenSink';
 import { LoginPage } from './pages/LoginPage';
+import { NotFoundPage } from './pages/NotFoundPage';
 import { CrossZonePage } from './pages/cross-zone/CrossZonePage';
 import { DispatchRunsPage } from './pages/dispatch/DispatchRunsPage';
 import { DispatchRunDetailPage } from './pages/dispatch/DispatchRunDetailPage';
@@ -480,6 +481,11 @@ export function AppRoutes() {
               </RoleRoute>
             }
           />
+          {/* #281 AC11 (audit §2.5 D3) — the catch-all, declared LAST and INSIDE this layout route.
+              Without it a mistyped or retired URL matched nothing, the pathless shell never rendered,
+              and the operator got a blank document with no nav and no way back. Inside the shell it is
+              a page they can navigate out of; outside it, it would only be a prettier dead end. */}
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
     </>

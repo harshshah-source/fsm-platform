@@ -1,21 +1,29 @@
 # 281 — Make the dispatch timeline navigable as one concept (executes #280 / audit F6)
 
-Status: **`ready-for-agent`** — #280 Q1–Q3 are ruled (R8–R10, approved 2026-08-24). Q1's answer (R8)
-confirms no approved design is required: the ruled cross-view control is contextual per-record links,
-which are additions to existing page furniture, not a new layout. **Not yet started** — this update is
-bookkeeping only; see the note at the end of this section.
+Status: **DONE 2026-08-24** — implemented against R8–R10. All 14 acceptance criteria met; no
+follow-up filed. Frontend and navigation only, no new endpoint, no role-gate change.
 Type: HITL · Admin (frontend-only)
 Decision: [#280](./280-decision-dispatch-timeline-ia.md) — R1–R10
 Source: `audit/navigation-ia-audit-2026-08-19.md` **F6 (HIGH)** and §2.5 "Two concrete defects";
 `audit/frontend-ux-audit-2026-08-19.md` finding **10**.
 
-**Implementation has not begun.** The product-direction blockers (#280 Q1–Q3) are resolved, and the
-acceptance criteria below have been reconciled against R8–R10 (wording-only changes, listed inline).
-Starting the build is a separate, still-pending operator go-ahead — this record does not itself
-authorize it. #280 Q4 (whether to commit the two source audits) remains open and is unrelated to this
-issue's readiness.
+**Implemented 2026-08-24.** What landed, and where:
 
-## Current behaviour (verified 2026-08-24 against the working tree)
+| AC | Where |
+|---|---|
+| AC1/AC2/AC12 | `components/shell/nav.ts` — a `Dispatch` `NavGroup` (the Settings console's grouped-rail pattern) holding Scheduler Preview / Schedules / Intra-day Queue / Dispatch Runs in that order; `NavLink` gains `hint?` (the question each answers, rendered as visible copy in `Sidebar.tsx`) and `indent?` (R9's one presentational treatment, on Intra-day only). Role gates untouched — the links moved between groups, nothing else. |
+| AC2/AC3/AC8 | `components/domain/DispatchTimelineNote.tsx`, on all four surfaces. Prose, not a control: each page states its own question in full, never renders itself as one of the choices, and names the siblings by the *question* they move to. Sits in the same slot reference `12-batch-schedule-review.png` already uses for its advisory banner. |
+| AC6/AC7 | `DispatchBatchDetailPage.tsx` — a visible identity block (the page's `PageHeader` is `sr-only`, so the batch named its SE and plant nowhere a sighted operator could read them): `seName` → `/schedules/:seId` primary, `plantName` → `/reports/device?plantId=`, every row's device cell → `/tickets/:ticketId`. `ZoneUnassignableTable.tsx` gets the same ticket link — it was the one remaining inert identifier on the chain. |
+| AC8 | Per-record links both directions: `SchedulesPage` row → `/schedules/preview?date=<tomorrow>&se=<seId>`; `ScheduleDetailPage` stop → `/batches/:batchId`; `IntradayQueuePage` SE → `/schedules/:seId`. `SchedulerPreviewPage` accepts `?date=`/`?se=` so a projection is an address, and offers the selected SE their committed plan. |
+| AC9 (D1) | `breadcrumb.ts` — a literal nav route now beats any param pattern that would also match it, guarded generally rather than as a `preview` special case, mirroring `AppRoutes.tsx`'s own route-ordering guard. |
+| AC10 (D2) | `SchedulerPreviewPage.tsx` — engineer/plant/zone names from three reads that already exist and are already gated to the same roles (`/schedules/engineers`, `/planner/plants`, `/dashboard/operating-mode`), all best-effort with `name ?? id` fallback (#277's pattern); `formatPlantDisplayName` now used; the `mode` enum translated through `operatingModeCopy`'s new `operatingModeLabel` rather than rendered raw. |
+| AC11 (D3) | `pages/NotFoundPage.tsx` + `path="*"` declared last **inside** the shell layout route, so an operator keeps the navigation they need to recover. |
+
+Rejected on purpose, and worth not re-litigating: a shared date switcher and a tab strip (#280 R8),
+and any change to `/assign` (#280 R7 / AC13). **#280 Q4** (whether to commit the two source audits)
+remains open and is unrelated.
+
+## Current behaviour before this issue (verified 2026-08-24 against the working tree)
 
 - `nav.ts:91-95` renders **Schedules**, **Scheduler Preview**, **Dispatch Runs** as three adjacent
   flat rows inside one eighteen-link OPERATIONS group; **Intra-day Queue** follows. Nothing in the
@@ -64,40 +72,40 @@ run/zone pages above it.
 
 Navigation and grouping:
 
-- [ ] AC1 — The sidebar expresses Preview / Schedules / Dispatch Runs and Intra-day Queue as one named
+- [x] AC1 — The sidebar expresses Preview / Schedules / Dispatch Runs and Intra-day Queue as one named
       **Dispatch** cluster rather than adjacent flat rows, in the same pattern the Settings console
       already uses for its named groups. Per **#280 R9**, Intra-day Queue is included in the cluster
       but presented as subordinate to Schedules — not a flat fourth peer alongside Preview/Schedules/
       Dispatch Runs.
-- [ ] AC2 — Preview, Schedules and Dispatch Runs each carry, on the surface itself, which question
+- [x] AC2 — Preview, Schedules and Dispatch Runs each carry, on the surface itself, which question
       they answer — future, present, or past. Intra-day Queue carries its own R9 framing — "changes to
       today's plan" — rather than a fourth co-equal tense label. A new ZM can rank the four dispatch
       nouns, and understand Intra-day's subordinate relationship to Schedules, without opening them.
 
 Distinction preserved (#280 R2/R3 — the hard constraint):
 
-- [ ] AC3 — Previewing a future run, viewing the current/latest committed result, and inspecting a
+- [x] AC3 — Previewing a future run, viewing the current/latest committed result, and inspecting a
       historical run remain **three distinct answers**. No screen presents a projection as a
       commitment or a committed plan as editable history. This applies to the R8 cross-view links too:
       a link may move the operator between views, but must never make one view look like another.
-- [ ] AC4 — Scheduler Preview still renders its as-of-recompute caveat with the real watermark, and
+- [x] AC4 — Scheduler Preview still renders its as-of-recompute caveat with the real watermark, and
       still makes no claim that its ordering is what dispatch will produce (#251 AC6 unchanged).
-- [ ] AC5 — Dispatch Runs remains read-only; nothing added here makes a historical run appear
+- [x] AC5 — Dispatch Runs remains read-only; nothing added here makes a historical run appear
       mutable.
 
 The `Run → Zone → Batch` chain (#280 R4):
 
-- [ ] AC6 — From a batch, the operator reaches the SE day plan that batch produced (`seName` →
+- [x] AC6 — From a batch, the operator reaches the SE day plan that batch produced (`seName` →
       `/schedules/:engineerId`) in **one action** — a direct link, not a re-navigate-and-search — per
       **#280 R10**. This is the primary link on the page.
-- [ ] AC7 — Per **#280 R10**, every identifier the chain displays that has a live destination is
+- [x] AC7 — Per **#280 R10**, every identifier the chain displays that has a live destination is
       linked, not left inert: `seName` → `/schedules/:engineerId` (AC6, primary), each `ticketId` →
       `/tickets/:ticketId` (per row), and `plantName` → `/reports/device?plantId=` (R10's explicitly
       approved addition beyond Q3's original three options).
 
 Cross-view movement (#280 R5):
 
-- [ ] AC8 — From any one of the four views the operator can reach the others; each path states which
+- [x] AC8 — From any one of the four views the operator can reach the others; each path states which
       question it is moving to. Per **#280 R8**, this is **contextual, per-record links** — where a
       view renders a specific SE, day, or run, it links to the corresponding record on its sibling
       view(s). Explicitly not a shared date-anchored switcher (Schedules and Dispatch Runs are not
@@ -106,25 +114,25 @@ Cross-view movement (#280 R5):
 
 Supporting defects:
 
-- [ ] AC9 — `/schedules/preview` renders its own breadcrumb, not `Schedule Detail`. A regression test
+- [x] AC9 — `/schedules/preview` renders its own breadcrumb, not `Schedule Detail`. A regression test
       in `test/breadcrumb.test.tsx` pins it, and the resolver is guarded against the literal-vs-param
       collision the way `AppRoutes.tsx` already guards its route ordering. (D1)
-- [ ] AC10 — Scheduler Preview shows engineer and plant **names**, with the id as a fallback that
+- [x] AC10 — Scheduler Preview shows engineer and plant **names**, with the id as a fallback that
       does not crash when the name is null — the `PlannerPage` pattern from #277. No bare or
       truncated UUID is presented as a user-facing identifier. (D2)
-- [ ] AC11 — A mistyped or retired admin URL renders the shell with a "not found" message and a way
+- [x] AC11 — A mistyped or retired admin URL renders the shell with a "not found" message and a way
       back, rather than a blank page. (D3)
 
 Non-regression:
 
-- [ ] AC12 — No role's reach changes. Every route keeps its current role gate; the Dispatch grouping
+- [x] AC12 — No role's reach changes. Every route keeps its current role gate; the Dispatch grouping
       is presentational (#280 R6).
-- [ ] AC13 — `/assign` and the P9 Assign Work Console are untouched (#280 R7). Manual assignment is
+- [x] AC13 — `/assign` and the P9 Assign Work Console are untouched (#280 R7). Manual assignment is
       not folded into the dispatch timeline.
-- [ ] AC14 — No dispatch, scheduling, holds or recommender behaviour changes. Frontend and
+- [x] AC14 — No dispatch, scheduling, holds or recommender behaviour changes. Frontend and
       navigation only; no new endpoint.
 
-## Tests
+## Tests (all landed and green)
 
 - `test/breadcrumb.test.tsx` — `/schedules/preview` resolves to its own crumb (AC9); a case per
   literal-under-param route so the next one cannot regress silently.
@@ -161,7 +169,7 @@ ruled.
 
 ## Blocked by
 
-Nothing. #280 Q1–Q3 are ruled (R8–R10, approved 2026-08-24): Q1 — contextual per-record links; Q2 —
+Nothing — and nothing blocks anything else; the issue is done. #280 Q1–Q3 are ruled (R8–R10, approved 2026-08-24): Q1 — contextual per-record links; Q2 —
 Intra-day joins the Dispatch cluster, subordinate to Schedules; Q3 — the chain terminates at both the
 SE day plan and the ticket drawer, plus a linked `plantName`. Every destination this issue links to
 already exists and is already role-gated (AC12). **#280 Q4** (whether to commit the two source audits)

@@ -140,13 +140,27 @@ export function Sidebar({ role }: { role: string }) {
                         className={cn(
                           'flex items-center gap-2.5 rounded-lg border-l-2 px-2 py-2 text-[13px] font-medium transition-[background-color,border-color,color,box-shadow] focus-ring',
                           collapsed && 'lg:justify-center lg:gap-0 lg:px-0',
+                          // #280 R9 — the indent is how Intra-day Queue reads as subordinate to the row
+                          // above it rather than as a fourth peer. Dropped on the collapsed rail, where
+                          // there is no label to indent from and it would only misalign the icons.
+                          item.indent && !collapsed && 'ml-3',
                           active
                             ? 'border-brand-600 bg-white/10 text-white shadow-sm ring-1 ring-white/10'
                             : 'border-transparent text-chrome-text hover:bg-white/10 hover:text-white',
                         )}
                       >
                         <Icon className="h-4 w-4 shrink-0" />
-                        <span className={cn('truncate', collapsed && 'lg:sr-only')}>{item.label}</span>
+                        {/* #281 AC2 — label over hint. The hint is the operator question this
+                            destination answers; it is what lets a new ZM rank the dispatch nouns
+                            without opening them, so it is visible copy and not a hover tooltip. */}
+                        <span className={cn('min-w-0 flex-1', collapsed && 'lg:sr-only')}>
+                          <span className="block truncate">{item.label}</span>
+                          {item.hint && (
+                            <span className="block truncate text-[10.5px] font-normal leading-tight text-chrome-muted">
+                              {item.hint}
+                            </span>
+                          )}
+                        </span>
                       </Link>
                     </li>
                   );

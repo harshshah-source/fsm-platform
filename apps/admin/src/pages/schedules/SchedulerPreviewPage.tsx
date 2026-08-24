@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { apiOperatingMode } from '../../api/operatingMode';
+import { apiListPlannerPlants } from '../../api/planner';
+import { apiZoneEngineers } from '../../api/schedules';
 import {
   getSchedulerPreview,
   placeHold,
@@ -13,6 +17,9 @@ import { SLABadge, TierBadge } from '../../components/domain/badges';
 import { Badge } from '../../components/ui';
 import { Button } from '../../components/ui/Button';
 import { IconCalendar } from '../../components/ui/icons';
+import { formatPlantDisplayName } from '../../lib/plantNames';
+import { operatingModeLabel } from '../../utils/operatingModeCopy';
+import { DispatchTimelineNote } from '../../components/domain/DispatchTimelineNote';
 
 /**
  * Scheduler Preview (#251) — what the next dispatch run *would* do, and the one pre-run lever an
@@ -34,6 +41,20 @@ import { IconCalendar } from '../../components/ui/icons';
  * recompute, so a D+1 projection ranks tomorrow's plan on today's severities. `bucketsAsOf` is
  * rendered verbatim because a preview that hid it would look authoritative about an ordering it
  * cannot know.
+ *
+ * **#281 AC10 (audit §2.5 D2) — names, not keys.** This page shipped rendering `seId.slice(0, 8)`,
+ * `Plant {plantId}` and `Zone {zoneId}`, and used `formatPlantDisplayName` zero times: three internal
+ * keys on the one screen whose entire purpose is letting a human read a plan. The projection payload
+ * carries ids only, so the names come from three reads that already exist and are already gated to
+ * these same manager roles — `/schedules/engineers`, `/planner/plants` and `/dashboard/operating-mode`
+ * (no new endpoint, #281 AC14). All three are **best-effort**: the projection is the primary content,
+ * so a failed lookup falls back to the id (`name ?? id`, the #277 `PlannerPage` pattern) rather than
+ * failing the page.
+ *
+ * **#281 AC8 (#280 R8) — the cross-view links are per-record.** `?date=` / `?se=` make a projection
+ * addressable so a sibling view can link INTO one, and the selected SE offers their committed day
+ * plan. Deliberately not a shared switcher and not a tab strip: this page is a projection and the one
+ * thing it must never do is read as a commitment (#280 R2).
  */
 
 /** Tomorrow in IST, `YYYY-MM-DD` — the default a scheduler actually wants to look at. */
@@ -53,11 +74,27 @@ function formatWatermark(iso: string | null): string {
 }
 
 export function SchedulerPreviewPage() {
-  const [date, setDate] = useState(defaultPreviewDate());
+  /**
+   * The previewed date and the selected SE live in the URL so a projection is an ADDRESS — that is
+   * what makes a per-record link from a sibling view possible at all (#280 R8). Absent params keep
+   * the old behaviour exactly: tomorrow, and the first projected SE.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlDate = searchParams.get('date');
+  const urlSe = searchParams.get('se');
+  const [date, setDate] = useState(urlDate ?? defaultPreviewDate());
   const [preview, setPreview] = useState<SchedulerPreviewResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSe, setSelectedSe] = useState<string | null>(null);
+  const [selectedSe, setSelectedSe] = useState<string | null>(urlSe);
+  /**
+   * #281 AC10 — id → name lookups. Held as plain arrays and resolved through the helpers below so a
+   * backend that answers with something other than a list (version skew) degrades to "no names"
+   * rather than throwing inside a render.
+   */
+  const [engineerNames, setEngineerNames] = useState<Map<string, string>>(new Map());
+  const [plantNames, setPlantNames] = useState<Map<string, string>>(new Map());
+  const [zoneNames, setZoneNames] = useState<Map<string, string>>(new Map());
   const [notice, setNotice] = useState<string | null>(null);
   /** A hold refused because the ticket carries an open vehicle-return report — awaiting confirm. */
   const [vuConflict, setVuConflict] = useState<{ ticketId: string; expectedFrom: string } | null>(null);
@@ -78,6 +115,68 @@ export function SchedulerPreviewPage() {
   );
 
   useEffect(() => load(date), [load, date]);
+
+  // Keep the URL in step with the two pieces of state a sibling view can address. `replace` — moving
+  // around inside one projection is not a navigation the Back button should have to unwind step by
+  // step (the same convention the Settings console uses for `?tab=`).
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    next.set('date', date);
+    if (selectedSe) next.set('se', selectedSe);
+    else next.delete('se');
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+  }, [date, selectedSe, searchParams, setSearchParams]);
+
+  /**
+   * The three name lookups. Fired once, not per date: none of them is date-scoped, and each is
+   * independently best-effort — one failing must not cost the page the other two.
+   */
+  useEffect(() => {
+    let alive = true;
+    const asMap = <T,>(rows: T[], key: (r: T) => string, value: (r: T) => string | null) => {
+      const map = new Map<string, string>();
+      // Runtime guard, not a type guard: a backend answering with something other than a list
+      // (version skew, an error body served as 200) must cost the names, never the page.
+      if (!Array.isArray(rows)) return map;
+      for (const row of rows) {
+        const v = value(row);
+        if (v) map.set(key(row), v);
+      }
+      return map;
+    };
+
+    apiZoneEngineers()
+      .then((rows) => alive && setEngineerNames(asMap(rows, (e) => e.engineerId, (e) => e.name ?? null)))
+      .catch(() => undefined);
+    apiListPlannerPlants()
+      .then((rows) => alive && setPlantNames(asMap(rows, (p) => p.plantId, (p) => p.name ?? null)))
+      .catch(() => undefined);
+    apiOperatingMode()
+      .then((rows) => alive && setZoneNames(asMap(rows, (z) => z.zoneId, (z) => z.zoneName ?? null)))
+      .catch(() => undefined);
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // `name ?? id` — the #277 PlannerPage rule. A null name is a normal reading (an SE with no user
+  // record, an unmapped plant code), never a crash and never a blank cell.
+  const seLabel = useCallback(
+    (seId: string) => engineerNames.get(seId) ?? seId.slice(0, 8),
+    [engineerNames],
+  );
+  const plantLabel = useCallback(
+    (plantId: string) => {
+      const name = plantNames.get(plantId);
+      return name ? formatPlantDisplayName(name) || name : `Plant ${plantId}`;
+    },
+    [plantNames],
+  );
+  const zoneLabel = useCallback(
+    (zoneId: string) => zoneNames.get(zoneId) ?? `Zone ${zoneId}`,
+    [zoneNames],
+  );
 
   const zones = preview?.zones ?? [];
   const decisionsByTicket = useMemo(() => {
@@ -177,6 +276,8 @@ export function SchedulerPreviewPage() {
         subtitle="The plan the next dispatch run would produce for the selected date. Reviewing is optional — with no action here the run proceeds exactly as it would have. The only pre-run change available is holding a ticket back."
       />
 
+      <DispatchTimelineNote position="future" />
+
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <label className="text-sm text-ink-muted" htmlFor="preview-date">
           Plan date
@@ -260,7 +361,7 @@ export function SchedulerPreviewPage() {
                       selectedSe === row.seId ? 'bg-surface-alt' : ''
                     }`}
                   >
-                    <div className="font-mono text-[11px] text-ink-muted">{row.seId.slice(0, 8)}</div>
+                    <div className="text-[13px] font-medium text-ink">{seLabel(row.seId)}</div>
                     <div className="mt-1 text-xs text-ink-muted">
                       {row.stops} plant{row.stops === 1 ? '' : 's'} · {row.tickets} ticket
                       {row.tickets === 1 ? '' : 's'}
@@ -276,10 +377,25 @@ export function SchedulerPreviewPage() {
             {selected ? (
               <>
                 <div className="mb-3 flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-sm text-ink">{selected.entry.seId.slice(0, 8)}</span>
+                  <span className="text-sm font-semibold text-ink">{seLabel(selected.entry.seId)}</span>
                   <Badge tone="info">Projected</Badge>
-                  <span className="text-xs text-ink-muted">Zone {selected.zone.zoneId}</span>
-                  <span className="text-xs text-ink-muted">Mode {selected.zone.mode}</span>
+                  <span className="text-xs text-ink-muted">{zoneLabel(selected.zone.zoneId)}</span>
+                  {/* Issue 136's vocabulary rule — the mode enum is translated in one module and
+                      never rendered raw. An unknown value degrades to nothing rather than leaking. */}
+                  {operatingModeLabel(selected.zone.mode) && (
+                    <span className="text-xs text-ink-muted">{operatingModeLabel(selected.zone.mode)}</span>
+                  )}
+                  {/*
+                    #281 AC8 (#280 R8) — the per-record cross-view link: THIS engineer, on the sibling
+                    view that answers the present-tense question. It states the question it moves to,
+                    because a link between a projection and a commitment that did not would re-create
+                    the confusion #280 R2 is about, one screen smaller.
+                  */}
+                  <span data-testid="preview-to-schedule" className="ml-auto text-xs">
+                    <Link to={`/schedules/${selected.entry.seId}`} className="text-link hover:underline">
+                      See what is actually committed for them today →
+                    </Link>
+                  </span>
                 </div>
                 {selected.entry.plants.map((stop, i) => (
                   <div key={stop.plantId} className="mb-3 rounded-md border border-line">
@@ -287,7 +403,7 @@ export function SchedulerPreviewPage() {
                       <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-surface-alt text-xs">
                         {i + 1}
                       </span>
-                      Plant {stop.plantId}
+                      {plantLabel(stop.plantId)}
                       <span className="ml-2 text-xs text-ink-muted">
                         {stop.ticketIds.length} ticket{stop.ticketIds.length === 1 ? '' : 's'}
                       </span>
@@ -301,7 +417,17 @@ export function SchedulerPreviewPage() {
                             data-testid={`preview-ticket-${ticketId}`}
                             className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 last:border-b-0"
                           >
-                            <span className="font-mono text-xs text-link">{ticketId.slice(0, 8)}</span>
+                            {/* #281 AC10 — a truncated uuid is not an identifier an operator can act
+                                on. The full id rides the accessible name, and the row opens the
+                                ticket rather than asking them to copy eight characters somewhere. */}
+                            <Link
+                              to={`/tickets/${ticketId}`}
+                              aria-label={`Open ticket ${ticketId}`}
+                              title={ticketId}
+                              className="font-mono text-xs text-link hover:underline"
+                            >
+                              {ticketId.slice(0, 8)}
+                            </Link>
                             {d?.deviceBucket && <SLABadge bucket={d.deviceBucket} />}
                             {d?.companyTier && <TierBadge tier={d.companyTier} />}
                             {d?.plannerBias && <Badge tone="info">Planner</Badge>}
@@ -333,8 +459,15 @@ export function SchedulerPreviewPage() {
           <ul>
             {preview.holds.map((h: HoldInForce) => (
               <li key={h.ticketId} className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 last:border-b-0">
-                <span className="font-mono text-xs text-link">{h.ticketId.slice(0, 8)}</span>
-                <span className="text-xs text-ink-muted">{h.plantName}</span>
+                <Link
+                  to={`/tickets/${h.ticketId}`}
+                  aria-label={`Open ticket ${h.ticketId}`}
+                  title={h.ticketId}
+                  className="font-mono text-xs text-link hover:underline"
+                >
+                  {h.ticketId.slice(0, 8)}
+                </Link>
+                <span className="text-xs text-ink-muted">{formatPlantDisplayName(h.plantName) || h.plantName}</span>
                 <span className="text-xs text-ink-muted">returns {h.heldUntil}</span>
                 <span className="ml-auto">
                   <Button variant="secondary" onClick={() => doRelease(h.ticketId)}>

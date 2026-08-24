@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { apiZoneEngineers, type ZoneEngineer } from '../../api/schedules';
 import {
   apiIntradayUpdates,
   type IntradayUpdateRow,
@@ -11,6 +12,7 @@ import {
   type IntradayInsertionStatus,
 } from '../../api/intradayInsertions';
 import { DataTable, MetricCard, PageHeader, type Column } from '../../components/data';
+import { DispatchTimelineNote } from '../../components/domain';
 import { Badge, Button } from '../../components/ui';
 import type { BadgeTone } from '../../components/ui/Badge';
 import { IntradayManualAssignModal } from './IntradayManualAssignModal';
@@ -35,6 +37,12 @@ import { IntradayManualAssignModal } from './IntradayManualAssignModal';
  * `Intra-day Queue` aria-label, the ticket-drawer navigation. `iq-row-*` insertion rows are keyed
  * `iq-row-ins-<insertionId>` — a separate id space from the ZM-update rows' `auditId`, which the two
  * sequences could otherwise collide with.
+ *
+ * **#281 (#280 R9) — this is not a fourth tense.** It is the record of changes to today's committed
+ * plans, subordinate to Schedules, and the copy says so rather than letting the sidebar imply a peer
+ * relationship. The SE column links to the day plan the change was made TO (#280 R8's per-record
+ * mechanism): a same-day edit is only legible against the plan it edited. Names come from
+ * `/schedules/engineers` best-effort — neither event stream carries one, and a uuid is not a name.
  */
 const EVENT_LABEL: Record<IntradayUpdateType, string> = {
   ADD: 'ZM same-day update — Add',
@@ -99,6 +107,7 @@ export function IntradayQueuePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [assignTarget, setAssignTarget] = useState<IntradayInsertionRow | null>(null);
+  const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
 
   const load = () => {
     Promise.all([apiIntradayUpdates(), apiIntradayInsertions()])
@@ -111,6 +120,21 @@ export function IntradayQueuePage() {
   };
 
   useEffect(load, []);
+
+  // Best-effort: the queue is the primary content and reads correctly with ids alone, so a failure
+  // here degrades the SE column to its short id rather than failing the page (the #277 pattern).
+  useEffect(() => {
+    let alive = true;
+    apiZoneEngineers()
+      .then((rows) => alive && setEngineers(Array.isArray(rows) ? rows : []))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const seLabel = (seId: string | null): string =>
+    seId ? (engineers.find((e) => e.engineerId === seId)?.name ?? seId.slice(0, 8)) : '—';
 
   const rows: UnifiedRow[] = [
     ...updates.map((r): UnifiedRow => ({ kind: 'update', ...r })),
@@ -152,13 +176,28 @@ export function IntradayQueuePage() {
         ),
     },
     {
+      /*
+       * #281 AC8 — a same-day change is only legible against the plan it changed, and
+       * `/schedules/:seId` renders exactly that. An escalation names no SE (no capacity-eligible one
+       * existed), so there is nothing to link and the cell stays inert rather than linking nowhere.
+       */
       key: 'se',
       header: 'SE',
-      render: (row) => (
-        <span className="font-mono text-xs text-ink">
-          {row.kind === 'update' ? shortId(row.seId) : shortId(row.offeredSeId)}
-        </span>
-      ),
+      render: (row) => {
+        const seId = row.kind === 'update' ? row.seId : row.offeredSeId;
+        if (!seId) return <span className="text-xs text-ink-muted">—</span>;
+        return (
+          <Link
+            to={`/schedules/${seId}`}
+            onClick={(e) => e.stopPropagation()}
+            title={`Today's day plan for ${seLabel(seId)}`}
+            className="text-xs text-link hover:underline"
+          >
+            {seLabel(seId)}
+          </Link>
+        );
+      },
+      exportValue: (row) => seLabel(row.kind === 'update' ? row.seId : row.offeredSeId),
     },
     {
       key: 'acceptance',
@@ -209,6 +248,8 @@ export function IntradayQueuePage() {
         title="Intra-day Queue"
         subtitle="Zonal-Manager manual same-day changes to SE Day Plans — add, remove, or reorder — alongside system-triggered CRITICAL assignments and escalations. Manual updates apply immediately, no SE Acceptance required; a CRITICAL ticket is assigned directly or escalated to the Zonal Manager."
       />
+
+      <DispatchTimelineNote position="intraday" />
 
       {error && (
         <p role="alert" className="mb-4 text-sm text-critical">

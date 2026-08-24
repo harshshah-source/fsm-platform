@@ -1109,6 +1109,37 @@ prose wins, and the endpoint reports the drop; and an unexpected candidates payl
 console down**, pool and Commit included, until the read was made defensive — the column is additive
 and its rollback is "hide the column", which a crash defeats.
 
+**#281 the dispatch timeline is navigable as one concept — P10, decision #280 (done, 2026-08-24):**
+the sidebar has a named **Dispatch** group — Scheduler Preview → Schedules → *(indented)* Intra-day
+Queue → Dispatch Runs, each with a visible one-line hint naming the question it answers — instead of
+four rows adjacent inside the eighteen-link OPERATIONS group "only because they were added in that
+order". `NavLink` gained two optional presentational fields (`hint`, `indent`); no route, role gate or
+existing nav test changed, which is what makes the no-reach-change claim checkable rather than
+asserted. Cross-view movement is **contextual per-record links** (#280 R8) — Schedules row →
+`/schedules/preview?date=<tomorrow>&se=<seId>`, day-plan stop → `/batches/:batchId`, Intra-day SE →
+`/schedules/:seId`, Preview's selected SE → their committed plan — plus one shared
+`DispatchTimelineNote` on all four surfaces that is **prose, not a control**: #280 R8 rejected a tab
+strip because a segmented control asserts the views are interchangeable, so each page states its own
+question in full, never renders itself as a choice, and names its siblings by the question they move
+to. That note also exists because **`PageHeader` renders screen-reader-only** — the subtitle each of
+these pages already carried reached nobody looking at the screen, which is the same reason
+`DispatchBatchDetailPage` gained a visible identity block: the batch's SE and plant were rendered
+visibly nowhere but as a value repeated on every table row. The `Run → Zone → Batch` chain now
+terminates where #280 R10 ruled — `seName` → `/schedules/:seId` (primary), `plantName` →
+`/reports/device?plantId=`, every row's device cell → `/tickets/:ticketId` (also added to
+`ZoneUnassignableTable`, the last inert identifier on the drill-down). Three audit defects closed with
+it: the breadcrumb resolver now lets a **literal nav route beat any param pattern** that would also
+match it (`/schedules/preview` announced itself as *Schedules › Schedule Detail*), fixed as a class
+rather than as a `preview` special case and mirroring the guard `AppRoutes.tsx` already carries in its
+route ordering; Scheduler Preview reads in **names** (engineer/plant/zone, from `/schedules/engineers`,
+`/planner/plants` and `/dashboard/operating-mode` — three reads that already exist and are already
+clamped to the same manager roles, all best-effort with `name ?? id`), and its `mode` enum now goes
+through a new `operatingModeLabel` in `utils/operatingModeCopy.ts` instead of being rendered raw
+against Issue 136's own vocabulary rule; and `AppRoutes` finally has a **`path="*"` catch-all**,
+declared last and *inside* the shell layout route, so a mistyped URL renders a message with the
+navigation still around it rather than a blank document. Frontend only: no new endpoint, no backend
+change, no dispatch/scheduling/holds/recommender behaviour change, `/assign` untouched.
+
 **#269 capacity is visible on the admin (done, 2026-08-20):** `daily_capacity` shipped with Issue 13b
 and was rendered in **zero** places — it had no numerator, so an overload today was discoverable only
 by counting an SE's batch rows by hand. The backend now supplies `committed` from the one

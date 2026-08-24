@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiDispatchRuns, type DispatchRunListRow } from '../../api/dispatch-runs';
 import { DataTable, EmptyState, PageHeader, type Column } from '../../components/data';
+import { DispatchTimelineNote } from '../../components/domain';
 import { Badge } from '../../components/ui';
 import { IconClock } from '../../components/ui/icons';
 import { STATUS_TONE, formatDateTime, formatDuration, triggerActor } from './format';
@@ -10,6 +11,11 @@ import { STATUS_TONE, formatDateTime, formatDuration, triggerActor } from './for
  * Batch-Assignment transparency — runs list (Issue 123). Every daily/manual dispatch run as a row;
  * click through to the run detail (config-in-effect + per-zone cards). A ZONAL_MANAGER's totals are
  * clamped to their own zone server-side. Read-only.
+ *
+ * **#281 — the past tense of the dispatch timeline** (#280 R1/R3). The note below states that in
+ * visible copy, including the read-only part: #281 AC5 forbids anything added by that issue making a
+ * historical run look mutable, and the surest way to break that is to describe the ledger as though
+ * it were a plan.
  */
 export function DispatchRunsPage() {
   const navigate = useNavigate();
@@ -63,6 +69,8 @@ export function DispatchRunsPage() {
         title="Dispatch Runs"
         subtitle="Every batch-assignment run — the daily auto-dispatch and any manual triggers — with the configuration that applied and why each ticket landed where it did. Read-only; a Zonal Manager sees their own zone's slice."
       />
+
+      <DispatchTimelineNote position="past" />
 
       <DataTable
         columns={columns}
