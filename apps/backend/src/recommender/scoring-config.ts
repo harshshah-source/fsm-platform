@@ -1,4 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service';
+import type { LatLng } from './distance';
 import type { ScoringWeights } from './scoring';
 
 /** The narrow slice of the client these reads touch — a transaction client satisfies it too. */
@@ -48,4 +49,20 @@ export async function readEngineerCapacity(
 ): Promise<Map<string, { dailyCapacity: number; isActive: boolean }>> {
   const rows = await prisma.engineerMaster.findMany({ select: { engineerId: true, dailyCapacity: true, isActive: true } });
   return new Map(rows.map((r) => [r.engineerId, { dailyCapacity: r.dailyCapacity, isActive: r.isActive }]));
+}
+
+/**
+ * #267 — every engineer's admin-entered home base, keyed by `engineer_id`. An SE with either
+ * coordinate NULL is simply absent from the map (never a fabricated `(0,0)`) — the recommender reads
+ * an absent entry the same way it reads a plant with no geometry: NOT_AVAILABLE, 0 contribution,
+ * never a drop. Not zone-scoped, matching {@link readEngineerCapacity}'s own scope: a floating/
+ * multi-plant SE's home base is a global fact, not a per-zone one.
+ */
+export async function readEngineerHomeBases(prisma: ScoringConfigClient): Promise<Map<string, LatLng>> {
+  const rows = await prisma.engineerMaster.findMany({ select: { engineerId: true, homeLat: true, homeLng: true } });
+  const bases = new Map<string, LatLng>();
+  for (const r of rows) {
+    if (r.homeLat !== null && r.homeLng !== null) bases.set(r.engineerId, { lat: r.homeLat, lng: r.homeLng });
+  }
+  return bases;
 }

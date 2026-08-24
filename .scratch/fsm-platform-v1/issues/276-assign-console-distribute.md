@@ -1,6 +1,6 @@
 # 276 — Assign Work Console S4: Distribute — several plants across several engineers in one pass
 
-Status: ready-for-agent
+Status: done (2026-08-24) — see `docs/progress/276-assign-console-distribute.md`
 Type: AFK · Backend + Admin
 Decision: #272 **R2** (projected, not persisted), **R6** (tier precedence displayed, crossable)
 
@@ -67,18 +67,18 @@ draft-plan column as the projection's destination.
 
 ## Acceptance criteria
 
-- [ ] The projection writes nothing: no recommendation rows, no lock, no in-flight row, no ledger
+- [x] The projection writes nothing: no recommendation rows, no lock, no in-flight row, no ledger
       row, no ticket mutation — asserted the same way #250's own ACs assert it.
-- [ ] Running the same projection twice on unchanged data returns the same lanes.
-- [ ] "By coverage tier" never places work on a lower tier when a passing higher-tier candidate
+- [x] Running the same projection twice on unchanged data returns the same lanes.
+- [x] "By coverage tier" never places work on a lower tier when a passing higher-tier candidate
       exists; the unplaced remainder is reported, not silently dropped.
-- [ ] "Keep each plant whole" never splits one plant across two lanes.
-- [ ] "By capacity headroom" may exceed capacity when the selected engineers cannot absorb the
+- [x] "Keep each plant whole" never splits one plant across two lanes.
+- [x] "By capacity headroom" may exceed capacity when the selected engineers cannot absorb the
       selection; the affected lanes are marked and still committable.
-- [ ] Work with no eligible engineer lands in the no-coverage rail with `NO_COVERAGE` or
+- [x] Work with no eligible engineer lands in the no-coverage rail with `NO_COVERAGE` or
       `ALL_DROPPED`, matching the transparency vocabulary.
-- [ ] The proposal is editable before commit and the ledger recomputes on every edit.
-- [ ] Selection logic exists in exactly one place — a test asserts the projection agrees with the
+- [x] The proposal is editable before commit and the ledger recomputes on every edit.
+- [x] Selection logic exists in exactly one place — a test asserts the projection agrees with the
       engine's own choice for a single-ticket, single-candidate case.
 
 ## Tests

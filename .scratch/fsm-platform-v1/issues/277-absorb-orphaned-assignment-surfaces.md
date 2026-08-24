@@ -1,6 +1,6 @@
 # 277 — Assign Work Console S5: absorb the orphaned manual-assignment surfaces
 
-Status: ready-for-agent
+Status: done (2026-08-24) — see `docs/progress/277-absorb-orphaned-assignment-surfaces.md`
 Type: AFK · Backend + Admin
 Decision: #272 **R1** (the console is the single manual-assignment surface)
 
@@ -73,18 +73,18 @@ Mobile: none.
 
 ## Acceptance criteria
 
-- [ ] No component in `apps/admin/src` is imported by nothing (sweep test or documented exception) —
+- [x] No component in `apps/admin/src` is imported by nothing (sweep test or documented exception) —
       `CriticalQueue`'s state is resolved, not left ambiguous.
-- [ ] The plant-cluster size signal and the deferral-confirm flow are reachable in the console; the
+- [x] The plant-cluster size signal and the deferral-confirm flow are reachable in the console; the
       behaviours `CriticalQueue`'s tests covered are still covered somewhere.
-- [ ] `GET /intraday-insertions/:id/available-ses` returns rows carrying at minimum `seId`, `name`,
+- [x] `GET /intraday-insertions/:id/available-ses` returns rows carrying at minimum `seId`, `name`,
       `coverageType`, `committed`, `dailyCapacity`; the candidate set is unchanged from today's
       `string[]` for the same insertion (set-equality pin).
-- [ ] The Intra-day Queue offers manual assignment on an escalated insertion; assigning calls
+- [x] The Intra-day Queue offers manual assignment on an escalated insertion; assigning calls
       `POST :id/manual-assign` and the row reflects the new state after refetch.
-- [ ] The manual-assign modal never shows a bare UUID.
-- [ ] `PlannerPage` shows engineer names; a null name falls back to the id and does not crash.
-- [ ] No second capacity counter was introduced anywhere in this issue (#269 owns it).
+- [x] The manual-assign modal never shows a bare UUID.
+- [x] `PlannerPage` shows engineer names; a null name falls back to the id and does not crash.
+- [x] No second capacity counter was introduced anywhere in this issue (#269 owns it).
 
 ## Tests
 

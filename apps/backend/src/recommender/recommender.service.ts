@@ -25,13 +25,22 @@ import {
   urgencyFromBucket,
 } from './canonical-sort';
 import { buildCandidateReadiness } from './candidate-readiness';
-import { type SeCandidateReadiness, applyHardFilters } from './hard-filters';
+import { type LatLng, haversineKm } from './distance';
+import {
+  type HardFilterReason,
+  type SeCandidateReadiness,
+  applyHardFilters,
+  evaluateAllFilters,
+  notEnforcedFilters,
+} from './hard-filters';
+import { plantCoordinatesForZone } from './plant-geometry';
 import { type ScoringWeights, scoreCandidate } from './scoring';
 import { chooseWithinTier } from './tier-score-chooser';
 import {
   PREVENTIVE_SUFFIX,
   readBaseActiveWeights,
   readEngineerCapacity,
+  readEngineerHomeBases,
   readPlantClusterMultiplier,
 } from './scoring-config';
 
@@ -142,6 +151,9 @@ export interface PreviewDecision {
    */
   clusterSeed: boolean;
   capacityAtDecision: { used: number; cap: number | null } | null;
+  /** #270 — filters this decision could not enforce for real (stubbed feed, Issues 28/22); empty once
+   *  both land. Never omits a filter just because it happened not to drop anyone this ticket. */
+  notEnforcedFilters: HardFilterReason[];
 }
 
 /** The projected day plan: SE → plant stop → tickets, in the order the run decided them. */
@@ -254,9 +266,29 @@ export class RecommenderService {
 
   async runForZone(
     zoneId: bigint,
-    opts: { now?: Date; runId?: bigint; dryRun?: boolean; targetDate?: Date } = {},
+    opts: {
+      now?: Date;
+      runId?: bigint;
+      dryRun?: boolean;
+      targetDate?: Date;
+      /**
+       * #276 — restrict the ticket universe to exactly this set (still subject to every other
+       * eligibility gate below: deferral, deactivation, departure, threshold). `undefined` means "the
+       * whole zone", the pre-#276 behaviour, so every existing caller is unaffected.
+       */
+      ticketIds?: string[];
+      /**
+       * #276 — restrict the candidate pool to exactly these engineers, applied once at the point
+       * `orderedCandidatesForPlant` returns (below) and nowhere else — every rule downstream (hard
+       * filters, tier precedence, scoring, capacity) runs unmodified over the narrowed pool, which is
+       * what keeps this the same selection code rather than a second copy of it. `undefined` means
+       * "every covering engineer", the pre-#276 behaviour.
+       */
+      engineerIds?: string[];
+    } = {},
   ): Promise<RunSummary> {
     const now = opts.now ?? new Date();
+    const engineerIdSet = opts.engineerIds ? new Set(opts.engineerIds) : null;
     // #250 — the preview seam. `dryRun` suppresses every write and returns the projection instead;
     // `targetDate` moves the date-bound reads onto another IST day. Both default off/today, so the
     // real path below is bit-identical to before (pinned by the today-parity test).
@@ -312,6 +344,10 @@ export class RecommenderService {
     const tickets = await this.prisma.ticket.findMany({
       where: {
         ...ticketWhere,
+        // #276 — Distribute's projection scope: exactly these tickets, still subject to every gate
+        // below. Absent for every pre-#276 caller, so the real run and #250's zone-wide preview are
+        // unaffected.
+        ...(opts.ticketIds ? { ticketId: { in: opts.ticketIds } } : {}),
         // #146 — a ZM-deferred ticket is UNASSIGNED precisely so it can come back, but not before the
         // date the ZM chose. Without this it would be re-dispatched on the same run that removed it.
         ...notDeferredOn(targetDay),
@@ -467,25 +503,55 @@ export class RecommenderService {
     const committed = await this.committedDayPlan(targetDay);
     const assigned = new Map<string, number>(); // se_id → tickets on the SE's day plan
     const plantsBySe = new Map<string, Set<string>>(); // se_id → plants already on that day plan
+    const lastStopPlantBySe = new Map<string, string | null>(); // se_id → their last live stop's plant today
     for (const [seId, entry] of committed) {
       assigned.set(seId, entry.count);
       plantsBySe.set(seId, entry.plants);
+      lastStopPlantBySe.set(seId, entry.lastStopPlantId);
     }
     const plannerByPlant = await this.plannerForDate(zoneId, targetDay); // plant_id → planned se_ids (soft bias)
     const kitStatusBySe = new Map<string, CommonKitStatus>(); // memoised Common-Kit status per SE
     const availabilityBySe = new Map<string, SeAvailabilityStatus>(); // memoised current availability per SE
+
+    // #267 — plant coordinates fetched ONCE per zone-run (never per ticket/candidate — the AC this
+    // guards), plus every engineer's admin-entered home base (global, matching `engineerCapacity`'s
+    // own scope). Both raw reads; neither costs more as the ticket list grows.
+    const plantCoords = await plantCoordinatesForZone(this.prisma, zoneId);
+    const homeBases = await this.engineerHomeBases();
+    // An SE's current position in their accumulating day route — seeded lazily (a candidate not yet
+    // encountered this run has nothing to seed) from their last live stop today, else home base, else
+    // null (NOT_AVAILABLE). Advanced in place after they WIN a ticket, so the next ticket they win
+    // scores distance from the plant they were just given, not from where they started the run.
+    const currentPos = new Map<string, LatLng | null>();
+    const currentPosFor = (seId: string): LatLng | null => {
+      if (!currentPos.has(seId)) {
+        const lastStopPlant = lastStopPlantBySe.get(seId);
+        const seeded = (lastStopPlant && plantCoords.get(lastStopPlant)) || homeBases.get(seId) || null;
+        currentPos.set(seId, seeded);
+      }
+      return currentPos.get(seId)!;
+    };
+    // Null-honesty (#267 AC, #270's vocabulary): missing position AND/or missing destination geometry
+    // both mean "cannot be computed" — never a fabricated `(0,0)`, which is a real point in the Gulf of
+    // Guinea and would hand every such candidate a spectacular fake distance.
+    const distanceKmFor = (seId: string, plantId: string): number | null => {
+      const pos = currentPosFor(seId);
+      const dest = plantCoords.get(plantId);
+      if (pos === null || dest === undefined) return null;
+      return haversineKm(pos, dest);
+    };
 
     /**
      * The ticket's scoring features — one definition, used both to score every candidate in the
      * winning tier and to persist the winner's breakdown, so the number that selected an SE and the
      * number stored to explain that selection are the same computation rather than two derivations.
      *
-     * Every field comes from the TICKET, which is the structural fact behind #258 Q-A: candidates for
-     * one ticket share an identical `baseScore`, so without a per-candidate term the score cannot
-     * order them at all. `distanceFromPrevStopKm` is the other per-candidate term and stays null until
-     * #267 gives it real geometry.
+     * Every field but `distanceFromPrevStopKm` comes from the TICKET, which is the structural fact
+     * behind #258 Q-A: candidates for one ticket share an identical `baseScore`, so without a
+     * per-candidate term the score cannot order them at all. `distanceFromPrevStopKm` is that
+     * per-candidate term (#267) — the caller passes the candidate's own `seId` for it.
      */
-    const featuresFor = (c: RunCandidate) => ({
+    const featuresFor = (c: RunCandidate, seId: string) => ({
       companyPriorityRank: c.companyPriorityRank,
       // Install candidates have no SLA bucket → zero dispatch urgency (backlog, not an active outage).
       dispatchUrgency: c.deviceBucket ? urgencyFromBucket(c.deviceBucket) : 0,
@@ -493,7 +559,7 @@ export class RecommenderService {
       // Age drives the PREVENTIVE aged-bias term (weighted 0 in DEFICIT). For installs the anchor is the
       // backlog target date, so older Install backlog ranks higher.
       inactivityHours: c.ageAnchor ? Math.max(0, (now.getTime() - c.ageAnchor.getTime()) / 3_600_000) : null,
-      distanceFromPrevStopKm: null, // Floating distance-from-previous-stop deferred (needs day-plan geo)
+      distanceFromPrevStopKm: distanceKmFor(seId, String(c.plantId)),
     });
 
     let recommended = 0;
@@ -523,7 +589,12 @@ export class RecommenderService {
     for (let i = 0; i < runList.length; i++) {
       const t = runList[i];
       const processingRank = i + 1;
-      const ordered = await this.candidates.orderedCandidatesForPlant(t.plantId);
+      const orderedFull = await this.candidates.orderedCandidatesForPlant(t.plantId);
+      // #276 — Distribute's engineer-set scope, applied once here and nowhere else. Everything below
+      // (kit/availability memoisation, readiness, hard filters, tier precedence, scoring, capacity,
+      // the trace) runs over `ordered` exactly as it always has; a narrower pool is not a different
+      // rule, only fewer rows for the same rule to see.
+      const ordered = engineerIdSet ? orderedFull.filter((c) => engineerIdSet.has(c.seId)) : orderedFull;
 
       // Common-Kit completeness (Issue 21) + current SE availability (Issue 25) per candidate —
       // memoised across the run. An SE with an active non-AVAILABLE availability window is dropped
@@ -557,6 +628,13 @@ export class RecommenderService {
       // a filter — `last_activity_at` never gates scoring (CONTEXT §3/§16).
       const filtered = applyHardFilters(readiness);
       const passed = filtered.passed;
+      // #270 — one lookup, shared by the chosen row and every runner-up below, so each candidate's
+      // trace entry carries its OWN tri-state filter read rather than a reason inferred from whether
+      // it happened to appear in `dropped`.
+      const readinessBySe = new Map(readiness.map((r) => [r.seId, r]));
+      // NOT_ENFORCED is identical for every candidate today (both stubbed feeds are global) — read off
+      // the pool's first candidate, or `[]` for an empty pool (NO_COVERAGE).
+      const notEnforced = readiness.length > 0 ? notEnforcedFilters(readiness[0]) : [];
       const planned = plannerByPlant.get(String(t.plantId));
       const ticketPlant = String(t.plantId);
 
@@ -582,7 +660,7 @@ export class RecommenderService {
       // issue needed: a higher score can never cross a tier, while a human's pin still can.
       const { chosen, winningTier, tierCandidates, tierScores } = chooseWithinTier({
         passed,
-        scoreFor: (c) => scoreCandidate(featuresFor(t), weights, clusterFor(c.seId)).score,
+        scoreFor: (c) => scoreCandidate(featuresFor(t, c.seId), weights, clusterFor(c.seId)).score,
         pinnedSeIds: planned,
       });
 
@@ -634,6 +712,8 @@ export class RecommenderService {
               candidatesTotal: ordered.length,
               passedCount: 0,
               dropCounts,
+              // #270 — never a fabricated PASSED for a filter whose feed does not exist yet.
+              notEnforcedFilters: notEnforced,
               chosen: null,
               runnersUp: ordered.slice(0, TRACE_RUNNERS_UP).map((c, idx) => ({
                 seId: c.seId,
@@ -643,6 +723,7 @@ export class RecommenderService {
                 dropReason: dropReasonBySe.get(c.seId) ?? null,
                 plannerPlanned: planned?.has(c.seId) ?? false,
                 score: null,
+                filterStates: readinessBySe.has(c.seId) ? evaluateAllFilters(readinessBySe.get(c.seId)!) : [],
               })),
               scoreDegenerate: true,
               poolEmptyReason,
@@ -673,6 +754,7 @@ export class RecommenderService {
           plannerBias: false,
           clusterSeed: isSeed,
           capacityAtDecision: null,
+          notEnforcedFilters: notEnforced,
         });
         unassignable++;
         continue;
@@ -682,7 +764,7 @@ export class RecommenderService {
       if (!dryRun) await this.inventory.resolveComponentBlock(t.ticketId, now);
 
       const coverageType = chosen.coverageType;
-      const features = featuresFor(t);
+      const features = featuresFor(t, chosen.seId);
       // The winner's persisted breakdown is the same computation that selected them — same helper,
       // same multiplier — rather than a second derivation that could quietly disagree with it.
       const scored = scoreCandidate(features, weights, multiplier);
@@ -734,6 +816,12 @@ export class RecommenderService {
       const wonPlants = plantsBySe.get(chosen.seId) ?? new Set<string>();
       wonPlants.add(ticketPlant);
       plantsBySe.set(chosen.seId, wonPlants);
+      // #267 — advance the winner's route position to the plant they were just given, so the NEXT
+      // ticket they win scores distance from here, not from where they started the run. Only advances
+      // with real geometry (a plant with no `location` leaves `currentPos` where it was, honest rather
+      // than pretending the SE moved to an unknown point).
+      const wonCoord = plantCoords.get(ticketPlant);
+      if (wonCoord) currentPos.set(chosen.seId, wonCoord);
       recommended++;
 
       const plannerPlannedChosen = planned?.has(chosen.seId) ?? false;
@@ -757,6 +845,7 @@ export class RecommenderService {
           used: assigned.get(chosen.seId) ?? 1,
           cap: capacity.get(chosen.seId)?.dailyCapacity ?? null,
         },
+        notEnforcedFilters: notEnforced,
       });
 
       if (opts.runId !== undefined && recommendationId !== null) {
@@ -786,6 +875,8 @@ export class RecommenderService {
             candidatesTotal: ordered.length,
             passedCount: passed.length,
             dropCounts,
+            // #270 — never a fabricated PASSED for a filter whose feed does not exist yet.
+            notEnforcedFilters: notEnforced,
             chosen: {
               seId: chosen.seId,
               coverageType,
@@ -805,6 +896,10 @@ export class RecommenderService {
               breakdown: scored.breakdown,
               /** Which coverage tier the score was consulted within — everything below it was never reached. */
               tierEvaluated: winningTier,
+              // #270 — the winner's own tri-state filter read (always PASSED×5 or NOT_ENFORCED×the two
+              // stubbed ones, since only passing candidates can win), for the same "scan every trace
+              // row" honesty check the runners-up carry.
+              filterStates: readinessBySe.has(chosen.seId) ? evaluateAllFilters(readinessBySe.get(chosen.seId)!) : [],
             },
             runnersUp: ordered
               .filter((c) => c.seId !== chosen.seId)
@@ -825,6 +920,7 @@ export class RecommenderService {
                     : 'TIER_NOT_REACHED',
                 dropReason: dropReasonBySe.get(c.seId) ?? null,
                 plannerPlanned: planned?.has(c.seId) ?? false,
+                filterStates: readinessBySe.has(c.seId) ? evaluateAllFilters(readinessBySe.get(c.seId)!) : [],
                 // #266 — the runner-up's OWN score, closing the defect the TODO here used to admit.
                 // Every passing runner-up was previously scored with `multiplier` — the multiplier
                 // computed for the CHOSEN SE — which was merely redundant while all candidates scored
@@ -1055,6 +1151,11 @@ export class RecommenderService {
 
   private engineerCapacity(): Promise<Map<string, { dailyCapacity: number; isActive: boolean }>> {
     return readEngineerCapacity(this.prisma);
+  }
+
+  /** #267 — every engineer's admin-entered home base; absent = no home base set. */
+  private engineerHomeBases(): Promise<Map<string, LatLng>> {
+    return readEngineerHomeBases(this.prisma);
   }
 
   /**

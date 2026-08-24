@@ -95,6 +95,30 @@ describe('SE Planner grid (Issue 14b slice 1)', () => {
     // Reads the zone-scoped planner range endpoint.
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/planner?dateFrom='))).toBe(true);
   });
+
+  it('#277 — Engineer column shows the name, falling back to the id when null', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes('/schedules/engineers')) {
+        return json([
+          { engineerId: 'se-north-1', name: 'Anita Verma', coverageType: 'MULTI_PLANT', zoneId: '1', dailyCapacity: 10, isActive: true },
+          { engineerId: 'se-north-2', name: null, coverageType: 'DEDICATED', zoneId: '1', dailyCapacity: 8, isActive: true },
+        ]);
+      }
+      if (u.includes('/schedules')) return json([]);
+      if (u.includes('/planner/plants')) return json(plants);
+      if (u.includes('/planner')) return json(entries);
+      return json([]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderPage();
+
+    const grid = within(await screen.findByRole('table', { name: /planner/i }));
+    expect(grid.getByText('Anita Verma')).toBeInTheDocument();
+    expect(grid.queryByText('se-north-1')).toBeNull();
+    // Null name falls back to the id rather than crashing or showing "undefined".
+    expect(grid.getByText('se-north-2')).toBeInTheDocument();
+  });
 });
 
 /**

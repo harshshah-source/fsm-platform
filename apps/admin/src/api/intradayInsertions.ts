@@ -8,12 +8,21 @@
 // did — zero `intraday-insertions` references in `apps/admin` before this file). `IntradayQueuePage`
 // merges these rows with the ZM manual-update rows into one table.
 
+import {
+  DeferralConflictError,
+  type DeferralConflict,
+  type DeferralOverride,
+} from './schedules';
+import type { CandidateRow } from './candidates';
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
 const TOKEN_KEY = 'fsm.accessToken';
 
-function authHeaders(): Record<string, string> {
+function authHeaders(json = false): Record<string, string> {
   const token = sessionStorage.getItem(TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  if (json) headers['Content-Type'] = 'application/json';
+  return headers;
 }
 
 export type IntradayInsertionStatus =
@@ -47,4 +56,44 @@ export async function apiIntradayInsertions(): Promise<IntradayInsertionRow[]> {
   const res = await fetch(`${BASE_URL}/intraday-insertions`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as IntradayInsertionRow[];
+}
+
+/**
+ * Candidate SEs for the manual-assign modal (Issue 30, row shape by #277) — #274's candidate row,
+ * never a bare id.
+ */
+export async function apiAvailableSes(insertionId: string): Promise<CandidateRow[]> {
+  const res = await fetch(`${BASE_URL}/intraday-insertions/${insertionId}/available-ses`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as CandidateRow[];
+}
+
+export interface ManualAssignOk {
+  result: 'OK';
+  insertionId: string;
+  scheduleId: string;
+  batchId: string;
+  seId: string;
+}
+
+/** Resolve an escalated insertion by hand from the Intra-day Queue (Issue 30). */
+export async function apiManualAssign(
+  insertionId: string,
+  seId: string,
+  deferral: DeferralOverride = {},
+): Promise<ManualAssignOk> {
+  const res = await fetch(`${BASE_URL}/intraday-insertions/${insertionId}/manual-assign`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ seId, ...deferral }),
+  });
+  if (res.status === 409) {
+    const body = (await res.json()) as DeferralConflict | { code?: string };
+    if (body?.code === 'CONFLICT_DEFERRED') throw new DeferralConflictError(body as DeferralConflict);
+    throw new Error(`REQUEST_FAILED_${res.status}`);
+  }
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as ManualAssignOk;
 }

@@ -7,12 +7,20 @@ import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { Prisma } from '../generated/prisma/client';
 import { type SlaBucket } from '../generated/prisma/enums';
 import { NotificationService } from '../notifications/notification.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { buildCandidateReadiness } from '../recommender/candidate-readiness';
 import { CandidateSelectionService } from '../recommender/candidate-selection.service';
 import { urgencyFromBucket } from '../recommender/canonical-sort';
+import { type LatLng, haversineKm } from '../recommender/distance';
 import { applyHardFilters } from '../recommender/hard-filters';
+import { plantCoordinatesForZone } from '../recommender/plant-geometry';
 import { type ScoringFeatures, scoreCandidate } from '../recommender/scoring';
-import { readBaseActiveWeights, readEngineerCapacity, readPlantClusterMultiplier } from '../recommender/scoring-config';
+import {
+  readBaseActiveWeights,
+  readEngineerCapacity,
+  readEngineerHomeBases,
+  readPlantClusterMultiplier,
+} from '../recommender/scoring-config';
 import { chooseWithinTier } from '../recommender/tier-score-chooser';
 import {
   ActorContext,
@@ -20,6 +28,7 @@ import {
   type DeferralVuContext,
   OverrideService,
 } from '../scheduling/override.service';
+import { CandidateQueryService, type CandidateRow } from '../scheduling/candidate-query.service';
 import { committedDayPlan } from '../scheduling/committed-day-load';
 import { ZmScope } from '../scheduling/zm-schedule-query.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -129,6 +138,13 @@ export class IntradayInsertionService {
     private readonly notifications: NotificationService,
     private readonly availability: SeAvailabilityService = new SeAvailabilityService(prisma),
     private readonly audit: AuditService = new AuditService(prisma),
+    /** #277 — `available-ses`' row shape, published from #274's own assembly rather than re-spelled here. */
+    private readonly candidateQuery: CandidateQueryService = new CandidateQueryService(
+      prisma,
+      candidates,
+      availability,
+      new InventoryService(prisma),
+    ),
   ) {}
 
   /**
@@ -178,10 +194,33 @@ export class IntradayInsertionService {
     const committed = await committedDayPlan(this.prisma, day);
     const committedCount = new Map<string, number>();
     const plantsBySe = new Map<string, Set<string>>();
+    const lastStopPlantBySe = new Map<string, string | null>();
     for (const [seId, entry] of committed) {
       committedCount.set(seId, entry.count);
       plantsBySe.set(seId, entry.plants);
+      lastStopPlantBySe.set(seId, entry.lastStopPlantId);
     }
+
+    // #267 — the same distance seam the morning batch closes, wired identically ("same discipline")
+    // rather than left permanently NOT_AVAILABLE on the CRITICAL path. Plant geometry is zone-scoped
+    // and fetched once per tick (this sweep's own "per zone-run" boundary); home bases are global.
+    const plantCoords = await plantCoordinatesForZone(this.prisma, zoneId);
+    const homeBases = await readEngineerHomeBases(this.prisma);
+    const currentPos = new Map<string, LatLng | null>();
+    const currentPosFor = (seId: string): LatLng | null => {
+      if (!currentPos.has(seId)) {
+        const lastStopPlant = lastStopPlantBySe.get(seId);
+        const seeded = (lastStopPlant && plantCoords.get(lastStopPlant)) || homeBases.get(seId) || null;
+        currentPos.set(seId, seeded);
+      }
+      return currentPos.get(seId)!;
+    };
+    const distanceKmFor = (seId: string, plantId: string): number | null => {
+      const pos = currentPosFor(seId);
+      const dest = plantCoords.get(plantId);
+      if (pos === null || dest === undefined) return null;
+      return haversineKm(pos, dest);
+    };
 
     let assigned = 0;
     let escalated = 0;
@@ -210,22 +249,24 @@ export class IntradayInsertionService {
 
       const ticketPlant = String(ticket.plantId);
       const clusterFor = (seId: string): number => (plantsBySe.get(seId)?.has(ticketPlant) ? clusterMultiplier : 1);
-      const features: ScoringFeatures = {
+      // #267 — per-candidate, like the morning batch: every candidate for this ticket shares the same
+      // base, so `distanceFromPrevStopKm` (route position → this plant) is the only term that can
+      // separate them.
+      const featuresFor = (seId: string): ScoringFeatures => ({
         companyPriorityRank: ticket.company.companyPriorityRank,
         dispatchUrgency: urgencyFromBucket(ticket.device.state!.slaBucket!),
         repeatFailure: ticket.repeatFailure,
         inactivityHours: ticket.device.state!.latestGpsDatetime
           ? Math.max(0, (now.getTime() - ticket.device.state!.latestGpsDatetime.getTime()) / 3_600_000)
           : null,
-        // Floating distance-from-previous-stop deferred until #267 (unbuilt seam, same as the batch).
-        distanceFromPrevStopKm: null,
-      };
+        distanceFromPrevStopKm: distanceKmFor(seId, ticketPlant),
+      });
 
       // #268 — no SE Planner pin: the ADR-0022 soft bias is a morning-batch concept the issue's ACs
       // never extend to CRITICAL work, so this stays pure tier+score rather than inventing a new rule.
       const { chosen } = chooseWithinTier({
         passed,
-        scoreFor: (c) => scoreCandidate(features, weights, clusterFor(c.seId)).score,
+        scoreFor: (c) => scoreCandidate(featuresFor(c.seId), weights, clusterFor(c.seId)).score,
       });
 
       if (chosen === null) {
@@ -252,6 +293,9 @@ export class IntradayInsertionService {
       const plants = plantsBySe.get(chosen.seId) ?? new Set<string>();
       plants.add(ticketPlant);
       plantsBySe.set(chosen.seId, plants);
+      // #267 — advance the winner's route position, same as the morning batch (§ above).
+      const wonCoord = plantCoords.get(ticketPlant);
+      if (wonCoord) currentPos.set(chosen.seId, wonCoord);
 
       await this.prisma.intradayInsertion.create({
         data: {
@@ -316,14 +360,25 @@ export class IntradayInsertionService {
     await this.escalateToZm(zoneId, ticket.ticketId, ins.insertionId);
   }
 
-  /** Available candidate SEs for the ZM manual-assignment modal (Issue 30) — `AVAILABLE` only, no ping filter. */
-  async availableSesForManualAssign(insertionId: bigint, now: Date = new Date()): Promise<string[]> {
+  /**
+   * Available candidate SEs for the ZM manual-assignment modal (Issue 30, row shape by #277) —
+   * `AVAILABLE` only, no ping filter. Returns #274's candidate row (name, coverage, load, kit) instead
+   * of a bare `string[]` — the modal this feeds had no admin client before #277 precisely because a
+   * list of UUIDs cannot be shown to a human. The **set** of SEs offered is unchanged from before #277:
+   * filtered on `availabilityStatus`, exactly as the old `availableCandidates` did, not on the hard-filter
+   * `verdict` `CandidateQueryService` also carries — a capacity- or kit-short SE was always offered here
+   * (Q2: an administrative override, not a gate), and folding the verdict in would silently narrow the set.
+   */
+  async availableSesForManualAssign(insertionId: bigint, scope: ZmScope, now: Date = new Date()): Promise<CandidateRow[]> {
     const ins = await this.prisma.intradayInsertion.findUnique({
       where: { insertionId },
       include: { ticket: { select: { plantId: true } } },
     });
     if (!ins) return [];
-    return this.availableCandidates(ins.ticket.plantId, now);
+    const view = await this.candidateQuery.listForPlants([ins.ticket.plantId], scope, now);
+    const plant = view.plants[0];
+    if (!plant) return [];
+    return plant.candidates.filter((c) => c.availabilityStatus === 'AVAILABLE');
   }
 
   /** ZM manual assignment from the escalation queue — commits to the chosen SE (no SE Acceptance gate). */
@@ -407,16 +462,5 @@ export class IntradayInsertionService {
       deliveryModel: 'GENERAL',
       metadata: { insertionId: String(insertionId), ticketId },
     });
-  }
-
-  /** Strict-precedence candidate SEs for a plant filtered to `AVAILABLE` (no activity-ping filter). */
-  private async availableCandidates(plantId: bigint, now: Date): Promise<string[]> {
-    const ordered = await this.candidates.orderedCandidatesForPlant(plantId);
-    if (ordered.length === 0) return [];
-    const statuses = await this.availability.currentStatusMany(
-      ordered.map((c) => c.seId),
-      now,
-    );
-    return ordered.filter((c) => (statuses.get(c.seId) ?? 'AVAILABLE') === 'AVAILABLE').map((c) => c.seId);
   }
 }

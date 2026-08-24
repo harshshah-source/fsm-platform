@@ -36,6 +36,12 @@ export interface CandidateReadinessInput {
  * `vehicleReadiness` is fixed at `UNKNOWN` and `expectedComponentsAvailable` at `true` because both
  * remain unbuilt seams (Issues 28 and 22). Neither is a drop today; when they land they land here,
  * once, for both callers.
+ *
+ * #270 — `vehicleReadinessEnforced`/`componentAvailabilityEnforced` are `false` here for the same
+ * reason: this is the feed site, so it is where "no real data source yet" gets stated, not inferred
+ * from the stub value downstream. When Issue 28/22 wire real feeds, flipping these two `false`s to
+ * `true` (right here, nowhere else) is the entire seam — `hard-filters.ts` already evaluates real
+ * data correctly today, proven by `test/hard-filters.spec.ts`'s enforced-flag cases.
  */
 export function buildCandidateReadiness(
   input: CandidateReadinessInput,
@@ -46,11 +52,13 @@ export function buildCandidateReadiness(
     // engine's winning tier, the column's headings — needs no second lookup.
     coverageType: input.coverageType,
     vehicleReadiness: 'UNKNOWN',
+    vehicleReadinessEnforced: false,
     available: (input.capacity?.isActive ?? true) && input.availabilityStatus === 'AVAILABLE',
     // `>=`, matching #269's `isOverCapacity`: an SE at exactly `6/6` is one no automatic path will
     // add to, so the badge and the filter agree at the boundary rather than one step apart.
     overCapacity: input.capacity !== undefined && input.committed >= input.capacity.dailyCapacity,
     commonKitComplete: input.commonKitComplete,
     expectedComponentsAvailable: true,
+    componentAvailabilityEnforced: false,
   };
 }

@@ -32,7 +32,13 @@ import { DayPlanQueryService, type DayPlanView } from './day-plan-query.service'
 import { BUSINESS_TIMEZONE } from './dispatch-cron';
 import { DispatchRunService, type DispatchInFlight, type DispatchRunSummary } from './dispatch-run.service';
 import { DispatchScheduleService, type DispatchScheduleView } from './dispatch-schedule.service';
-import { OverrideService, type AssignOutcome, type PlantAssignSummary } from './override.service';
+import {
+  OverrideService,
+  type AssignBatchLane,
+  type AssignBatchResult,
+  type AssignOutcome,
+  type PlantAssignSummary,
+} from './override.service';
 import {
   SchedulerPreviewService,
   type HoldOutcome,
@@ -44,12 +50,37 @@ import {
   type AssignableWorkView,
 } from './assignable-work-query.service';
 import { CandidateQueryService, type CandidatesView } from './candidate-query.service';
+import { DistributeProjectionService, type DistributeResult, type DistributeStrategy } from './distribute-projection.service';
 import {
   ZmScheduleQueryService,
   type ZmScheduleDetail,
   type ZmScheduleRow,
   type ZoneEngineerRow,
 } from './zm-schedule-query.service';
+
+/**
+ * The zone scope a `/schedules` request runs under, with acting folded in.
+ *
+ * A CSM / Operations Head acting in a zone (`X-Acting-As-Zone`) is read **and written** as that
+ * zone's ZM. Before this there were two postures on one controller: the console's reads collapsed
+ * (inline, four times over) while every write built its scope straight from the claims — so an
+ * Operations Head acting in a zone saw that zone's pool and committed against a pan-India scope. On
+ * the console specifically, the read and the write are two halves of one operator action, and they
+ * cannot disagree about which zone the operator is standing in.
+ *
+ * **This can only ever narrow.** With no header it is byte-identical to the old expression; a ZM
+ * cannot widen, because {@link RequestActor} only carries an `actingZone` for the two acting-capable
+ * roles. No `@Roles()` guard changes, so no role gains reach it did not have.
+ *
+ * #239 owns replacing this with its shared `@CurrentScope()` decorator across every manager surface;
+ * the semantics here are deliberately identical so that swap is a mechanical no-op. It is kept local
+ * rather than imported so this slice carries no dependency on #239's own unlanded files.
+ */
+function scopeFor(user: AccessTokenClaims, actor: RequestActor): { role: string; zoneId: number | null } {
+  return actor.actingZone !== null
+    ? { role: 'ZONAL_MANAGER', zoneId: actor.actingZone }
+    : { role: user.role, zoneId: user.zone_id };
+}
 
 /**
  * `?plantIds=1,2,3` → `bigint[]`. Deliberately lenient about junk: an unparseable id is dropped
@@ -117,6 +148,7 @@ export class SchedulesController {
     private readonly schedulerPreview: SchedulerPreviewService,
     private readonly assignableWork: AssignableWorkQueryService,
     private readonly candidateQuery: CandidateQueryService,
+    private readonly distribute: DistributeProjectionService,
   ) {}
 
   /**
@@ -160,6 +192,7 @@ export class SchedulesController {
   @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
   async dispatchRunNow(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { zoneId?: number; reason?: string } = {},
   ): Promise<DispatchRunSummary> {
     // MANUAL + actor land on the dispatch_runs ledger row and its audit bracket; #213 adds the
@@ -273,6 +306,7 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async placeHold(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { ticketId?: string; heldUntil?: string; reasonCode?: string; confirm?: boolean },
   ): Promise<HoldOutcome> {
     if (!body?.ticketId || !body?.heldUntil || !body?.reasonCode?.trim()) {
@@ -287,8 +321,8 @@ export class SchedulesController {
       body.ticketId,
       heldUntil,
       body.reasonCode.trim(),
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
+      scopeFor(user, actor),
+      actor,
       { confirm: body.confirm === true },
     );
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
@@ -307,13 +341,14 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async releaseHold(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { ticketId?: string },
   ): Promise<ReleaseOutcome> {
     if (!body?.ticketId) throw new BadRequestException({ code: 'INVALID_RELEASE', message: 'ticketId is required.' });
     const outcome = await this.schedulerPreview.releaseHold(
       body.ticketId,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
+      scopeFor(user, actor),
+      actor,
     );
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     return outcome;
@@ -330,13 +365,14 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async assign(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { ticketId: string; seId: string; confirm?: boolean; reasonCode?: string },
   ): Promise<AssignOutcome> {
     const outcome = await this.override.assignTicket(
       body.ticketId,
       body.seId,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
+      scopeFor(user, actor),
+      actor,
       new Date(),
       'CRITICAL_ASSIGN',
       false,
@@ -370,6 +406,7 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async assignPlants(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { seId: string; plantIds: string[] },
   ): Promise<PlantAssignSummary> {
     if (!body?.seId || !Array.isArray(body.plantIds) || body.plantIds.length === 0)
@@ -377,11 +414,41 @@ export class SchedulesController {
     const outcome = await this.override.assignPlants(
       body.plantIds.map(String),
       body.seId,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
+      scopeFor(user, actor),
+      actor,
     );
     if ('result' in outcome) throw new NotFoundException({ code: 'SE_NOT_FOUND' });
     return outcome;
+  }
+
+  /**
+   * #275 — the Assign Work Console's review-and-commit write. One transaction per engineer lane, one
+   * result row per lane; `assignPlants` above is now a shorthand over this same primitive. `reasonCode`
+   * is mandatory — it is the one thing a manual multi-engineer plan must always be able to answer
+   * ("why"), recorded once per lane regardless of how many tickets it touches or how many were skipped.
+   */
+  @Post('assign-batch')
+  @HttpCode(200)
+  @Roles(...MANAGER_ROLES)
+  async assignBatchRoute(
+    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
+    @Body() body: { reasonCode?: string; lanes?: AssignBatchLane[] },
+  ): Promise<AssignBatchResult> {
+    if (!body?.reasonCode || body.reasonCode.trim() === '')
+      throw new BadRequestException({ code: 'REASON_REQUIRED' });
+    if (!Array.isArray(body.lanes) || body.lanes.length === 0)
+      throw new BadRequestException({ code: 'LANES_REQUIRED' });
+    for (const lane of body.lanes) {
+      if (!lane?.seId || !Array.isArray(lane.ticketIds) || lane.ticketIds.length === 0)
+        throw new BadRequestException({ code: 'LANE_SE_AND_TICKETS_REQUIRED' });
+    }
+    return this.override.assignBatch(
+      body.lanes,
+      body.reasonCode.trim(),
+      scopeFor(user, actor),
+      actor,
+    );
   }
 
   @Get()
@@ -416,10 +483,7 @@ export class SchedulesController {
     @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
   ): Promise<AssignableWorkView> {
-    const scope =
-      actor.actingZone !== null
-        ? { role: 'ZONAL_MANAGER', zoneId: actor.actingZone }
-        : { role: user.role, zoneId: user.zone_id };
+    const scope = scopeFor(user, actor);
     return this.assignableWork.listForScope(scope);
   }
 
@@ -436,11 +500,49 @@ export class SchedulesController {
     @CurrentActor() actor: RequestActor,
     @Query('plantIds') plantIds?: string,
   ): Promise<CandidatesView> {
-    const scope =
-      actor.actingZone !== null
-        ? { role: 'ZONAL_MANAGER', zoneId: actor.actingZone }
-        : { role: user.role, zoneId: user.zone_id };
+    const scope = scopeFor(user, actor);
     return this.candidateQuery.listForPlants(parsePlantIds(plantIds), scope);
+  }
+
+  /**
+   * #275 — resolve the console's plant-shaped draft into the ticket ids `assign-batch` needs, right
+   * before the review screen shows a diff. Same predicate as the work pool and `assignPlants`, so the
+   * ids resolved here are exactly the tickets a commit will move — never a second count to disagree
+   * with the one already on screen.
+   */
+  @Get('assignable-tickets')
+  @Roles(...MANAGER_ROLES)
+  assignableTicketIds(
+    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
+    @Query('plantIds') plantIds?: string,
+  ): Promise<{ plantId: string; ticketIds: string[] }[]> {
+    const scope = scopeFor(user, actor);
+    return this.assignableWork.ticketIdsForPlants(scope, parsePlantIds(plantIds));
+  }
+
+  /**
+   * #276 — Distribute: several plants across several engineers, projected before anything enters the
+   * draft. RBAC is #272 open question 3, ruled 2026-08-24 (operator): all managers, the same
+   * `MANAGER_ROLES` ladder as the console's own draft/commit — not the narrower `dispatch-run` ladder
+   * the issue text raised as the closer precedent.
+   */
+  @Post('distribute-preview')
+  @HttpCode(200)
+  @Roles(...MANAGER_ROLES)
+  distributePreview(
+    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
+    @Body() body: { ticketIds?: string[]; engineerIds?: string[]; strategy?: DistributeStrategy },
+  ): Promise<DistributeResult> {
+    if (!Array.isArray(body?.ticketIds) || body.ticketIds.length === 0)
+      throw new BadRequestException({ code: 'TICKET_IDS_REQUIRED' });
+    if (!Array.isArray(body?.engineerIds) || body.engineerIds.length === 0)
+      throw new BadRequestException({ code: 'ENGINEER_IDS_REQUIRED' });
+    if (!['COVERAGE_TIER', 'CAPACITY_HEADROOM', 'PLANT_WHOLE'].includes(body.strategy as string))
+      throw new BadRequestException({ code: 'STRATEGY_REQUIRED' });
+    const scope = scopeFor(user, actor);
+    return this.distribute.project(body.ticketIds, body.engineerIds, body.strategy!, scope);
   }
 
   @Get(':engineerId')

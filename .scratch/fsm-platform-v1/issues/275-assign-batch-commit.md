@@ -1,6 +1,6 @@
 # 275 — Assign Work Console S3: `assign-batch` — one commit, per-engineer transactions, a review diff
 
-Status: ready-for-agent
+Status: done (2026-08-24) — see `docs/progress/275-assign-batch-commit.md`
 Type: AFK · Backend + Admin
 Decision: #272 **R2** (nothing written until commit), **R5** (overload stated, not gated), **R8**
 (per-engineer transactional, per-engineer result)
@@ -71,20 +71,20 @@ sentence in the footer is copy to match, not paraphrase: it is the Q2 posture wr
 
 ## Acceptance criteria
 
-- [ ] A three-lane batch commits as three transactions; forcing lane 2 to throw leaves lanes 1 and 3
+- [x] A three-lane batch commits as three transactions; forcing lane 2 to throw leaves lanes 1 and 3
       committed and reports lane 2 failed.
-- [ ] Every assigned ticket has its own audit row, identical in shape to a single `assignTicket` —
+- [x] Every assigned ticket has its own audit row, identical in shape to a single `assignTicket` —
       the batch endpoint adds no new audit semantics.
-- [ ] `POST /schedules/assign-plants` returns a byte-identical `PlantAssignSummary` before and after
+- [x] `POST /schedules/assign-plants` returns a byte-identical `PlantAssignSummary` before and after
       the re-implementation (contract regression pin over the existing Device Detail flow).
-- [ ] An out-of-zone ticket appears in that lane's `skipped` with a reason and does not fail the lane.
-- [ ] A deferred ticket without `confirm` returns `CONFLICT_DEFERRED` for that ticket only (#249),
+- [x] An out-of-zone ticket appears in that lane's `skipped` with a reason and does not fail the lane.
+- [x] A deferred ticket without `confirm` returns `CONFLICT_DEFERRED` for that ticket only (#249),
       and the console offers the existing confirm flow.
-- [ ] Committing to an over-capacity engineer succeeds 200 with **no** confirm step and **no** extra
+- [x] Committing to an over-capacity engineer succeeds 200 with **no** confirm step and **no** extra
       audit requirement (Q2 regression pin).
-- [ ] The review screen's "still unassigned after" equals the post-commit `assignable-work` total,
+- [x] The review screen's "still unassigned after" equals the post-commit `assignable-work` total,
       asserted end-to-end.
-- [ ] A lost race returns a clean 4xx for that ticket (#265), never a 500 and never a silent skip.
+- [x] A lost race returns a clean 4xx for that ticket (#265), never a 500 and never a silent skip.
 
 ## Tests
 

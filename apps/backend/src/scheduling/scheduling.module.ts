@@ -18,6 +18,7 @@ import { DispatchRunService } from './dispatch-run.service';
 import { DispatchScheduleService } from './dispatch-schedule.service';
 import { DispatchSchedulerService } from './dispatch-scheduler.service';
 import { DispatchTransparencyQueryService } from './dispatch-transparency-query.service';
+import { DistributeProjectionService } from './distribute-projection.service';
 import { OverrideService } from './override.service';
 import { ScheduleClosureScheduler } from './schedule-closure-scheduler.service';
 import { SameDayUpdateService } from './same-day-update.service';
@@ -78,6 +79,9 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
     // #274 — the candidate column's read. Composes the recommender's own `orderedCandidatesForPlant`
     // plus the readiness inputs the engine's hard filters consume, so the column cannot drift from it.
     CandidateQueryService,
+    // #276 — Distribute's projection: the scoped dry-run seam (`COVERAGE_TIER`) plus allocation over
+    // `CandidateQueryService`'s shared readiness read (`CAPACITY_HEADROOM` / `PLANT_WHOLE`).
+    DistributeProjectionService,
     // #76 adoption — SpineDayPlanNotifier routes through the real notification spine.
     { provide: DAY_PLAN_NOTIFIER, useClass: SpineDayPlanNotifier },
     // Issue 15 AC#7 — the real soft_states-backed conflict source replaces the 13a no-conflict seam.
@@ -87,6 +91,8 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
   // controller is registered in `AppModule`, so a provider that is only visible inside this module
   // resolves at `SchedulingModule` boot and then fails at AppModule boot — which is every e2e that
   // stands up the real app, and none of the ones that construct services by hand.
-  exports: [AssignableWorkQueryService, CandidateQueryService, BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService],
+  // #264 — `DAY_PLAN_NOTIFIER` exported so `BusinessSweepSchedulerModule`'s re-drain sweep can share
+  // the real spine notifier rather than standing up a second binding of its own.
+  exports: [AssignableWorkQueryService, CandidateQueryService, DistributeProjectionService, BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService, DAY_PLAN_NOTIFIER],
 })
 export class SchedulingModule {}

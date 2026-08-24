@@ -5,14 +5,24 @@ import {
   type AssignableWorkView,
 } from '../../api/assignWork';
 import { apiCandidates, type CandidatesView, type PlantCandidates } from '../../api/candidates';
-import { apiAssignPlants, apiZoneEngineers, type ZoneEngineer } from '../../api/schedules';
+import {
+  apiAssignBatch,
+  apiAssignableTickets,
+  apiZoneEngineers,
+  type AssignBatchLaneResult,
+  type DistributeResult,
+  type DistributeUnplaced,
+  type ZoneEngineer,
+} from '../../api/schedules';
 import { MetricStrip, PageHeader, SearchInput, type Metric } from '../../components/data';
 import { Badge, Button, LoadBadge } from '../../components/ui';
 import { engineerOptionLabel } from '../../lib/capacity';
 import { cn } from '../../lib/cn';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 import { CandidateColumn } from './CandidateColumn';
+import { DistributePanel } from './DistributePanel';
 import { LaneHeader, laneCoverage } from './LaneCoverage';
+import { ReviewCommitScreen, type ReviewLane } from './ReviewCommitScreen';
 
 /**
  * **Assign work** — the manual-assignment console (#273, approved direction #272; the authoritative
@@ -31,11 +41,14 @@ import { LaneHeader, laneCoverage } from './LaneCoverage';
  * rather than implying a durability it does not have. A shared, resumable draft needs its own table,
  * an owner and a staleness rule for when the underlying tickets move; that is not v1.
  *
- * **Slices 1 and 2 of five.** #273 built the pool, the ledger and the commit; **#274** added the
+ * **Four of five slices.** #273 built the pool, the ledger and the commit; **#274** added the
  * candidate column (the engine's own ordered eligibility list, dropped candidates included with their
  * reason), coverage badges per engineer-and-plant, and the `committed → after / capacity` load each
- * lane would carry. The transactional `assign-batch` write (#275), Distribute (#276) and the absorbed
- * orphan surfaces (#277) follow.
+ * lane would carry. **#275** replaced the direct-commit with a review-and-commit screen over the
+ * transactional `assign-batch`. **#276** added Distribute: project several plants across several
+ * engineers before anything enters the draft, from the real selection logic, with the remainder it
+ * could not place held in the draft's own **no-eligible-engineer rail**. **#277** absorbed the
+ * orphaned manual-assignment surfaces.
  */
 
 /** The unit of selection. A plant serves several companies, so neither id alone identifies a row. */
@@ -46,6 +59,15 @@ interface Lane {
   seId: string;
   /** Plant ids, deduplicated — the write's unit (see {@link plantTotals}). */
   plantIds: string[];
+  /**
+   * #276 — ticket ids Distribute placed at a plant it did **not** hand over whole (a strategy split
+   * the plant, or handed only part of it to this lane). Only set for such plants; a manually-built
+   * lane (#273/#274) never populates this, and a Distribute lane that received a plant's *entire*
+   * assignable set leaves it unset too — both fall back to resolving the whole plant at review time
+   * (`GET /schedules/assignable-tickets`), exactly as before. The override exists so a partial
+   * placement is not silently widened back out to the whole plant at commit.
+   */
+  ticketOverrides?: Record<string, string[]>;
 }
 
 /**
@@ -77,11 +99,25 @@ function silentFor(hours: number | null): string | null {
   return hours === null ? null : `oldest ${Math.round(hours)} h silent`;
 }
 
+/**
+ * The two ways Distribute can fail to place work, in the transparency surfaces' own words (#276
+ * required-change 4). `NO_COVERAGE` — not one of the chosen engineers covers the plant at any tier.
+ * `ALL_DROPPED` — some do, and every one of them failed a hard filter. They are different problems
+ * (a coverage gap versus a readiness gap) and the rail must not blur them into "unassignable".
+ */
+const UNPLACED_REASON_TEXT: Record<DistributeUnplaced['reason'], string> = {
+  NO_COVERAGE: 'no coverage',
+  ALL_DROPPED: 'all dropped',
+};
+
 export function AssignConsolePage() {
   const [view, setView] = useState<AssignableWorkView | null>(null);
   const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  /** #277 — absorbs `CriticalQueue`'s grouping into a pool filter; the `criticalCount` badge already
+   *  on every row is the same cluster-size signal that component uniquely carried. */
+  const [criticalOnly, setCriticalOnly] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // One empty lane from the start. A console that opens with no lane offers a pool you can tick and
   // nowhere to put it — a dead end on the first screen, and the dispatcher always needs at least one.
@@ -96,7 +132,25 @@ export function AssignConsolePage() {
   const [focusedPlantId, setFocusedPlantId] = useState<string | null>(null);
   const [candidateView, setCandidateView] = useState<CandidatesView | null>(null);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
-  const [results, setResults] = useState<{ seId: string; ok: boolean; assigned: number; message?: string }[] | null>(null);
+  /**
+   * The review-and-commit screen (#275). Null = drafting; set once the operator asks to review — the
+   * ready lanes' plants are resolved to ticket ids first, so the diff and the commit act on the exact
+   * same set. Nothing is written by entering review; only {@link commitBatch} writes.
+   */
+  const [reviewLanes, setReviewLanes] = useState<ReviewLane[] | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [batchResults, setBatchResults] = useState<AssignBatchLaneResult[] | null>(null);
+  /** #276 — the Distribute panel. Closed by default; opened from the footer over the ticked pool rows. */
+  const [distributing, setDistributing] = useState(false);
+  /**
+   * #276 — work a projection could not place, kept in the draft's own rail (`#272`'s approved design)
+   * rather than dying with the panel that reported it. This is draft state, not panel state: the
+   * operator has to be able to close Distribute, keep editing, and still see what nobody can take.
+   *
+   * Keyed by ticket so a second run over an overlapping selection **replaces** its verdict instead of
+   * double-counting it — the same ticket cannot be both `NO_COVERAGE` and placed.
+   */
+  const [unplaced, setUnplaced] = useState<Map<string, DistributeUnplaced>>(new Map());
 
   const load = useCallback(() => {
     let alive = true;
@@ -117,6 +171,9 @@ export function AssignConsolePage() {
 
   /** Plants already drafted, across every lane — a plant cannot be handed to two engineers. */
   const drafted = useMemo(() => new Set(lanes.flatMap((l) => l.plantIds)), [lanes]);
+
+  /** #276 — the ticked pool rows, folded to distinct plant ids: Distribute's own input unit. */
+  const selectedPlantIds = useMemo(() => [...new Set([...selected].map((k) => k.split(':')[1]))], [selected]);
 
   /**
    * Which plants the column needs an answer for: the focused one, plus every plant already drafted —
@@ -167,14 +224,82 @@ export function AssignConsolePage() {
   const inDraft = useMemo(() => {
     let open = 0;
     let critical = 0;
-    for (const plantId of drafted) {
-      const t = totals.get(plantId);
-      if (!t) continue;
-      open += t.openUnassigned;
-      critical += t.criticalCount;
+    const countedForCritical = new Set<string>();
+    for (const lane of lanes) {
+      for (const plantId of lane.plantIds) {
+        // #276 — a plant Distribute only partly placed here counts its own ticket ids, not the whole
+        // plant's total, or a split site would overcount "in draft" by however much landed elsewhere.
+        const override = lane.ticketOverrides?.[plantId];
+        open += override ? override.length : (totals.get(plantId)?.openUnassigned ?? 0);
+        // Critical count has no per-ticket breakdown on the client (the pool only carries a per-plant
+        // aggregate) — counted once per distinct plant, same as before #276. A plant a strategy split
+        // across two lanes is therefore an approximation here; the review screen's own per-ticket
+        // resolution is what the commit actually acts on.
+        if (!countedForCritical.has(plantId)) {
+          countedForCritical.add(plantId);
+          critical += totals.get(plantId)?.criticalCount ?? 0;
+        }
+      }
     }
     return { open, critical };
-  }, [drafted, totals]);
+  }, [lanes, totals]);
+
+  /**
+   * What the draft has actually placed, at the granularity the draft knows it.
+   *
+   * A lane holding a plant with **no** override has taken that plant *whole*, so every ticket there is
+   * placed even though the ids are not resolved until review — recorded as a plant id. A lane holding
+   * an override has taken exactly those ids and no more.
+   */
+  const placed = useMemo(() => {
+    const wholePlants = new Set<string>();
+    const ticketIds = new Set<string>();
+    for (const lane of lanes) {
+      for (const plantId of lane.plantIds) {
+        const override = lane.ticketOverrides?.[plantId];
+        if (override) for (const id of override) ticketIds.add(id);
+        else wholePlants.add(plantId);
+      }
+    }
+    return { wholePlants, ticketIds };
+  }, [lanes]);
+
+  /**
+   * The rail's live contents — everything the projection could not place that the draft has not since
+   * picked up.
+   *
+   * **Per ticket, not per plant.** The approved design draws Pali Works simultaneously in an
+   * engineer's lane *and* in the rail, which is the real and common case: a plant whose work is
+   * partly coverable and partly not. Filtering the rail by "is this plant drafted anywhere" would
+   * erase exactly that row. Placing work by hand still clears it, because a hand-drafted plant is
+   * taken whole (R2 — the operator may always overrule the projection).
+   *
+   * Derived rather than stored, so it self-corrects as the operator edits: removing a chip puts its
+   * unplaceable work back on the rail without Distribute having to be re-run.
+   */
+  const unplacedVisible = useMemo(
+    () =>
+      [...unplaced.values()].filter(
+        (u) => !placed.wholePlants.has(u.plantId) && !placed.ticketIds.has(u.ticketId),
+      ),
+    [unplaced, placed],
+  );
+
+  /**
+   * One chip per (plant, reason) — the design's own grouping. Two reasons at one plant stay two
+   * chips: they are different failures and merging them would hide a coverage gap behind a
+   * readiness one. Busiest first, then by plant, so the order is stable across re-renders.
+   */
+  const unplacedGroups = useMemo(() => {
+    const groups = new Map<string, { plantId: string; reason: DistributeUnplaced['reason']; count: number }>();
+    for (const u of unplacedVisible) {
+      const key = `${u.plantId}:${u.reason}`;
+      const row = groups.get(key) ?? { plantId: u.plantId, reason: u.reason, count: 0 };
+      row.count += 1;
+      groups.set(key, row);
+    }
+    return [...groups.values()].sort((a, b) => b.count - a.count || a.plantId.localeCompare(b.plantId));
+  }, [unplacedVisible]);
 
   const openTotal = view?.totals.openUnassigned ?? 0;
 
@@ -198,6 +323,7 @@ export function AssignConsolePage() {
   ];
 
   const matches = (company: string, plant: AssignablePlantRow) => {
+    if (criticalOnly && plant.criticalCount === 0) return false;
     const term = search.trim().toLowerCase();
     if (!term) return true;
     return company.toLowerCase().includes(term) || plant.plantName.toLowerCase().includes(term);
@@ -261,38 +387,170 @@ export function AssignConsolePage() {
   };
 
   /**
-   * Commit: one `apiAssignPlants` per lane, sequentially, reporting per lane.
+   * #276 — merge a Distribute projection into the draft. It is a starting point, not a commit (R2):
+   * the operator can still move chips, add plants, or drop a lane before ever reviewing. Reuses the
+   * engineer's existing lane exactly as {@link assignCandidate} does — a second lane for one engineer
+   * would split their load and make the `→ after / cap` figure on each row a lie.
    *
-   * Deliberately the **existing** endpoint — #275 replaces it with a transactional `assign-batch`,
-   * and blocking a usable console on that rewrite would leave the seven scattered surfaces as the only
-   * way to assign for another two slices. The per-lane result shape is already what `assign-batch`
-   * returns, so the swap is behind this function.
-   *
-   * Lanes are independent: one failing does not report the others as failed, and does not stop them.
-   * That is the honest reading of a per-engineer write, and it is what #275 formalises.
+   * A plant a strategy handed over **whole** (its ticket ids match the pool's full assignable set)
+   * needs no override — it behaves exactly like a manually-drafted plant, resolved fresh at review
+   * time. A plant it only **partly** placed (`CAPACITY_HEADROOM` splitting a busy site, or a second
+   * lane also drafted into the same plant) keeps its explicit ticket ids so the review screen commits
+   * precisely what was projected, not the whole plant.
    */
-  const commit = async () => {
-    setCommitting(true);
-    const out: { seId: string; ok: boolean; assigned: number; message?: string }[] = [];
-    for (const lane of lanes) {
-      if (!lane.seId || lane.plantIds.length === 0) continue;
-      try {
-        const summary = await apiAssignPlants(lane.seId, lane.plantIds);
-        out.push({ seId: lane.seId, ok: true, assigned: summary.assigned });
-      } catch {
-        out.push({ seId: lane.seId, ok: false, assigned: 0, message: 'Assignment failed for this engineer' });
+  const addDistributeResultToDraft = (result: DistributeResult) => {
+    let created = 0;
+    setLanes((prev) => {
+      let next = [...prev];
+      let cursor = nextLaneId;
+      for (const dLane of result.lanes) {
+        for (const stop of dLane.plants) {
+          const wholePlant = stop.ticketIds.length === (totals.get(stop.plantId)?.openUnassigned ?? -1);
+          const existingIdx = next.findIndex((l) => l.seId === dLane.seId);
+          const emptyIdx = existingIdx === -1 ? next.findIndex((l) => !l.seId && l.plantIds.length === 0) : -1;
+          const targetIdx = existingIdx !== -1 ? existingIdx : emptyIdx;
+
+          const applyTo = (lane: Lane): Lane => {
+            const plantIds = lane.plantIds.includes(stop.plantId) ? lane.plantIds : [...lane.plantIds, stop.plantId];
+            const overrides = wholePlant
+              ? lane.ticketOverrides
+              : { ...lane.ticketOverrides, [stop.plantId]: stop.ticketIds };
+            return { ...lane, seId: dLane.seId, plantIds, ticketOverrides: overrides };
+          };
+
+          if (targetIdx !== -1) {
+            next = next.map((l, i) => (i === targetIdx ? applyTo(l) : l));
+          } else {
+            next = [...next, applyTo({ id: cursor, seId: '', plantIds: [] })];
+            cursor += 1;
+            created += 1;
+          }
+        }
       }
-    }
-    setResults(out);
+      return next;
+    });
+    if (created > 0) setNextLaneId((n) => n + created);
+    // #276 required-change 4 — the unplaced remainder moves into the draft's rail with the lanes, in
+    // the same action, instead of dying with the panel that reported it. Keyed by ticket, so a second
+    // run over an overlapping selection replaces its earlier verdict rather than double-counting it.
+    // Nothing is removed here: {@link unplacedVisible} filters against the live draft, so a ticket
+    // this run placed drops off the rail on its own — and comes back if the operator undoes it.
+    setUnplaced((prev) => {
+      const next = new Map(prev);
+      for (const u of result.unplaced) next.set(u.ticketId, u);
+      return next;
+    });
+    setDistributing(false);
+  };
+
+  /** Drop the draft *and* the rail: both describe a projection the operator has just abandoned. */
+  const clearDraft = () => {
     setLanes([{ id: nextLaneId, seId: '', plantIds: [] }]);
-    setCommitting(false);
-    load();
+    setUnplaced(new Map());
   };
 
   const engineerName = (seId: string) => engineers.find((e) => e.engineerId === seId)?.name ?? seId;
   const plantName = (plantId: string) =>
     view?.companies.flatMap((c) => c.plants).find((p) => p.plantId === plantId)?.plantName ?? `Plant ${plantId}`;
   const readyLanes = lanes.filter((l) => l.seId && l.plantIds.length > 0);
+
+  /**
+   * Resolve each ready lane's drafted plants into the ticket ids the commit will actually move, then
+   * hand the diff to the review screen (#275). Nothing is written here — #272 R2 holds until
+   * {@link commitBatch}; this is a read, same as the pool and candidate reads already are.
+   */
+  const openReview = async () => {
+    setReviewing(true);
+    setBatchResults(null);
+    try {
+      const built: ReviewLane[] = [];
+      for (const lane of readyLanes) {
+        // #276 — a plant Distribute placed only part of keeps its explicit ticket ids; only the
+        // plants with no override (every manually-built lane, and any Distribute handed whole) go
+        // through the whole-plant resolver.
+        const toResolve = lane.plantIds.filter((id) => !lane.ticketOverrides?.[id]);
+        const resolved = await apiAssignableTickets(toResolve);
+        const ticketIds = [
+          ...resolved.flatMap((r) => r.ticketIds),
+          ...lane.plantIds.flatMap((id) => lane.ticketOverrides?.[id] ?? []),
+        ];
+        const eng = engineers.find((e) => e.engineerId === lane.seId);
+        const committed = eng?.committed ?? 0;
+        const criticalCount = lane.plantIds.reduce((n, id) => n + (totals.get(id)?.criticalCount ?? 0), 0);
+        built.push({
+          seId: lane.seId,
+          engineerName: engineerName(lane.seId),
+          plantNames: lane.plantIds.map(plantName),
+          ticketIds,
+          criticalCount,
+          coverage: laneCoverage(lane.seId, lane.plantIds, candidateView, plantName),
+          committed,
+          after: committed + ticketIds.length,
+          dailyCapacity: typeof eng?.dailyCapacity === 'number' ? eng.dailyCapacity : null,
+        });
+      }
+      setReviewLanes(built);
+    } catch {
+      setError('Failed to build the review — try again');
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  /** The one write (#275) — `assign-batch`, one transaction per lane, one result row per lane. */
+  const commitBatch = async (reasonCode: string) => {
+    if (!reviewLanes) return;
+    setCommitting(true);
+    try {
+      const out = await apiAssignBatch(
+        reasonCode,
+        reviewLanes.map((l) => ({ seId: l.seId, ticketIds: l.ticketIds })),
+      );
+      setBatchResults(out.lanes);
+      setLanes([{ id: nextLaneId, seId: '', plantIds: [] }]);
+      // The rail described a projection over the pre-commit pool; that pool has just moved. Keeping
+      // it would leave stale "nobody can take this" claims on screen beside a freshly reloaded pool.
+      setUnplaced(new Map());
+      load();
+    } catch {
+      setError('Commit failed before any lane result came back — check the audit trail before retrying.');
+    } finally {
+      setCommitting(false);
+    }
+  };
+
+  const backToDraft = () => {
+    setReviewLanes(null);
+    setBatchResults(null);
+  };
+
+  if (reviewLanes) {
+    return (
+      <div>
+        <PageHeader
+          title="Assign work"
+          subtitle="The last screen before anything is written — a diff, not a confirmation dialog."
+        />
+        {error && (
+          <p role="alert" className="mb-4 text-sm text-critical">
+            {error}
+          </p>
+        )}
+        <ReviewCommitScreen
+          lanes={reviewLanes}
+          stillUnassignedAfter={Math.max(0, openTotal - reviewLanes.reduce((n, l) => n + l.ticketIds.length, 0))}
+          // #276 — of what is left after this commit, how much nobody in the selection can take. The
+          // rail's own live count, so the review screen and the draft cannot disagree about it.
+          noEligibleEngineerCount={unplacedVisible.length}
+          committing={committing}
+          results={batchResults}
+          onBack={backToDraft}
+          onCommit={commitBatch}
+          onTicketResolved={load}
+        />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -324,6 +582,24 @@ export function AssignConsolePage() {
             placeholder="Search company or plant…"
             aria-label="Search the work pool"
           />
+
+          {/* #277 — the Critical+ preset that absorbs the orphaned `CriticalQueue` grouping. */}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              data-testid="filter-critical-plus"
+              aria-pressed={criticalOnly}
+              onClick={() => setCriticalOnly((v) => !v)}
+              className={cn(
+                'rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+                criticalOnly
+                  ? 'border-critical bg-critical-bg text-critical'
+                  : 'border-line bg-surface-raised text-ink-muted hover:text-ink-strong',
+              )}
+            >
+              Critical+
+            </button>
+          </div>
 
           <div className="mt-3 space-y-4">
             {(view?.companies ?? []).map((company) => {
@@ -401,6 +677,13 @@ export function AssignConsolePage() {
             {view && view.companies.length === 0 && (
               <p className="text-sm text-ink-muted">Nothing unassigned in your scope right now.</p>
             )}
+            {view &&
+              view.companies.length > 0 &&
+              view.companies.every((c) => c.plants.every((p) => !matches(c.companyName, p))) && (
+                <p className="text-sm text-ink-muted">
+                  {criticalOnly ? 'No CRITICAL+ work in scope.' : 'Nothing matches this search.'}
+                </p>
+              )}
           </div>
         </section>
 
@@ -446,7 +729,10 @@ export function AssignConsolePage() {
                       committed={eng.committed ?? 0}
                       after={
                         (eng.committed ?? 0) +
-                        lane.plantIds.reduce((n, id) => n + (totals.get(id)?.openUnassigned ?? 0), 0)
+                        lane.plantIds.reduce(
+                          (n, id) => n + (lane.ticketOverrides?.[id]?.length ?? totals.get(id)?.openUnassigned ?? 0),
+                          0,
+                        )
                       }
                       dailyCapacity={typeof eng.dailyCapacity === 'number' ? eng.dailyCapacity : null}
                     />
@@ -455,6 +741,7 @@ export function AssignConsolePage() {
                   <div className="mt-2 flex flex-wrap gap-1">
                     {lane.plantIds.map((plantId) => {
                       const t = totals.get(plantId);
+                      const override = lane.ticketOverrides?.[plantId];
                       const name =
                         view?.companies.flatMap((c) => c.plants).find((p) => p.plantId === plantId)?.plantName ??
                         `Plant ${plantId}`;
@@ -465,7 +752,11 @@ export function AssignConsolePage() {
                           className="inline-flex items-center gap-1 rounded-full bg-surface-sunken px-2 py-0.5 text-[11px]"
                         >
                           {formatPlantDisplayName(name)}
-                          <span className="tabular-nums text-ink-muted">×{t?.openUnassigned ?? 0}</span>
+                          <span className="tabular-nums text-ink-muted">
+                            ×{override ? override.length : (t?.openUnassigned ?? 0)}
+                            {/* #276 — a strategy that only handed part of this plant's work here, said out loud. */}
+                            {override && ` of ${t?.openUnassigned ?? '?'}`}
+                          </span>
                           <button
                             type="button"
                             aria-label={`Remove ${name} from lane ${lane.id}`}
@@ -494,27 +785,72 @@ export function AssignConsolePage() {
             <Button size="sm" variant="ghost" onClick={addLane}>
               + Add engineer lane
             </Button>
-          </div>
 
-          {results && (
-            <div className="mt-3 space-y-1" data-testid="commit-results">
-              {results.map((r) => (
-                <p key={r.seId} data-testid={`result-${r.seId}`} className="text-xs">
-                  <span className="font-medium text-ink-strong">{engineerName(r.seId)}</span>{' '}
-                  {r.ok ? (
-                    <span className="text-success">assigned {r.assigned}</span>
-                  ) : (
-                    <span className="text-critical">{r.message}</span>
-                  )}
+            {/*
+              #276 required-change 4 / the approved design's "No eligible engineer" rail. Work the
+              projection could not place sits **in the draft column**, not in the panel that reported
+              it — a dispatcher who closes Distribute has not solved the coverage gap, and a console
+              that dropped it here would be under-reporting its own residual on the one screen whose
+              job is to answer "what is left".
+
+              Dashed, muted and un-actionable by design: these chips are not draggable and carry no
+              Assign button, because nothing in this selection *can* take them. The fix is coverage or
+              a freed-up engineer, not another click here.
+            */}
+            {unplacedGroups.length > 0 && (
+              <div
+                data-testid="unplaced-rail"
+                className="rounded-md border border-dashed border-critical/60 bg-surface-card p-2"
+              >
+                <div
+                  data-testid="unplaced-rail-total"
+                  className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.08em] text-critical"
+                >
+                  No eligible engineer · {unplacedVisible.length} device{unplacedVisible.length === 1 ? '' : 's'}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {unplacedGroups.map((g) => (
+                    <span
+                      key={`${g.plantId}-${g.reason}`}
+                      data-testid={`unplaced-${g.plantId}-${g.reason}`}
+                      className="inline-flex items-center gap-1 rounded-full border border-dashed border-line-strong px-2 py-0.5 text-[11px] text-ink-muted"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'h-1.5 w-1.5 shrink-0 rounded-full',
+                          g.reason === 'NO_COVERAGE' ? 'bg-critical' : 'bg-warning',
+                        )}
+                      />
+                      {formatPlantDisplayName(plantName(g.plantId))}
+                      <span className="tabular-nums">×{g.count}</span>
+                      <span>· {UNPLACED_REASON_TEXT[g.reason]}</span>
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[11px] text-ink-muted">
+                  Not in the draft and not committed. “No coverage” means none of the engineers you chose
+                  covers that plant; “all dropped” means they do and every one failed a readiness check.
                 </p>
-              ))}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </section>
 
         {/* ---------------- Candidates (#274) ---------------- */}
         <CandidateColumn plant={focusedCandidates} loading={candidatesLoading} onAssign={assignCandidate} />
       </div>
+
+      {distributing && (
+        <DistributePanel
+          plantIds={selectedPlantIds}
+          plantName={plantName}
+          engineers={engineers}
+          resolveTicketIds={async (ids) => (await apiAssignableTickets(ids)).flatMap((r) => r.ticketIds)}
+          onAddToDraft={addDistributeResultToDraft}
+          onClose={() => setDistributing(false)}
+        />
+      )}
 
       <footer className="mt-4 flex flex-wrap items-center gap-2 rounded-card border border-line bg-surface-card p-3 text-sm">
         <span>
@@ -525,13 +861,21 @@ export function AssignConsolePage() {
           <Button
             size="sm"
             variant="ghost"
-            disabled={drafted.size === 0}
-            onClick={() => setLanes([{ id: nextLaneId, seId: '', plantIds: [] }])}
+            disabled={selectedPlantIds.length === 0}
+            onClick={() => setDistributing(true)}
+          >
+            Distribute across selected engineers…
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={drafted.size === 0 && unplacedVisible.length === 0}
+            onClick={clearDraft}
           >
             Clear draft
           </Button>
-          <Button size="sm" disabled={readyLanes.length === 0 || committing} loading={committing} onClick={() => void commit()}>
-            Commit
+          <Button size="sm" disabled={readyLanes.length === 0 || reviewing} loading={reviewing} onClick={() => void openReview()}>
+            Review &amp; commit
           </Button>
         </span>
       </footer>

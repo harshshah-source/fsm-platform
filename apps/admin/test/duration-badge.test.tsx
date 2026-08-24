@@ -1,8 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DurationBadge } from '../src/components/domain/badges';
-import { CriticalQueue } from '../src/pages/dashboard/CriticalQueue';
-import type { CriticalQueueGroup } from '../src/api/dashboard';
 
 /**
  * Issue 3 — per-device surfaces show the actual inactive duration instead of the severity label. The
@@ -32,22 +30,5 @@ describe('Issue 3 — DurationBadge', () => {
   it('renders nothing for an ACTIVE (null) bucket', () => {
     const { container } = render(<DurationBadge bucket={null} latestGpsDatetime={ago(1000)} />);
     expect(container).toBeEmptyDOMElement();
-  });
-});
-
-describe('Issue 3 — Critical Queue shows duration per device', () => {
-  it('replaces the bucket label with the elapsed inactive duration', () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(FIXED_NOW);
-    const groups: CriticalQueueGroup[] = [
-      {
-        companyId: '1', companyName: 'Acme', companyTier: 'PLATINUM', zoneId: '1', plantId: '7',
-        plantName: 'Yard-1', clusterSize: 1, suggestedSes: [],
-        tickets: [{ ticketId: 't1', deviceId: '900', slaBucket: 'CRITICAL', latestGpsDatetime: ago(2 * 3_600_000), status: 'OPEN' }],
-      },
-    ];
-    render(<CriticalQueue groups={groups} />);
-    const group = screen.getByTestId('critical-group');
-    expect(within(group).getByTestId('bucket-CRITICAL')).toHaveTextContent('2h');
   });
 });

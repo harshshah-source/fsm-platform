@@ -10,6 +10,7 @@ import { DispatchScheduleService } from '../src/scheduling/dispatch-schedule.ser
 import { OverrideService } from '../src/scheduling/override.service';
 import { AssignableWorkQueryService } from '../src/scheduling/assignable-work-query.service';
 import { CandidateQueryService } from '../src/scheduling/candidate-query.service';
+import { DistributeProjectionService } from '../src/scheduling/distribute-projection.service';
 import { SchedulerPreviewService } from '../src/scheduling/scheduler-preview.service';
 import { SchedulesController } from '../src/scheduling/schedules.controller';
 import { ZmScheduleQueryService } from '../src/scheduling/zm-schedule-query.service';
@@ -17,15 +18,16 @@ import { ZmScheduleQueryService } from '../src/scheduling/zm-schedule-query.serv
 describe('Schedules route matching (e2e)', () => {
   let app: INestApplication;
   const dayPlan = { getDayPlan: vi.fn() };
-  const override = { assignTicket: vi.fn() };
+  const override = { assignTicket: vi.fn(), assignBatch: vi.fn() };
   const zm = {
     listSchedules: vi.fn(),
     listZoneEngineers: vi.fn(),
     getScheduleDetail: vi.fn(),
   };
   const dispatchSchedule = { current: vi.fn(), setCron: vi.fn() };
-  const assignableWork = { listForScope: vi.fn() };
+  const assignableWork = { listForScope: vi.fn(), ticketIdsForPlants: vi.fn() };
   const candidateQuery = { listForPlants: vi.fn() };
+  const distribute = { project: vi.fn() };
 
   const authGuard: CanActivate = {
     canActivate(context: ExecutionContext): boolean {
@@ -67,6 +69,10 @@ describe('Schedules route matching (e2e)', () => {
         // while the run summary said "1 failed" — a line easy to read as the known #184 worker crash.
         // It shipped. The route assertion below now exists so the file has something to fail *with*.
         { provide: CandidateQueryService, useValue: candidateQuery },
+        // #276 — same trap, sixth time: a constructor dependency added to the controller without a
+        // matching provider here throws in `beforeAll` and the file reports every test skipped rather
+        // than failed, which reads as green from a distance.
+        { provide: DistributeProjectionService, useValue: distribute },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -182,4 +188,104 @@ describe('Schedules route matching (e2e)', () => {
     expect(zm.getScheduleDetail).not.toHaveBeenCalled();
   });
 
+  /** #275 — `assignable-tickets` is the fifth literal path on a controller that also has `GET :engineerId`. */
+  it('routes GET /api/schedules/assignable-tickets to the resolver handler, not :engineerId', async () => {
+    assignableWork.ticketIdsForPlants.mockResolvedValue([{ plantId: '20', ticketIds: ['t1', 't2'] }]);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/schedules/assignable-tickets?plantIds=20')
+      .expect(200);
+
+    expect(res.body).toEqual([{ plantId: '20', ticketIds: ['t1', 't2'] }]);
+    expect(assignableWork.ticketIdsForPlants).toHaveBeenCalledTimes(1);
+    expect(assignableWork.ticketIdsForPlants.mock.calls[0][1]).toEqual([20n]);
+    expect(zm.getScheduleDetail).not.toHaveBeenCalled();
+  });
+
+  describe('#276 — POST /api/schedules/distribute-preview validation', () => {
+    it('rejects a missing ticket/engineer selection or an unknown strategy', async () => {
+      await request(app.getHttpServer())
+        .post('/api/schedules/distribute-preview')
+        .send({ engineerIds: ['se-1'], strategy: 'COVERAGE_TIER' })
+        .expect(400);
+      await request(app.getHttpServer())
+        .post('/api/schedules/distribute-preview')
+        .send({ ticketIds: ['t-1'], strategy: 'COVERAGE_TIER' })
+        .expect(400);
+      await request(app.getHttpServer())
+        .post('/api/schedules/distribute-preview')
+        .send({ ticketIds: ['t-1'], engineerIds: ['se-1'], strategy: 'MADE_UP' })
+        .expect(400);
+      expect(distribute.project).not.toHaveBeenCalled();
+    });
+
+    it('forwards a valid request to the service unchanged', async () => {
+      distribute.project.mockResolvedValue({ strategy: 'COVERAGE_TIER', targetDate: '2026-06-24', lanes: [], unplaced: [], overCapacitySeIds: [] });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/schedules/distribute-preview')
+        .send({ ticketIds: ['t-1'], engineerIds: ['se-1'], strategy: 'COVERAGE_TIER' })
+        .expect(200);
+
+      expect(res.body.strategy).toBe('COVERAGE_TIER');
+      expect(distribute.project).toHaveBeenCalledWith(
+        ['t-1'],
+        ['se-1'],
+        'COVERAGE_TIER',
+        { role: 'ZONAL_MANAGER', zoneId: 1 },
+      );
+    });
+  });
+
+  describe('#275 — POST /api/schedules/assign-batch validation', () => {
+    it('rejects a missing or blank reasonCode', async () => {
+      await request(app.getHttpServer())
+        .post('/api/schedules/assign-batch')
+        .send({ lanes: [{ seId: 'se-1', ticketIds: ['t1'] }] })
+        .expect(400);
+      await request(app.getHttpServer())
+        .post('/api/schedules/assign-batch')
+        .send({ reasonCode: '   ', lanes: [{ seId: 'se-1', ticketIds: ['t1'] }] })
+        .expect(400);
+      expect(override.assignBatch).not.toHaveBeenCalled();
+    });
+
+    it('rejects an empty or malformed lane list', async () => {
+      await request(app.getHttpServer())
+        .post('/api/schedules/assign-batch')
+        .send({ reasonCode: 'why', lanes: [] })
+        .expect(400);
+      await request(app.getHttpServer())
+        .post('/api/schedules/assign-batch')
+        .send({ reasonCode: 'why', lanes: [{ seId: 'se-1', ticketIds: [] }] })
+        .expect(400);
+      expect(override.assignBatch).not.toHaveBeenCalled();
+    });
+
+    it('trims the reason and forwards the lanes unchanged to the service', async () => {
+      override.assignBatch.mockResolvedValue({ lanes: [{ seId: 'se-1', result: 'OK', assigned: 1, alreadyAssigned: 0, skipped: [], batchIds: ['1'] }] });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/schedules/assign-batch')
+        .send({ reasonCode: '  why this plan  ', lanes: [{ seId: 'se-1', ticketIds: ['t1'] }] })
+        .expect(200);
+
+      expect(res.body.lanes[0]).toMatchObject({ seId: 'se-1', result: 'OK', assigned: 1 });
+      // The actor is now the request's resolved `RequestActor` rather than a hand-built subset, so it
+      // also carries `actingZone` — null here, because this request sends no `X-Acting-As-Zone`. The
+      // attribution values themselves are unchanged for a non-acting caller, which is the guarantee
+      // that made the change safe; `assign-batch-acting-scope.e2e-spec.ts` pins the acting case.
+      expect(override.assignBatch).toHaveBeenCalledWith(
+        [{ seId: 'se-1', ticketIds: ['t1'] }],
+        'why this plan',
+        { role: 'ZONAL_MANAGER', zoneId: 1 },
+        {
+          userId: '11111111-1111-1111-1111-111111111111',
+          role: 'ZONAL_MANAGER',
+          actedAsRole: null,
+          actingZone: null,
+        },
+      );
+    });
+  });
 });

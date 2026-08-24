@@ -128,7 +128,7 @@ Read directly, not inferred. Re-verifying these wastes a session:
 ## Open, and deliberately not ruled here
 
 Three calls raised in the design and left to the operator. None blocks #273; each is answered before
-the issue that needs it. **One of the three is now ruled** — see Q2.
+the issue that needs it. **Two of the three are now ruled** — see Q2, Q3.
 
 1. **Does the console replace the Device Detail panel, or sit beside it?** Recommendation on file:
    the panel stays as a shortcut that deep-links into the console pre-scoped to that device's plant.
@@ -138,6 +138,8 @@ the issue that needs it. **One of the three is now ruled** — see Q2.
    resumable draft was considered and rejected for v1 — it needs its own table, an owner, and a
    reconciliation rule for when the underlying tickets move out from under it. #273 builds to this;
    do not invent persistence.
-3. **Does the Zonal Manager get Distribute, or only OH + CSM?** The existing ladder already splits
-   preview/holds (all managers) from `dispatch-run` (OH + CSM); Distribute is closer to a dispatch
-   run than to a single assignment. Needed before #276.
+3. ~~**Does the Zonal Manager get Distribute, or only OH + CSM?**~~ **RULED 2026-08-24 (operator):
+   all managers** — same `MANAGER_ROLES` ladder as preview/holds and the console's own draft/commit
+   (#273/#275), not the narrower `dispatch-run` (OH + CSM) ladder the issue text raised as the closer
+   precedent. A ZM may distribute work across their own zone's engineers in one pass, same as they can
+   already commit a hand-built multi-engineer plan through #275. #276 builds to this.

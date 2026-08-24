@@ -48,12 +48,19 @@ export async function committedDayLoad(
   return load;
 }
 
-/** One SE's committed day, as both figures the run needs: how much, and where. */
+/** One SE's committed day, as the figures the run needs: how much, where, and where they are now. */
 export interface CommittedDayEntry {
   /** Live day-plan stops — the figure {@link committedDayLoad} returns and `daily_capacity` caps. */
   count: number;
   /** The distinct plants those stops are at, as `plant_id` strings. */
   plants: Set<string>;
+  /**
+   * #267 — the plant of the SE's LAST (highest `stop_sequence`) live stop today, as a `plant_id`
+   * string, or `null` with no live stop. `distance`'s `currentPos` seed: an SE mid-route continues
+   * from where their existing plan leaves off, not from their home base. Free — the same rows this
+   * function already reads for `count`/`plants`, no second query.
+   */
+  lastStopPlantId: string | null;
 }
 
 /**
@@ -84,13 +91,19 @@ export async function committedDayPlan(
         schedule: { ...liveScheduleFilter(), dateFrom: { lte: target }, dateTo: { gte: target } },
       },
     },
-    select: { batch: { select: { seId: true, plantId: true } } },
+    select: { batch: { select: { seId: true, plantId: true, stopSequence: true } } },
   });
   const plan = new Map<string, CommittedDayEntry>();
+  const maxStopSeen = new Map<string, number>();
   for (const r of rows) {
-    const entry = plan.get(r.batch.seId) ?? { count: 0, plants: new Set<string>() };
+    const entry = plan.get(r.batch.seId) ?? { count: 0, plants: new Set<string>(), lastStopPlantId: null };
     entry.count += 1;
     entry.plants.add(String(r.batch.plantId));
+    const seenMax = maxStopSeen.get(r.batch.seId) ?? -1;
+    if (r.batch.stopSequence > seenMax) {
+      maxStopSeen.set(r.batch.seId, r.batch.stopSequence);
+      entry.lastStopPlantId = String(r.batch.plantId);
+    }
     plan.set(r.batch.seId, entry);
   }
   return plan;

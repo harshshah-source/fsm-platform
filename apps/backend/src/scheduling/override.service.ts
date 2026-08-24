@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { assignableTickets } from '../ticketing/assignable-work';
 import { isNotDeferredOn, notDeferredOn } from '../ticketing/deferral';
 import { DAY_PLAN_NOTIFIER, DayPlanNotifier } from './day-plan-notifier';
+import { drainRows, queueDayPlanOverridden } from './day-plan-notification-outbox';
 import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
 import {
@@ -75,6 +76,54 @@ export interface PlantAssignSummary {
   alreadyAssigned: number;
   perPlant: { plantId: string; assigned: number; openUnassigned: number }[];
 }
+
+/** One (engineer, tickets) unit of an `assign-batch` commit (#275). */
+export interface AssignBatchLane {
+  seId: string;
+  ticketIds: string[];
+}
+
+/** Why a ticket in a lane was not written — reported per ticket, never folded into a bare count. */
+export type AssignBatchSkipReason = 'NOT_FOUND' | 'OUT_OF_ZONE' | 'CONFLICT_DEFERRED' | 'LOST_RACE';
+
+/**
+ * One lane's outcome. `assigned`/`alreadyAssigned` are counts (matching {@link PlantAssignSummary}'s
+ * vocabulary); `skipped` is itemised because a bare count cannot tell an operator *which* ticket needs
+ * a second look (#275 required-change #1). `batchIds` is plural — the issue text names a singular
+ * `batchId`, but a lane routinely spans more than one plant (every console lane can), and each plant is
+ * its own `plant_batch_assignments` row; collapsing that to one id would be wrong on the common case,
+ * not just the edge case.
+ */
+export interface AssignBatchLaneResult {
+  seId: string;
+  result: 'OK' | 'SE_NOT_FOUND' | 'LANE_FAILED';
+  assigned: number;
+  alreadyAssigned: number;
+  skipped: { ticketId: string; reason: AssignBatchSkipReason }[];
+  scheduleId?: string;
+  batchIds: string[];
+}
+
+export interface AssignBatchResult {
+  lanes: AssignBatchLaneResult[];
+}
+
+/**
+ * Ticket-itemised shape {@link assignBatch} and the {@link OverrideService.assignPlants} shorthand
+ * both build on — the one place lane semantics live, so the two public shapes cannot drift apart.
+ */
+type LaneDetail =
+  | { seId: string; ok: false; reason: 'SE_NOT_FOUND' }
+  | {
+      seId: string;
+      ok: true;
+      assignedTicketIds: string[];
+      assignedPlantIds: Map<string, bigint>;
+      alreadyAssignedTicketIds: string[];
+      skipped: { ticketId: string; reason: AssignBatchSkipReason }[];
+      scheduleId: bigint | undefined;
+      batchIds: bigint[];
+    };
 
 type BatchWithSchedule = Prisma.PlantBatchAssignmentGetPayload<{ include: { schedule: true } }>;
 
@@ -194,8 +243,9 @@ export class OverrideService {
     });
     if (!bat) return { result: 'NOT_FOUND' };
 
+    let outboxId: bigint;
     try {
-      await this.audit.withAudit(
+      outboxId = await this.audit.withAudit(
         this.auditEntry(actor, batchId, {
           action: cmd.action,
           ticketId: cmd.ticketId,
@@ -219,6 +269,9 @@ export class OverrideService {
           // Returned to the Shared Pool — no longer a Formal Assignment.
           await tx.ticket.update({ where: { ticketId: cmd.ticketId }, data: { assignmentState: 'UNASSIGNED' } });
           await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
+          // #264 — written inside this same transaction: a withdrawal that rolls back leaves no ghost
+          // "Day Plan updated" outbox row.
+          return queueDayPlanOverridden(tx, { seId, scheduleId, batchId, action: cmd.action });
         },
       );
     } catch (e: unknown) {
@@ -227,7 +280,7 @@ export class OverrideService {
       throw e;
     }
 
-    await this.notifier.dayPlanOverridden({ seId, scheduleId, batchId, action: cmd.action });
+    await drainRows(this.prisma, this.notifier, [outboxId], now);
     return { result: 'OK', batchId: String(batchId), scheduleId: String(scheduleId), seId, status: 'OVERRIDDEN' };
   }
 
@@ -244,8 +297,9 @@ export class OverrideService {
     });
     if (!bat) return { result: 'NOT_FOUND' };
 
+    let outboxId: bigint;
     try {
-      await this.audit.withAudit(
+      outboxId = await this.audit.withAudit(
       this.auditEntry(actor, batchId, {
         action: cmd.action,
         ticketId: cmd.ticketId,
@@ -287,6 +341,7 @@ export class OverrideService {
           data: { assignmentState: 'UNASSIGNED', deferredUntil: new Date(cmd.deferredToDate) },
         });
         await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
+        return queueDayPlanOverridden(tx, { seId, scheduleId, batchId, action: cmd.action });
       },
       );
     } catch (e: unknown) {
@@ -294,7 +349,7 @@ export class OverrideService {
       throw e;
     }
 
-    await this.notifier.dayPlanOverridden({ seId, scheduleId, batchId, action: cmd.action });
+    await drainRows(this.prisma, this.notifier, [outboxId], now);
     return { result: 'OK', batchId: String(batchId), scheduleId: String(scheduleId), seId, status: 'OVERRIDDEN' };
   }
 
@@ -320,7 +375,7 @@ export class OverrideService {
     const ordered = [...others];
     ordered.splice(pos - 1, 0, target);
 
-    await this.audit.withAudit(
+    const outboxId = await this.audit.withAudit(
       this.auditEntry(actor, batchId, { action: cmd.action, stopSequence: pos, reasonCode: cmd.reasonCode, seId }, auditAction),
       async (tx) => {
         for (let i = 0; i < ordered.length; i++) {
@@ -330,10 +385,11 @@ export class OverrideService {
           });
         }
         await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
+        return queueDayPlanOverridden(tx, { seId, scheduleId, batchId, action: cmd.action });
       },
     );
 
-    await this.notifier.dayPlanOverridden({ seId, scheduleId, batchId, action: cmd.action });
+    await drainRows(this.prisma, this.notifier, [outboxId], now);
     return { result: 'OK', batchId: String(batchId), scheduleId: String(scheduleId), seId, status: 'OVERRIDDEN' };
   }
 
@@ -427,7 +483,7 @@ export class OverrideService {
     // this condition. It cannot be caught *inside* the block below either — a P2002 aborts the whole
     // Postgres transaction — so the recovery wraps the call and lets the rollback do its work, which
     // is also what stops `withAudit` leaving an audit row for an assignment that never happened.
-    let ids: { scheduleId: bigint; batchId: bigint };
+    let ids: { scheduleId: bigint; batchId: bigint; outboxId: bigint };
     const commit = () =>
       this.audit.withAudit(
         {
@@ -469,7 +525,10 @@ export class OverrideService {
             data: { assignmentState: 'FORMALLY_ASSIGNED', deferredUntil: null },
           });
           if (insertAtTop) await this.moveBatchToTop(tx, sched.scheduleId, batch.batchId);
-          return { scheduleId: sched.scheduleId, batchId: batch.batchId };
+          // #264 — written inside this same transaction as everything above: a retried/rolled-back
+          // attempt (the P2002 recovery below) never leaves a ghost outbox row.
+          const outboxId = await queueDayPlanOverridden(tx, { seId, scheduleId: sched.scheduleId, batchId: batch.batchId, action: auditAction });
+          return { scheduleId: sched.scheduleId, batchId: batch.batchId, outboxId };
         },
       );
 
@@ -484,17 +543,27 @@ export class OverrideService {
       throw e;
     }
 
-    await this.notifier.dayPlanOverridden({ seId, scheduleId: ids.scheduleId, batchId: ids.batchId, action: auditAction });
+    await drainRows(this.prisma, this.notifier, [ids.outboxId], now);
     return { result: 'OK', scheduleId: String(ids.scheduleId), batchId: String(ids.batchId), ticketId, seId };
   }
 
   /**
-   * Manual multi-plant SE assignment (Issue 122b, Device Detail page). For each selected plant, every
-   * OPEN + UNASSIGNED ticket is formally assigned to the SE through the exact same {@link assignTicket}
-   * primitive the Critical-Queue one-click and the ZM same-day ADD use — so schedules, plant batches,
-   * stop ordering, audit rows, notifications and the Shared-Pool exit all behave identically to the
-   * system flow. Zone scope is enforced per ticket inside assignTicket (out-of-scope plants contribute
-   * nothing rather than failing the whole batch).
+   * Manual multi-plant SE assignment (Issue 122b, Device Detail page) — a shorthand over
+   * {@link assignBatch} (#275): expands the selected plants to their assignable ticket ids and
+   * delegates to the one write path every manual assign now shares (schedules, plant batches, stop
+   * ordering, audit rows, notifications and the Shared-Pool exit all still run through
+   * {@link assignLane}, the same primitive `assign-batch` uses). `PlantAssignSummary` is unchanged —
+   * the Device Detail panel and Commissioning Cohort keep working against the same response shape
+   * (`assignable-work.e2e-spec.ts` / `issue-122b-fleet-assign.e2e-spec.ts` pin it byte-for-byte).
+   *
+   * **Fold, not itemise, for this legacy shape.** `assignLane` itemises a lost race in `skipped`
+   * rather than folding it into `alreadyAssigned` (#275's own requirement for the new endpoint) — but
+   * `PlantAssignSummary` predates that vocabulary and has no `skipped` field at all. The pre-#275
+   * behaviour counted every `ALREADY_ASSIGNED` outcome (races included) into one number, so a lost
+   * race is folded back into `alreadyAssigned` here to keep the old contract's arithmetic identical.
+   * `NOT_FOUND`/`OUT_OF_ZONE`/`CONFLICT_DEFERRED` stay silently dropped, exactly as the old per-ticket
+   * loop dropped a `NOT_FOUND`/`CONFLICT_DEFERRED` outcome from `assignTicket` — uncounted on either
+   * side, the plant's own "vanished" gap (`openUnassigned − assigned − alreadyAssigned`).
    */
   async assignPlants(
     plantIds: string[],
@@ -507,7 +576,8 @@ export class OverrideService {
     if (!se) return { result: 'SE_NOT_FOUND' };
 
     const ids = plantIds.filter((p) => /^\d+$/.test(p)).map((p) => BigInt(p));
-    const summary: PlantAssignSummary = { seId, assigned: 0, alreadyAssigned: 0, perPlant: [] };
+    const perPlant = new Map<string, { assigned: number; openUnassigned: number }>();
+    const allTicketIds: string[] = [];
 
     for (const plantId of ids) {
       const open = await this.prisma.ticket.findMany({
@@ -524,16 +594,230 @@ export class OverrideService {
         select: { ticketId: true },
         orderBy: { createdAt: 'asc' },
       });
-      let assigned = 0;
-      for (const t of open) {
-        const outcome = await this.assignTicket(t.ticketId, seId, scope, actor, now, 'MANUAL_PLANT_ASSIGN');
-        if (outcome.result === 'OK') assigned += 1;
-        else if (outcome.result === 'ALREADY_ASSIGNED') summary.alreadyAssigned += 1;
-      }
-      summary.assigned += assigned;
-      summary.perPlant.push({ plantId: String(plantId), assigned, openUnassigned: open.length });
+      perPlant.set(String(plantId), { assigned: 0, openUnassigned: open.length });
+      for (const t of open) allTicketIds.push(t.ticketId);
     }
+
+    const buildSummary = (): PlantAssignSummary => ({
+      seId,
+      assigned: 0,
+      alreadyAssigned: 0,
+      perPlant: [...perPlant].map(([plantId, v]) => ({ plantId, ...v })),
+    });
+    if (allTicketIds.length === 0) return buildSummary();
+
+    const detail = await this.assignLane(
+      { seId, ticketIds: allTicketIds },
+      'Manual plant assignment',
+      scope,
+      actor,
+      now,
+      istDate(now),
+      'MANUAL_PLANT_ASSIGN',
+    );
+    if (!detail.ok) return { result: 'SE_NOT_FOUND' };
+
+    for (const ticketId of detail.assignedTicketIds) {
+      const plantId = String(detail.assignedPlantIds.get(ticketId));
+      const row = perPlant.get(plantId);
+      if (row) row.assigned += 1;
+    }
+    const lostRace = detail.skipped.filter((s) => s.reason === 'LOST_RACE').length;
+
+    const summary = buildSummary();
+    summary.assigned = detail.assignedTicketIds.length;
+    summary.alreadyAssigned = detail.alreadyAssignedTicketIds.length + lostRace;
     return summary;
+  }
+
+  /**
+   * `POST /schedules/assign-batch` primitive (#275) — one transaction per lane (see {@link assignLane}),
+   * one result row per lane. A lane that throws — an unexpected error, not one of the honest skip
+   * reasons {@link assignLane} reports — is caught here and reported `LANE_FAILED` without touching the
+   * others; that isolation is the entire point of the per-lane transaction boundary.
+   */
+  async assignBatch(
+    lanes: AssignBatchLane[],
+    reasonCode: string,
+    scope: ZmScope,
+    actor: ActorContext,
+    now: Date = new Date(),
+    auditAction = 'MANUAL_BATCH_ASSIGN',
+  ): Promise<AssignBatchResult> {
+    const day = istDate(now);
+    const results: AssignBatchLaneResult[] = [];
+    for (const lane of lanes) {
+      try {
+        const detail = await this.assignLane(lane, reasonCode, scope, actor, now, day, auditAction);
+        results.push(
+          detail.ok
+            ? {
+                seId: detail.seId,
+                result: 'OK',
+                assigned: detail.assignedTicketIds.length,
+                alreadyAssigned: detail.alreadyAssignedTicketIds.length,
+                skipped: detail.skipped,
+                scheduleId: detail.scheduleId ? String(detail.scheduleId) : undefined,
+                batchIds: detail.batchIds.map(String),
+              }
+            : { seId: detail.seId, result: 'SE_NOT_FOUND', assigned: 0, alreadyAssigned: 0, skipped: [], batchIds: [] },
+        );
+      } catch {
+        results.push({ seId: lane.seId, result: 'LANE_FAILED', assigned: 0, alreadyAssigned: 0, skipped: [], batchIds: [] });
+      }
+    }
+    return { lanes: results };
+  }
+
+  /**
+   * One engineer's slice of a manual plan, in one transaction (#275, matching #262's per-unit shape:
+   * one transaction per SE, not per ticket and not per whole batch). Every ticket is re-read and
+   * re-verified under this same transaction immediately before it is written, so a ticket that changed
+   * state since the caller last looked — assigned by someone else, deferred, moved out of scope — is
+   * caught here rather than trusted from a stale read.
+   *
+   * Deliberately **not** the single-ticket `assignTicket` shape of "insert, catch the unique-violation,
+   * re-read": #265 found that a P2002 aborts the *whole* Postgres transaction, and this transaction is
+   * now shared across every ticket in the lane — one collision would silently roll back every sibling
+   * ticket already written in it. `FOR UPDATE ... SKIP LOCKED` immediately before the write closes the
+   * same race without ever risking that abort: a row currently held by a concurrent writer is simply
+   * invisible to this query, never an error.
+   */
+  private async assignLane(
+    lane: AssignBatchLane,
+    reasonCode: string,
+    scope: ZmScope,
+    actor: ActorContext,
+    now: Date,
+    day: Date,
+    auditAction: string,
+  ): Promise<LaneDetail> {
+    const se = await this.prisma.engineerMaster.findUnique({ where: { engineerId: lane.seId } });
+    if (!se) return { seId: lane.seId, ok: false, reason: 'SE_NOT_FOUND' };
+
+    const assignedTicketIds: string[] = [];
+    const assignedPlantIds = new Map<string, bigint>();
+    const alreadyAssignedTicketIds: string[] = [];
+    const skipped: { ticketId: string; reason: AssignBatchSkipReason }[] = [];
+    const outboxIds: bigint[] = [];
+    let scheduleId: bigint | undefined;
+    const batchIds = new Set<bigint>();
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const ticketId of lane.ticketIds) {
+        const ticket = await tx.ticket.findUnique({ where: { ticketId }, include: { plant: true } });
+        if (!ticket) {
+          skipped.push({ ticketId, reason: 'NOT_FOUND' });
+          continue;
+        }
+        if (!this.inScope(ticket.plant.zoneId, scope)) {
+          skipped.push({ ticketId, reason: 'OUT_OF_ZONE' });
+          continue;
+        }
+        if (ticket.assignmentState === 'FORMALLY_ASSIGNED') {
+          alreadyAssignedTicketIds.push(ticketId);
+          continue;
+        }
+        if (!isNotDeferredOn(ticket.deferredUntil, day)) {
+          skipped.push({ ticketId, reason: 'CONFLICT_DEFERRED' });
+          continue;
+        }
+
+        // Re-verify under lock immediately before writing — closes the gap between the read above and
+        // this write for a genuine concurrent racer (#265's class of defect), without an abort risk.
+        const locked = await tx.$queryRaw<Array<{ assignment_state: string }>>`
+          SELECT assignment_state FROM tickets WHERE ticket_id = ${ticketId}::uuid
+            FOR UPDATE OF tickets SKIP LOCKED`;
+        if (locked.length === 0 || locked[0].assignment_state === 'FORMALLY_ASSIGNED') {
+          // Either a concurrent writer holds this exact row right now (SKIP LOCKED made it invisible),
+          // or they finished first between our read and this lock. Either way: lost the race, reported
+          // — never a silent skip and never the 500 an unguarded insert would have risked.
+          skipped.push({ ticketId, reason: 'LOST_RACE' });
+          continue;
+        }
+
+        const sched = await this.ensureSchedule(tx, lane.seId, { zoneId: ticket.plant.zoneId, dateFrom: day, dateTo: day }, now);
+        scheduleId = sched.scheduleId;
+        let batch = await tx.plantBatchAssignment.findFirst({
+          where: { scheduleId: sched.scheduleId, plantId: ticket.plantId, seId: lane.seId },
+        });
+        if (!batch) {
+          batch = await tx.plantBatchAssignment.create({
+            data: {
+              scheduleId: sched.scheduleId,
+              plantId: ticket.plantId,
+              seId: lane.seId,
+              status: 'AUTO_ASSIGNED',
+              stopSequence: await this.nextStopSequence(tx, sched.scheduleId),
+            },
+          });
+        }
+        batchIds.add(batch.batchId);
+        await tx.batchAssignmentTicket.create({
+          data: { batchId: batch.batchId, ticketId, sortOrder: await this.nextSortOrder(tx, batch.batchId) },
+        });
+        await tx.ticket.update({
+          where: { ticketId },
+          data: { assignmentState: 'FORMALLY_ASSIGNED', deferredUntil: null },
+        });
+        // Same shape as a single `assignTicket` call — this endpoint adds no new audit semantics for
+        // the per-ticket row; the mandatory reason is recorded once below, for the lane as a whole.
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.userId,
+            actorRole: actor.role,
+            actedAsRole: actor.actedAsRole ?? null,
+            action: auditAction,
+            entityType: 'ticket',
+            entityId: ticketId,
+            metadata: { seId: lane.seId } as Prisma.InputJsonValue,
+          },
+        });
+        const outboxId = await queueDayPlanOverridden(tx, {
+          seId: lane.seId,
+          scheduleId: sched.scheduleId,
+          batchId: batch.batchId,
+          action: auditAction,
+        });
+        outboxIds.push(outboxId);
+        assignedTicketIds.push(ticketId);
+        assignedPlantIds.set(ticketId, ticket.plantId);
+      }
+
+      // The mandatory reason (#275 required-change #1) — one row per lane, separate from each ticket's
+      // own assignment audit row above, so "why this plan was made" is recorded even for a lane that
+      // ended up assigning nothing (every ticket skipped or already done).
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.userId,
+          actorRole: actor.role,
+          actedAsRole: actor.actedAsRole ?? null,
+          action: 'ASSIGN_BATCH_COMMIT',
+          entityType: 'assign_batch_lane',
+          entityId: lane.seId,
+          metadata: {
+            reasonCode,
+            ticketIds: lane.ticketIds,
+            assigned: assignedTicketIds.length,
+            alreadyAssigned: alreadyAssignedTicketIds.length,
+            skipped,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    });
+
+    await drainRows(this.prisma, this.notifier, outboxIds, now);
+
+    return {
+      seId: lane.seId,
+      ok: true,
+      assignedTicketIds,
+      assignedPlantIds,
+      alreadyAssignedTicketIds,
+      skipped,
+      scheduleId,
+      batchIds: [...batchIds],
+    };
   }
 
   private async swapSe(
@@ -548,7 +832,7 @@ export class OverrideService {
     // #265 item 5 (the sweep) — `swapSe` reaches `ensureSchedule` too, so it carried the identical
     // unhandled schedule race: swap two engineers' work at the same moment somebody else assigns to
     // the target, and the swap 500s. Same recovery, same reason.
-    const newScheduleId = await retryOnceOnUniqueViolation('WorkSchedule', () =>
+    const swapped = await retryOnceOnUniqueViolation('WorkSchedule', () =>
       this.audit.withAudit(
         this.auditEntry(actor, batch.batchId, {
           action: cmd.action,
@@ -569,13 +853,14 @@ export class OverrideService {
             where: { scheduleId: batch.scheduleId, ...liveScheduleFilter() },
             data: { status: 'OVERRIDDEN', lastOverriddenBy: actor.userId, lastOverriddenAt: now },
           });
-          return sched.scheduleId;
+          const outboxId = await queueDayPlanOverridden(tx, { seId: cmd.newSeId, scheduleId: sched.scheduleId, batchId: batch.batchId, action: cmd.action });
+          return { scheduleId: sched.scheduleId, outboxId };
         },
       ),
     );
 
-    await this.notifier.dayPlanOverridden({ seId: cmd.newSeId, scheduleId: newScheduleId, batchId: batch.batchId, action: cmd.action });
-    return { result: 'OK', batchId: String(batch.batchId), scheduleId: String(newScheduleId), seId: cmd.newSeId, status: 'OVERRIDDEN' };
+    await drainRows(this.prisma, this.notifier, [swapped.outboxId], now);
+    return { result: 'OK', batchId: String(batch.batchId), scheduleId: String(swapped.scheduleId), seId: cmd.newSeId, status: 'OVERRIDDEN' };
   }
 
   /** Shared mover for REASSIGN (one ticket) and SPLIT_BATCH (a subset): move tickets to a same-plant
@@ -596,11 +881,11 @@ export class OverrideService {
     });
     if (rows.length !== ticketIds.length) return { result: 'NOT_FOUND' };
 
-    let newScheduleId: bigint;
+    let moved: { scheduleId: bigint; outboxId: bigint };
     try {
       // #265 item 5 — and `moveTickets` likewise. A LostRaceError from the guarded stamp below is not
       // a unique violation, so it passes straight through the retry to the catch that answers it.
-      newScheduleId = await retryOnceOnUniqueViolation('WorkSchedule', () =>
+      moved = await retryOnceOnUniqueViolation('WorkSchedule', () =>
         this.audit.withAudit(
           this.auditEntry(actor, batch.batchId, { action, ticketIds, newSeId, reasonCode, fromSeId: batch.seId }),
           async (tx) => {
@@ -637,7 +922,8 @@ export class OverrideService {
               await tx.batchAssignmentTicket.create({ data: { batchId: targetBatch.batchId, ticketId: r.ticketId, sortOrder: sort++ } });
             }
             await this.flagOverridden(tx, batch.batchId, batch.scheduleId, reasonCode, actor, now);
-            return sched.scheduleId;
+            const outboxId = await queueDayPlanOverridden(tx, { seId: newSeId, scheduleId: sched.scheduleId, batchId: batch.batchId, action });
+            return { scheduleId: sched.scheduleId, outboxId };
           },
         ),
       );
@@ -646,7 +932,7 @@ export class OverrideService {
       throw e;
     }
 
-    await this.notifier.dayPlanOverridden({ seId: newSeId, scheduleId: newScheduleId, batchId: batch.batchId, action });
+    await drainRows(this.prisma, this.notifier, [moved.outboxId], now);
     return { result: 'OK', batchId: String(batch.batchId), scheduleId: String(batch.scheduleId), seId: batch.seId, status: 'OVERRIDDEN' };
   }
 

@@ -212,7 +212,7 @@ export function PlannerPage() {
                 const sched = scheduleFor(eng.engineerId);
                 return (
                   <tr key={eng.engineerId} className="border-b border-line align-top last:border-b-0">
-                    <td className="px-3 py-2.5 font-medium text-ink-strong">{eng.engineerId}</td>
+                    <td className="px-3 py-2.5 font-medium text-ink-strong">{eng.name ?? eng.engineerId}</td>
                     <td className="px-3 py-2.5">
                       <Badge tone="neutral">{eng.coverageType}</Badge>
                     </td>

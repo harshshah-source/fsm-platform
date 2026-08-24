@@ -250,6 +250,12 @@ model EngineerMaster {
   shiftStart                   DateTime?    @map("shift_start") @db.Time(6)
   shiftEnd                     DateTime?    @map("shift_end") @db.Time(6)
   preferredNotificationChannel String?      @map("preferred_notification_channel")
+  // #267 — admin-managed home/base (Q6: existing plant coordinates, NO live GPS in Phase 1). Plain
+  // floats, not PostGIS geometry: unlike `plants.location` these need no spatial index, only a
+  // haversine read in the recommender. Nullable — an SE without a home base scores `distance` as
+  // NOT_AVAILABLE, never a fabricated 0-distance advantage (never `(0,0)`).
+  homeLat                       Float?       @map("home_lat")
+  homeLng                       Float?       @map("home_lng")
   lastActivityAt               DateTime?    @map("last_activity_at") @db.Timestamptz(6)
   isActive                     Boolean      @default(true) @map("is_active")
   createdAt                    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -2789,4 +2795,32 @@ model CronTickClaim {
   @@id([jobName, windowStart], map: "cron_tick_claims_pkey")
   @@index([windowStart], map: "ix_cron_tick_claims_window_start")
   @@map("cron_tick_claims")
+}
+
+/// #264 — durable day-plan notification outbox (executes #189). Dispatch/override write their
+/// "Day Plan is live/updated" intent HERE inside their own writing transaction, so the intent commits
+/// with the plan or not at all; delivery is attempted post-commit and — on failure — never propagates
+/// into the dispatch/override outcome (`day-plan-notification-outbox.ts`'s whole job). A partial index
+/// on `(created_at) WHERE sent_at IS NULL` backs the re-drain sweep's query; not expressible in this
+/// schema DSL, added as raw SQL in the migration — the generated client has no idea it exists.
+model DayPlanNotificationOutbox {
+  id         BigInt    @id @default(autoincrement())
+  /// 'DAY_PLAN_DISPATCHED' | 'DAY_PLAN_OVERRIDDEN' — the two `DayPlanNotifier` methods.
+  eventType  String    @map("event_type")
+  seId       String    @map("se_id") @db.Uuid
+  scheduleId BigInt    @map("schedule_id")
+  /// Null for DAY_PLAN_OVERRIDDEN — `DayPlanOverriddenEvent` carries no zoneId.
+  zoneId     BigInt?   @map("zone_id")
+  /// The rest of the event's own fields (stops/tickets, or batchId/action) — additive, no new column
+  /// per field the two event shapes don't share.
+  payload    Json
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Non-null once delivery was attempted without throwing (spine honesty: ATTEMPTED, not confirmed
+  /// received — matches `NotificationService`'s own posture). Claimed via a guarded
+  /// `transitionOrConflict` update so a racing sweep + post-commit drain deliver at most once.
+  sentAt     DateTime? @map("sent_at") @db.Timestamptz(6)
+  attempts   Int       @default(0)
+  lastError  String?   @map("last_error")
+
+  @@map("day_plan_notification_outbox")
 }

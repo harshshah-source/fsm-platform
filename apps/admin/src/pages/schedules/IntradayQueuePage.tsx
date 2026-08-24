@@ -11,8 +11,9 @@ import {
   type IntradayInsertionStatus,
 } from '../../api/intradayInsertions';
 import { DataTable, MetricCard, PageHeader, type Column } from '../../components/data';
-import { Badge } from '../../components/ui';
+import { Badge, Button } from '../../components/ui';
 import type { BadgeTone } from '../../components/ui/Badge';
+import { IntradayManualAssignModal } from './IntradayManualAssignModal';
 
 /**
  * Intra-day Queue (Issue 31 · FE-13 parity, `/intraday`, reference 13; #268 binds the second data
@@ -97,8 +98,9 @@ export function IntradayQueuePage() {
   const [insertions, setInsertions] = useState<IntradayInsertionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [assignTarget, setAssignTarget] = useState<IntradayInsertionRow | null>(null);
 
-  useEffect(() => {
+  const load = () => {
     Promise.all([apiIntradayUpdates(), apiIntradayInsertions()])
       .then(([u, i]) => {
         setUpdates(u);
@@ -106,7 +108,9 @@ export function IntradayQueuePage() {
       })
       .catch(() => setError('Failed to load the Intra-day Queue'))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(load, []);
 
   const rows: UnifiedRow[] = [
     ...updates.map((r): UnifiedRow => ({ kind: 'update', ...r })),
@@ -179,6 +183,24 @@ export function IntradayQueuePage() {
       align: 'right',
       render: (row) => <span className="text-ink-muted">{fmtTime(rowAt(row))}</span>,
     },
+    {
+      key: 'action',
+      header: '',
+      exportable: false,
+      render: (row) =>
+        row.kind === 'insertion' && row.status === 'ESCALATION_REQUIRED' ? (
+          <Button
+            size="sm"
+            data-testid={`iq-assign-ins-${row.insertionId}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setAssignTarget(row);
+            }}
+          >
+            Assign
+          </Button>
+        ) : null,
+    },
   ];
 
   return (
@@ -212,6 +234,17 @@ export function IntradayQueuePage() {
         loading={loading}
         empty="No intra-day updates yet today."
       />
+
+      {assignTarget && (
+        <IntradayManualAssignModal
+          insertion={assignTarget}
+          onClose={() => setAssignTarget(null)}
+          onAssigned={() => {
+            setAssignTarget(null);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 }

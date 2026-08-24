@@ -1,12 +1,10 @@
 import type { SessionView } from '@fsm/shared';
-import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CriticalQueueGroup } from '../src/api/dashboard';
 import { AuthProvider } from '../src/auth/AuthProvider';
+import { engineerOptionLabel } from '../src/lib/capacity';
 import { SeManagementPage } from '../src/pages/engineers/SeManagementPage';
-import { CriticalQueue } from '../src/pages/dashboard/CriticalQueue';
 import { PlannerPage } from '../src/pages/planner/PlannerPage';
 import { SchedulesPage } from '../src/pages/schedules/SchedulesPage';
 
@@ -124,73 +122,31 @@ describe('#269 — SE Planner grid load / cap column', () => {
 });
 
 /**
- * The assign pickers. All three (`CriticalQueue`, the Swap/Reassign/Split targets on the schedule
- * detail, the commissioning-cohort per-device assign) render an `<option>`, which can carry neither a
- * badge nor a colour — so the treatment is words, via the one `engineerOptionLabel` helper. The
- * over-capacity option must remain **selectable and assignable**: #258 Q2 pinned by test, in this file
- * and in the backend spec, because a capacity gate is the single most likely "improvement" to arrive
- * here later.
+ * The `engineerOptionLabel` text format — the one helper every `<option>`-based picker in the app
+ * shares (the Swap/Reassign/Split targets on the schedule detail, the commissioning-cohort per-device
+ * assign, the Assign Work Console's lane picker). An `<option>` can carry neither a badge nor a colour,
+ * so the over-capacity treatment is words, entirely in this string. Pinned directly against the pure
+ * helper (#277) rather than through a specific host — `CriticalQueue`, the one host this block used to
+ * render through, is retired (absorbed into the console per #277); the option must stay selectable,
+ * never gated, which the console's own commit path proves independently (`assign-console.test.tsx`,
+ * "states an over-capacity lane in words on the review screen, and still allows the commit").
  */
-const CRITICAL_GROUPS: CriticalQueueGroup[] = [
-  {
-    companyId: '10',
-    companyName: 'Acme Logistics',
-    companyTier: 'PLATINUM',
-    zoneId: '1',
-    plantId: '7',
-    plantName: 'Yard-1',
-    clusterSize: 1,
-    suggestedSes: [],
-    tickets: [{ ticketId: 't1', deviceId: '900', slaBucket: 'CRITICAL', latestGpsDatetime: null, status: 'OPEN' }],
-  },
-];
-
-describe('#269 — assign pickers show n/cap and never gate on it', () => {
-  it('labels each SE option with their load and names the over-capacity case in words', async () => {
-    render(<CriticalQueue groups={CRITICAL_GROUPS} engineers={engineers} />);
-
-    const group = screen.getByText('Yard-1').closest('[data-testid="critical-group"]') as HTMLElement;
-    const picker = within(group).getByLabelText(/assign to/i);
-
-    expect(within(picker).getByRole('option', { name: 'Karan Singh — 4/6' })).toBeInTheDocument();
-    expect(within(picker).getByRole('option', { name: 'Amit Yadav — 8/6 · over capacity' })).toBeInTheDocument();
+describe('#269 — engineerOptionLabel names the over-capacity case in words', () => {
+  it('labels a roomy engineer with just their load', () => {
+    expect(engineerOptionLabel({ engineerId: 'se-roomy', name: 'Karan Singh', committed: 4, dailyCapacity: 6 })).toBe(
+      'Karan Singh — 4/6',
+    );
   });
 
-  it('leaves the over-capacity SE selectable and assigns to them with no confirmation step', async () => {
-    fetchMock.mockImplementation(async (url: string, opts?: RequestInit) => {
-      const u = String(url);
-      if (u.includes('/schedules/assign') && (opts?.method ?? 'GET') === 'POST') {
-        const body = JSON.parse(String(opts?.body)) as { ticketId: string; seId: string };
-        return json({ result: 'OK', scheduleId: '1', batchId: '1', ticketId: body.ticketId, seId: body.seId });
-      }
-      return json({});
-    });
-    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
-    render(<CriticalQueue groups={CRITICAL_GROUPS} engineers={engineers} />);
+  it('names the over-capacity case in words, on the same option — never disabled, never hidden', () => {
+    expect(engineerOptionLabel({ engineerId: 'se-full', name: 'Amit Yadav', committed: 8, dailyCapacity: 6 })).toBe(
+      'Amit Yadav — 8/6 · over capacity',
+    );
+  });
 
-    const group = screen.getByText('Yard-1').closest('[data-testid="critical-group"]') as HTMLElement;
-    const picker = within(group).getByLabelText(/assign to/i) as HTMLSelectElement;
-
-    // Selectable — not `disabled`, which is what a capacity gate would look like here.
-    expect(within(picker).getByRole('option', { name: /over capacity/i })).not.toBeDisabled();
-    await user.selectOptions(picker, 'se-full');
-    expect(picker.value).toBe('se-full');
-
-    const assign = within(group).getByRole('button', { name: /assign/i });
-    expect(assign).toBeEnabled();
-    await user.click(assign);
-
-    // Straight to the write. No confirm dialog, no reason prompt, no second click.
-    await waitFor(() => {
-      const posts = fetchMock.mock.calls.filter(
-        ([url, o]) => String(url).includes('/schedules/assign') && (o as RequestInit | undefined)?.method === 'POST',
-      );
-      expect(posts).toHaveLength(1);
-      const body = JSON.parse(String((posts[0][1] as RequestInit).body)) as Record<string, unknown>;
-      expect(body.seId).toBe('se-full');
-      expect(body.confirm).toBeUndefined();
-      expect(body.reasonCode).toBeUndefined();
-    });
+  it('falls back to the id when no name is available, and to the bare name with no load data', () => {
+    expect(engineerOptionLabel({ engineerId: 'se-x', committed: 4, dailyCapacity: 6 })).toBe('se-x — 4/6');
+    expect(engineerOptionLabel({ engineerId: 'se-y', name: 'No Load Data' })).toBe('No Load Data');
   });
 });
 

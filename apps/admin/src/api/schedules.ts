@@ -2,13 +2,24 @@
 // Mirrors the backend ZmScheduleQueryService view types; token comes from the same sessionStorage key
 // AuthProvider writes. Monitoring only — there is no approval gate (CONTEXT.md Decisions §7).
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
+import { authHeaders as sharedAuthHeaders } from './authHeaders';
 
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
+
+/**
+ * Bearer + `X-Acting-As-Zone`, from the one shared builder, plus this module's JSON opt-in.
+ *
+ * This file used to carry its own **bearer-only** copy, which made the Assign Work Console
+ * structurally incapable of honouring acting on its own write path: the pool and candidate reads go
+ * through `assignWork.ts` / `candidates.ts` (shared builder, header sent) while `assignable-tickets`,
+ * `distribute-preview` and `assign-batch` live here and sent no header at all. The backend collapses
+ * the acting zone for all five — so an Operations Head acting in a zone read that zone and committed
+ * pan-India, and the audit row could not record that they were acting, because the request never said
+ * so. Endpoints on this module that ignore the header are unaffected by sending it.
+ */
 function authHeaders(json = false): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   return {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...sharedAuthHeaders(),
     ...(json ? { 'Content-Type': 'application/json' } : {}),
   };
 }
@@ -180,6 +191,98 @@ export async function apiAssignPlants(seId: string, plantIds: string[]): Promise
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as PlantAssignSummary;
+}
+
+/** #275 — resolve a draft's plant ids into the ticket ids `assign-batch` will commit. */
+export async function apiAssignableTickets(plantIds: string[]): Promise<{ plantId: string; ticketIds: string[] }[]> {
+  if (plantIds.length === 0) return [];
+  const res = await fetch(`${BASE_URL}/schedules/assignable-tickets?plantIds=${plantIds.join(',')}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as { plantId: string; ticketIds: string[] }[];
+}
+
+/** One (engineer, tickets) lane of an `assign-batch` commit (#275). */
+export interface AssignBatchLane {
+  seId: string;
+  ticketIds: string[];
+}
+
+export type AssignBatchSkipReason = 'NOT_FOUND' | 'OUT_OF_ZONE' | 'CONFLICT_DEFERRED' | 'LOST_RACE';
+
+export interface AssignBatchLaneResult {
+  seId: string;
+  result: 'OK' | 'SE_NOT_FOUND' | 'LANE_FAILED';
+  assigned: number;
+  alreadyAssigned: number;
+  skipped: { ticketId: string; reason: AssignBatchSkipReason }[];
+  scheduleId?: string;
+  batchIds: string[];
+}
+
+export interface AssignBatchResult {
+  lanes: AssignBatchLaneResult[];
+}
+
+/**
+ * #275 — the review-and-commit write: one transaction per lane, one result row per lane, a mandatory
+ * reason recorded once per lane. `assignPlants` above still exists for the Device Detail panel; the
+ * console commits through this endpoint so the review screen can show a real diff before anything is
+ * written and so a lane that fails is reported without touching the others.
+ */
+export async function apiAssignBatch(reasonCode: string, lanes: AssignBatchLane[]): Promise<AssignBatchResult> {
+  const res = await fetch(`${BASE_URL}/schedules/assign-batch`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ reasonCode, lanes }),
+  });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as AssignBatchResult;
+}
+
+/** #276 — the three ways Distribute can turn a selection into a plan. */
+export type DistributeStrategy = 'COVERAGE_TIER' | 'CAPACITY_HEADROOM' | 'PLANT_WHOLE';
+
+export interface DistributePlantStop {
+  plantId: string;
+  ticketIds: string[];
+}
+export interface DistributeLane {
+  seId: string;
+  plants: DistributePlantStop[];
+}
+export interface DistributeUnplaced {
+  ticketId: string;
+  plantId: string;
+  reason: 'NO_COVERAGE' | 'ALL_DROPPED';
+}
+export interface DistributeResult {
+  strategy: DistributeStrategy;
+  targetDate: string;
+  lanes: DistributeLane[];
+  unplaced: DistributeUnplaced[];
+  overCapacitySeIds: string[];
+}
+
+/**
+ * #276 — Distribute: project several plants across several engineers before anything is written.
+ * Built on the real selection engine (`COVERAGE_TIER`) or the same shared readiness read the
+ * candidate column already uses (`CAPACITY_HEADROOM` / `PLANT_WHOLE`) — never a client-side copy of
+ * either. The proposal lands in the draft, editable; nothing is written by this call.
+ */
+export async function apiDistributePreview(
+  ticketIds: string[],
+  engineerIds: string[],
+  strategy: DistributeStrategy,
+): Promise<DistributeResult> {
+  const res = await fetch(`${BASE_URL}/schedules/distribute-preview`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify({ ticketIds, engineerIds, strategy }),
+  });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as DistributeResult;
 }
 
 export type OverrideCommand =

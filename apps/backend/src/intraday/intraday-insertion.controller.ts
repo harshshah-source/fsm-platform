@@ -15,6 +15,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
+import type { CandidateRow } from '../scheduling/candidate-query.service';
 import {
   type CriticalAssignOutcome,
   IntradayInsertionRow,
@@ -58,11 +59,14 @@ export class IntradayInsertionController {
     return this.svc.assignCriticalForZone(BigInt(zoneId));
   }
 
-  /** AVAILABLE SEs for the ZM manual-assignment modal (Issue 30 — availability only, never ping age). */
+  /**
+   * AVAILABLE SEs for the ZM manual-assignment modal (Issue 30 — availability only, never ping age),
+   * as #274's candidate row (#277) — never a bare UUID.
+   */
   @Get(':id/available-ses')
   @Roles(...MANAGER_ROLES)
-  availableSes(@Param('id') id: string): Promise<string[]> {
-    return this.svc.availableSesForManualAssign(BigInt(id));
+  availableSes(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string): Promise<CandidateRow[]> {
+    return this.svc.availableSesForManualAssign(BigInt(id), { role: user.role, zoneId: user.zone_id });
   }
 
   @Post(':id/manual-assign')

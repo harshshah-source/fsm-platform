@@ -9,6 +9,8 @@
  * not the curve); these are monotonic, bounded transforms chosen for explainability.
  */
 
+import { NOT_AVAILABLE, type DistanceKm } from './distance';
+
 export interface ScoringWeights {
   [component: string]: number;
 }
@@ -32,6 +34,9 @@ export interface ScoreBreakdown {
   /** Device-age score 0..1 (capped at 7d); contributes only when `device_age` is weighted (PREVENTIVE). */
   ageScore: number;
   distanceScore: number;
+  /** #267 — the raw distance the score above was derived from, or `NOT_AVAILABLE` (never a fabricated
+   *  0/`(0,0)`) when the SE has no home base and no prior stop, or the plant has no geometry. */
+  distanceKm: DistanceKm;
   weights: ScoringWeights;
   baseScore: number;
   clusterMultiplier: number;
@@ -141,6 +146,7 @@ export function scoreCandidate(
       repeatPenalty: penalty,
       ageScore,
       distanceScore: ds,
+      distanceKm: features.distanceFromPrevStopKm === null ? NOT_AVAILABLE : features.distanceFromPrevStopKm,
       weights,
       baseScore,
       clusterMultiplier,

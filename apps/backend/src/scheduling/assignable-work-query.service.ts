@@ -200,6 +200,36 @@ export class AssignableWorkQueryService {
   }
 
   /**
+   * Resolve plants to the concrete ticket ids `assign-batch` (#275) needs — the console drafts by
+   * plant (unchanged from #273), but the write is ticket-shaped, so the review screen calls this once,
+   * right before showing the diff, to turn each lane's plant ids into the ticket ids it will commit.
+   * Same predicate as {@link listForScope} and `assignPlants`, so the count the pool showed and the
+   * ids this resolves can never disagree about which tickets are "assignable".
+   */
+  async ticketIdsForPlants(
+    scope: ZmScope,
+    plantIds: bigint[],
+    now: Date = new Date(),
+  ): Promise<{ plantId: string; ticketIds: string[] }[]> {
+    if (plantIds.length === 0) return [];
+    const day = istDate(now);
+    const plantClamp = this.zoneClamp(scope);
+    const rows = await this.prisma.ticket.findMany({
+      where: {
+        plantId: { in: plantIds },
+        ...assignableTickets(day),
+        ...(plantClamp ? { plant: plantClamp } : {}),
+      },
+      select: { ticketId: true, plantId: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const byPlant = new Map<string, string[]>();
+    for (const id of plantIds) byPlant.set(String(id), []);
+    for (const r of rows) byPlant.get(String(r.plantId))?.push(r.ticketId);
+    return [...byPlant].map(([plantId, ticketIds]) => ({ plantId, ticketIds }));
+  }
+
+  /**
    * A ZONAL_MANAGER sees their own zone; CSM / Operations Head see every zone — the same clamp every
    * other manager read on this controller applies, hung off the **plant's** zone because that is the
    * ZM's row-scoping key (`plants.zone_id`, the operational zone, not AutoPlant's per-company one).

@@ -280,8 +280,8 @@ describe('#274 — assign console candidate column', () => {
     expect(within(lane).getByTestId('coverage-se-b-21')).toHaveAttribute('data-tier-crossing', 'true');
     expect(within(lane).getByTestId('coverage-se-b-20')).toHaveAttribute('data-tier-crossing', 'false');
 
-    // Marked, not barred. The console still commits.
-    expect(screen.getByRole('button', { name: /^commit$/i })).toBeEnabled();
+    // Marked, not barred. The console still lets the operator move to review.
+    expect(screen.getByRole('button', { name: /review.*commit/i })).toBeEnabled();
   });
 
   /**

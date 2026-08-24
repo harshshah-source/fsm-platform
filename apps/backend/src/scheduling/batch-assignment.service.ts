@@ -5,6 +5,7 @@ import {
   type DayPlanNotifier,
   LoggingDayPlanNotifier,
 } from './day-plan-notifier';
+import { drainRows, queueDayPlanDispatched } from './day-plan-notification-outbox';
 import { ZONE_LOCK_TIMEOUT_MS, dispatchZoneLockKey } from './dispatch-zone-lock';
 import { type SeSkip, describeSeSkip } from './se-skip';
 import { UNIQUE_ACTIVE_SCHEDULE_INDEX_STATUS, liveScheduleFilter } from './schedule-status';
@@ -81,10 +82,12 @@ export class BatchAssignmentService {
   async dispatchForZone(zoneId: bigint, opts: DispatchOptions): Promise<DispatchSummary> {
     const now = opts.now ?? new Date();
 
-    // Notifier events are collected per SE and fired only AFTER every transaction has settled — a
-    // rolled-back plan must never announce "Day Plan is live", and notification I/O has no place
-    // inside a DB transaction. #264 makes this buffer durable.
-    const notifications: Parameters<DayPlanNotifier['dayPlanDispatched']>[0][] = [];
+    // #264 — the outbox row IS the durable "Day Plan is live" intent, written inside each SE's own
+    // per-SE transaction (below) so it commits with the plan or not at all. Only the row ids are
+    // collected here; delivery is attempted post-commit, once every SE transaction has settled — a
+    // rolled-back plan must never announce "Day Plan is live" (it never wrote a row), and notification
+    // I/O has no place inside a DB transaction.
+    const outboxIds: bigint[] = [];
     const seSkips: SeSkip[] = [];
     let schedules = 0;
     let batches = 0;
@@ -98,7 +101,7 @@ export class BatchAssignmentService {
 
     for (const seId of seIds) {
       try {
-        const out = await this.dispatchForSe(zoneId, seId, opts, now, notifications);
+        const out = await this.dispatchForSe(zoneId, seId, opts, now, outboxIds);
         schedules += out.schedules;
         batches += out.batches;
         tickets += out.tickets;
@@ -115,10 +118,11 @@ export class BatchAssignmentService {
     // (SKIP LOCKED), and deleting it would be taking work out from under its owner.
     const orphansCleared = await this.clearFailedSeOrphans(opts.runId, zoneId, seSkips.map((s) => s.seId));
 
-    // "Day Plan is live" — fires after commit, regardless of channel availability (Issue 11 AC#4).
-    for (const event of notifications) {
-      await this.notifier.dayPlanDispatched(event);
-    }
+    // #264 — post-commit drain. A notifier throw here is caught INSIDE `drainRow`, stamped on the
+    // outbox row, and never propagates out of `dispatchForZone` — the misreport inversion #264 exists
+    // to close (a notifier failure used to surface as a zone dispatch error even though every schedule
+    // had already committed).
+    await drainRows(this.prisma, this.notifier, outboxIds, now);
 
     return {
       schedules,
@@ -142,7 +146,7 @@ export class BatchAssignmentService {
     seId: string,
     opts: DispatchOptions,
     now: Date,
-    notifications: Parameters<DayPlanNotifier['dayPlanDispatched']>[0][],
+    outboxIds: bigint[],
   ): Promise<{ schedules: number; batches: number; tickets: number }> {
     const empty = { schedules: 0, batches: 0, tickets: 0 };
     return this.prisma.$transaction(async (tx) => {
@@ -260,7 +264,11 @@ export class BatchAssignmentService {
           }
         }
 
-        notifications.push({ seId, scheduleId, zoneId, stops: stopSequence, tickets });
+        // #264 — written INSIDE this SE's own transaction: the intent commits with the plan or not at
+        // all. A rollback after this point (e.g. the P2002 guard elsewhere in this class never applies
+        // here, but a future failure would) takes the outbox row with it — no ghost "plan is live".
+        const outboxId = await queueDayPlanDispatched(tx, { seId, scheduleId, zoneId, stops: stopSequence, tickets });
+        outboxIds.push(outboxId);
       }
 
       // Consume every row this SE CLAIMED (Issue 100), the guarded duplicates included — they are done
