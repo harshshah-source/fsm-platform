@@ -53,4 +53,52 @@ describe('POST /api/batches/:id/override (e2e)', () => {
   it('rejects an unauthenticated request', async () => {
     await request(app.getHttpServer()).post('/api/batches/999999999/override').send(body).expect(401);
   });
+
+  /**
+   * #289 — the preview wears the **same** role gate, the same 404 and the same request body as the
+   * confirm it precedes. One vocabulary: an operator previews the object they then commit, and a
+   * client that can build one can build the other.
+   */
+  describe('POST /api/batches/:id/override/preview', () => {
+    const move = {
+      action: 'REASSIGN',
+      ticketId: '00000000-0000-0000-0000-0000000000aa',
+      newSeId: '00000000-0000-0000-0000-0000000000bb',
+      reasonCode: 'X',
+    };
+
+    it('404s an unknown batch for a ZM', async () => {
+      const token = await login('zm.north@fsm.test');
+      await request(app.getHttpServer())
+        .post('/api/batches/999999999/override/preview')
+        .set('Authorization', `Bearer ${token}`)
+        .send(move)
+        .expect(404);
+    });
+
+    /**
+     * An action with one lane is refused rather than answered with zeros. A preview reading
+     * `0 → 0` for a REMOVE would say "this costs nothing", which is the opposite of what removing
+     * somebody's work does.
+     */
+    it('400s an action that moves nothing between engineers', async () => {
+      const token = await login('zm.north@fsm.test');
+      const res = await request(app.getHttpServer())
+        .post('/api/batches/999999999/override/preview')
+        .set('Authorization', `Bearer ${token}`)
+        .send(body)
+        .expect(400);
+      expect(res.body.code).toBe('NOT_PROJECTABLE');
+    });
+
+    it('forbids an SE, and rejects an unauthenticated request', async () => {
+      const seToken = await login('se.north@fsm.test');
+      await request(app.getHttpServer())
+        .post('/api/batches/999999999/override/preview')
+        .set('Authorization', `Bearer ${seToken}`)
+        .send(move)
+        .expect(403);
+      await request(app.getHttpServer()).post('/api/batches/999999999/override/preview').send(move).expect(401);
+    });
+  });
 });

@@ -21,6 +21,7 @@ import { DispatchTransparencyQueryService } from './dispatch-transparency-query.
 import { DispatchChangesTodayService } from './dispatch-changes-today.service';
 import { DispatchTodayQueryService } from './dispatch-today-query.service';
 import { DistributeProjectionService } from './distribute-projection.service';
+import { OverrideProjectionService } from './override-projection.service';
 import { OverrideService } from './override.service';
 import { ScheduleClosureScheduler } from './schedule-closure-scheduler.service';
 import { SameDayUpdateService } from './same-day-update.service';
@@ -77,6 +78,7 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
       useFactory: (prisma: PrismaService, claims: CronTickClaimService) => new ScheduleClosureScheduler(prisma, claims),
       inject: [PrismaService, CronTickClaimService],
     },
+    OverrideProjectionService,
     AssignableWorkQueryService,
     // #274 — the candidate column's read. Composes the recommender's own `orderedCandidatesForPlant`
     // plus the readiness inputs the engine's hard filters consume, so the column cannot drift from it.
@@ -101,6 +103,6 @@ import { SchedulerPreviewService } from './scheduler-preview.service';
   // stands up the real app, and none of the ones that construct services by hand.
   // #264 — `DAY_PLAN_NOTIFIER` exported so `BusinessSweepSchedulerModule`'s re-drain sweep can share
   // the real spine notifier rather than standing up a second binding of its own.
-  exports: [AssignableWorkQueryService, CandidateQueryService, DistributeProjectionService, BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService, DispatchTodayQueryService, DispatchChangesTodayService, DAY_PLAN_NOTIFIER],
+  exports: [AssignableWorkQueryService, CandidateQueryService, DistributeProjectionService, BatchAssignmentService, DayPlanQueryService, ZmScheduleQueryService, DispatchTransparencyQueryService, OverrideService, OverrideProjectionService, SameDayUpdateService, DispatchRunService, BulkUnassignService, DispatchScheduleService, SchedulerPreviewService, DispatchTodayQueryService, DispatchChangesTodayService, DAY_PLAN_NOTIFIER],
 })
 export class SchedulingModule {}

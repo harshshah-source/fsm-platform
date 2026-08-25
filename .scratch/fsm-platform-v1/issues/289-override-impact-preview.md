@@ -1,6 +1,8 @@
 # 289 — Override: preview the impact before it is committed
 
-Status: **ready-for-agent** (after #285)
+Status: **backend done** (2026-08-25) · **UI half open** — see
+[`HANDOFF-P11-289-ui.md`](../HANDOFF-P11-289-ui.md) and
+[`docs/progress/289-override-impact-preview.md`](../../../docs/progress/289-override-impact-preview.md)
 Type: AFK · Backend + Admin
 Decision: [#282](./282-decision-todays-dispatch-crew-deck.md) R1 — the design's step 3.
 
@@ -28,11 +30,16 @@ Lost races re-present as the existing clean 409 conflict shape (#265), never an 
 
 ## Acceptance criteria
 
-- [ ] AC1 — The projection returns capacity before/after for both engineers, rank context, stop-order
+- [x] AC1 — The projection returns capacity before/after for both engineers, rank context, stop-order
       effect and conflicts.
-- [ ] AC2 — **The preview writes nothing** — a spec asserts zero rows change across every table it
+- [x] AC2 — **The preview writes nothing** — a spec asserts zero rows change across every table it
       touches.
-- [ ] AC3 — Confirm remains the audited write with its mandatory reason; the audit row is unchanged.
-- [ ] AC4 — A lost race returns the existing 409 conflict, itemised, not a 500.
-- [ ] AC5 — The cockpit renders the preview between the override choice and the commit.
-- [ ] AC6 — Both suites green.
+- [x] AC3 — Confirm remains the audited write with its mandatory reason; the audit row is unchanged.
+- [x] AC4 — A lost race returns the existing 409 conflict, itemised, not a 500.
+- [ ] AC5 — ~~The cockpit renders~~ **Schedule Detail renders** the preview between the override
+      choice and the commit. **Operator ruling, 2026-08-25**, put to them explicitly: the cockpit has
+      no override controls — it links out to `/schedules/:engineerId`, which is where an operator
+      actually chooses an override — so building move controls into `/dispatch/today` would duplicate
+      an existing surface, which #282 R5 forbids. The option was offered and not taken. **Open.**
+- [ ] AC6 — Both suites green. *(Backend green: 8 service specs + 3 HTTP specs. Admin pending the
+      UI half.)*
