@@ -1,7 +1,11 @@
 # HANDOFF — P11 (Today's Dispatch / Crew Deck), 2026-08-25
 
-Stopped at a safe point mid-P11. **Everything implemented is committed** (`8b342e3`, `ea8f5cd`);
-this file records what is verified, what is not, and the three traps waiting for the next session.
+**Updated 2026-08-25 (second session).** The interrupted verification is finished and **#286 is done**
+(`56ac41e`, `7dfcd40`). This file stays live only for **trap 3** — the uncommitted prior-session work
+still interleaved in the tree, including #287's UI half. Everything else below is history; the
+current picture is INDEX §P11.
+
+Everything implemented is committed (`8b342e3`, `ea8f5cd`, `56ac41e`, `7dfcd40`).
 
 ## Where P11 stands
 
@@ -11,7 +15,7 @@ this file records what is verified, what is not, and the three traps waiting for
 | #283 provenance seams | **DONE** — `ea8f5cd`, report `docs/progress/283-assignment-provenance-seams.md` |
 | #284 read layer | **MOSTLY DONE** — both reads + controller shipped. **Open:** run-level decision stream (`GET /dispatch-runs/:runId/decisions`) and `GET /schedules?date=` |
 | #285 cockpit | **DONE** — `ea8f5cd`, report `docs/progress/284-285-dispatch-today-cockpit.md` |
-| #286 crashed-zone re-dispatch | **NOT STARTED** — policy ruled (#282 R3), ACs written |
+| #286 crashed-zone re-dispatch | **DONE 2026-08-25** — `56ac41e`, report `docs/progress/286-crashed-zone-redispatch.md` |
 | #287 MV freshness | **DONE** (backend + panel), see caveat below |
 | #288 escalate-only mid-day unavailability | **NOT STARTED** — policy ruled (#282 R4), ACs written |
 | #289 override impact preview | **NOT STARTED** — ACs written |
@@ -26,7 +30,11 @@ this file records what is verified, what is not, and the three traps waiting for
   capacity, removal, deferral, candidate, day-plan, cron-tick, lost-race).
 - Remaining specs batch 1, 141 files / 879 tests.
 
-**NOT run: remaining specs batch 2 (~146 files).** The command was interrupted. Run it first:
+**Batch 2 was run and is green (2026-08-25, second session): 146 files, 145 in-batch plus
+`report-mix-outcomes` re-run alone after a #184 worker crash.** The whole backend suite has since been
+run for #286 — **424 files / 2163 tests, 0 failed** (two #184 flakes, both green in isolation) — and
+the admin suite too (110 files / 616 tests). The batching command is kept below because it is still
+the reliable way to run this suite:
 
 ```
 $all = Get-ChildItem test -Filter *.ts | Where-Object { $_.Name -match '\.(e2e-)?spec\.ts$' } | % { $_.Name }
@@ -35,8 +43,9 @@ $rest = $all | ? { $affected -notcontains $_ } | % { "test/$_" }
 npx vitest run @($rest[141..($rest.Count-1)]) --reporter=basic
 ```
 
-**Admin: 110 files / 613 tests green — but that run predates the `ConfigInEffectPanel` MV block.**
-Re-run the admin suite; nothing else changed in admin since.
+~~**Admin: 110 files / 613 tests green — but that run predates the `ConfigInEffectPanel` MV block.**~~
+**Re-run 2026-08-25 (second session): 110 files / 613 tests green**, and again after #286's cockpit
+change: **110 files / 616 tests green.**
 
 ## Three traps — read before touching anything
 
@@ -91,10 +100,10 @@ failure the whole grammar exists to prevent (#282 R2), and it has its own test.
 
 ## Suggested next order
 
-1. Finish verification (batch 2 + admin re-run).
-2. **#286** — highest operational value, policy already ruled, and its "stop deleting failed-run
-   traces" note pairs naturally with the re-dispatch work.
-3. **#284's leftovers** — the decision stream makes Replay real rather than a link.
+1. ~~Finish verification (batch 2 + admin re-run).~~ **Done 2026-08-25.**
+2. ~~**#286**~~ **Done 2026-08-25** (`56ac41e`). Its "stop deleting failed-run traces" note landed with
+   it: orphan SUGGESTED recs are `RETIRED` now, so the traces survive.
+3. **#284's leftovers** — the decision stream makes Replay real rather than a link. **← next**
 4. **#290** then **#289**, **#288**.
 
 ## Reading order for the next session
