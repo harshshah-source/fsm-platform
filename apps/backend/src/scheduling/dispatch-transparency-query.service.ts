@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SUPERSEDED_RECOMMENDATION_STATUSES } from '../recommender/recommendation-status';
@@ -229,6 +229,44 @@ export interface DispatchTicketTrace {
     companyName: string | null;
     transporterName: string | null;
   };
+}
+
+/**
+ * One decision the run made, as Replay reads it (#284 §C).
+ *
+ * Deliberately **flat and small**: the stream is a run's whole decision list, hundreds of rows for a
+ * real zone, and the per-ticket inspector ({@link DispatchTicketTrace}) already owns the deep view.
+ * What is here is what the deck needs to place a row and let somebody click it — identity, the SE (or
+ * the honest absence of one), and the two numbers that say how contested the decision was.
+ */
+export interface DispatchDecisionRow {
+  ticketId: string;
+  zoneId: string;
+  /** The engine's own processing order. NULL only for rows written before the column existed. */
+  processingRank: number | null;
+  /** `SUGGESTED` | `DISPATCHED` | `UNASSIGNABLE` | `RETIRED` (#286) — the recommendation's own status. */
+  status: string | null;
+  seId: string | null;
+  seName: string | null;
+  plantId: string | null;
+  plantName: string | null;
+  deviceId: string | null;
+  companyTier: string | null;
+  deviceBucket: string | null;
+  /** `NO_COVERAGE` | `ALL_DROPPED` on an unassignable decision; null when an SE was chosen. */
+  poolEmptyReason: string | null;
+  candidatesTotal: number | null;
+  passedCount: number | null;
+}
+
+/** A page of {@link DispatchDecisionRow}, with the total the page was cut from. */
+export interface DispatchRunDecisions {
+  runId: string;
+  /** Decisions matching the scope, before paging — so the UI can say "20 of 340". */
+  total: number;
+  limit: number;
+  offset: number;
+  rows: DispatchDecisionRow[];
 }
 
 /**
@@ -735,6 +773,104 @@ export class DispatchTransparencyQueryService {
     };
   }
 
+  /**
+   * #284 §C — the run-level decision stream Replay is made of.
+   *
+   * **Ordered by `processing_rank`**, which is the whole point: the engine records the order it
+   * considered tickets in, and a stream sorted any other way describes the same decisions in an order
+   * the run never used — a report, not a replay.
+   *
+   * Driven from `dispatch_decision_traces` rather than from `recommendations`, for two reasons. The
+   * trace carries a denormalised `zone_id`, which is what makes the zone clamp a predicate rather than
+   * a join through ticket → plant; and the recommender writes one trace per decision **including the
+   * unassignable ones** (`recommender.service.ts` — the `chosen === null` branch pushes its own row),
+   * so "every decision this run made" is exactly this table's contents for the run. An unassignable
+   * decision is a decision: leaving it out would show a run doing less than it did.
+   *
+   * A `RETIRED` recommendation (#286) is **kept**. It is what the run intended for a ticket it did not
+   * end up placing, which is precisely the question Replay exists to answer — and it only survives at
+   * all because #286 stopped deleting those rows.
+   */
+  async getRunDecisions(
+    runId: bigint,
+    scope: ZmScope,
+    opts: { zoneId?: bigint; limit?: number; offset?: number } = {},
+  ): Promise<DispatchRunDecisions | null> {
+    const run = await this.prisma.dispatchRun.findUnique({ where: { runId }, select: { runId: true } });
+    if (!run) return null;
+
+    const zoneClamp = this.zmZone(scope);
+    // A ZM naming another zone is refused rather than quietly answered with their own: silently
+    // substituting the scope for the request answers a question nobody asked. `?zoneId` is camelCase,
+    // so the global ZoneScopeGuard (which reads `:zoneId` / `?zone_id`) does not fire here — this is
+    // the clamp, not a second one.
+    if (zoneClamp !== null && opts.zoneId != null && opts.zoneId !== zoneClamp) {
+      throw new ForbiddenException({ code: 'ZONE_SCOPE_VIOLATION' });
+    }
+    const zoneId = zoneClamp ?? opts.zoneId ?? null;
+    const where = { runId, ...(zoneId !== null ? { zoneId } : {}) };
+
+    const limit = boundedPage(opts.limit, DECISION_PAGE_DEFAULT, DECISION_PAGE_MAX);
+    const offset = Number.isInteger(opts.offset) && opts.offset! > 0 ? opts.offset! : 0;
+
+    const [total, traces] = await Promise.all([
+      this.prisma.dispatchDecisionTrace.count({ where }),
+      this.prisma.dispatchDecisionTrace.findMany({
+        where,
+        // `traceId` breaks the tie so paging is stable: `processing_rank` is per zone, so a multi-zone
+        // run has as many rank 1s as it had zones, and two pages of an unstably-ordered query can drop
+        // a row and repeat another.
+        orderBy: [{ recommendation: { processingRank: 'asc' } }, { traceId: 'asc' }],
+        skip: offset,
+        take: limit,
+        include: {
+          recommendation: { select: { processingRank: true, status: true, companyTier: true, deviceBucket: true } },
+          ticket: { select: { deviceId: true, plantId: true, plant: { select: { name: true } } } },
+        },
+      }),
+    ]);
+
+    const seNames = await this.resolveEngineerNames(traces.map((t) => t.seId));
+    return {
+      runId: runId.toString(),
+      total,
+      limit,
+      offset,
+      rows: traces.map((t) => {
+        const json = (t.trace as Record<string, unknown>) ?? {};
+        return {
+          ticketId: t.ticketId,
+          zoneId: t.zoneId.toString(),
+          processingRank: t.recommendation?.processingRank ?? null,
+          status: t.recommendation?.status ?? null,
+          seId: t.seId,
+          seName: t.seId != null ? (seNames.get(t.seId) ?? null) : null,
+          plantId: t.ticket?.plantId != null ? String(t.ticket.plantId) : null,
+          plantName: t.ticket?.plant?.name ?? null,
+          deviceId: t.ticket?.deviceId ?? null,
+          companyTier: t.recommendation?.companyTier ?? null,
+          deviceBucket: t.recommendation?.deviceBucket ?? null,
+          poolEmptyReason: typeof json.poolEmptyReason === 'string' ? json.poolEmptyReason : null,
+          candidatesTotal: typeof json.candidatesTotal === 'number' ? json.candidatesTotal : null,
+          passedCount: typeof json.passedCount === 'number' ? json.passedCount : null,
+        };
+      }),
+    };
+  }
+
+  /** seId → display name for one page of decisions. One query, deduped; unknown ids simply stay null. */
+  private async resolveEngineerNames(ids: (string | null)[]): Promise<Map<string, string>> {
+    const unique = [...new Set(ids.filter((id): id is string => id != null))];
+    if (unique.length === 0) return new Map();
+    const engineers = await this.prisma.engineerMaster.findMany({
+      where: { engineerId: { in: unique } },
+      select: { engineerId: true, user: { select: { name: true } } },
+    });
+    return new Map(
+      engineers.filter((e) => e.user?.name != null).map((e) => [e.engineerId, e.user!.name as string]),
+    );
+  }
+
   /** actorUserId → display name for MANUAL-run actors (dedupes; skips CRON/null actors). */
   private async resolveActorNames(ids: (string | null)[]): Promise<Map<string, string>> {
     const unique = [...new Set(ids.filter((id): id is string => id != null))];
@@ -766,6 +902,18 @@ export class DispatchTransparencyQueryService {
   private zmZone(scope: ZmScope): bigint | null {
     return scope.role === 'ZONAL_MANAGER' && scope.zoneId != null ? BigInt(scope.zoneId) : null;
   }
+}
+
+/**
+ * #284 §C paging bounds. 100 is a screenful of a stream and a cheap query; 500 is the ceiling because
+ * a caller asking for more is asking for an export, which is a different endpoint's job.
+ */
+const DECISION_PAGE_DEFAULT = 100;
+const DECISION_PAGE_MAX = 500;
+
+/** A caller-supplied page size, or the default. Garbage and out-of-range values fall back rather than 400. */
+function boundedPage(raw: number | undefined, fallback: number, max: number): number {
+  return Number.isInteger(raw) && raw! > 0 && raw! <= max ? raw! : fallback;
 }
 
 function sum<T>(items: T[], f: (t: T) => number): number {

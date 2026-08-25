@@ -82,6 +82,40 @@ describe('ZM Schedule list (Issue 13b AC#1)', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/schedules'))).toBe(true);
   });
 
+  /**
+   * #284 §D — the page's own copy says "What today's run actually committed", and until the endpoint
+   * gained `?date=` the query had no date predicate at all: a never-closed plan from last week came
+   * back beside today's. The page now asks for the operating day by default and says which scope it
+   * is showing, so the sentence above the table is true of the table below it.
+   */
+  it('#284 — scopes to the operating day by default, and says so', async () => {
+    stubList();
+    renderPage();
+    await screen.findByRole('table', { name: /schedules/i });
+
+    const dated = fetchMock.mock.calls.map(([url]) => String(url)).filter((u) => u.includes('/schedules?'));
+    expect(dated.some((u) => /date=\d{4}-\d{2}-\d{2}/.test(u))).toBe(true);
+    expect(screen.getByTestId('schedule-scope-today')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  /**
+   * The escape hatch, and why it exists: a plan that was never closed is a real fault, and a page that
+   * silently hid it would replace a wrong list with a missing one.
+   */
+  it('#284 — "All live plans" drops the date and shows everything again', async () => {
+    stubList();
+    const { default: userEvent } = await import('@testing-library/user-event');
+    renderPage();
+    await screen.findByRole('table', { name: /schedules/i });
+    fetchMock.mockClear();
+
+    await userEvent.click(screen.getByTestId('schedule-scope-all'));
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url)).filter((u) => u.includes('/schedules'));
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.some((u) => u.includes('date='))).toBe(false);
+  });
+
   it('shows no Approve action and no approval countdown (no gate)', async () => {
     stubList();
     renderPage();

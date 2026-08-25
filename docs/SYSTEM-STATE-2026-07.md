@@ -785,6 +785,28 @@ about the shape:
   the evidence a zone lost its day) and retired EXHAUSTED without dispatching, degrading to exactly
   #261's behaviour plus a record.
 
+**Run-level decision stream (#284 §C, 2026-08-25).** `GET /api/dispatch-runs/:runId/decisions?zoneId=&limit=&offset=`
+returns every decision a run made, **ordered by `recommendations.processing_rank`** — the engine's own
+processing order, which is what makes it a replay rather than a report. Manager-roled, ZM zone-clamped,
+paged (default 100, max 500). Read from `dispatch_decision_traces`: that table carries a denormalised
+`zone_id` (so the clamp is a predicate, not a join through ticket → plant) and holds a row for **every**
+decision including the unassignable ones, which get `poolEmptyReason` and a null SE. A `RETIRED`
+recommendation (#286) is included — what a run intended but did not place is precisely what Replay is
+for. Two shape decisions: a ZM naming another zone gets **403 `ZONE_SCOPE_VIOLATION`**, not their own
+zone's answer (`?zoneId` is camelCase, so the global `ZoneScopeGuard` never sees it — answering a
+question nobody asked is worse than refusing); and paging orders `(processing_rank, trace_id)`, because
+rank is per zone and a multi-zone run has as many rank 1s as it had zones. The admin cockpit's Replay
+mode renders this and expands each row into the existing per-ticket `TracePanel`.
+
+**`GET /api/schedules?date=` (#284 §D, 2026-08-25).** The list had **no date predicate at all** — live
+status only — so a never-closed plan from last week came back beside today's while every label above it
+promised "today". `?date=YYYY-MM-DD` applies `dateFrom <= day <= dateTo` (the `DayPlanQueryService` rule)
+with the `istWindowStart` parser and the `INVALID_DATE` shape `/schedules/preview` already uses.
+**Additive, not a new default**: omitting it returns exactly what it always did, because callers depend
+on that (#284 AC10 governs over the issue prose's "defaulting to today"). The Batch Schedule *page*
+passes it and defaults to the operating day, with an `All live plans` toggle — operator-ruled, and the
+toggle exists because a never-closed plan is a real fault that a silently-scoped page would hide.
+
 **The dispatch write unit is the SE, not the zone (#262, 2026-08-23).** `dispatchForZone` was one
 transaction spanning every SE in the zone. It is now **one transaction per SE**, each claiming that
 SE's recommendation rows with `SELECT … FOR UPDATE SKIP LOCKED`. Three defects went with the old shape,

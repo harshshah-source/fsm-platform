@@ -39,6 +39,25 @@ describe('ZM schedules monitoring (e2e)', () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
+  /**
+   * #284 §D — the date filter over the wire: accepted, additive, and validated with the same
+   * `INVALID_DATE` shape `GET /schedules/preview` already returns for the same parser.
+   */
+  it('#284 — accepts ?date= and rejects a malformed one with INVALID_DATE', async () => {
+    const token = await login('zm.north@fsm.test');
+    const filtered = await request(app.getHttpServer())
+      .get('/api/schedules?date=2026-06-21')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(Array.isArray(filtered.body)).toBe(true);
+
+    const bad = await request(app.getHttpServer())
+      .get('/api/schedules?date=2026-02-31')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(400);
+    expect(bad.body.code).toBe('INVALID_DATE');
+  });
+
   it('forbids an SE from the ZM monitoring list', async () => {
     const token = await login('se.north@fsm.test');
     await request(app.getHttpServer())

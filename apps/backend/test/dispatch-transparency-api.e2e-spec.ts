@@ -492,6 +492,96 @@ describe('/api/dispatch-runs (e2e)', () => {
       .expect(404);
   });
 
+  /**
+   * #284 §C — Replay's run-level decision stream.
+   *
+   * The per-ticket trace above answers "why this SE for THIS ticket". Nothing answered "what did the
+   * run decide, in the order it decided it" — though `recommendations.processing_rank` has persisted
+   * exactly that since the ledger existed. That order is what makes this Replay rather than a report:
+   * a list sorted by ticket id would describe the same decisions in an order the engine never used.
+   */
+  it('decision stream: decisions in processing_rank order, both zones, for OH', async () => {
+    const token = await login('ops.head@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get(`/api/dispatch-runs/${runId}/decisions`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.runId).toBe(runId.toString());
+    expect(res.body.total).toBe(3); // two ZM-zone tickets (one placed, one unassignable) + one foreign
+    const ranks = res.body.rows.map((r: any) => r.processingRank);
+    expect([...ranks].sort((a: number, b: number) => a - b)).toEqual(ranks);
+    expect(res.body.rows.map((r: any) => r.ticketId).sort()).toEqual([tZmAssigned, tZmUnassignable, tOther].sort());
+
+    const placed = res.body.rows.find((r: any) => r.ticketId === tZmAssigned);
+    expect(placed).toMatchObject({
+      zoneId: ZM_ZONE.toString(),
+      status: 'DISPATCHED',
+      seId: seZm,
+      plantName: 'P-dt-zm-' + NS,
+      poolEmptyReason: null,
+    });
+    expect(placed.seName).toMatch(/^SE zm-/);
+
+    // An unassignable decision is a decision: it is in the stream, with no SE and the reason the
+    // pool was empty. Omitting it would make Replay show a run doing less than it did.
+    const unassignable = res.body.rows.find((r: any) => r.ticketId === tZmUnassignable);
+    expect(unassignable).toMatchObject({ status: 'UNASSIGNABLE', seId: null, poolEmptyReason: 'NO_COVERAGE' });
+    expect(unassignable.seName).toBeNull();
+  });
+
+  it('decision stream: a ZM sees only their own zone, with a total that says so', async () => {
+    const token = await login('zm.north@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get(`/api/dispatch-runs/${runId}/decisions`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.total).toBe(2);
+    expect(res.body.rows.map((r: any) => r.ticketId).sort()).toEqual([tZmAssigned, tZmUnassignable].sort());
+  });
+
+  it('decision stream: ?zoneId= narrows a multi-zone run to one zone', async () => {
+    const token = await login('ops.head@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get(`/api/dispatch-runs/${runId}/decisions?zoneId=${zoneOther}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.total).toBe(1);
+    expect(res.body.rows[0]).toMatchObject({ ticketId: tOther, zoneId: zoneOther.toString() });
+  });
+
+  /** Paginated, because a real zone's run is hundreds of decisions and the page renders a stream. */
+  it('decision stream: limit and offset page through a stable total', async () => {
+    const token = await login('ops.head@fsm.test');
+    const server = app.getHttpServer();
+    const first = await request(server)
+      .get(`/api/dispatch-runs/${runId}/decisions?limit=2`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const second = await request(server)
+      .get(`/api/dispatch-runs/${runId}/decisions?limit=2&offset=2`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(first.body).toMatchObject({ total: 3, limit: 2, offset: 0 });
+    expect(first.body.rows).toHaveLength(2);
+    expect(second.body).toMatchObject({ total: 3, limit: 2, offset: 2 });
+    expect(second.body.rows).toHaveLength(1);
+    // The two pages are disjoint and together are the whole run — the property a stream must have.
+    const all = [...first.body.rows, ...second.body.rows].map((r: any) => r.ticketId);
+    expect(new Set(all).size).toBe(3);
+  });
+
+  it('decision stream: an unknown run is 404, not an empty stream', async () => {
+    const token = await login('ops.head@fsm.test');
+    await request(app.getHttpServer())
+      .get('/api/dispatch-runs/999999999/decisions')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
+  });
+
   it('role matrix: SE is 403, unauthenticated is 401', async () => {
     const seToken = await login('se.north@fsm.test');
     await request(app.getHttpServer()).get('/api/dispatch-runs').set('Authorization', `Bearer ${seToken}`).expect(403);

@@ -63,12 +63,21 @@ export function SchedulesPage() {
   const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * #284 §D — which plans this page is showing.
+   *
+   * `TODAY` is the default because it is what the page has always *said* it shows ("What today's run
+   * actually committed"); the read had no date predicate at all, so a never-closed plan from last week
+   * sat in the list under that sentence. `ALL` is not a debug switch — a plan that was never closed is
+   * a real fault, and a page that only hid it would trade a wrong list for a missing one.
+   */
+  const [scope, setScope] = useState<'TODAY' | 'ALL'>('TODAY');
 
   const load = useCallback(() => {
     let alive = true;
     setLoading(true);
     setError(null);
-    apiListSchedules()
+    apiListSchedules(scope === 'TODAY' ? istIsoDate(new Date()) : undefined)
       .then((r) => alive && setRows(r))
       .catch(() => alive && setError('Failed to load schedules'))
       .finally(() => alive && setLoading(false));
@@ -78,7 +87,7 @@ export function SchedulesPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [scope]);
 
   useEffect(() => load(), [load]);
 
@@ -192,6 +201,7 @@ export function SchedulesPage() {
         subtitle="Each row is one Service Engineer's day plan: the plant stops and tickets the system auto-dispatched to them. Click a row to see the ordered stops. Monitoring only — batches dispatch automatically, no approval step."
       />
       <DispatchTimelineNote position="present" />
+      <ScopeToggle scope={scope} onChange={setScope} />
       <MetricStrip metrics={metrics} />
       <DataTable
         ariaLabel="Batch Schedules"
@@ -210,6 +220,55 @@ export function SchedulesPage() {
           />
         }
       />
+    </div>
+  );
+}
+
+/**
+ * #284 §D — the scope this list is showing, stated rather than assumed.
+ *
+ * Two states and no date picker: this page is every SE's day plan, not a single-date view (#280 R8's
+ * reasoning, which is why it rejected a shared date-anchored control across the dispatch surfaces).
+ * The question here is narrower — "today, or every live plan?" — and it has exactly two honest answers.
+ */
+function ScopeToggle({
+  scope,
+  onChange,
+}: {
+  scope: 'TODAY' | 'ALL';
+  onChange: (next: 'TODAY' | 'ALL') => void;
+}) {
+  const options: { id: 'TODAY' | 'ALL'; label: string; testId: string; hint: string }[] = [
+    { id: 'TODAY', label: 'Today', testId: 'schedule-scope-today', hint: "the operating day's plans" },
+    { id: 'ALL', label: 'All live plans', testId: 'schedule-scope-all', hint: 'includes plans never closed' },
+  ];
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Schedule scope">
+      <div className="flex flex-wrap items-center gap-1 rounded-full border border-line bg-surface-card p-1 text-[11px] shadow-sm">
+        {options.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            data-testid={o.testId}
+            aria-pressed={scope === o.id}
+            title={o.hint}
+            onClick={() => onChange(o.id)}
+            className={[
+              'rounded-full px-2.5 py-1 font-semibold transition-colors focus-ring',
+              scope === o.id
+                ? 'bg-brand-600 text-white'
+                : 'text-ink-muted hover:bg-surface-sunken hover:text-ink-strong',
+            ].join(' ')}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      {scope === 'ALL' && (
+        <span className="ml-1 text-[10px] text-ink-muted">
+          Showing every live plan, including any that were never closed.
+        </span>
+      )}
     </div>
   );
 }

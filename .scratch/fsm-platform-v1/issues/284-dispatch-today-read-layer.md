@@ -1,6 +1,6 @@
 # 284 — The thin read layer the cockpit needs: today, changes-today, decision stream
 
-Status: **ready-for-agent** (after [#283](./283-assignment-provenance-seams.md))
+Status: **done** (2026-08-25) — §A/§B in [`docs/progress/284-285-dispatch-today-cockpit.md`](../../../docs/progress/284-285-dispatch-today-cockpit.md), §C/§D in [`docs/progress/284-decision-stream-and-date-filter.md`](../../../docs/progress/284-decision-stream-and-date-filter.md)
 Type: AFK · Backend
 Decision: [#282](./282-decision-todays-dispatch-crew-deck.md) R1/R5/R6 — compose existing services;
 no duplicate domain representation, no scheduler logic in React.
@@ -85,22 +85,26 @@ deferred, not faked (#282 R6).
 
 ## Acceptance criteria
 
-- [ ] AC1 — `GET /dispatch/today` returns the shape above for a zone, with stops in persisted order
+- [x] AC1 — `GET /dispatch/today` returns the shape above for a zone, with stops in persisted order
       and **no fabricated times or ETAs** anywhere in the payload (#258 Q6).
-- [ ] AC2 — The operating day is the IST day; a plan whose `dateFrom..dateTo` does not cover today is
+- [x] AC2 — The operating day is the IST day; a plan whose `dateFrom..dateTo` does not cover today is
       absent, and a stale never-closed plan from last week does **not** appear (the `/schedules` bug,
       pinned so the cockpit cannot inherit it).
-- [ ] AC3 — An engineer with no plan today appears with `stops: []`.
-- [ ] AC4 — Capacity comes from `committedDayPlan` in **one** query for the whole zone; a spec asserts
+- [x] AC3 — An engineer with no plan today appears with `stops: []`.
+- [x] AC4 — Capacity comes from `committedDayPlan` in **one** query for the whole zone; a spec asserts
       the endpoint's per-engineer `committed` equals `GET /schedules/engineers` engineer-for-engineer
       (one definition, #269/#272 R9).
-- [ ] AC5 — ZM is zone-clamped server-side; a ZM cannot read another zone (403/empty per the existing
+- [x] AC5 — ZM is zone-clamped server-side; a ZM cannot read another zone (403/empty per the existing
       convention), and acting-zone is honoured.
-- [ ] AC6 — `changes-today` reports a ZM override made through `POST /batches/:id/override` — the case
+- [x] AC6 — `changes-today` reports a ZM override made through `POST /batches/:id/override` — the case
       the current Intra-day Queue structurally cannot see. Pinned as a regression.
-- [ ] AC7 — `changes-today` is IST-day-bounded: yesterday's identical change is absent.
-- [ ] AC8 — A swap counts once as a swap, not as one add plus one remove.
-- [ ] AC9 — The decision stream returns a run's decisions in `processing_rank` order, zone-clamped.
-- [ ] AC10 — `GET /schedules?date=` filters; the existing no-param behaviour is preserved for callers
+- [x] AC7 — `changes-today` is IST-day-bounded: yesterday's identical change is absent.
+- [x] AC8 — A swap counts once as a swap, not as one add plus one remove.
+- [x] AC9 — The decision stream returns a run's decisions in `processing_rank` order, zone-clamped.
+- [x] AC10 — `GET /schedules?date=` filters; the existing no-param behaviour is preserved for callers
       that depend on it, and the change is additive.
-- [ ] AC11 — Full backend suite green; no existing endpoint's response shape changes.
+      **Note on the §D prose:** the Required-change text says "defaulting to today"; this AC says the
+      no-param behaviour is preserved. The AC governs — a today default would silently narrow every
+      existing caller. The *page* passes the parameter (and defaults to today, operator-ruled
+      2026-08-25, with an `All live plans` toggle so a never-closed plan stays findable).
+- [x] AC11 — Full backend suite green; no existing endpoint's response shape changes.

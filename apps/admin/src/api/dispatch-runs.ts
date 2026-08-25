@@ -103,6 +103,15 @@ export interface ConfigSnapshot {
   settings: Record<string, string>;
   capacity: Record<string, { dailyCapacity: number | null; isActive: boolean }>;
   scheduler: { businessSweepsEnabled: boolean; dispatchCron: string };
+  /** #287 — the freshness of the FLOATING candidate pool this run selected from. Absent on runs that
+   *  predate the field, so a reader must treat its absence as unknown, not as fresh. */
+  eligibilityMv?: {
+    viewName: string;
+    lastSuccessAt: string | null;
+    lastAttemptAt: string | null;
+    lastError: string | null;
+    stale: boolean;
+  };
 }
 
 /** #131 — the run's build attribution against the current runtime-lock high-water mark. Null for a
@@ -244,6 +253,9 @@ export interface DecisionTrace {
   runnersUp: TraceRunnerUp[];
   scoreDegenerate: boolean;
   poolEmptyReason: PoolEmptyReason | null;
+  /** #270 — filters this ticket could not enforce for real (Issue 28/22's feeds are unbuilt).
+   *  Absent on older runs (version skew). Never rendered as a pass. */
+  notEnforcedFilters?: string[];
 }
 
 export interface DispatchTicketTrace {
@@ -268,6 +280,41 @@ export interface DispatchTicketTrace {
   };
 }
 
+/**
+ * #284 §C — one decision a run made, as Replay lists it.
+ *
+ * Flat and small by design: the stream is the whole run, and the deep "why this SE" view already
+ * exists as the per-ticket trace this row expands into.
+ */
+export interface DispatchDecisionRow {
+  ticketId: string;
+  zoneId: string;
+  /** The engine's own processing order — what makes this a replay rather than a report. */
+  processingRank: number | null;
+  /** `SUGGESTED` | `DISPATCHED` | `UNASSIGNABLE` | `RETIRED`. */
+  status: string | null;
+  seId: string | null;
+  seName: string | null;
+  plantId: string | null;
+  plantName: string | null;
+  deviceId: string | null;
+  companyTier: string | null;
+  deviceBucket: string | null;
+  /** `NO_COVERAGE` | `ALL_DROPPED` on an unassignable decision; null when an SE was chosen. */
+  poolEmptyReason: string | null;
+  candidatesTotal: number | null;
+  passedCount: number | null;
+}
+
+export interface DispatchRunDecisions {
+  runId: string;
+  /** Decisions in scope before paging, so the page can say "20 of 340" honestly. */
+  total: number;
+  limit: number;
+  offset: number;
+  rows: DispatchDecisionRow[];
+}
+
 export const apiDispatchRuns = (limit?: number) =>
   get<DispatchRunListRow[]>(`/dispatch-runs${limit ? `?limit=${limit}` : ''}`);
 
@@ -281,3 +328,16 @@ export const apiDispatchBatchDetail = (batchId: string) => get<DispatchBatchDeta
 
 export const apiDispatchTicketTrace = (runId: string, ticketId: string) =>
   get<DispatchTicketTrace>(`/dispatch-runs/${runId}/tickets/${ticketId}/trace`);
+
+/** #284 §C — a page of a run's decisions, in `processing_rank` order. */
+export const apiDispatchRunDecisions = (
+  runId: string,
+  opts: { zoneId?: string; limit?: number; offset?: number } = {},
+) => {
+  const params = new URLSearchParams();
+  if (opts.zoneId) params.set('zoneId', opts.zoneId);
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.offset != null) params.set('offset', String(opts.offset));
+  const qs = params.toString();
+  return get<DispatchRunDecisions>(`/dispatch-runs/${runId}/decisions${qs ? `?${qs}` : ''}`);
+};

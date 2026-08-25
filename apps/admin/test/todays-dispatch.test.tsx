@@ -4,12 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DispatchChangesTodayView, DispatchTodayView } from '../src/api/dispatchToday';
 import TodaysDispatchPage from '../src/pages/dispatch/TodaysDispatchPage';
 
+vi.mock('../src/api/dispatch-runs', async () => {
+  const actual = await vi.importActual('../src/api/dispatch-runs');
+  return { ...actual, apiDispatchRunDecisions: vi.fn(), apiDispatchTicketTrace: vi.fn() };
+});
+
 vi.mock('../src/api/dispatchToday', async () => {
   const actual = await vi.importActual('../src/api/dispatchToday');
   return { ...actual, apiDispatchToday: vi.fn(), apiDispatchChangesToday: vi.fn() };
 });
 
 const { apiDispatchToday, apiDispatchChangesToday } = await import('../src/api/dispatchToday');
+const { apiDispatchRunDecisions } = await import('../src/api/dispatch-runs');
 
 const ticket = (over: Partial<DispatchTodayView['engineers'][0]['stops'][0]['tickets'][0]> = {}) => ({
   ticketId: '11111111-2222-3333-4444-555555555555',
@@ -273,6 +279,90 @@ describe("#285 — Today's Dispatch cockpit", () => {
 
     const notice = await screen.findByTestId('recovery-notice');
     expect(notice).toHaveTextContent(/re-dispatched/i);
+  });
+
+  /**
+   * #285 AC8 / #284 §C — Replay renders the run's own decisions, in the order the engine made them.
+   *
+   * It shipped as a pair of links to the ledger, which was honest but was not Replay: the question
+   * "what did this run decide, and in what order" had no answer on the page. `processing_rank` had
+   * persisted that order the whole time.
+   */
+  it('replay lists the run decisions in processing_rank order', async () => {
+    vi.mocked(apiDispatchToday).mockResolvedValue(view());
+    vi.mocked(apiDispatchRunDecisions).mockResolvedValue({
+      runId: '42',
+      total: 2,
+      limit: 100,
+      offset: 0,
+      rows: [
+        {
+          ticketId: 'aaaaaaaa-0000-0000-0000-000000000001',
+          zoneId: '7',
+          processingRank: 1,
+          status: 'DISPATCHED',
+          seId: 'se-1',
+          seName: 'Ramesh K.',
+          plantId: '4',
+          plantName: 'Acme Cement',
+          deviceId: 'DEV-1',
+          companyTier: 'GOLD',
+          deviceBucket: 'CRITICAL',
+          poolEmptyReason: null,
+          candidatesTotal: 4,
+          passedCount: 2,
+        },
+        {
+          ticketId: 'bbbbbbbb-0000-0000-0000-000000000002',
+          zoneId: '7',
+          processingRank: 2,
+          status: 'UNASSIGNABLE',
+          seId: null,
+          seName: null,
+          plantId: '5',
+          plantName: 'Beta Works',
+          deviceId: 'DEV-2',
+          companyTier: 'SILVER',
+          deviceBucket: 'WARNING',
+          poolEmptyReason: 'NO_COVERAGE',
+          candidatesTotal: 0,
+          passedCount: 0,
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/dispatch/today?mode=replay']}>
+        <TodaysDispatchPage />
+      </MemoryRouter>,
+    );
+
+    const rows = await screen.findAllByTestId(/^decision-row-/);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('Acme Cement');
+    expect(rows[0]).toHaveTextContent('Ramesh K.');
+    // An unassignable decision is a decision — present, with the reason its pool was empty.
+    expect(rows[1]).toHaveTextContent('Beta Works');
+    expect(rows[1]).toHaveTextContent(/no coverage/i);
+  });
+
+  it('replay says so when a past run made no decisions, rather than rendering nothing', async () => {
+    vi.mocked(apiDispatchToday).mockResolvedValue(view());
+    vi.mocked(apiDispatchRunDecisions).mockResolvedValue({
+      runId: '42',
+      total: 0,
+      limit: 100,
+      offset: 0,
+      rows: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/dispatch/today?mode=replay']}>
+        <TodaysDispatchPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('replay-empty')).toBeInTheDocument();
   });
 
   it('shows an error state with a retry rather than a blank page', async () => {

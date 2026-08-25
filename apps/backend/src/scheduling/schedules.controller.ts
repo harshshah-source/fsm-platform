@@ -451,9 +451,24 @@ export class SchedulesController {
     );
   }
 
+  /**
+   * #284 §D — `?date=YYYY-MM-DD` narrows to the plans covering that IST operating day.
+   *
+   * **Additive**: no parameter is the all-live list this route has always returned, because callers
+   * depend on it (AC10). The page that says "today" is the one that passes the parameter — a default
+   * of today would silently narrow every existing caller, which is a behaviour change dressed as a fix.
+   * Same `INVALID_DATE` shape and the same `istWindowStart` parser as `GET /schedules/preview`.
+   */
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<ZmScheduleRow[]> {
+  list(@CurrentUser() user: AccessTokenClaims, @Query('date') date?: string): Promise<ZmScheduleRow[]> {
+    if (date != null && date !== '') {
+      const target = istWindowStart(date);
+      if (Number.isNaN(target.getTime())) {
+        throw new BadRequestException({ code: 'INVALID_DATE', message: 'date must be YYYY-MM-DD.' });
+      }
+      return this.zm.listSchedules({ role: user.role, zoneId: user.zone_id }, { date: target });
+    }
     return this.zm.listSchedules({ role: user.role, zoneId: user.zone_id });
   }
 

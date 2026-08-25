@@ -133,6 +133,30 @@ describe('Issue 13a slice 1 — ZmScheduleQueryService', () => {
     expect(mine[0].ticketCount).toBe(2);
   });
 
+  /**
+   * #284 §D — the date filter the page's own label has always implied.
+   *
+   * `listSchedules` filters on live status alone and carries **no date predicate**, so it returns a
+   * never-closed plan from last week beside today's while the nav row, the page copy and
+   * `DispatchTimelineNote` all say "today". The filter is **additive**: no argument keeps the existing
+   * all-live answer, because callers depend on it and #284 AC10 says so explicitly.
+   */
+  it('#284 — no date argument keeps the existing all-live answer', async () => {
+    const rows = await zm.listSchedules({ role: 'ZONAL_MANAGER', zoneId: Number(zoneId) });
+    expect(rows.some((r) => r.seId === se)).toBe(true);
+  });
+
+  it('#284 — ?date= keeps a plan whose range covers that IST day', async () => {
+    const rows = await zm.listSchedules({ role: 'ZONAL_MANAGER', zoneId: Number(zoneId) }, { date: NOW });
+    expect(rows.some((r) => r.seId === se)).toBe(true);
+  });
+
+  it('#284 — ?date= drops a plan whose range does not cover that day, stale-but-live included', async () => {
+    const nextWeek = new Date('2026-06-28T06:00:00Z');
+    const rows = await zm.listSchedules({ role: 'ZONAL_MANAGER', zoneId: Number(zoneId) }, { date: nextWeek });
+    expect(rows.some((r) => r.seId === se)).toBe(false);
+  });
+
   it('excludes schedules from other zones for a zone-scoped ZM', async () => {
     const rows = await zm.listSchedules({ role: 'ZONAL_MANAGER', zoneId: Number(otherZoneId) });
     expect(rows.some((r) => r.seId === se)).toBe(false);

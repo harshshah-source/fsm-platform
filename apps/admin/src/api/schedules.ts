@@ -44,7 +44,12 @@ export interface ScheduleRow {
   ticketCount: number;
 }
 
-export const apiListSchedules = () => get<ScheduleRow[]>('/schedules');
+/**
+ * #284 §D — `date` narrows to the plans covering that IST operating day; omitting it returns the
+ * all-live list this endpoint has always returned. Additive on both sides of the wire.
+ */
+export const apiListSchedules = (date?: string) =>
+  get<ScheduleRow[]>(`/schedules${date ? `?date=${encodeURIComponent(date)}` : ''}`);
 
 export interface TicketReasoning {
   companyTier: string | null;

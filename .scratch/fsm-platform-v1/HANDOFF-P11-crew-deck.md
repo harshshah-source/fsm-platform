@@ -75,7 +75,7 @@ These files carry **other issues' uncommitted work** and were deliberately **lef
 
 | File | Whose | Why it matters |
 |---|---|---|
-| `apps/admin/src/api/dispatch-runs.ts` | #270 (`notEnforcedFilters`) **+ my `eligibilityMv` type** | The MV panel below needs my half of it |
+| `apps/admin/src/api/dispatch-runs.ts` | #270 (`notEnforcedFilters`) **+ my `eligibilityMv` type** | The MV panel below needs my half of it. **2026-08-25 (second session): this file has now been committed** with #284's decision-stream client, which had nowhere else to live without letting a commit boundary dictate the code layout. Both foreign additions are *optional type-only* fields, so they are inert until their own code lands — but they are no longer uncommitted, and whoever finishes #270/#287 should not expect to find them here |
 | `apps/admin/src/pages/dispatch/ConfigInEffectPanel.tsx` | #270 (eligibility-proxy note) **+ my MV freshness block** | #287's UI half lives here |
 | `apps/backend/test/day-plan-notification-outbox-writers.e2e-spec.ts` | #264 (untracked test file) **+ my fixture fix** | **The fixture fix is required**: it built its actor as `'zm-obx-' + NS`, and #283 writes `added_by` to a `uuid` column, so the old fixture now fails. Whoever commits #264 must include it |
 
@@ -103,8 +103,8 @@ failure the whole grammar exists to prevent (#282 R2), and it has its own test.
 1. ~~Finish verification (batch 2 + admin re-run).~~ **Done 2026-08-25.**
 2. ~~**#286**~~ **Done 2026-08-25** (`56ac41e`). Its "stop deleting failed-run traces" note landed with
    it: orphan SUGGESTED recs are `RETIRED` now, so the traces survive.
-3. **#284's leftovers** — the decision stream makes Replay real rather than a link. **← next**
-4. **#290** then **#289**, **#288**.
+3. ~~**#284's leftovers**~~ **Done 2026-08-25** — the decision stream landed and Replay is real. `GET /schedules?date=` too, consumed by a Batch Schedule page that now defaults to the operating day.
+4. **#290** then **#289**, **#288**. **← next**
 
 ## Reading order for the next session
 

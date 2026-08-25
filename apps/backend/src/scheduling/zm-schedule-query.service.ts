@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { SUPERSEDED_RECOMMENDATION_STATUSES } from '../recommender/recommendation-status';
 import { committedDayLoad } from './committed-day-load';
@@ -96,9 +97,27 @@ export interface ZmScheduleDetail {
 export class ZmScheduleQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listSchedules(scope: ZmScope): Promise<ZmScheduleRow[]> {
+  /**
+   * #284 §D — an optional operating-day filter, and the reason it is optional.
+   *
+   * This read has never had a date predicate: it filters on live status alone, so a never-closed plan
+   * from last week comes back beside today's while the nav row, the page copy and
+   * `DispatchTimelineNote` all promise "today". `opts.date` applies the same
+   * `dateFrom <= day <= dateTo` rule `DayPlanQueryService` has always used for the SE-facing read.
+   *
+   * **Additive, never a new default** (#284 AC10): omitting it returns exactly what it always
+   * returned. Making "today" the default would silently narrow every existing caller — a page, a link
+   * and a test each expecting the all-live list — which is a behaviour change wearing a bugfix's
+   * clothes. The surface that promises "today" passes the parameter; the endpoint keeps its word to
+   * everyone else.
+   */
+  async listSchedules(scope: ZmScope, opts: { date?: Date } = {}): Promise<ZmScheduleRow[]> {
     const schedules = await this.prisma.workSchedule.findMany({
-      where: { status: { in: [...LIVE_SCHEDULE_STATUSES] }, ...this.zoneFilter(scope) },
+      where: {
+        status: { in: [...LIVE_SCHEDULE_STATUSES] },
+        ...this.zoneFilter(scope),
+        ...dayCoverageFilter(opts.date),
+      },
       orderBy: [{ zoneId: 'asc' }, { seId: 'asc' }],
       include: {
         engineer: { select: { user: { select: { name: true } } } },
@@ -263,4 +282,17 @@ export class ZmScheduleQueryService {
     }
     return map;
   }
+}
+
+/**
+ * #284 §D — `dateFrom <= day <= dateTo`, or nothing at all when no day was asked for.
+ *
+ * `istDate` because `date_from`/`date_to` are `@db.Date`: Postgres DATE carries no timezone and Prisma
+ * marshals it to UTC midnight, so the comparison value has to be UTC midnight *of the IST calendar
+ * date* (`ist-day.ts` states the rule and the two functions that get it wrong).
+ */
+function dayCoverageFilter(date: Date | undefined): { dateFrom?: { lte: Date }; dateTo?: { gte: Date } } {
+  if (date === undefined) return {};
+  const day = istDate(date);
+  return { dateFrom: { lte: day }, dateTo: { gte: day } };
 }

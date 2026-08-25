@@ -9,7 +9,14 @@ import {
 import { EmptyState, MetricStrip, PageHeader, type Metric } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { Button } from '../../components/ui/Button';
+import {
+  apiDispatchRunDecisions,
+  type DispatchRunDecisions,
+  type PoolEmptyReason,
+} from '../../api/dispatch-runs';
 import { CrewCard, ProvenanceLegend } from './CrewCard';
+import { TracePanel } from './DecisionTrace';
+import { POOL_EMPTY_LABEL, ordinal } from './format';
 
 type Mode = 'plan' | 'live' | 'replay';
 
@@ -28,9 +35,11 @@ const MODES: { id: Mode; label: string; question: string }[] = [
  * hard-coded — the wireframe's "42 placed · 3 unassignable" are example values, and #282 R6 forbids
  * shipping them.
  *
- * Plan and Replay are deliberately thin here: Plan links to the Scheduler Preview that already owns
- * the projection (#250/#251) and Replay to the run ledger and DecisionTrace that already own the
- * history, rather than reimplementing either. Live is the mode that had no home before.
+ * Plan stays deliberately thin: it links to the Scheduler Preview that already owns the projection
+ * (#250/#251) rather than reimplementing it. Replay is no longer thin — #284's decision stream landed,
+ * so it lists the run's own decisions in `processing_rank` order and expands each into the existing
+ * `TracePanel`, which is what #285 AC8 asked for and what a pair of links could not deliver. Live is
+ * the mode that had no home at all before.
  */
 export default function TodaysDispatchPage() {
   const [params, setParams] = useSearchParams();
@@ -183,7 +192,7 @@ export default function TodaysDispatchPage() {
       )}
 
       {mode === 'plan' && <PlanMode zoneId={view.zone.zoneId} />}
-      {mode === 'replay' && <ReplayMode runId={run?.runId ?? null} />}
+      {mode === 'replay' && <ReplayMode runId={run?.runId ?? null} zoneId={view.zone.zoneId} />}
 
       {mode === 'live' && (
         <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
@@ -399,25 +408,125 @@ function PlanMode({ zoneId }: { zoneId: string }) {
   );
 }
 
-/** Replay points at the ledger and the per-ticket trace, which already answer "why". */
-function ReplayMode({ runId }: { runId: string | null }) {
+/**
+ * Replay — the run's own decisions, in the order the engine made them (#285 AC8, #284 §C).
+ *
+ * `processing_rank` is the whole reason this is a replay and not a report: it is the order the engine
+ * actually considered tickets in, and any other sort describes the same decisions in an order the run
+ * never used. Each row expands into the per-ticket trace that already owns "why this SE" — the deep
+ * view is not rebuilt here, it is reached from here.
+ *
+ * An **unassignable** decision is a decision and gets a row. Listing only the placements would show a
+ * run doing less than it did, which is the same class of omission #282 R6 forbids on the counters.
+ */
+function ReplayMode({ runId, zoneId }: { runId: string | null; zoneId: string }) {
+  const [data, setData] = useState<DispatchRunDecisions | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [openTicket, setOpenTicket] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!runId) return;
+    let live = true;
+    setData(null);
+    setError(null);
+    apiDispatchRunDecisions(runId, { zoneId })
+      .then((d) => live && setData(d))
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : 'Failed to load the decisions'));
+    return () => {
+      live = false;
+    };
+  }, [runId, zoneId]);
+
   return (
-    <section className="rounded-lg border border-line bg-surface p-4">
-      <h2 className="text-sm font-semibold text-ink">What a past run did, and why</h2>
-      <p className="mt-1 max-w-prose text-[12px] text-ink-muted">
-        Each run keeps the configuration it froze at admission and a decision trace per ticket —
-        the candidates it compared, the tier it evaluated, the capacity at the moment it chose.
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {runId && (
-          <Link to={`/dispatch-runs/${runId}`}>
-            <Button>Open today’s run</Button>
-          </Link>
-        )}
-        <Link to="/dispatch-runs">
-          <Button variant="secondary">All runs</Button>
-        </Link>
+    <section className="flex flex-col gap-3">
+      <div className="rounded-lg border border-line bg-surface p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold text-ink">What a past run did, and why</h2>
+          <div className="flex flex-wrap gap-2">
+            {runId && (
+              <Link to={`/dispatch-runs/${runId}`}>
+                <Button variant="secondary">Run detail</Button>
+              </Link>
+            )}
+            <Link to="/dispatch-runs">
+              <Button variant="secondary">All runs</Button>
+            </Link>
+          </div>
+        </div>
+        <p className="mt-1 max-w-prose text-[12px] text-ink-muted">
+          Decisions in the order the engine made them. Open one for the candidates it compared, the
+          tier it evaluated and the capacity at the moment it chose.
+        </p>
       </div>
+
+      {!runId ? (
+        <EmptyState message="No dispatch run for this zone today — there is nothing to replay yet." />
+      ) : error ? (
+        <EmptyState message={`Could not load this run’s decisions — ${error}`} />
+      ) : !data ? (
+        <EmptyState message="Loading decisions…" />
+      ) : data.rows.length === 0 ? (
+        <div data-testid="replay-empty">
+          <EmptyState message="This run recorded no decisions for this zone." />
+        </div>
+      ) : (
+        <section className="rounded-lg border border-line bg-surface">
+          <h3 className="border-b border-line px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+            Decisions
+            <span className="ml-2 tabular-nums text-ink">
+              {data.rows.length} of {data.total}
+            </span>
+          </h3>
+          <ul className="divide-y divide-line">
+            {data.rows.map((d) => (
+              <li key={d.ticketId} data-testid={`decision-row-${d.ticketId}`} className="px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  <span className="tabular-nums text-ink-muted">
+                    {d.processingRank == null ? '—' : ordinal(d.processingRank)}
+                  </span>
+                  <Link to={`/tickets/${d.ticketId}`} className="font-mono text-link">
+                    {d.ticketId.slice(0, 8)}
+                  </Link>
+                  <span className="text-ink">{d.plantName ?? d.plantId ?? '—'}</span>
+                  {d.deviceBucket && <Badge tone="neutral">{d.deviceBucket.replace('_', ' ')}</Badge>}
+                  {d.seName ? (
+                    <span className="text-ink">{d.seName}</span>
+                  ) : (
+                    <span className="text-warning">
+                      Unassignable
+                      {d.poolEmptyReason && ` — ${POOL_EMPTY_LABEL[d.poolEmptyReason as PoolEmptyReason] ?? d.poolEmptyReason}`}
+                    </span>
+                  )}
+                  {d.status && d.status !== 'DISPATCHED' && d.status !== 'UNASSIGNABLE' && (
+                    // RETIRED (#286) and SUGGESTED both mean "intended, not placed" — worth saying,
+                    // because the row otherwise reads as work that landed on somebody's plan.
+                    <Badge tone="warning">{d.status.toLowerCase()}</Badge>
+                  )}
+                  <button
+                    type="button"
+                    className="ml-auto text-link"
+                    aria-expanded={openTicket === d.ticketId}
+                    onClick={() => setOpenTicket(openTicket === d.ticketId ? null : d.ticketId)}
+                  >
+                    {openTicket === d.ticketId ? 'Hide why' : 'Why?'}
+                  </button>
+                </div>
+                {openTicket === d.ticketId && runId && (
+                  <div className="mt-2">
+                    <TracePanel runId={runId} ticketId={d.ticketId} />
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          {data.total > data.rows.length && (
+            <p className="border-t border-line px-3 py-2 text-[10px] text-ink-muted">
+              Showing the first {data.rows.length} of {data.total} decisions. Open the run detail for
+              the full ledger.
+            </p>
+          )}
+        </section>
+      )}
     </section>
   );
 }
