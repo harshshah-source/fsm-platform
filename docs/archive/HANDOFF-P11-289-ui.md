@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-08-25 — consumed.** #289's UI half was built in the session that followed this
+> handoff; the ruling it carried is now recorded in the issue, `INDEX.md`, `SYSTEM-STATE` §3h and
+> `docs/progress/289-override-impact-preview.md`. Nothing here is current.
+
 # HANDOFF — #289's UI half, 2026-08-25 (third session)
 
 Stopped at a safe point. **Everything implemented is committed.** #289's **backend is done and
