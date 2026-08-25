@@ -8,7 +8,13 @@ export type BadgeTone =
   | 'warning'
   | 'critical'
   | 'neutral'
-  | 'brand';
+  | 'brand'
+  /**
+   * #290 — "a human crossed a coverage tier", the violet in #272's non-negotiable grammar table.
+   * Its own tone rather than a reuse of `warning`: amber means over capacity and crimson means
+   * critical, and one colour for two meanings is what made the assign board unreadable.
+   */
+  | 'tierCross';
 
 const TONES: Record<BadgeTone, string> = {
   info: 'bg-info-bg text-info ring-info/10',
@@ -18,6 +24,7 @@ const TONES: Record<BadgeTone, string> = {
   critical: 'bg-critical-bg text-critical ring-critical/10',
   neutral: 'bg-neutral-bg text-neutral ring-neutral/10',
   brand: 'bg-brand-300 text-brand-700 ring-brand-600/10',
+  tierCross: 'bg-tier-cross-bg text-tier-cross ring-tier-cross/10',
 };
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {

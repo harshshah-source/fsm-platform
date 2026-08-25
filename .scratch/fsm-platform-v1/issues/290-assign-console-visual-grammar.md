@@ -1,6 +1,6 @@
 # 290 — The Assign Work Console's approved visual grammar, actually built
 
-Status: **ready-for-agent**
+Status: **done** (2026-08-25) — report [`docs/progress/290-assign-console-visual-grammar.md`](../../../docs/progress/290-assign-console-visual-grammar.md)
 Type: AFK · Admin
 Decision: [#272](./272-decision-assign-work-console.md) — the grammar table it calls
 **non-negotiable**, and which was never implemented.
@@ -25,7 +25,8 @@ uses, so the two boards read as one product (#272:64, #282 R2).
 
 ## Required change
 
-Add the violet token to `index.css`; implement the chip grammar (solid+dot own coverage, heavy
+~~Add the violet token to `index.css`~~ (it already exists — `--color-tier-cross`, added with #285's
+provenance grammar; the gap was that `/assign` never used it); implement the chip grammar (solid+dot own coverage, heavy
 crimson + flag critical, dashed violet human tier-crossing); the amber over-capacity lane; the
 legend; and the ledger's summary-tag cell. **Grayscale-survivable**: never the same shape for two
 meanings. Workflow, endpoints and role visibility are untouched — this is the approved visual layer
@@ -33,10 +34,10 @@ only.
 
 ## Acceptance criteria
 
-- [ ] AC1 — Violet token exists and is used **only** for human tier-crossing.
-- [ ] AC2 — Over-capacity is amber (lane + load), never crimson; critical is crimson, never amber.
-- [ ] AC3 — Chip grammar renders per the design, including critical chips split from non-critical.
-- [ ] AC4 — The legend renders its three swatches.
-- [ ] AC5 — The ledger's summary-tag cell renders live counts.
-- [ ] AC6 — Grayscale test: each meaning is distinguishable by shape/border alone.
-- [ ] AC7 — No workflow or endpoint change; admin suite green.
+- [x] AC1 — Violet token exists and is used **only** for human tier-crossing.
+- [x] AC2 — Over-capacity is amber (lane + load), never crimson; critical is crimson, never amber.
+- [x] AC3 — Chip grammar renders per the design, including critical chips split from non-critical.
+- [x] AC4 — The legend renders its three swatches.
+- [x] AC5 — The ledger's summary-tag cell renders live counts.
+- [x] AC6 — Grayscale test: each meaning is distinguishable by shape/border alone.
+- [x] AC7 — No workflow or endpoint change; admin suite green.

@@ -2,21 +2,35 @@ import { createContext, useCallback, useContext, useRef, useState, type ReactNod
 import { cn } from '../../lib/cn';
 import type { BadgeTone } from '../ui/Badge';
 
+/** The tones a toast can carry — the notification-shaped subset of {@link BadgeTone}. */
+export type ToastTone = Extract<
+  BadgeTone,
+  'info' | 'success' | 'verified' | 'warning' | 'critical' | 'neutral' | 'brand'
+>;
+
 interface ToastItem {
   id: number;
-  tone: BadgeTone;
+  tone: ToastTone;
   message: ReactNode;
 }
 
 interface ToastApi {
-  push: (message: ReactNode, tone?: BadgeTone) => void;
+  push: (message: ReactNode, tone?: ToastTone) => void;
   success: (message: ReactNode) => void;
   error: (message: ReactNode) => void;
 }
 
 const ToastCtx = createContext<ToastApi | null>(null);
 
-const TONE_CLASS: Record<BadgeTone, string> = {
+/**
+ * A toast's tone is a **subset** of `BadgeTone`, and says so.
+ *
+ * #290 added `tierCross` — a chip meaning on the assign board — and a `Record<BadgeTone, …>` here
+ * forced this file to invent a toast style for it. A tier crossing is never announced as a toast, so
+ * the honest fix is to narrow the type rather than to fabricate an entry: every tone below is one a
+ * toast can actually carry, and adding a chip meaning no longer drags a notification style behind it.
+ */
+const TONE_CLASS: Record<ToastTone, string> = {
   info: 'border-info/30 bg-info-bg text-info',
   success: 'border-success/30 bg-success-bg text-success',
   verified: 'border-verified/30 bg-verified-bg text-verified',
@@ -34,7 +48,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const remove = useCallback((id: number) => setItems((s) => s.filter((t) => t.id !== id)), []);
 
   const push = useCallback(
-    (message: ReactNode, tone: BadgeTone = 'neutral') => {
+    (message: ReactNode, tone: ToastTone = 'neutral') => {
       const id = nextId.current++;
       setItems((s) => [...s, { id, tone, message }]);
       setTimeout(() => remove(id), 4000);

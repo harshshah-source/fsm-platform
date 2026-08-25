@@ -785,6 +785,22 @@ about the shape:
   the evidence a zone lost its day) and retired EXHAUSTED without dispatching, degrading to exactly
   #261's behaviour plus a record.
 
+**The assign board's visual grammar (#290, 2026-08-25; #272's non-negotiable table).** One colour,
+one meaning, across the whole admin: **amber** = over capacity, **crimson** = critical work,
+**violet** (`--color-tier-cross`, the `tierCross` `Badge` tone) = a human crossed a coverage tier.
+`/assign` shipped with the first two **swapped** — over capacity in crimson, a crossing in amber — so
+the board could not distinguish "past their cap" from "on a clock", and drew a decision #258 Q2 rules
+an administrative *right* as a failure. Fixed in all three places it lived: `LaneCoverage`,
+`ReviewCommitScreen`, and `LoadBadge` — which changed for **all seven** surfaces it appears on, because
+a colour that means different things on different screens is the same defect in a smaller box.
+`src/pages/assign/grammar.tsx` holds the grammar as a table (`CHIP_FORM`) and the legend renders from
+it, so a swatch cannot describe a border the chips stopped using. Every meaning is a **shape** first
+(solid 1px / dashed / solid 2px, plus a flag on critical and a dot on own-coverage) with a test that
+the three cannot collapse into two — colour is the second signal, never the only one. Critical work is
+its own chip, suppressed for a partial Distribute placement where the plant's critical count would be
+a fabricated claim about an arbitrary subset. `Toast` now takes a narrower `ToastTone` rather than all
+of `BadgeTone`, so a chip meaning no longer drags a notification style behind it.
+
 **Run-level decision stream (#284 §C, 2026-08-25).** `GET /api/dispatch-runs/:runId/decisions?zoneId=&limit=&offset=`
 returns every decision a run made, **ordered by `recommendations.processing_rank`** — the engine's own
 processing order, which is what makes it a replay rather than a report. Manager-roled, ZM zone-clamped,

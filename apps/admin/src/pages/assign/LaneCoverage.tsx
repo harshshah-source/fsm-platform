@@ -86,12 +86,15 @@ export function LaneHeader({
           key={c.plantId}
           data-testid={`coverage-${seId}-${c.plantId}`}
           data-tier-crossing={String(c.tierCrossing)}
-          tone={c.coverageType === null ? 'critical' : c.tierCrossing ? 'warning' : 'success'}
-          // Dashed is the #272 grammar for "a human crossed a coverage tier" — the legend's own
-          // wording. The approved design pairs it with a violet, which this theme has no token for;
-          // the dash carries the meaning and the state is also exposed as data + title, never by
-          // colour alone.
-          className={cn(c.tierCrossing && 'border border-dashed border-warning ring-0')}
+          // #290 — a crossing is **violet**, not amber. Amber is over-capacity and nothing else; using
+          // it here said "this engineer is past their cap" about an engineer who may be well under it,
+          // which is how a grammar stops being read at all. The token exists now
+          // (`--color-tier-cross`, added with #285's provenance grammar), so the two boards finally
+          // spell the same meaning the same way.
+          tone={c.coverageType === null ? 'critical' : c.tierCrossing ? 'tierCross' : 'success'}
+          // Dashed carries the meaning in grayscale — the colour is the second signal, never the only
+          // one — and the state is exposed as data + title besides.
+          className={cn(c.tierCrossing && 'border border-dashed border-tier-cross ring-0')}
           {...(c.tierCrossing ? { title: 'Tier crossing — a stronger tier is available and passing' } : {})}
         >
           {c.coverageType === null ? 'No coverage' : TIER_LABEL[c.coverageType].toUpperCase()} ·{' '}
@@ -102,7 +105,10 @@ export function LaneHeader({
       <span
         data-testid={`lane-load-${seId}`}
         data-over-capacity={String(over)}
-        className={cn('ml-auto tabular-nums text-xs', over ? 'font-semibold text-critical' : 'text-ink-muted')}
+        // #290 — **amber**, not crimson. Crimson is critical work; over capacity is a state and an
+        // administrative right (#258 Q2), and rendering it in the critical colour said the opposite of
+        // what that ruling means.
+        className={cn('ml-auto tabular-nums text-xs', over ? 'font-semibold text-warning' : 'text-ink-muted')}
         {...(over ? { title: 'This draft takes the engineer to or past capacity — still assignable' } : {})}
       >
         <span className="text-ink-muted">{committed} →</span> {after}

@@ -16,11 +16,12 @@ import {
 } from '../../api/schedules';
 import { MetricStrip, PageHeader, SearchInput, type Metric } from '../../components/data';
 import { Badge, Button, LoadBadge } from '../../components/ui';
-import { engineerOptionLabel } from '../../lib/capacity';
+import { engineerOptionLabel, isOverCapacity } from '../../lib/capacity';
 import { cn } from '../../lib/cn';
 import { formatPlantDisplayName } from '../../lib/plantNames';
 import { CandidateColumn } from './CandidateColumn';
 import { DistributePanel } from './DistributePanel';
+import { CHIP_FORM, CHIP_MEANING_LABEL, GrammarLegend, chipMeaning } from './grammar';
 import { LaneHeader, laneCoverage } from './LaneCoverage';
 import { ReviewCommitScreen, type ReviewLane } from './ReviewCommitScreen';
 
@@ -303,6 +304,7 @@ export function AssignConsolePage() {
 
   const openTotal = view?.totals.openUnassigned ?? 0;
 
+
   const metrics: Metric[] = [
     { label: 'Open unassigned', value: openTotal, hint: view ? `zone scope · ${view.date}` : '—', tone: 'info', testId: 'ledger-open' },
     { label: 'In this draft', value: inDraft.open, hint: `${drafted.size} plants · ${lanes.length} engineers`, tone: 'brand', testId: 'ledger-draft' },
@@ -452,6 +454,39 @@ export function AssignConsolePage() {
   const engineerName = (seId: string) => engineers.find((e) => e.engineerId === seId)?.name ?? seId;
   const plantName = (plantId: string) =>
     view?.companies.flatMap((c) => c.plants).find((p) => p.plantId === plantId)?.plantName ?? `Plant ${plantId}`;
+
+  /**
+   * #290 AC5 — the ledger's fifth cell: what should worry you about *this draft*.
+   *
+   * The four numbers beside it answer "how much work"; none of them answers "and is any of it a
+   * problem". Derived from the very same `laneCoverage` the lanes render and the same `isOverCapacity`
+   * the load uses, so the summary can never disagree with the board underneath it — a rollup computed
+   * a second way is a rollup that will eventually contradict its own detail.
+   */
+  const draftWarnings = useMemo(() => {
+    let overCapacity = 0;
+    let crossings = 0;
+    let noCoverage = 0;
+    for (const lane of lanes) {
+      if (!lane.seId || lane.plantIds.length === 0) continue;
+      const eng = engineers.find((e) => e.engineerId === lane.seId);
+      const after =
+        (eng?.committed ?? 0) +
+        lane.plantIds.reduce(
+          (n, id) => n + (lane.ticketOverrides?.[id]?.length ?? totals.get(id)?.openUnassigned ?? 0),
+          0,
+        );
+      if (typeof eng?.dailyCapacity === 'number' && isOverCapacity({ committed: after, dailyCapacity: eng.dailyCapacity })) {
+        overCapacity += 1;
+      }
+      for (const c of laneCoverage(lane.seId, lane.plantIds, candidateView, plantName)) {
+        if (c.coverageType === null) noCoverage += 1;
+        else if (c.tierCrossing) crossings += 1;
+      }
+    }
+    return { overCapacity, crossings, noCoverage };
+  }, [lanes, engineers, totals, candidateView, plantName]);
+
   const readyLanes = lanes.filter((l) => l.seId && l.plantIds.length > 0);
 
   /**
@@ -566,6 +601,26 @@ export function AssignConsolePage() {
       )}
 
       <MetricStrip metrics={metrics} />
+
+      {/* #290 AC5 — the ledger's fifth cell. Silent on a clean draft: a row of "0 over capacity ·
+          0 crossings" trains the operator to stop reading the one place a real warning will appear. */}
+      <div data-testid="ledger-summary" className="flex flex-wrap items-center gap-2 text-[11px]">
+        {draftWarnings.overCapacity > 0 && (
+          <Badge tone="warning" data-testid="summary-over-capacity">
+            {draftWarnings.overCapacity} {draftWarnings.overCapacity === 1 ? 'engineer' : 'engineers'} over capacity
+          </Badge>
+        )}
+        {draftWarnings.crossings > 0 && (
+          <Badge tone="tierCross" data-testid="summary-crossings">
+            {draftWarnings.crossings} tier {draftWarnings.crossings === 1 ? 'crossing' : 'crossings'}
+          </Badge>
+        )}
+        {draftWarnings.noCoverage > 0 && (
+          <Badge tone="critical" data-testid="summary-no-coverage">
+            {draftWarnings.noCoverage} no coverage
+          </Badge>
+        )}
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* ---------------- Work pool ---------------- */}
@@ -697,8 +752,35 @@ export function AssignConsolePage() {
           <div className="space-y-2">
             {lanes.map((lane) => {
               const eng = engineers.find((e) => e.engineerId === lane.seId);
+              // One computation of the draft's effect on this engineer, shared by the header, the lane
+              // treatment and the chips — three renderings of one fact, never three derivations of it.
+              const laneAfter =
+                (eng?.committed ?? 0) +
+                lane.plantIds.reduce(
+                  (n, id) => n + (lane.ticketOverrides?.[id]?.length ?? totals.get(id)?.openUnassigned ?? 0),
+                  0,
+                );
+              const laneOver =
+                typeof eng?.dailyCapacity === 'number' &&
+                isOverCapacity({ committed: laneAfter, dailyCapacity: eng.dailyCapacity });
+              const coverageFacts = eng ? laneCoverage(eng.engineerId, lane.plantIds, candidateView, plantName) : [];
+              const factFor = (plantId: string) => coverageFacts.find((c) => c.plantId === plantId) ?? null;
+
               return (
-                <div key={lane.id} data-testid={`lane-${lane.id}`} className="rounded-md border border-line p-2">
+                <div
+                  key={lane.id}
+                  data-testid={`lane-${lane.id}`}
+                  data-over-capacity={String(laneOver)}
+                  // #290 — the lane itself carries the over-capacity state, not only the number in its
+                  // header. The design draws an amber lane because "this engineer is past their cap" is
+                  // a fact about the whole row, and an operator scanning six lanes reads the row before
+                  // they read any figure inside it. **A state, never a barrier** (#258 Q2): nothing here
+                  // disables anything, and the Review & commit button stays live.
+                  className={cn(
+                    'rounded-md border p-2',
+                    laneOver ? 'border-warning bg-warning-bg/30' : 'border-line',
+                  )}
+                >
                   <div className="flex items-center gap-2">
                     <select
                       aria-label={`Engineer for lane ${lane.id}`}
@@ -745,32 +827,99 @@ export function AssignConsolePage() {
                       const name =
                         view?.companies.flatMap((c) => c.plants).find((p) => p.plantId === plantId)?.plantName ??
                         `Plant ${plantId}`;
-                      return (
+                      const fact = factFor(plantId);
+                      const placed = override ? override.length : (t?.openUnassigned ?? 0);
+                      /**
+                       * #290 AC3 — critical work is its **own chip**, as the design draws it
+                       * (`Kotputli Works ×3 crit` beside `Kotputli Works ×1`). One chip totalling both
+                       * hides the only number a dispatcher triages by: a plant reading `×15` says
+                       * nothing about whether any of it is on a clock.
+                       *
+                       * The split is suppressed when a strategy handed this lane only part of the
+                       * plant (#276's `ticketOverrides`): the plant's critical count is a fact about
+                       * the *plant*, and asserting it of an arbitrary subset would be a fabricated
+                       * number — exactly what #282 R6 forbids.
+                       */
+                      const critical = override ? 0 : Math.min(t?.criticalCount ?? 0, placed);
+                      const remainder = placed - critical;
+                      const remove = () =>
+                        setLanes((prev) =>
+                          prev.map((l) =>
+                            l.id === lane.id ? { ...l, plantIds: l.plantIds.filter((p) => p !== plantId) } : l,
+                          ),
+                        );
+                      /**
+                       * The remove control belongs to the **plant**, not to a chip, so exactly one is
+                       * rendered even when the plant splits into a critical chip and a remainder. Two
+                       * buttons doing the identical thing to the identical object would claim a
+                       * granularity the draft does not have — a lane holds plants, and there is no way
+                       * to drop "the critical half" of one. (It also produced two controls with the
+                       * same accessible name, which is how the suite found this.)
+                       */
+                      const chip = (opts: {
+                        testId: string;
+                        meaning: ReturnType<typeof chipMeaning>;
+                        qty: string;
+                        removable: boolean;
+                      }) => (
                         <span
-                          key={plantId}
-                          data-testid={`chip-${lane.id}-${plantId}`}
-                          className="inline-flex items-center gap-1 rounded-full bg-surface-sunken px-2 py-0.5 text-[11px]"
+                          key={opts.testId}
+                          data-testid={opts.testId}
+                          data-tier-crossing={String(fact?.tierCrossing ?? false)}
+                          title={`${formatPlantDisplayName(name)} — ${CHIP_MEANING_LABEL[opts.meaning]}`}
+                          className={cn(
+                            'inline-flex items-center gap-1 rounded-md bg-surface px-2 py-0.5 text-[11px]',
+                            CHIP_FORM[opts.meaning],
+                          )}
                         >
+                          {/* The dot is the grammar's own mark for "inside the engineer's own
+                              coverage"; a critical chip carries a flag instead, so the two are
+                              distinguishable with the colour removed. */}
+                          {opts.meaning === 'CRITICAL' ? (
+                            <span aria-hidden>⚑</span>
+                          ) : (
+                            <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+                          )}
                           {formatPlantDisplayName(name)}
-                          <span className="tabular-nums text-ink-muted">
-                            ×{override ? override.length : (t?.openUnassigned ?? 0)}
+                          <span className="tabular-nums opacity-80">
+                            ×{opts.qty}
                             {/* #276 — a strategy that only handed part of this plant's work here, said out loud. */}
                             {override && ` of ${t?.openUnassigned ?? '?'}`}
                           </span>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${name} from lane ${lane.id}`}
-                            onClick={() =>
-                              setLanes((prev) =>
-                                prev.map((l) =>
-                                  l.id === lane.id ? { ...l, plantIds: l.plantIds.filter((p) => p !== plantId) } : l,
-                                ),
-                              )
-                            }
-                            className="text-ink-muted hover:text-critical"
-                          >
-                            ×
-                          </button>
+                          {opts.removable && (
+                            <button
+                              type="button"
+                              aria-label={`Remove ${name} from lane ${lane.id}`}
+                              onClick={remove}
+                              className="opacity-70 hover:opacity-100"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </span>
+                      );
+                      const base = chipMeaning({
+                        critical: false,
+                        tierCrossing: fact?.tierCrossing ?? false,
+                        noCoverage: fact?.coverageType === null && fact !== null,
+                      });
+                      const showRemainder = remainder > 0 || critical === 0;
+                      return (
+                        <span key={plantId} className="contents">
+                          {critical > 0 &&
+                            chip({
+                              testId: `chip-${lane.id}-${plantId}-critical`,
+                              meaning: 'CRITICAL',
+                              qty: `${critical} crit`,
+                              removable: !showRemainder,
+                            })}
+                          {showRemainder &&
+                            chip({
+                              testId: `chip-${lane.id}-${plantId}`,
+                              meaning: base,
+                              qty: String(remainder),
+                              removable: true,
+                            })}
                         </span>
                       );
                     })}
@@ -785,6 +934,10 @@ export function AssignConsolePage() {
             <Button size="sm" variant="ghost" onClick={addLane}>
               + Add engineer lane
             </Button>
+
+            {/* #290 AC4 — the legend the design puts beneath the lanes, drawn from the same `CHIP_FORM`
+                table the chips above use, so it can never describe a border they stopped using. */}
+            <GrammarLegend />
 
             {/*
               #276 required-change 4 / the approved design's "No eligible engineer" rail. Work the

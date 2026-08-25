@@ -39,7 +39,12 @@ export function LoadBadge({ committed, dailyCapacity, seId }: LoadBadgeProps) {
   return (
     <span {...testId} data-over-capacity={String(over)}>
       <Badge
-        tone={over ? 'critical' : 'neutral'}
+        // #290 — **amber**, not crimson. Crimson is critical work in #272's grammar table; over
+        // capacity is a state and an administrative right (#258 Q2), and rendering it in the critical
+        // colour told the operator the opposite of what that ruling says. One colour, one meaning —
+        // across all seven surfaces this badge appears on, so nobody has to know which screen they are
+        // reading before they can read a colour.
+        tone={over ? 'warning' : 'neutral'}
         className="tabular-nums"
         {...(over ? { title: 'At or over capacity — assignment is still allowed' } : {})}
       >

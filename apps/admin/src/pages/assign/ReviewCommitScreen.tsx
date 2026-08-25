@@ -163,8 +163,15 @@ export function ReviewCommitScreen({
                 <tr key={lane.seId} data-testid={`review-lane-${lane.seId}`} className="border-b border-line last:border-0">
                   <td className="p-2 font-medium text-ink-strong">{lane.engineerName}</td>
                   <td className="p-2">
+                    {/* #290 — violet, matching the lanes. This is the last thing an operator reads
+                        before writing, and a grammar that changes at the moment of commitment is not a
+                        grammar. */}
                     {lane.coverage.map((c) => (
-                      <Badge key={c.plantId} tone={c.coverageType === null ? 'critical' : c.tierCrossing ? 'warning' : 'success'} className="mr-1">
+                      <Badge
+                        key={c.plantId}
+                        tone={c.coverageType === null ? 'critical' : c.tierCrossing ? 'tierCross' : 'success'}
+                        className={c.tierCrossing ? 'mr-1 border border-dashed border-tier-cross ring-0' : 'mr-1'}
+                      >
                         {c.coverageType ?? 'NO COVERAGE'}
                         {c.tierCrossing ? ' · tier crossed' : ''}
                       </Badge>
