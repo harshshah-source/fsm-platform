@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RETIRED_RECOMMENDATION_STATUS } from '../recommender/recommendation-status';
 import {
   DAY_PLAN_NOTIFIER,
   type DayPlanNotifier,
@@ -357,8 +358,12 @@ export class BatchAssignmentService {
    */
   private async clearFailedSeOrphans(runId: bigint | undefined, zoneId: bigint, seIds: string[]): Promise<number> {
     if (runId === undefined || seIds.length === 0) return 0;
-    const { count } = await this.prisma.recommendation.deleteMany({
+    // #286 — retired, not deleted, for the reason `clearFinalizedOrphans` gives: the trace cascades on
+    // delete, and a per-SE transaction that rolled back is exactly the case where somebody later asks
+    // what the engine had intended for that engineer.
+    const { count } = await this.prisma.recommendation.updateMany({
       where: { runId, status: 'SUGGESTED', seId: { in: seIds }, ticket: { plant: { zoneId } } },
+      data: { status: RETIRED_RECOMMENDATION_STATUS },
     });
     return count;
   }

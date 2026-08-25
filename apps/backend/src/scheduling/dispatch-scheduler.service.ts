@@ -6,8 +6,10 @@ import {
   BUSINESS_TIMEZONE,
   DEFAULT_DISPATCH_CRON,
   DEFAULT_DISPATCH_REAPER_CRON,
+  DEFAULT_DISPATCH_RECOVERY_CRON,
   DISPATCH_JOB_NAME,
   DISPATCH_REAPER_JOB_NAME,
+  DISPATCH_RECOVERY_JOB_NAME,
   type DispatchRetryPolicy,
   bootstrapDispatchCron,
   readDispatchRetryPolicy,
@@ -122,7 +124,9 @@ export class DispatchSchedulerService {
    *
    * It deliberately does **not** dispatch. A reaper that also ran the zones it freed would turn "clean
    * up after a crash" into an unscheduled dispatch run at an arbitrary minute of the day, which is the
-   * schedule's decision to make, not the janitor's — #260 owns retrying a zone that was contended.
+   * schedule's decision to make, not the janitor's — #260 owns retrying a zone that was contended, and
+   * since #282 R3 {@link dispatchRecoveryTick} owns re-dispatching one whose holder died. What this
+   * tick gained is a single side effect: it records that the zone is owed a day (#286).
    */
   @Cron(DEFAULT_DISPATCH_REAPER_CRON, { name: DISPATCH_REAPER_JOB_NAME, timeZone: BUSINESS_TIMEZONE })
   async dispatchReaperTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
@@ -136,6 +140,37 @@ export class DispatchSchedulerService {
       return { ran: true };
     } catch (e) {
       this.logger.error(`dispatch reaper tick failed: ${e instanceof Error ? e.message : String(e)}`);
+      return { ran: false, reason: 'ERROR' };
+    }
+  }
+
+  /**
+   * #286 — give the zones the reaper marked their day back, the same day and bounded (#282 R3).
+   *
+   * The complement of the tick above, and the reason that one's "deliberately does not dispatch" is
+   * still true: the janitor records the wreckage, this collects on it, and neither does the other's
+   * job. Splitting them that way is what keeps the recovery a *decision* with bounds and a record
+   * rather than a side effect of cleaning up.
+   *
+   * Its own job name, like the reaper's, so the three dispatch jobs never contend for one window; and
+   * gated by the same master switch, re-read every tick, so disabling business sweeps disables this too.
+   */
+  @Cron(DEFAULT_DISPATCH_RECOVERY_CRON, { name: DISPATCH_RECOVERY_JOB_NAME, timeZone: BUSINESS_TIMEZONE })
+  async dispatchRecoveryTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
+    if (!this.config.enabled) return { ran: false, reason: 'DISABLED' };
+    try {
+      if (!(await this.claims.claimTickOrLog(DISPATCH_RECOVERY_JOB_NAME, now)))
+        return { ran: false, reason: 'TICK_CLAIMED' };
+      const out = await this.dispatchRun.recoverMarkedZones(now);
+      if (out.attempted > 0 || out.expired > 0) {
+        this.logger.warn(
+          `dispatch recovery tick: ${out.attempted} attempt(s) — ${out.recovered} recovered, ` +
+            `${out.exhausted} exhausted, ${out.expired} expired, ${out.deferred} still held`,
+        );
+      }
+      return { ran: true };
+    } catch (e) {
+      this.logger.error(`dispatch recovery tick failed: ${e instanceof Error ? e.message : String(e)}`);
       return { ran: false, reason: 'ERROR' };
     }
   }

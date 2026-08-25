@@ -86,6 +86,23 @@ export interface TodayHold {
   decidedBy: string | null;
 }
 
+/**
+ * #286 — this zone's same-day recovery state, when it has one. `null` on an ordinary day.
+ *
+ * The bound on automatic re-dispatch is only acceptable because it is visible: a zone that lost its
+ * morning and was recovered, or that was given up on after three attempts, must not read the same as a
+ * zone that had a quiet day. The state is the whole message; `attempts` and `lastError` are what make
+ * it actionable rather than alarming.
+ */
+export interface TodayRecovery {
+  /** `PENDING` | `RECOVERED` | `EXHAUSTED` | `EXPIRED`. */
+  state: string;
+  attempts: number;
+  markedAt: string;
+  lastAttemptAt: string | null;
+  lastError: string | null;
+}
+
 export interface TodayEscalation {
   insertionId: string;
   ticketId: string;
@@ -97,6 +114,8 @@ export interface DispatchTodayView {
   operatingDay: string;
   zone: { zoneId: string; name: string };
   run: TodayRun | null;
+  /** #286 — set only when this zone was owed a re-dispatch today. Null is "nothing crashed". */
+  recovery: TodayRecovery | null;
   engineers: TodayEngineer[];
   situation: TodaySituation;
   rails: {
@@ -235,8 +254,9 @@ export class DispatchTodayQueryService {
       };
     });
 
-    const [run, unassignable, held, escalations, changesToday, policyWithheld] = await Promise.all([
+    const [run, recovery, unassignable, held, escalations, changesToday, policyWithheld] = await Promise.all([
       this.latestRun(zoneId, day),
+      this.recoveryToday(zoneId, day),
       this.unassignableToday(zoneId, day),
       this.heldToday(zoneId, day),
       this.escalationsOpen(zoneId),
@@ -248,6 +268,7 @@ export class DispatchTodayQueryService {
       operatingDay: day.toISOString().slice(0, 10),
       zone: { zoneId: String(zone.zoneId), name: zone.name },
       run,
+      recovery,
       engineers: lanes,
       situation: {
         placed: lanes.reduce((n, e) => n + e.stops.reduce((m, s) => m + s.tickets.length, 0), 0),
@@ -259,6 +280,26 @@ export class DispatchTodayQueryService {
       },
       rails: { unassignable, held, policyWithheld: { count: policyWithheld, itemised: false } },
       escalations,
+    };
+  }
+
+  /**
+   * #286 — the zone's recovery mark for the operating day, if there is one.
+   *
+   * Scoped to `day` deliberately: yesterday's crash is history, not today's situation, and a rail that
+   * kept showing it would train the operator to ignore the rail.
+   */
+  private async recoveryToday(zoneId: bigint, day: Date): Promise<TodayRecovery | null> {
+    const mark = await this.prisma.dispatchZoneRecovery.findUnique({
+      where: { zoneId_businessDate: { zoneId, businessDate: day } },
+    });
+    if (!mark) return null;
+    return {
+      state: mark.state,
+      attempts: mark.attempts,
+      markedAt: mark.markedAt.toISOString(),
+      lastAttemptAt: mark.lastAttemptAt?.toISOString() ?? null,
+      lastError: mark.lastError,
     };
   }
 

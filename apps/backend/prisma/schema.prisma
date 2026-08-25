@@ -336,6 +336,7 @@ model Zone {
   zoneMappings   ZoneMapping[]
   plantOverrides PlantZoneOverride[]
   dispatchRuns   DispatchRunZone[]
+  recoveries     DispatchZoneRecovery[]
   tierOverrides  CompanyTierOverride[]
 
   @@index([zonalManagerUserId])
@@ -928,6 +929,52 @@ model DispatchRunZone {
   @@unique([runId, zoneId])
   @@index([zoneId])
   @@map("dispatch_run_zones")
+}
+
+/// #286 — where a crashed zone's day is recorded until it gets it back.
+///
+/// PENDING: the reaper freed this zone's claim from a run that died, and nothing has re-dispatched it
+/// yet. RECOVERED: a re-dispatch ran. EXHAUSTED: the per-day attempt budget is spent — the zone stops
+/// being retried and the exhaustion is surfaced, never silent. EXPIRED: the operating-day cutoff
+/// passed first; re-dispatching a field day that is over helps nobody.
+enum DispatchRecoveryState {
+  PENDING
+  RECOVERED
+  EXHAUSTED
+  EXPIRED
+
+  @@map("dispatch_recovery_state")
+}
+
+/// #286 — one row per (zone, operating day) recording that the zone is owed a same-day re-dispatch.
+///
+/// The reaper writes it and does **not** dispatch (#261's rule stands); a bounded collector reads it
+/// and re-dispatches through `runForActiveZones`'s ordinary admission path. It is a table rather than
+/// in-process state because the event it records is process death itself (#258 Q8).
+///
+/// Keyed per DAY, not per crash: a zone that crashes three times before noon draws from one attempt
+/// budget, which is what makes "bounded" true of the zone rather than of each incident.
+model DispatchZoneRecovery {
+  id            BigInt                @id @default(autoincrement())
+  zoneId        BigInt                @map("zone_id")
+  businessDate  DateTime              @map("business_date") @db.Date
+  state         DispatchRecoveryState
+  /// Re-dispatch runs actually made today. A refusal (the zone was contended) does not spend one —
+  /// contention is bounded by the operating-day cutoff instead, so a busy zone is not punished.
+  attempts      Int                   @default(0)
+  markedAt      DateTime              @map("marked_at") @db.Timestamptz(6)
+  /// The reaped run whose death produced this mark. Plain BigInt, no relation — for the reason
+  /// `contendedWithRunId` gives: a purge must not be able to rewrite the record of a recovery.
+  markedByRunId BigInt?               @map("marked_by_run_id")
+  lastAttemptAt DateTime?             @map("last_attempt_at") @db.Timestamptz(6)
+  resolvedAt    DateTime?             @map("resolved_at") @db.Timestamptz(6)
+  /// Why the last attempt did not recover the zone. Diagnosis and the operator's rail, never a predicate.
+  lastError     String?               @map("last_error")
+
+  zone Zone @relation(fields: [zoneId], references: [zoneId], onDelete: Cascade)
+
+  @@unique([zoneId, businessDate])
+  @@map("dispatch_zone_recoveries")
 }
 
 /// Bounded per-ticket decision trace, 1:1 with the run's `recommendations` row. The jsonb carries

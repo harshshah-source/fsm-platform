@@ -223,4 +223,55 @@ describe('#284 — GET /dispatch/today', () => {
   it('AC5 — a ZM cannot read another zone', async () => {
     await expect(svc.today(scope(), { zoneId: otherZoneId, now: TODAY })).rejects.toThrow();
   });
+
+  /**
+   * #286 AC5 — the recovery state reaches the operator, or the bound is a secret.
+   *
+   * "The zone stops being retried" is only acceptable because somebody is told. A zone whose day was
+   * lost, recovered, or abandoned after three attempts looks identical on this page to a zone that had
+   * a quiet morning, and that is precisely the reading an operator would draw if nothing said otherwise.
+   */
+  describe('#286 — the crashed-zone recovery rail', () => {
+    afterEach(async () => {
+      await prisma.dispatchZoneRecovery.deleteMany({ where: { zoneId } });
+    });
+
+    it('is null on an ordinary day — a zone that never crashed says nothing', async () => {
+      const view = await svc.today(scope(), { zoneId, now: TODAY });
+      expect(view.recovery).toBeNull();
+    });
+
+    it('carries the state, the attempts and the reason once a zone has been marked', async () => {
+      await prisma.dispatchZoneRecovery.create({
+        data: {
+          zoneId,
+          businessDate: new Date(Date.UTC(2026, 5, 28)),
+          state: 'EXHAUSTED',
+          attempts: 3,
+          markedAt: TODAY,
+          lastAttemptAt: TODAY,
+          lastError: 'the zone kept failing',
+        },
+      });
+
+      const view = await svc.today(scope(), { zoneId, now: TODAY });
+
+      expect(view.recovery).toMatchObject({ state: 'EXHAUSTED', attempts: 3, lastError: 'the zone kept failing' });
+    });
+
+    /** Yesterday's crash is not today's situation — the mark is read for the operating day only. */
+    it("ignores another day's mark", async () => {
+      await prisma.dispatchZoneRecovery.create({
+        data: {
+          zoneId,
+          businessDate: new Date(Date.UTC(2026, 5, 27)),
+          state: 'EXHAUSTED',
+          attempts: 3,
+          markedAt: LAST_WEEK,
+        },
+      });
+
+      expect((await svc.today(scope(), { zoneId, now: TODAY })).recovery).toBeNull();
+    });
+  });
 });

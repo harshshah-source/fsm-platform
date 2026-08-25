@@ -33,6 +33,9 @@ describe('Issue 113 — DispatchRunService per-zone error containment', () => {
         create: vi.fn(async () => ({})),
         update: vi.fn(async () => ({})),
         updateMany: vi.fn(async () => ({ count: 0 })),
+        // #286 — the reap now looks for stranded claims by predicate (`RUNNING` under a run that is
+        // not), rather than by the run-id list it had just aborted. Nothing is stranded in this fake.
+        findMany: vi.fn(async () => []),
       },
       priorityRuleConfig: { findMany: vi.fn(async () => []) },
       systemSetting: { findMany: vi.fn(async () => []) },

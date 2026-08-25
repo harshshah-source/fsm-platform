@@ -40,8 +40,14 @@ const EXPECTED_CRON_JOBS = [
   // whose process died and deliberately dispatches nothing, so an idle system heals itself without an
   // unscheduled dispatch run appearing at an arbitrary minute of the day.
   'business-dispatch-reaper',
+  // #286 — the same-day recovery collector (#282 R3). Separate from the reaper above for the reason
+  // that one is separate from `business-dispatch`: the janitor records that a zone lost its day, this
+  // one decides — bounded, and on the record — to give it back.
+  'business-dispatch-recovery',
   'business-fleet-uptime',
   'business-install-verification',
+  // #264 — the day-plan notification outbox re-drain sweep.
+  'business-notification-outbox',
   'business-repeat-escalation',
   'business-root-cause',
   'business-soft-inactive',
@@ -80,11 +86,11 @@ describe('#229 AC-2 — scheduled-work wiring, asserted on the real AppModule', 
     await app.close();
   });
 
-  it('registers exactly the 19 expected cron jobs — no more, no fewer', () => {
+  it('registers exactly the 21 expected cron jobs — no more, no fewer', () => {
     const registered = [...app.get(SchedulerRegistry).getCronJobs().keys()].sort();
 
     expect(registered).toEqual(EXPECTED_CRON_JOBS);
-    expect(registered).toHaveLength(19);
+    expect(registered).toHaveLength(21);
   });
 
   it('reaches the auto-recovery pre-check from the telemetry tick, and surfaces its result', async () => {

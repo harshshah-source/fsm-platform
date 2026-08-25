@@ -37,6 +37,65 @@ export const DISPATCH_REAPER_JOB_NAME = 'business-dispatch-reaper';
 export const DEFAULT_DISPATCH_REAPER_CRON = '*/3 * * * *';
 
 /**
+ * #286 — the same-day recovery collector's job name and cadence.
+ *
+ * Five minutes, against the reaper's three: the mark has to exist before there is anything to collect,
+ * so a collector that ran faster than the reaper would mostly find an empty table. Not settings-backed,
+ * for the reason the reaper is not — when the system repairs itself is an implementation detail, while
+ * *whether* it does is #282 R3, already ruled.
+ */
+export const DISPATCH_RECOVERY_JOB_NAME = 'business-dispatch-recovery';
+export const DEFAULT_DISPATCH_RECOVERY_CRON = '*/5 * * * *';
+
+/**
+ * How many re-dispatch runs one zone may draw in one operating day (#286 AC5).
+ *
+ * Three, because the failures worth retrying are transient (a lock held a moment too long, a
+ * connection dropped) and a fourth attempt against a zone that has failed three times is not
+ * diagnosis, it is a loop. A zone that spends its budget is recorded EXHAUSTED and surfaced —
+ * the bound exists so somebody gets told, not so the system goes quiet.
+ */
+export const DEFAULT_DISPATCH_RECOVERY_MAX_ATTEMPTS = 3;
+
+/**
+ * The operating-day cutoff, as an IST hour (#286 AC5). After it, outstanding marks EXPIRE rather than
+ * dispatch: a day plan pushed to an engineer at 19:00 is not a recovered field day, it is work nobody
+ * will do, and #258 Q6's ordinal-only plan has no way to say "tomorrow morning" either.
+ *
+ * 18:00 IST, one hour before the field day's own close, so a recovery started at the cutoff still has
+ * somewhere to land.
+ */
+export const DEFAULT_DISPATCH_RECOVERY_CUTOFF_HOUR_IST = 18;
+
+/** The two bounds on same-day recovery (#286). Both configurable; neither is optional. */
+export interface DispatchRecoveryPolicy {
+  maxAttempts: number;
+  cutoffHourIst: number;
+}
+
+/**
+ * Resolve the recovery bounds. Read from the environment on the same terms as the retry policy: how
+ * hard the system tries to repair itself is an implementation detail, not an operator's business hour.
+ *
+ * `maxAttempts = 0` disables same-day recovery entirely — the documented rollback switch. Marks are
+ * still written (they are the evidence a zone lost its day) and the collector retires them EXHAUSTED
+ * without dispatching, so turning this off degrades to exactly #261's behaviour plus a record.
+ */
+export function readDispatchRecoveryPolicy(env: NodeJS.ProcessEnv = process.env): DispatchRecoveryPolicy {
+  const attempts = Number(env.DISPATCH_RECOVERY_MAX_ATTEMPTS);
+  const cutoff = Number(env.DISPATCH_RECOVERY_CUTOFF_HOUR_IST);
+  return {
+    // `>= 0`: zero is the off switch and must survive the fallback that rescues garbage.
+    maxAttempts:
+      Number.isInteger(attempts) && attempts >= 0 ? attempts : DEFAULT_DISPATCH_RECOVERY_MAX_ATTEMPTS,
+    cutoffHourIst:
+      Number.isInteger(cutoff) && cutoff >= 0 && cutoff <= 24
+        ? cutoff
+        : DEFAULT_DISPATCH_RECOVERY_CUTOFF_HOUR_IST,
+  };
+}
+
+/**
  * The **bootstrap** default, consulted only when no setting row exists yet (#213 AC-1). After the row
  * is created the environment variable is not a parallel source and is never read again — which is the
  * whole point of the ruling: changing the dispatch hour must not require a redeploy.

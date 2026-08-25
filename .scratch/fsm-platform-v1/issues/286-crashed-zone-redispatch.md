@@ -1,6 +1,6 @@
 # 286 — A crashed zone gets its day back: same-day bounded re-dispatch
 
-Status: **ready-for-agent**
+Status: **done** (2026-08-25) — report [`docs/progress/286-crashed-zone-redispatch.md`](../../../docs/progress/286-crashed-zone-redispatch.md)
 Type: AFK · Backend (the policy is ruled — [#282](./282-decision-todays-dispatch-crew-deck.md) R3)
 Decision: #282 R3 (operator, 2026-08-25). Constrained by #258 **Q8 + G1-G8**, which this issue may
 not weaken in any respect.
@@ -40,17 +40,17 @@ evidence of what the dead run intended is destroyed by the next run for that zon
 
 ## Acceptance criteria
 
-- [ ] AC1 — A zone whose run is reaped is re-dispatched the same day and its engineers get a plan.
-- [ ] AC2 — **Other zones are unaffected** by both the crash and the recovery (zone independence, G2).
-- [ ] AC3 — **No ticket is dispatched twice** — work already committed by the dead run's finished
+- [x] AC1 — A zone whose run is reaped is re-dispatched the same day and its engineers get a plan.
+- [x] AC2 — **Other zones are unaffected** by both the crash and the recovery (zone independence, G2).
+- [x] AC3 — **No ticket is dispatched twice** — work already committed by the dead run's finished
       per-SE transactions stands and is not duplicated (G1, effectively-once).
-- [ ] AC4 — No permanent `RUNNING` state at any point in the sequence (G5).
-- [ ] AC5 — The re-dispatch is bounded: after the configured attempts the zone stops being retried,
+- [x] AC4 — No permanent `RUNNING` state at any point in the sequence (G5).
+- [x] AC5 — The re-dispatch is bounded: after the configured attempts the zone stops being retried,
       the exhaustion is recorded, and nothing loops.
-- [ ] AC6 — A manual `POST /schedules/dispatch-run` still behaves exactly as before (never patient,
+- [x] AC6 — A manual `POST /schedules/dispatch-run` still behaves exactly as before (never patient,
       correct 409s) and is not consumed by the new mechanism.
-- [ ] AC7 — Concurrency: the collector and a cron tick cannot both admit the same zone (existing
+- [x] AC7 — Concurrency: the collector and a cron tick cannot both admit the same zone (existing
       partial unique proves it); a two-connection spec pins it.
-- [ ] AC8 — An aborted run's decision traces survive the next run for that zone.
-- [ ] AC9 — Full backend suite green, including every existing reaper/wedge/idempotency spec
+- [x] AC8 — An aborted run's decision traces survive the next run for that zone.
+- [x] AC9 — Full backend suite green, including every existing reaper/wedge/idempotency spec
       unchanged — this issue adds behaviour, it does not alter the concurrency model.

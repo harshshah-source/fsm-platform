@@ -90,10 +90,27 @@ export interface TodayEscalation {
   createdAt: string;
 }
 
+/**
+ * #286 — this zone's same-day recovery state, or `null` when nothing crashed today.
+ *
+ * `EXHAUSTED` and `EXPIRED` are the two the operator has to act on: the first means the system tried
+ * and gave up, the second that the field day ran out first. Both are days of work that will not happen
+ * unless somebody does something, which is why they are on the page rather than only in a log.
+ */
+export interface TodayRecovery {
+  state: string;
+  attempts: number;
+  markedAt: string;
+  lastAttemptAt: string | null;
+  lastError: string | null;
+}
+
 export interface DispatchTodayView {
   operatingDay: string;
   zone: { zoneId: string; name: string };
   run: TodayRun | null;
+  /** #286 — null on an ordinary day; set when this zone was owed a re-dispatch. */
+  recovery: TodayRecovery | null;
   engineers: TodayEngineer[];
   situation: TodaySituation;
   rails: {

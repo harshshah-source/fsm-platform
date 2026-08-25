@@ -728,13 +728,18 @@ and on a 3-minute `business-dispatch-reaper` cron. What matters about the shape:
   existing. The transparency list and run detail render it with a `critical` tone.
 - **Order is load-bearing:** the run row is written first, its claims second. Dying between them leaves
   RUNNING claims under an ABORTED run, which the next pass finds and finishes; the reverse order leaves
-  a RUNNING run holding nothing, which reads as live and which no later pass corrects.
+  a RUNNING run holding nothing, which reads as live and which no later pass corrects. **Since #286
+  that "the next pass finds it" is actually true:** the claim sweep reads by predicate
+  (`status = RUNNING AND run.status <> RUNNING`) rather than by the run-id list the same pass just
+  aborted, which by construction could never contain an earlier crashed pass's leftovers.
 - **The run finalize and the per-zone finalize are `updateMany` keyed on `status = 'RUNNING'`.**
   Without that the reaper *creates* zombie-resurrect on the dispatch side rather than fixing it: a
   reaped-but-alive run would report SUCCESS over a zone already handed to somebody else. Same rule as
   #265's `liveScheduleFilter()` — **any new writer of a claim or run row must carry it.**
 - **The sweep does not dispatch.** It frees zones and stops. #260 owns retrying a contended zone;
   a janitor that also ran what it freed would be an unscheduled dispatch run at an arbitrary minute.
+  **Since #286 it does record** that the zone is owed a day — one `dispatch_zone_recoveries` row per
+  (zone, operating day) — and a separate collector decides, bounded and on the record, to give it back.
 - **`DEFAULT_DISPATCH_STALE_RUN_MIN` (10) and `DEFAULT_DISPATCH_RETRY_DEADLINE_MIN` (15) sit together
   in `dispatch-cron.ts`** under the invariant **reap ≤ retry deadline** — otherwise a crashed holder
   starves #260's whole retry window. The ingestion threshold stays separate at 30 min: an AutoPlant
@@ -742,7 +747,43 @@ and on a 3-minute `business-dispatch-reaper` cron. What matters about the shape:
 - **Recovery after ABORTED needs no new cleanup**, verified rather than assumed:
   `clearFinalizedOrphans` keys on `not: 'RUNNING'`, so an aborted run's SUGGESTED recs are collected
   and re-evaluated. That holds *only* because the predicate is a negation — rewritten as an allow-list
-  of terminal statuses those orphans become immortal and wedge the zone (Issue 126).
+  of terminal statuses those orphans become immortal and wedge the zone (Issue 126). **Since #286 that
+  collection RETIRES rather than deletes** (`recommendations.status = 'RETIRED'`, vocabulary in
+  `src/recommender/recommendation-status.ts`) — `dispatch_decision_traces` cascades on delete, so the
+  next run for a zone used to destroy the crashed run's reasoning as its first act. The partial unique
+  is `WHERE status = 'SUGGESTED'`, so retiring frees it identically; what prevents a double dispatch is
+  that index plus the in-transaction re-read, never the DELETE. `clearFailedSeOrphans` (#262) changed
+  with it, and the two latest-recommendation-wins readers
+  (`zm-schedule-query.reasoningByTicket`, `dispatch-transparency-query`'s batch detail) exclude
+  `RETIRED` so they keep answering exactly as they did when the row was deleted.
+
+**Same-day bounded re-dispatch of a crashed zone (#286, 2026-08-25; ruling #282 R3).** The half #261
+deliberately left open. `dispatch_zone_recoveries` holds one row per **(zone, operating day)** —
+`state PENDING | RECOVERED | EXHAUSTED | EXPIRED`, `attempts`, `marked_by_run_id`, `last_error` —
+written by the reaper and collected by `business-dispatch-recovery` (`*/5 * * * *` IST, master switch +
+its own #263 tick claim). `DispatchRunService.recoverMarkedZones` re-dispatches each marked zone
+through `runForActiveZones` **with no privileges**: same admission, same per-zone claim, same per-SE
+transactions, same idempotency guards, so G1–G8 hold without anything being restated. What matters
+about the shape:
+
+- **Keyed per day, not per crash.** A zone that crashes three times before noon draws from one attempt
+  budget (`DISPATCH_RECOVERY_MAX_ATTEMPTS`, default 3). A `RECOVERED` mark is re-armed by a later crash
+  with its count carried over; an `EXHAUSTED` or `EXPIRED` one is not — otherwise "bounded" describes
+  the incident instead of the day and a zone whose every run dies loops until midnight.
+- **A refusal is not an attempt.** If a live run holds the zone the mark stays PENDING and unbilled:
+  busy is not broken, and charging for contention would exhaust a healthy zone. The contended case is
+  bounded by the operating-day cutoff instead (`DISPATCH_RECOVERY_CUTOFF_HOUR_IST`, default 18), after
+  which outstanding marks EXPIRE — a plan produced at 19:00 is work nobody will do.
+- **The collector is never patient** (`deadlineMs: 0`). #260's patience is for a run with one chance
+  today; this one gets another in five minutes, and waiting fifteen inside a five-minute tick would
+  only hold its own window shut.
+- **The bound is surfaced, never silent.** `GET /dispatch/today` carries
+  `recovery: {state, attempts, markedAt, lastAttemptAt, lastError} | null` for the operating day, and
+  the cockpit renders it above the deck — warning-weighted for EXHAUSTED/EXPIRED, with the attempt
+  count and the last failure. A bound nobody is told about is a silent outage.
+- **`DISPATCH_RECOVERY_MAX_ATTEMPTS=0` is the documented rollback**: marks are still written (they are
+  the evidence a zone lost its day) and retired EXHAUSTED without dispatching, degrading to exactly
+  #261's behaviour plus a record.
 
 **The dispatch write unit is the SE, not the zone (#262, 2026-08-23).** `dispatchForZone` was one
 transaction spanning every SE in the zone. It is now **one transaction per SE**, each claiming that

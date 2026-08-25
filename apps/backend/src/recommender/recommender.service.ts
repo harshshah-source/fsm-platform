@@ -16,6 +16,7 @@ import {
 import { notDeferredOn, returnDateArrivedBefore } from '../ticketing/deferral';
 import { componentBlockedTickets, notComponentBlocked } from '../ticketing/component-blocked';
 import { CandidateSelectionService, type CoverageType } from './candidate-selection.service';
+import { RETIRED_RECOMMENDATION_STATUS } from './recommendation-status';
 import {
   type CandidateTicket,
   type CompanyTier,
@@ -976,20 +977,28 @@ export class RecommenderService {
   }
 
   /**
-   * #126 — delete crash-window orphan SUGGESTED recs for a zone before (re)suggesting. A live
+   * #126 — retire crash-window orphan SUGGESTED recs for a zone before (re)suggesting. A live
    * SUGGESTED whose owning `dispatch_run` is already finalized (or whose `run_id` is null / pre-ledger)
    * is a leftover from a rolled-back or never-consumed dispatch; clearing it lets this run re-evaluate
    * fresh and frees the one-SUGGESTED-per-ticket unique so the zone can never wedge. Recs owned by a
    * still-RUNNING run (a concurrent live dispatch) are left untouched — the per-create guard skips
-   * those tickets instead. `dispatch_decision_traces` rows cascade on delete. Returns the count cleared.
+   * those tickets instead. Returns the count cleared.
+   *
+   * #286 — this **retires**; it used to DELETE, and `dispatch_decision_traces` cascades on that delete
+   * (`schema.prisma`). So the next run for a zone destroyed the crashed run's reasoning as its first
+   * act, and "what was the dead run about to do?" became permanently unanswerable at exactly the moment
+   * somebody would ask. `RETIRED` frees the partial unique identically — it is
+   * `WHERE status = 'SUGGESTED'` — while leaving the evidence in place. What actually prevents a double
+   * dispatch is that index plus the in-transaction re-read, never the DELETE.
    */
   private async clearFinalizedOrphans(zoneId: bigint): Promise<number> {
-    const { count } = await this.prisma.recommendation.deleteMany({
+    const { count } = await this.prisma.recommendation.updateMany({
       where: {
         status: 'SUGGESTED',
         ticket: { plant: { zoneId } },
         OR: [{ runId: null }, { run: { status: { not: 'RUNNING' } } }],
       },
+      data: { status: RETIRED_RECOMMENDATION_STATUS },
     });
     return count;
   }

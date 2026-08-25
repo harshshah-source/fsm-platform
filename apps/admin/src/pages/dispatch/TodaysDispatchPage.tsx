@@ -148,6 +148,8 @@ export default function TodaysDispatchPage() {
 
       <MetricStrip metrics={metrics} />
 
+      {view.recovery && <RecoveryNotice recovery={view.recovery} />}
+
       {view.escalations.length > 0 && (
         <section
           data-testid="critical-interception"
@@ -280,6 +282,63 @@ export default function TodaysDispatchPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * #286 — what happened to a zone whose dispatch run died this morning.
+ *
+ * Rendered above the deck rather than in the work rail on purpose: it is not a queue of work, it is a
+ * statement about whether this zone's day is intact. Four states, and the operator has to be able to
+ * tell them apart at a glance —
+ *  - `RECOVERED`: the system put it right by itself. Reassurance, not an alarm.
+ *  - `PENDING`: still owed, and the collector will come back for it.
+ *  - `EXHAUSTED`: the system tried its budget and stopped. Somebody has to look.
+ *  - `EXPIRED`: the field day ran out first. The work did not happen and will not happen today.
+ *
+ * The attempt count and the last failure are shown for the two that need action, because "it gave up"
+ * without saying after how many tries or why is an alert nobody can act on.
+ */
+function RecoveryNotice({ recovery }: { recovery: NonNullable<DispatchTodayView['recovery']> }) {
+  const needsAction = recovery.state === 'EXHAUSTED' || recovery.state === 'EXPIRED';
+  const headline =
+    recovery.state === 'RECOVERED'
+      ? "This zone's dispatch run died and was automatically re-dispatched"
+      : recovery.state === 'PENDING'
+        ? "This zone's dispatch run died — a re-dispatch is queued"
+        : recovery.state === 'EXHAUSTED'
+          ? "This zone's dispatch run died and could not be recovered automatically"
+          : "This zone's dispatch run died and the operating day ended before it could be recovered";
+
+  return (
+    <section
+      data-testid="recovery-notice"
+      className={[
+        'rounded-lg border p-3',
+        needsAction ? 'border-2 border-warning bg-warning-bg/40' : 'border-line bg-surface',
+      ].join(' ')}
+    >
+      <h2 className={['text-sm font-semibold', needsAction ? 'text-warning' : 'text-ink'].join(' ')}>{headline}</h2>
+      <p className="mt-0.5 text-[11px] text-ink-muted">
+        Detected {new Date(recovery.markedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ·{' '}
+        <span className="tabular-nums">{recovery.attempts}</span>{' '}
+        {recovery.attempts === 1 ? 'attempt' : 'attempts'}
+        {recovery.lastAttemptAt && (
+          <>
+            {' '}
+            · last tried{' '}
+            {new Date(recovery.lastAttemptAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </>
+        )}
+      </p>
+      {recovery.lastError && <p className="mt-1 text-[11px] text-ink">{recovery.lastError}</p>}
+      {needsAction && (
+        <p className="mt-1 text-[11px] text-ink-muted">
+          Nothing further will be attempted automatically today — run dispatch for this zone manually
+          once the cause is cleared.
+        </p>
+      )}
+    </section>
   );
 }
 

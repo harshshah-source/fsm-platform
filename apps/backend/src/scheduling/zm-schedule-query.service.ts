@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { SUPERSEDED_RECOMMENDATION_STATUSES } from '../recommender/recommendation-status';
 import { committedDayLoad } from './committed-day-load';
 import { LIVE_SCHEDULE_STATUSES } from './schedule-status';
 
@@ -243,7 +244,10 @@ export class ZmScheduleQueryService {
   private async reasoningByTicket(ticketIds: string[]): Promise<Map<string, TicketReasoning>> {
     if (ticketIds.length === 0) return new Map();
     const recs = await this.prisma.recommendation.findMany({
-      where: { ticketId: { in: ticketIds } },
+      // #286 — a RETIRED row is newer than the DISPATCHED one that actually explains the placement, so
+      // latest-wins would start answering "why suggested?" with the reasoning of a run that placed
+      // nothing. Excluded here, which is exactly the answer this read gave while the row was deleted.
+      where: { ticketId: { in: ticketIds }, status: { notIn: SUPERSEDED_RECOMMENDATION_STATUSES } },
       orderBy: { recommendationId: 'desc' },
     });
     const map = new Map<string, TicketReasoning>();

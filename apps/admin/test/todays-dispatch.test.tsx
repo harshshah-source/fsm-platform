@@ -56,6 +56,7 @@ const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
   situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 0, overCapacity: 0, changesToday: 0 },
   rails: { unassignable: [], held: [], policyWithheld: { count: 5, itemised: false } },
   escalations: [],
+  recovery: null,
   ...over,
 });
 
@@ -223,6 +224,55 @@ describe("#285 — Today's Dispatch cockpit", () => {
     for (const n of ['42', '3', '2', '1', '4']) {
       expect(screen.getAllByText(n).length).toBeGreaterThan(0);
     }
+  });
+
+  /**
+   * #286 AC5 — the bound on automatic re-dispatch is only acceptable while somebody is told about it.
+   * A zone that spent its budget must not look like a zone that had a quiet morning.
+   */
+  it('says nothing about recovery on a zone that never crashed', async () => {
+    vi.mocked(apiDispatchToday).mockResolvedValue(view());
+    renderPage();
+
+    await screen.findByTestId('crew-card-se-1');
+    expect(screen.queryByTestId('recovery-notice')).not.toBeInTheDocument();
+  });
+
+  it('surfaces an exhausted same-day recovery, with its attempt count and reason', async () => {
+    vi.mocked(apiDispatchToday).mockResolvedValue(
+      view({
+        recovery: {
+          state: 'EXHAUSTED',
+          attempts: 3,
+          markedAt: '2026-08-25T05:02:00Z',
+          lastAttemptAt: '2026-08-25T05:20:00Z',
+          lastError: 'zone lock never cleared',
+        },
+      }),
+    );
+    renderPage();
+
+    const notice = await screen.findByTestId('recovery-notice');
+    expect(notice).toHaveTextContent('3');
+    expect(notice).toHaveTextContent('zone lock never cleared');
+  });
+
+  it('reports a recovered zone as recovered, not as a failure', async () => {
+    vi.mocked(apiDispatchToday).mockResolvedValue(
+      view({
+        recovery: {
+          state: 'RECOVERED',
+          attempts: 1,
+          markedAt: '2026-08-25T05:02:00Z',
+          lastAttemptAt: '2026-08-25T05:05:00Z',
+          lastError: null,
+        },
+      }),
+    );
+    renderPage();
+
+    const notice = await screen.findByTestId('recovery-notice');
+    expect(notice).toHaveTextContent(/re-dispatched/i);
   });
 
   it('shows an error state with a retry rather than a blank page', async () => {

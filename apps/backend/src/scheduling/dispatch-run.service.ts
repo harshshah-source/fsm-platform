@@ -1,4 +1,4 @@
-import { istDate } from '../common/ist-day';
+import { istDate, istDayStartInstant } from '../common/ist-day';
 import { PLANT_ELIGIBLE_FLOATING_SE_MV, isMvStale } from '../org/plant-eligible-floating-se.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
@@ -11,8 +11,10 @@ import { SE_ASSIGNMENT_THRESHOLD_KEY } from '../settings/assignment-threshold';
 import { BatchAssignmentService, type DispatchSummary } from './batch-assignment.service';
 import {
   DISPATCH_CRON_SETTING_KEY,
+  type DispatchRecoveryPolicy,
   type DispatchRetryPolicy,
   bootstrapDispatchCron,
+  readDispatchRecoveryPolicy,
   readDispatchRetryPolicy,
   staleDispatchRunFilter,
 } from './dispatch-cron';
@@ -163,6 +165,20 @@ interface RunTotals {
  * one means the run ended and forgot a zone, this one means nobody ended the run at all.
  */
 export const ABANDONED_CLAIM_ERROR = 'ABANDONED — the run holding this zone stopped reporting';
+
+/** What one collector pass did (#286). Every zone it looked at is in exactly one of these buckets. */
+export interface DispatchRecoveryOutcome {
+  /** Re-dispatch runs actually made this pass. */
+  attempted: number;
+  /** Zones whose re-dispatch completed — they have their day back. */
+  recovered: number;
+  /** Zones whose attempt budget ran out this pass. Recorded, surfaced, and not retried again today. */
+  exhausted: number;
+  /** Zones the operating-day cutoff overtook before they could be recovered. */
+  expired: number;
+  /** Zones still held by a live run — left PENDING for the next pass, and NOT charged an attempt. */
+  deferred: number;
+}
 
 class AllZonesHeldError extends Error {
   /**
@@ -492,21 +508,242 @@ export class DispatchRunService {
       where: { status: 'RUNNING', ...staleDispatchRunFilter(now) },
       select: { runId: true },
     });
-    if (stale.length === 0) return { runs: 0, claims: 0 };
     const runIds = stale.map((r) => r.runId);
 
-    const { count: runs } = await this.prisma.dispatchRun.updateMany({
-      where: { runId: { in: runIds }, status: 'RUNNING' },
-      data: { status: 'ABORTED', finishedAt: now },
+    const { count: runs } =
+      runIds.length === 0
+        ? { count: 0 }
+        : await this.prisma.dispatchRun.updateMany({
+            where: { runId: { in: runIds }, status: 'RUNNING' },
+            data: { status: 'ABORTED', finishedAt: now },
+          });
+
+    // Read by *predicate*, not by the run ids above. The two writes are deliberately not one
+    // transaction (see the doc comment), so a reaper that died between them left RUNNING claims under
+    // an already-ABORTED run — which the run-id list, sourced from RUNNING runs, could never find
+    // again. `run.status <> RUNNING` is the whole population of stranded claims, this pass's and any
+    // earlier pass's, and finding it is what makes the comment's "the next reap pass finishes it"
+    // true rather than aspirational.
+    const orphans = await this.prisma.dispatchRunZone.findMany({
+      where: { status: 'RUNNING', run: { status: { not: 'RUNNING' } } },
+      select: { id: true, zoneId: true, runId: true },
     });
+    if (orphans.length === 0) {
+      if (runs > 0) this.logger.warn(`reaped ${runs} abandoned dispatch run(s) [${runIds.join(', ')}]`);
+      return { runs, claims: 0 };
+    }
+
+    // #286 — marked BEFORE the claims are freed, and not after. If this process dies in the gap the
+    // claim is still RUNNING under a terminal run, so the next pass finds it here again and re-marks;
+    // marking afterwards would lose the zone's day to the very crash the reaper exists to survive.
+    // The reaper still does not dispatch (#261's rule): it leaves a row saying a day is owed.
+    await this.markZonesForRecovery(orphans, now);
+
     const { count: claims } = await this.prisma.dispatchRunZone.updateMany({
-      where: { runId: { in: runIds }, status: 'RUNNING' },
+      where: { id: { in: orphans.map((o) => o.id) }, status: 'RUNNING' },
       data: { status: 'ERROR', error: ABANDONED_CLAIM_ERROR, finishedAt: now },
     });
     this.logger.warn(
       `reaped ${runs} abandoned dispatch run(s) [${runIds.join(', ')}], freeing ${claims} zone claim(s)`,
     );
     return { runs, claims };
+  }
+
+  /**
+   * #286 — record that these zones are owed a re-dispatch today, without dispatching anything.
+   *
+   * Upserted per (zone, operating day), so a zone that crashes three times before noon draws from ONE
+   * attempt budget. Two states are deliberately left alone rather than re-armed:
+   *  - **EXHAUSTED** — the budget for this zone today is spent. Re-arming on a fresh crash would make
+   *    "bounded" a property of each incident instead of the day, and a zone that crashes every run
+   *    would loop forever, which is exactly AC5's failure mode.
+   *  - **EXPIRED** — the field day is over. Re-dispatching it helps nobody and would put work on a
+   *    plan no engineer will read.
+   *
+   * RECOVERED *is* re-armed: the zone crashed again after being put right, which is a new day owed,
+   * and the preserved `attempts` is what keeps it bounded.
+   */
+  private async markZonesForRecovery(orphans: Array<{ zoneId: bigint; runId: bigint }>, now: Date): Promise<void> {
+    const businessDate = istDate(now);
+    // One mark per zone even when a zone lost several claims; the run named is whichever of them the
+    // map keeps, and any of them is a true answer to "which dead run left this zone owed a day".
+    const runByZone = new Map(orphans.map((o) => [o.zoneId, o.runId]));
+    for (const zoneId of runByZone.keys()) {
+      try {
+        await this.prisma.dispatchZoneRecovery.upsert({
+          where: { zoneId_businessDate: { zoneId, businessDate } },
+          create: {
+            zoneId,
+            businessDate,
+            state: 'PENDING',
+            attempts: 0,
+            markedAt: now,
+            markedByRunId: runByZone.get(zoneId) ?? null,
+          },
+          update: {},
+        });
+        // Separate from the upsert on purpose: `update: {}` above cannot express "only if the row is
+        // still re-armable", and a blanket update would resurrect an EXHAUSTED or EXPIRED zone.
+        await this.prisma.dispatchZoneRecovery.updateMany({
+          where: { zoneId, businessDate, state: { in: ['PENDING', 'RECOVERED'] } },
+          data: { state: 'PENDING', markedAt: now, markedByRunId: runByZone.get(zoneId) ?? null, resolvedAt: null },
+        });
+      } catch (e) {
+        // A zone whose mark cannot be written must not stop the claims from being freed — a wedged
+        // zone is strictly worse than an unrecovered one.
+        this.logger.error(
+          `failed to mark zone ${zoneId} for same-day re-dispatch: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * #286 — re-dispatch the zones the reaper marked, the same day, bounded.
+   *
+   * **It adds no scheduling of its own.** Every zone goes through `runForActiveZones` exactly as the
+   * 05:00 tick and the manual button do: same tick claim upstream, same per-zone claim row, same per-SE
+   * transactions, same idempotency guards (#258 G1-G8). That is why AC3 holds without a line of code
+   * here — work the dead run already committed is already committed, and the recommendation-consuming
+   * dispatch simply finds nothing left to place for it.
+   *
+   * Two bounds, and they bind different failures:
+   *  - **the attempt budget** stops a zone that keeps failing. Spent only on a run that actually
+   *    happened; a *refusal* (some live run holds the zone) leaves the mark PENDING and unbilled,
+   *    because being busy is not being broken and charging for it would exhaust a healthy zone.
+   *  - **the operating-day cutoff** stops the refusal case from looping forever, and stops a recovery
+   *    landing on a field day that is over.
+   *
+   * Zones are walked in ascending id, the order every other admission uses, so a collector and a cron
+   * tick take their claims in the same order and cannot deadlock on each other.
+   *
+   * Never patient (`deadlineMs: 0`). #260's patience is for a run that has one chance today; this one
+   * gets another chance in five minutes, and a fifteen-minute wait inside a five-minute tick would
+   * simply hold the collector's own window shut.
+   */
+  async recoverMarkedZones(
+    now: Date = new Date(),
+    opts: { policy?: DispatchRecoveryPolicy } = {},
+  ): Promise<DispatchRecoveryOutcome> {
+    const policy = opts.policy ?? readDispatchRecoveryPolicy();
+    const businessDate = istDate(now);
+    const out: DispatchRecoveryOutcome = { attempted: 0, recovered: 0, exhausted: 0, expired: 0, deferred: 0 };
+
+    const marks = await this.prisma.dispatchZoneRecovery.findMany({
+      where: { businessDate, state: 'PENDING' },
+      orderBy: { zoneId: 'asc' },
+    });
+    if (marks.length === 0) return out;
+
+    // Hours into the IST operating day. Derived from the day's own start instant rather than from
+    // `now.getHours()`, which is the host's timezone and would move the cutoff with the deploy.
+    const istHour = (now.getTime() - istDayStartInstant(now).getTime()) / 3_600_000;
+    if (istHour >= policy.cutoffHourIst) {
+      const { count } = await this.prisma.dispatchZoneRecovery.updateMany({
+        where: { id: { in: marks.map((m) => m.id) }, state: 'PENDING' },
+        data: {
+          state: 'EXPIRED',
+          resolvedAt: now,
+          lastError: `the operating-day cutoff (${policy.cutoffHourIst}:00 IST) passed before this zone was re-dispatched`,
+        },
+      });
+      out.expired = count;
+      if (count > 0) this.logger.warn(`same-day recovery: ${count} zone(s) expired at the operating-day cutoff`);
+      return out;
+    }
+
+    for (const mark of marks) {
+      if (mark.attempts >= policy.maxAttempts) {
+        await this.retireMark(mark.id, mark.attempts, {
+          state: 'EXHAUSTED',
+          now,
+          attempts: mark.attempts,
+          lastError:
+            mark.lastError ??
+            `same-day re-dispatch gave up after ${mark.attempts} attempt(s) — the configured budget is ${policy.maxAttempts}`,
+        });
+        out.exhausted += 1;
+        continue;
+      }
+
+      let failure: string | null = null;
+      let recovered = false;
+      try {
+        const outcome = await this.runForActiveZones(now, {
+          trigger: 'CRON',
+          zoneId: mark.zoneId,
+          retry: { intervalMs: 0, deadlineMs: 0 },
+        });
+        if (outcome.result === 'CONFLICT') {
+          // Somebody live holds it. Not this zone's fault and not an attempt — try again next pass.
+          out.deferred += 1;
+          continue;
+        }
+        const zone = outcome.summary.zoneOutcomes.find((z) => z.zoneId === mark.zoneId.toString());
+        if (zone?.outcome === 'CONTENDED') {
+          out.deferred += 1;
+          continue;
+        }
+        recovered = zone?.outcome === 'DONE';
+        if (!recovered) {
+          failure =
+            outcome.summary.errors.find((e) => e.zoneId === mark.zoneId.toString())?.message ??
+            'the re-dispatch run did not complete this zone';
+        }
+      } catch (e) {
+        // Contained exactly like a zone failure inside a run: a zone that cannot be recovered must not
+        // stop the collector from recovering the others.
+        failure = e instanceof Error ? e.message : String(e);
+      }
+
+      out.attempted += 1;
+      const attempts = mark.attempts + 1;
+      if (recovered) {
+        await this.retireMark(mark.id, mark.attempts, { state: 'RECOVERED', now, attempts, lastError: null });
+        out.recovered += 1;
+        this.logger.log(`same-day recovery: zone ${mark.zoneId} re-dispatched (attempt ${attempts})`);
+        continue;
+      }
+
+      if (attempts >= policy.maxAttempts) {
+        await this.retireMark(mark.id, mark.attempts, { state: 'EXHAUSTED', now, attempts, lastError: failure });
+        out.exhausted += 1;
+        this.logger.error(
+          `same-day recovery EXHAUSTED for zone ${mark.zoneId} after ${attempts} attempt(s): ${failure}`,
+        );
+      } else {
+        await this.prisma.dispatchZoneRecovery.updateMany({
+          where: { id: mark.id, state: 'PENDING', attempts: mark.attempts },
+          data: { attempts, lastAttemptAt: now, lastError: failure },
+        });
+        this.logger.warn(`same-day recovery attempt ${attempts} failed for zone ${mark.zoneId}: ${failure}`);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Close a recovery mark (#286). `state = 'PENDING'` and the attempt count this pass read are both in
+   * the predicate for #265's reason: a write by primary key silently overwrites a decision somebody
+   * else already made — here, a second collector that got the zone first.
+   */
+  private async retireMark(
+    id: bigint,
+    seenAttempts: number,
+    ctx: { state: 'RECOVERED' | 'EXHAUSTED'; now: Date; lastError: string | null; attempts: number },
+  ): Promise<void> {
+    await this.prisma.dispatchZoneRecovery.updateMany({
+      where: { id, state: 'PENDING', attempts: seenAttempts },
+      data: {
+        state: ctx.state,
+        attempts: ctx.attempts,
+        // Only stamped when this pass actually ran something — a mark retired because its budget was
+        // already spent must not claim an attempt time it never spent.
+        ...(ctx.attempts > seenAttempts ? { lastAttemptAt: ctx.now } : {}),
+        resolvedAt: ctx.now,
+        lastError: ctx.lastError,
+      },
+    });
   }
 
   /**

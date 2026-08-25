@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { SUPERSEDED_RECOMMENDATION_STATUSES } from '../recommender/recommendation-status';
 import { RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 import type { ZmScope } from './zm-schedule-query.service';
 
@@ -647,7 +648,11 @@ export class DispatchTransparencyQueryService {
     const runId = batch.schedule.runId;
     const ticketIds = batch.tickets.map((t) => t.ticket.ticketId);
     const recs = await this.prisma.recommendation.findMany({
-      where: { runId, ticketId: { in: ticketIds } },
+      // #286 — a run can now leave a RETIRED row beside the DISPATCHED one for the same ticket (its
+      // own suggestion, superseded before it was consumed). Two rows per ticket would make the
+      // last-write-wins map below arbitrary, so the superseded one is skipped: this batch is a record
+      // of what was dispatched, not of what was reconsidered.
+      where: { runId, ticketId: { in: ticketIds }, status: { notIn: SUPERSEDED_RECOMMENDATION_STATUSES } },
       select: {
         ticketId: true,
         processingRank: true,
