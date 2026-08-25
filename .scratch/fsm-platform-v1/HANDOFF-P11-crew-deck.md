@@ -79,10 +79,22 @@ These files carry **other issues' uncommitted work** and were deliberately **lef
 | `apps/admin/src/pages/dispatch/ConfigInEffectPanel.tsx` | #270 (eligibility-proxy note) **+ my MV freshness block** | #287's UI half lives here |
 | `apps/backend/test/day-plan-notification-outbox-writers.e2e-spec.ts` | #264 (untracked test file) **+ my fixture fix** | **The fixture fix is required**: it built its actor as `'zm-obx-' + NS`, and #283 writes `added_by` to a `uuid` column, so the old fixture now fails. Whoever commits #264 must include it |
 
+**2026-08-25 (fourth session) — trap 3 had already bitten, and nothing had noticed.**
+`apps/backend/src/common/manager-scope.ts` and `common/decorators/current-scope.decorator.ts` were in
+this same uncommitted pile, but `ea8f5cd`'s `dispatch-today.controller.ts` **imports both** — so HEAD
+did not build, while every suite run stayed green because the suites run the working tree, not the
+commit. Both files (and the helper's unit spec) are committed as `7695a04`; the wider #239 work they
+belong to is untouched. Every other relative import in HEAD's `apps/*/src` and `apps/*/test` was then
+resolved against the tracked file set — the only unresolved ones left are `generated/prisma/*`, which
+is generated output. **The lesson generalises: a green suite proves nothing about a commit boundary.**
+
 So **#287 is backend-complete and committed, but its ConfigInEffect display is uncommitted** —
 it exists in the working tree, typechecks, and will land whenever #270's admin work is committed.
 The wider tree also has ~30 files of prior-session work (charts, reports, settings, #281's own
-frontend). Do not assume `HEAD` reflects the working tree.
+frontend). Do not assume `HEAD` reflects the working tree. It also holds **untracked completion
+reports for seven issues INDEX and SYSTEM-STATE already describe as done** — `docs/progress/` for
+#236, #264, #267, #270, #275, #276, #277 — so the repo's record of finished work is thinner than the
+work itself.
 
 ## Two design decisions the next session must not undo
 
