@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   apiOverrideBatch,
+  apiOverridePreview,
   apiScheduleDetail,
   apiZoneEngineers,
   OverrideConflictError,
   type OverrideCommand,
   type OverrideConflict,
+  type OverrideImpact,
   type ScheduleDetail,
   type ScheduleStop,
   type ScheduleStopTicket,
@@ -14,7 +16,7 @@ import {
 } from '../../api/schedules';
 import { Badge, Button } from '../../components/ui';
 import type { BadgeTone } from '../../components/ui/Badge';
-import { PlantName } from '../../components/domain';
+import { OverrideImpactPanel, PlantName } from '../../components/domain';
 import { engineerOptionLabel } from '../../lib/capacity';
 
 /**
@@ -163,6 +165,44 @@ export function ScheduleDetailPage() {
   );
 }
 
+/**
+ * #289 — the preview between the choice and the commit.
+ *
+ * **Keyed on the target, not on the form.** The impact is a function of *which engineer the work
+ * moves to* and *which work moves* — never of the reason typed beside it, so a manager writing three
+ * sentences of justification does not fire three projections. `reasonCode` is still sent, because the
+ * preview and the confirm take the identical body and drifting into two vocabularies is how a preview
+ * ends up disagreeing with the write it precedes.
+ *
+ * A failed projection resolves to `null` and the panel simply does not appear. The preview is an aid,
+ * not a gate (#258 Q2): a manager whose network hiccuped keeps their Confirm, and the 409 conflict
+ * path (AC4) stays exactly where it was — on the commit.
+ */
+function useOverridePreview(batchId: string, cmd: OverrideCommand | null): OverrideImpact | null {
+  const [impact, setImpact] = useState<OverrideImpact | null>(null);
+  // Reason deliberately excluded: see above. Stringified so the effect compares by value, not identity.
+  const key = cmd ? JSON.stringify({ ...cmd, reasonCode: '' }) : null;
+
+  useEffect(() => {
+    if (!cmd || key === null) {
+      setImpact(null);
+      return;
+    }
+    let alive = true;
+    setImpact(null); // never show the previous target's numbers under the new target's name
+    apiOverridePreview(batchId, cmd)
+      .then((i) => alive && setImpact(i))
+      .catch(() => alive && setImpact(null));
+    return () => {
+      alive = false;
+    };
+    // `cmd` is intentionally not a dependency — `key` is its value-identity minus the reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchId, key]);
+
+  return impact;
+}
+
 function Stop({
   stop,
   targets,
@@ -178,6 +218,16 @@ function Stop({
   const [position, setPosition] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  // Both two-lane moves off this stop. Split waits for a selection as well as a target: which work
+  // moves is as much the projection's input as who it moves to, and an empty set moves nothing.
+  const impact = useOverridePreview(
+    stop.batchId,
+    open === 'swap' && newSeId !== ''
+      ? { action: 'SWAP_SE', newSeId, reasonCode: reason }
+      : open === 'split' && newSeId !== '' && selected.size > 0
+        ? { action: 'SPLIT_BATCH', ticketIds: [...selected], newSeId, reasonCode: reason }
+        : null,
+  );
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -264,6 +314,7 @@ function Stop({
           >
             Confirm swap
           </Button>
+          {impact && <OverrideImpactPanel impact={impact} />}
         </div>
       )}
 
@@ -280,6 +331,7 @@ function Stop({
           >
             Confirm split
           </Button>
+          {impact && <OverrideImpactPanel impact={impact} />}
         </div>
       )}
 
@@ -321,6 +373,14 @@ function TicketRow({
   const [deferTo, setDeferTo] = useState('');
   const [newSeId, setNewSeId] = useState('');
   const [busy, setBusy] = useState(false);
+  // Only Reassign hands work to another engineer; Remove and Defer have one lane and no two-lane
+  // impact to project (the endpoint refuses them with NOT_PROJECTABLE rather than answering zeros).
+  const impact = useOverridePreview(
+    batchId,
+    open === 'reassign' && newSeId !== ''
+      ? { action: 'REASSIGN', ticketId: ticket.ticketId, newSeId, reasonCode: reason }
+      : null,
+  );
 
   const commit = async (cmd: OverrideCommand) => {
     setBusy(true);
@@ -405,7 +465,7 @@ function TicketRow({
       )}
 
       {open === 'reassign' && (
-        <span className="flex items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2">
           <SePicker label="Target SE" value={newSeId} onChange={setNewSeId} targets={targets} />
           <ReasonInput value={reason} onChange={setReason} />
           <Button
@@ -416,7 +476,8 @@ function TicketRow({
           >
             Confirm reassign
           </Button>
-        </span>
+          {impact && <OverrideImpactPanel impact={impact} />}
+        </div>
       )}
     </li>
   );

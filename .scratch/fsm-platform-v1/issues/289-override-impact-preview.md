@@ -1,8 +1,9 @@
 # 289 — Override: preview the impact before it is committed
 
-Status: **backend done** (2026-08-25) · **UI half open** — see
-[`HANDOFF-P11-289-ui.md`](../HANDOFF-P11-289-ui.md) and
+Status: **done** (2026-08-25) — backend + UI, one vertical slice. Report:
 [`docs/progress/289-override-impact-preview.md`](../../../docs/progress/289-override-impact-preview.md)
+(the UI half's handoff is consumed and archived at
+[`docs/archive/HANDOFF-P11-289-ui.md`](../../../docs/archive/HANDOFF-P11-289-ui.md))
 Type: AFK · Backend + Admin
 Decision: [#282](./282-decision-todays-dispatch-crew-deck.md) R1 — the design's step 3.
 
@@ -36,10 +37,13 @@ Lost races re-present as the existing clean 409 conflict shape (#265), never an 
       touches.
 - [x] AC3 — Confirm remains the audited write with its mandatory reason; the audit row is unchanged.
 - [x] AC4 — A lost race returns the existing 409 conflict, itemised, not a 500.
-- [ ] AC5 — ~~The cockpit renders~~ **Schedule Detail renders** the preview between the override
+- [x] AC5 — ~~The cockpit renders~~ **Schedule Detail renders** the preview between the override
       choice and the commit. **Operator ruling, 2026-08-25**, put to them explicitly: the cockpit has
       no override controls — it links out to `/schedules/:engineerId`, which is where an operator
       actually chooses an override — so building move controls into `/dispatch/today` would duplicate
-      an existing surface, which #282 R5 forbids. The option was offered and not taken. **Open.**
-- [ ] AC6 — Both suites green. *(Backend green: 8 service specs + 3 HTTP specs. Admin pending the
-      UI half.)*
+      an existing surface, which #282 R5 forbids. The option was offered and not taken. **Built**:
+      `OverrideImpactPanel` in all three move panels (Swap SE, Split batch, per-ticket Reassign),
+      fetched on target-SE change — and, for Split, on the ticket selection, because which work moves
+      is as much the projection's input as who it moves to.
+- [x] AC6 — Both suites green. *(Backend: 8 service specs + 3 HTTP specs. Admin: 112 files / 653
+      tests, including `override-impact-preview.test.tsx` — 20 tests.)*

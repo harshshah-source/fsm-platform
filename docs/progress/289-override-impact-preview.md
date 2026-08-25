@@ -1,7 +1,9 @@
-# #289 — Override impact preview · backend completion report
+# #289 — Override impact preview · completion report
 
-**Backend landed 2026-08-25. The UI half is open** — see
-[`HANDOFF-P11-289-ui.md`](../../.scratch/fsm-platform-v1/HANDOFF-P11-289-ui.md).
+**Backend landed 2026-08-25; the UI half landed the same day** and is reported in its own section at
+the foot of this file — the backend half above it is left exactly as it was written. The handoff that
+carried the ruling between the two sessions is consumed:
+[`docs/archive/HANDOFF-P11-289-ui.md`](../archive/HANDOFF-P11-289-ui.md).
 Owning decision: [#282](../../.scratch/fsm-platform-v1/issues/282-decision-todays-dispatch-crew-deck.md) R1
 (the design's step 3).
 
@@ -86,3 +88,87 @@ action, and the same role gate as the confirm.
 **The UI (AC5) and therefore AC6's admin half.** The backend is complete, tested and wired; the panel
 that renders it is the next session's work, and the handoff carries the ruling above plus the exact
 component shape and the design lines to read.
+
+---
+
+# The UI half — 2026-08-25 (fourth session)
+
+Appended, not rewritten: everything above is the backend half as it was reported. **#289 is now
+done.** The handoff that carried the ruling between the two sessions
+(now `docs/archive/HANDOFF-P11-289-ui.md`) is consumed and archived.
+
+## What landed
+
+`apps/admin/src/components/domain/OverrideImpactPanel.tsx` and `apiOverridePreview` in
+`apps/admin/src/api/schedules.ts`, rendered inside **all three** move panels on Schedule Detail —
+Swap SE and Split batch on the stop, Reassign on the ticket row — between choosing a target SE and
+pressing Confirm. Four rows, the design's step 3: both lanes' `committed → after / capacity`, the
+system's view of the target, the route effect, and the conflicts the confirm will gate on.
+
+## Decisions worth recording
+
+**The preview is keyed on the target, not on the form.** The projection is a function of *which
+engineer the work moves to* and *which work moves* — never of the reason typed beside it, so a
+manager writing three sentences of justification fires one projection, not thirty. For Split that
+means the ticket selection is an input too: ticking a second ticket re-projects, because the impact
+of moving two tickets is not the impact of moving one. `reasonCode` is still **sent**, because the
+preview and the confirm take the identical body; a preview that trimmed the object would be the first
+step towards two vocabularies for one command.
+
+**A failed projection loses the panel, never the Confirm.** #258 Q2 again: the preview is an aid, so a
+manager whose projection 500s keeps a move they are entitled to make, and gets no error surface for a
+thing they did not ask for. Its own test drives a 500 and then commits.
+
+**The 409 path was left exactly where it was (AC4).** The lost-race conflict belongs to the write and
+is answered on the write; nothing about the preview routes through `OverrideConflictError`. A test
+opens the panel, commits into a 409, and asserts the existing banner — not an error page — still
+appears and still re-submits with `confirm: true`.
+
+**The "Human override" chip is neutral, where the design draws it amber.** #272's grammar table gives
+amber exactly one meaning — over capacity — and this pill would have sat inches from the amber
+capacity lane, same shape, different meaning: the precise defect #290 spent a slice removing from
+`/assign`, re-introduced for literal fidelity to a drawing. Violet was not the answer either; the
+table spends it on "a human crossed a coverage tier", which this move need not be. The words carry the
+meaning and no colour has to. **The lane treatment itself stays amber**, which is what the table
+actually assigns the colour to.
+
+**The design's pronoun is not rendered.** The panel says "existing stops are not reordered" where the
+design says "her route is not reordered". Nothing in the system records an engineer's pronouns, and a
+name is not one — so the sentence is written about the route rather than about the person, which is
+also the fact being promised.
+
+**The rank sentence names the run by id, and links to it.** The design writes "in the 05:00 run"; the
+projection carries `runId`, not a start time, so the row says `run 900` and links to
+`/dispatch-runs/900`, where the time is. The alternative — a second fetch to decorate one sentence —
+buys a phrase and costs a request on every target change.
+
+## A defect the suite found, and what it actually was
+
+Three tests in `schedule-override.test.tsx` failed the moment the page started previewing, with
+"found a label … no form control associated". The label was fine. The stub matched `/override` and
+POST, so it answered the **preview** with the commit's `{result:'OK'}` payload — the panel then read
+`from.dailyCapacity` off `undefined` and took the tree down with it, and a form inside an unmounted
+tree has no controls.
+
+Both halves were fixed as fidelity, not as appeasement: the stubs now match `/override/preview`
+**first**, as the real backend's two routes do, and `overrideCall()` — the helper asserting *what was
+written* — excludes the preview explicitly. That second half mattered more than it looks: a preview
+carries an empty `reasonCode`, so a helper that matched it would let a commit with a **missing
+mandatory reason** pass the "the reason was sent" assertion unnoticed.
+
+## Tests
+
+New: `test/override-impact-preview.test.tsx` (20) — the two lanes' before → after; over capacity
+marked and Confirm still enabled; the rank sentence and its run link; **two silence tests** (no rank
+recorded, and no run at all) that assert the absence of "unranked"; three route sentences (appended /
+joins an existing stop / opens a new day plan); conflicts clear, held-to-a-return-date, and on-site;
+the request cadence (nothing before a target, the identical body, no re-projection on typing, a
+re-projection on a new target); all three move panels including Split's selection dependency; the
+one-lane actions never projecting; the failed-projection and lost-race guards; and the header naming
+the move.
+
+Amended: `test/schedule-override.test.tsx` (+1 stub route, helper narrowed) — see above.
+
+Admin suite **112 files / 653 tests, 0 failed**; `tsc --noEmit` clean. (One unhandled error remains in
+`ticket-drawer-tabs.test.tsx`; it reproduces on a file this work never touched and its three tests
+pass.) No backend change: the endpoint shipped with `8f4550e` and was not edited.

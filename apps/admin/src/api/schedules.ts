@@ -333,3 +333,82 @@ export async function apiOverrideBatch(batchId: string, cmd: OverrideCommand): P
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as OverrideOk;
 }
+
+/** One side of a move, as the design's capacity bar reads it: `5/6 → 6/6` (#289). */
+export interface OverrideLaneImpact {
+  seId: string;
+  seName: string | null;
+  committed: number;
+  after: number;
+  /** Null when the engineer has no cap set — no denominator, and no over-capacity marking either. */
+  dailyCapacity: number | null;
+  overCapacity: boolean;
+}
+
+/**
+ * Where the run that placed this ticket ranked the *target* engineer.
+ *
+ * Every field is nullable and **null means unknown, never "unranked"** — the ticket was placed by
+ * hand, the run predates the trace, or the target was never in the candidate pool. A surface that
+ * rendered a fabricated position would be read as the engine's opinion (#283's rule).
+ */
+export interface OverrideRankContext {
+  ticketId: string;
+  runId: string;
+  processingRank: number | null;
+  chosenSeId: string | null;
+  targetPrecedenceRank: number | null;
+  targetVerdict: string | null;
+  targetDropReason: string | null;
+}
+
+/** What the move does to the target's route. Appended — never a reorder (#258 Q6's ordinal plan). */
+export interface OverrideRouteImpact {
+  targetScheduleId: string | null;
+  appendedAsStop: number;
+  joinsExistingStop: boolean;
+  reordersExistingStops: false;
+}
+
+export interface OverrideImpactConflicts {
+  /** The `CONFLICT_ON_SITE` gate — reads empty until `soft_states` exists (Issue 15). */
+  onSite: string[];
+  /** The `CONFLICT_DEFERRED` gate — tickets held to a future return date (#249). */
+  deferred: string[];
+}
+
+export interface OverrideImpact {
+  result: 'OK';
+  action: 'REASSIGN' | 'SWAP_SE' | 'SPLIT_BATCH';
+  batchId: string;
+  plantId: string;
+  plantName: string;
+  ticketIds: string[];
+  from: OverrideLaneImpact;
+  to: OverrideLaneImpact;
+  rank: OverrideRankContext | null;
+  route: OverrideRouteImpact;
+  conflicts: OverrideImpactConflicts;
+}
+
+/**
+ * #289 — what the proposed override would do, before it is done.
+ *
+ * **The same body the confirm takes**, deliberately: an operator previews `{action, ticketId,
+ * newSeId, reasonCode}` and confirms the identical object, so the preview and the write cannot drift
+ * into two vocabularies. A `POST` because the body is a command — the endpoint writes nothing, takes
+ * no lock and opens no run, pinned backend-side by a spec that counts rows.
+ *
+ * The single-lane actions (REMOVE / DEFER / REORDER) are a **400 `NOT_PROJECTABLE`**, not an empty
+ * impact: "both lanes' capacity" has no meaning for them and zeros would read as "this move costs
+ * nothing". Callers should not offer a preview for those; this throws if one does.
+ */
+export async function apiOverridePreview(batchId: string, cmd: OverrideCommand): Promise<OverrideImpact> {
+  const res = await fetch(`${BASE_URL}/batches/${encodeURIComponent(batchId)}/override/preview`, {
+    method: 'POST',
+    headers: authHeaders(true),
+    body: JSON.stringify(cmd),
+  });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as OverrideImpact;
+}

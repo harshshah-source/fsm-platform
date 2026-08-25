@@ -1066,6 +1066,26 @@ POSTs) drive identical code paths with no cron.
   defer/reorder) commits immediately, flips batch + schedule to OVERRIDDEN with mandatory reason +
   overrider, audits in-transaction, fires a push. No approval gate. Overriding work an SE is ON_SITE
   on goes through the conflict seam (`soft-state-conflict.ts`).
+- **Override impact preview** (#289/P11, `POST /api/batches/:id/override/preview` +
+  `OverrideProjectionService`): the approved flow is inspect → understand → override → **preview
+  impact** → confirm, and only the preview was missing — every override committed immediately, so the
+  one way to see what a move would do was to make it. The projection answers the design's step-3
+  panel: both lanes' `committed → after / capacity` (from `committedDayPlan`, the definition the
+  recommender enforces against — never re-derived), where the run that placed the ticket ranked the
+  **target** engineer (read from that run's own `dispatch_decision_traces` row, not re-scored), which
+  stop the work lands on and whether it joins one the target already makes, and the two conflicts the
+  confirm gates on. Same body, role gate and 404 as the confirm. **It writes nothing** — no `create`,
+  `update`, `$transaction` or `$executeRaw`, no advisory lock, no in-flight slot, no `dispatch_runs`
+  row — asserted by **counting rows** across five tables, not by reading the source. A one-lane action
+  (REMOVE/DEFER/REORDER) is `NOT_PROJECTABLE` (400), never `0 → 0`, which would read as "this costs
+  nothing" about removing somebody's work; a null rank is **unknown, never "unranked"**. **Surfaced on
+  Schedule Detail, not the cockpit** — operator ruling 2026-08-25, put to them explicitly: the cockpit
+  has no move controls and links out to `/schedules/:engineerId`, so building them there would
+  duplicate an existing surface (#282 R5). `OverrideImpactPanel` renders inside all three move panels
+  (Swap SE, Split batch, per-ticket Reassign), fetched on the **target** (and, for Split, on the ticket
+  selection) rather than on panel open or on keystrokes in the reason box. Over capacity is marked
+  amber and Confirm stays enabled (#258 Q2); a failed projection loses the panel, never the move; and
+  the #265 lost-race 409 stays entirely on the write.
 - **Return-date deferrals are overridable, never bypassable** (#249, Decision 17). `assignTicket`
   refuses a ticket held to a future `deferred_until` with `CONFLICT_DEFERRED` (409) carrying the
   deferral date and, when a report exists, the SE's `proposed_from` beside the authoritative

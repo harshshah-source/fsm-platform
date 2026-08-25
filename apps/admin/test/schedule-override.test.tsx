@@ -63,11 +63,42 @@ function detailBody() {
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
+/**
+ * #289 — the projection the page asks for once a target SE is picked. It shares the `/override` path
+ * prefix with the commit and must be matched **first**: answering a preview with the commit's own
+ * `{result:'OK'}` payload would both fake a write that never happened and hand the impact panel a
+ * shape it cannot render.
+ */
+function previewBody(body: { action: string; newSeId?: string; ticketId?: string; ticketIds?: string[] }) {
+  const ticketIds = body.ticketIds ?? (body.ticketId ? [body.ticketId] : ['tkt-1', 'tkt-2']);
+  return {
+    result: 'OK',
+    action: body.action,
+    batchId: '100',
+    plantId: '7',
+    plantName: 'Pune Depot',
+    ticketIds,
+    from: { seId: 'se-north-1', seName: null, committed: 2, after: 2 - ticketIds.length, dailyCapacity: 10, overCapacity: false },
+    to: {
+      seId: body.newSeId ?? 'se-north-2',
+      seName: null,
+      committed: 1,
+      after: 1 + ticketIds.length,
+      dailyCapacity: 10,
+      overCapacity: false,
+    },
+    rank: null,
+    route: { targetScheduleId: '11', appendedAsStop: 2, joinsExistingStop: false, reordersExistingStops: false },
+    conflicts: { onSite: [], deferred: [] },
+  };
+}
+
 function stub() {
   fetchMock.mockImplementation(async (url: string, opts?: RequestInit) => {
     const u = String(url);
     const method = opts?.method ?? 'GET';
     if (u.includes('/schedules/engineers')) return json(ENGINEERS);
+    if (u.includes('/override/preview')) return json(previewBody(JSON.parse(String(opts?.body))));
     if (u.includes('/batches/') && u.includes('/override') && method === 'POST') {
       const batchId = u.match(/batches\/(\d+)\/override/)![1];
       const body = JSON.parse(String(opts?.body)) as {
@@ -145,10 +176,17 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
+/**
+ * The **commit** for `action` — deliberately not the projection that now precedes it (#289). Both
+ * POST the same body to paths sharing the `/override` prefix, and the assertions below are about what
+ * was written: a preview carrying an empty `reasonCode` matching here would let a missing reason on
+ * the real write pass unnoticed.
+ */
 function overrideCall(action: string) {
   return fetchMock.mock.calls.find(
     ([url, opts]) =>
       String(url).includes('/override') &&
+      !String(url).includes('/override/preview') &&
       (opts as RequestInit | undefined)?.method === 'POST' &&
       String((opts as RequestInit).body).includes(`"action":"${action}"`),
   );
@@ -376,6 +414,7 @@ function stubConflict() {
     const u = String(url);
     const method = opts?.method ?? 'GET';
     if (u.includes('/schedules/engineers')) return json(ENGINEERS);
+    if (u.includes('/override/preview')) return json(previewBody(JSON.parse(String(opts?.body))));
     if (u.includes('/override') && method === 'POST') {
       const body = JSON.parse(String(opts?.body)) as { ticketId?: string; confirm?: boolean };
       if (!body.confirm) {
