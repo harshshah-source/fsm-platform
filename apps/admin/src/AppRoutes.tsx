@@ -30,6 +30,7 @@ import { LeaveRequestsPage } from './pages/engineers/LeaveRequestsPage';
 import { IntradayQueuePage } from './pages/schedules/IntradayQueuePage';
 import { ScheduleDetailPage } from './pages/schedules/ScheduleDetailPage';
 import { SchedulerPreviewPage } from './pages/schedules/SchedulerPreviewPage';
+import TodaysDispatchPage from './pages/dispatch/TodaysDispatchPage';
 import { SchedulesPage } from './pages/schedules/SchedulesPage';
 import { SettingsPage } from './pages/settings/SettingsPage';
 import { CommissioningCohortPage } from './pages/reports/CommissioningCohortPage';
@@ -85,6 +86,17 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <AssignConsolePage />
+              </RoleRoute>
+            }
+          />
+          {/* #285 — Today's Dispatch, the scheduler engine's operator cockpit (design #282). The
+              four dispatch pages below remain as supporting and historical surfaces; this is the one
+              that answers "what is happening now", which none of them could. */}
+          <Route
+            path="/dispatch/today"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <TodaysDispatchPage />
               </RoleRoute>
             }
           />

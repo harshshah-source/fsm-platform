@@ -283,6 +283,11 @@ export class IntradayInsertionService {
         now,
         'CRITICAL_ASSIGN',
         true,
+        {},
+        // #283 — this path already knows the tier it selected within: `chosen` came out of
+        // `chooseWithinTier` over `orderedCandidatesForPlant`. Passing it records the tier the engine
+        // actually evaluated, rather than one re-derived from `se_coverage` a moment later.
+        chosen.coverageType,
       );
       // Not OK: a concurrent writer (a ZM's manual assign, a second sweep instance) already moved this
       // ticket, or the deferral check inside `assignTicket` disagreed with the query above by a

@@ -5,6 +5,8 @@ import {
   type DayPlanNotifier,
   LoggingDayPlanNotifier,
 } from './day-plan-notifier';
+import { ADD_SOURCES } from './add-source';
+import { resolveCoverageForPlants } from './coverage-at-assign';
 import { drainRows, queueDayPlanDispatched } from './day-plan-notification-outbox';
 import { ZONE_LOCK_TIMEOUT_MS, dispatchZoneLockKey } from './dispatch-zone-lock';
 import { type SeSkip, describeSeSkip } from './se-skip';
@@ -239,6 +241,11 @@ export class BatchAssignmentService {
           _max: { stopSequence: true },
         });
         let stopSequence = lastStop._max.stopSequence ?? 0;
+        // #283 — the tier this SE covered each plant in, resolved once per plant for the whole
+        // transaction. The engine chose within a tier (#258 Q1) but the recommendation row it reads
+        // here does not carry which one, so it is resolved rather than threaded down from the
+        // recommender — one indexed lookup per stop, not per ticket.
+        const coverageByPlant = await resolveCoverageForPlants(tx, seId, [...byPlant.keys()]);
         for (const [plantId, ticketIds] of this.orderPlantStops(byPlant)) {
           stopSequence++;
           // A fresh batch per run (stamped with run_id) even when the plant already has a stop from an
@@ -251,7 +258,21 @@ export class BatchAssignmentService {
           let sortOrder = 0;
           for (const ticketId of ticketIds) {
             sortOrder++;
-            await tx.batchAssignmentTicket.create({ data: { batchId: batch.batchId, ticketId, sortOrder } });
+            await tx.batchAssignmentTicket.create({
+              data: {
+                batchId: batch.batchId,
+                ticketId,
+                sortOrder,
+                // #283 — the run placed this, so `added_by` stays NULL by construction: the actor
+                // column answers "which person did this", and here none did. `run_id` on the batch is
+                // the engine's own handle, exactly as terminal closure leaves `removed_by` NULL.
+                addSource: ADD_SOURCES.AUTO_DISPATCH,
+                coverageTypeAtAssign: coverageByPlant.get(String(plantId)) ?? null,
+                // The run's own clock, not the database's, for the same reason the manual paths use
+                // the caller's: one operation's rows should share one instant.
+                createdAt: now,
+              },
+            });
             // Committed work leaves the Shared Pool (Issue 12): the dispatched ticket is now a Formal
             // Assignment, not pickable secondary work (schema D6, LLD shared-pool partial index).
             await tx.ticket.update({

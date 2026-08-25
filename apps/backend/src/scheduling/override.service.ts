@@ -7,6 +7,8 @@ import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { assignableTickets } from '../ticketing/assignable-work';
 import { isNotDeferredOn, notDeferredOn } from '../ticketing/deferral';
+import { ADD_SOURCES, addProvenanceSourceFor, type CoverageAtAssign } from './add-source';
+import { resolveCoverageAtAssign, resolveCoverageForPlants } from './coverage-at-assign';
 import { DAY_PLAN_NOTIFIER, DayPlanNotifier } from './day-plan-notifier';
 import { drainRows, queueDayPlanOverridden } from './day-plan-notification-outbox';
 import { REMOVAL_REASONS } from './removal-reason';
@@ -422,7 +424,18 @@ export class OverrideService {
      * existing caller keeps its behaviour unless it deliberately opts in.
      */
     deferral: DeferralOverrideInput = {},
+    /**
+     * #283 — the chosen SE's coverage of this plant, when the caller already knows it. The intraday
+     * CRITICAL path does: it picked `chosen` out of `orderedCandidatesForPlant` and holds
+     * `chosen.coverageType` at the call site. Passing it through saves the lookup below *and* records
+     * the tier the engine actually evaluated rather than one re-derived a moment later.
+     */
+    coverageAtAssign: CoverageAtAssign | null = null,
   ): Promise<AssignOutcome> {
+    // The one caller that assigns as the engine rather than as a person (`IntradayInsertionService`
+    // passes `SYSTEM_ACTOR`). It decides both halves of the provenance question — which door, and
+    // whether a schedule created here is the system's or a manager's.
+    const systemActor = actor.role === 'SYSTEM';
     const ticket = await this.prisma.ticket.findUnique({ where: { ticketId }, include: { plant: true } });
     if (!ticket || !this.inScope(ticket.plant.zoneId, scope)) return { result: 'NOT_FOUND' };
     if (ticket.assignmentState === 'FORMALLY_ASSIGNED') return { result: 'ALREADY_ASSIGNED' };
@@ -498,7 +511,13 @@ export class OverrideService {
             : { seId }) as Prisma.InputJsonValue,
         },
         async (tx) => {
-          const sched = await this.ensureSchedule(tx, seId, { zoneId: ticket.plant.zoneId, dateFrom: day, dateTo: day }, now);
+          const sched = await this.ensureSchedule(
+            tx,
+            seId,
+            { zoneId: ticket.plant.zoneId, dateFrom: day, dateTo: day },
+            now,
+            systemActor,
+          );
           let batch = await tx.plantBatchAssignment.findFirst({
             where: { scheduleId: sched.scheduleId, plantId: ticket.plantId, seId },
           });
@@ -514,7 +533,25 @@ export class OverrideService {
             });
           }
           await tx.batchAssignmentTicket.create({
-            data: { batchId: batch.batchId, ticketId, sortOrder: await this.nextSortOrder(tx, batch.batchId) },
+            data: {
+              batchId: batch.batchId,
+              ticketId,
+              sortOrder: await this.nextSortOrder(tx, batch.batchId),
+              // #283 — who put this here, and through which door. `actor.userId` is the literal
+              // 'SYSTEM' on the intraday CRITICAL path, which is exactly the case that used to be
+              // indistinguishable from a ZM's one-click assign: both wrote a bare row and both
+              // audited as CRITICAL_ASSIGN.
+              addSource: addProvenanceSourceFor(auditAction, systemActor),
+              addedBy: systemActor ? null : actor.userId,
+              addReason: deferral.reasonCode ?? null,
+              coverageTypeAtAssign:
+                coverageAtAssign ?? (await resolveCoverageAtAssign(tx, seId, ticket.plantId)),
+              // Stamped from the caller's clock rather than left to the column default, so both legs
+              // of one operation agree: the removal side has always written `removedAt: now`, and a
+              // DB-evaluated `now()` on this side put the two ends of a single reassignment at
+              // different instants — which is precisely what a day-bounded ledger cannot tolerate.
+              createdAt: now,
+            },
           });
           // #249 AC2 — the deferral is spent by the assignment, exactly as `dispatchForZone` spends it.
           // Leaving a future date on a FORMALLY_ASSIGNED ticket is the verified stale-deferral edge this
@@ -702,6 +739,10 @@ export class OverrideService {
     const outboxIds: bigint[] = [];
     let scheduleId: bigint | undefined;
     const batchIds = new Set<bigint>();
+    // #283 — coverage is a property of (engineer, plant), and a lane routinely spans several plants
+    // but only ever one engineer. Resolving per ticket inside the loop would multiply queries by the
+    // lane size for an answer that changes only when the plant does, so it is memoised per plant.
+    const coverageByPlant = new Map<string, CoverageAtAssign>();
 
     await this.prisma.$transaction(async (tx) => {
       for (const ticketId of lane.ticketIds) {
@@ -753,8 +794,23 @@ export class OverrideService {
           });
         }
         batchIds.add(batch.batchId);
+        const plantKey = String(ticket.plantId);
+        if (!coverageByPlant.has(plantKey)) {
+          coverageByPlant.set(plantKey, await resolveCoverageAtAssign(tx, lane.seId, ticket.plantId));
+        }
         await tx.batchAssignmentTicket.create({
-          data: { batchId: batch.batchId, ticketId, sortOrder: await this.nextSortOrder(tx, batch.batchId) },
+          data: {
+            batchId: batch.batchId,
+            ticketId,
+            sortOrder: await this.nextSortOrder(tx, batch.batchId),
+            // The lane's reason is mandatory at the controller (#275), so this is the one add path
+            // that always carries a real human "why" onto the row itself rather than only into audit.
+            addSource: addProvenanceSourceFor(auditAction, false),
+            addedBy: actor.userId,
+            addReason: reasonCode,
+            coverageTypeAtAssign: coverageByPlant.get(plantKey) ?? null,
+            createdAt: now,
+          },
         });
         await tx.ticket.update({
           where: { ticketId },
@@ -906,6 +962,9 @@ export class OverrideService {
               });
             }
             let sort = await this.nextSortOrder(tx, targetBatch.batchId);
+            // #283 — a move is one plant and one destination engineer, so coverage resolves once for
+            // the whole set rather than per moved ticket.
+            const coverageAtAssign = await resolveCoverageAtAssign(tx, newSeId, batch.plantId);
             for (const r of rows) {
               // Update (mark removed) before insert so the one-active-batch-per-ticket partial unique holds.
               //
@@ -919,7 +978,23 @@ export class OverrideService {
                 { removedAt: now, removedBy: actor.userId, removalReason: REMOVAL_REASONS.REASSIGNED },
                 action,
               );
-              await tx.batchAssignmentTicket.create({ data: { batchId: targetBatch.batchId, ticketId: r.ticketId, sortOrder: sort++ } });
+              await tx.batchAssignmentTicket.create({
+                data: {
+                  batchId: targetBatch.batchId,
+                  ticketId: r.ticketId,
+                  sortOrder: sort++,
+                  // The two halves of a move are now symmetrical: the source row says REASSIGNED on
+                  // the removal side, the destination row says who moved it here and why on the add
+                  // side. #284's changes-today pairs them to count a swap once.
+                  addSource: action === 'SPLIT_BATCH' ? ADD_SOURCES.MANUAL_SPLIT : ADD_SOURCES.MANUAL_REASSIGN,
+                  addedBy: actor.userId,
+                  addReason: reasonCode,
+                  coverageTypeAtAssign: coverageAtAssign,
+                  // The same instant the source row is stamped `REASSIGNED` with, so the ledger can
+                  // pair the two halves of this move inside one day window.
+                  createdAt: now,
+                },
+              });
             }
             await this.flagOverridden(tx, batch.batchId, batch.scheduleId, reasonCode, actor, now);
             const outboxId = await queueDayPlanOverridden(tx, { seId: newSeId, scheduleId: sched.scheduleId, batchId: batch.batchId, action });
@@ -936,12 +1011,23 @@ export class OverrideService {
     return { result: 'OK', batchId: String(batch.batchId), scheduleId: String(batch.scheduleId), seId: batch.seId, status: 'OVERRIDDEN' };
   }
 
-  /** Find the target SE's live schedule for the source date range, or create a ZM_MANUAL one. */
+  /**
+   * Find the target SE's live schedule for the source date range, or create one.
+   *
+   * **#283 — the created row's `source` follows who is asking.** This method wrote `ZM_MANUAL`
+   * unconditionally, which was correct for the four human callers and wrong for the fifth: the
+   * intraday CRITICAL sweep reaches here as `SYSTEM_ACTOR`, so a plan the *engine* created for an
+   * engineer who had none yet was stamped as a manager's manual plan. `SYSTEM_GENERATED` already
+   * means "the system created this" and is exactly true of an engine CRITICAL insert, so no new
+   * `ScheduleSource` value is needed — note that such a row carries no `run_id`, because no dispatch
+   * run produced it.
+   */
   private async ensureSchedule(
     tx: Prisma.TransactionClient,
     seId: string,
     source: { zoneId: bigint; dateFrom: Date; dateTo: Date },
     now: Date,
+    systemActor = false,
   ) {
     // #153 — the target SE's own plan may itself have been overridden earlier (a ZM commonly adjusts
     // several plans in one sitting). Matching ACTIVE only stacked a second ZM_MANUAL schedule on top of
@@ -970,7 +1056,7 @@ export class OverrideService {
         dateFrom: source.dateFrom,
         dateTo: source.dateTo,
         status: 'ACTIVE',
-        source: 'ZM_MANUAL',
+        source: systemActor ? 'SYSTEM_GENERATED' : 'ZM_MANUAL',
         dispatchedAt: now,
       },
     });

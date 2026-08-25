@@ -2012,7 +2012,9 @@ const BATCHES: DatasetDefinition = {
         system: 'FSM_POSTGRES',
         table: 'plant_batch_assignments',
         refreshTrigger: 'Set at batch creation, never changes.',
-        excludes: ['Null for pre-run-attribution history and ZM_MANUAL batches — those fall back to the schedule’s own run_id'],
+        excludes: [
+          'Null for pre-run-attribution history and for any batch no dispatch run created — a manual plan, or (since #283) an intraday CRITICAL insert, which is the engine’s work but not a run’s. Those fall back to the schedule’s own run_id, which is itself null for an intraday-created schedule.',
+        ],
         developer: { column: 'plant_batch_assignments.run_id', expression: 'b.run_id' },
       },
     },

@@ -318,8 +318,8 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 | Table | Purpose | Constraints |
 |---|---|---|
 | `recommendations` | Append-only "why suggested" explainability (scoreBreakdown JSONB, canonical `processing_rank`) | partial unique `recommendations_one_suggested_per_ticket WHERE status='SUGGESTED'` (#100, `20260708120000`) |
-| `work_schedules` | Per-SE Day-Plan container (no approval gate — ADR-0007/0019 superseded). **Lifecycle now terminates** (#147): `ScheduleClosureScheduler` writes `COMPLETED`/`PARTIAL` onto past-dated rows under the zone's dispatch advisory lock, so schedules stop accreting as permanently live; the day-plan read is date-bounded independently of it. **Closure also ends the day's *assignments*** (#242): unresolved rows on the closing schedules are stamped `PLAN_EXPIRED` and their tickets returned to `UNASSIGNED`, so a terminal schedule no longer strands live work | partial unique `work_schedules_one_active_per_se_zone_day (se_id, zone_id, date_from) WHERE ACTIVE` — **zone_id deliberately in the key** vs the #100 spec, to allow cross-zone plans (INDEX.md:97) |
-| `plant_batch_assignments` / `batch_assignment_tickets` | **Also the attempt ledger** (#244 — one row = one attempt *window*; `soft_states` inside it = **reached**, a `troubleshooting_submissions` row = **success**). Plant-stop batches + per-ticket rows with override history (`removed_at`, `deferred_to_date`, **`removal_reason`** — #241: why the row stopped being live, closed vocabulary in `scheduling/removal-reason.ts`, NULL ⟺ still live; `removed_by IS NULL` is auto-recovery's signature and must **not** be read as "system" generally) | partial unique `batch_assignment_tickets_one_active_per_ticket WHERE removed_at IS NULL` (`20260621180000:78`); plain `(ticket_id)` for the per-ticket history read (#241). #242's nightly recycle writes `PLAN_EXPIRED` (unresolved, ticket also flipped to `UNASSIGNED`) and `RESOLVED_AT_CLOSURE` (a straggler row on an already-resolved ticket — stamped, never unassigned) |
+| `work_schedules` | Per-SE Day-Plan container (no approval gate — ADR-0007/0019 superseded). **`source` finally follows who created the row** (#283): the intraday CRITICAL sweep reaches `ensureSchedule` as the SYSTEM actor and now writes `SYSTEM_GENERATED`, where it previously stamped a manager's `ZM_MANUAL` on a plan the engine made. Such a row carries no `run_id` — it is the engine's work but not a *run's* — so `run_id IS NULL` no longer implies `ZM_MANUAL`. **Lifecycle now terminates** (#147): `ScheduleClosureScheduler` writes `COMPLETED`/`PARTIAL` onto past-dated rows under the zone's dispatch advisory lock, so schedules stop accreting as permanently live; the day-plan read is date-bounded independently of it. **Closure also ends the day's *assignments*** (#242): unresolved rows on the closing schedules are stamped `PLAN_EXPIRED` and their tickets returned to `UNASSIGNED`, so a terminal schedule no longer strands live work | partial unique `work_schedules_one_active_per_se_zone_day (se_id, zone_id, date_from) WHERE ACTIVE` — **zone_id deliberately in the key** vs the #100 spec, to allow cross-zone plans (INDEX.md:97) |
+| `plant_batch_assignments` / `batch_assignment_tickets` | **Also the attempt ledger** (#244 — one row = one attempt *window*; `soft_states` inside it = **reached**, a `troubleshooting_submissions` row = **success**). Plant-stop batches + per-ticket rows with override history (`removed_at`, `deferred_to_date`, **`removal_reason`** — #241: why the row stopped being live, closed vocabulary in `scheduling/removal-reason.ts`, NULL ⟺ still live; `removed_by IS NULL` is auto-recovery's signature and must **not** be read as "system" generally). **#283 gave the *add* side the same treatment**: `added_by` / `add_reason` / `add_source` / `coverage_type_at_assign` (vocabularies in `scheduling/add-source.ts`, TEXT for the same reason `removal_reason` is). `add_source` names the door — `AUTO_DISPATCH` and `SYSTEM_CRITICAL` are the engine (actor NULL by construction), everything else a person; **NULL means the row predates provenance and must render as *unknown*, never as system**. `coverage_type_at_assign` is stamped at write time, not derived later, because `se_coverage` is mutable and hard-deleted — it is the tier-crossing signal the approved grammar draws. Batch `status` stays a **lifecycle** column: no `MANUAL_ASSIGNED` member exists, because seven readers use `status IN ('AUTO_ASSIGNED','OVERRIDDEN')` as the live-batch predicate | partial unique `batch_assignment_tickets_one_active_per_ticket WHERE removed_at IS NULL` (`20260621180000:78`); plain `(ticket_id)` for the per-ticket history read (#241). #242's nightly recycle writes `PLAN_EXPIRED` (unresolved, ticket also flipped to `UNASSIGNED`) and `RESOLVED_AT_CLOSURE` (a straggler row on an already-resolved ticket — stamped, never unassigned). Add-provenance columns added by `20260825120000`, all nullable, history deliberately not backfilled |
 | `se_planner` | ZM plant-visit intent; **soft bias** to the recommender, never a constraint | unique `(se_id, plant_id, planned_date)` |
 | `intraday_insertions` | CRITICAL-insertion ledger — `ASSIGNED_DIRECT`/`ESCALATION_REQUIRED` written going forward (#268); `PENDING_ACCEPTANCE`/`ACCEPTED`/`DECLINED`/`TIMED_OUT` + `retry_chain` JSONB remain for historical rows only, nothing writes them any more. `offered_se_id`/`acceptance_deadline` nullable since #268 (an escalation with no candidate never had an SE to name) | partial unique `intraday_insertions_one_live_offer_per_ticket WHERE PENDING_ACCEPTANCE` (#101, `20260709120000`) — inert going forward, kept for the historical rows it still guards |
 | `cross_zone_escalations` | Parallel escalation record — ticket never leaves home queue | indexes on `(status, escalation_type)`, `home_zone_id` |
@@ -641,11 +641,11 @@ plant's open-ticket companies, surfaced in the Plant Zones confirm dialog (AC-9)
 
 | Filter | Drop condition | Feed today |
 |---|---|---|
-| VEHICLE_ON_TRIP | readiness = ON_TRIP | **Stubbed `'UNKNOWN'` constant** (`:152`) — Issue 28 VU is a ZM review flow, not wired as a feed; this filter can never fire in production |
+| VEHICLE_ON_TRIP | readiness = ON_TRIP | **Stubbed `'UNKNOWN'` constant** (`:152`) — Issue 28/#65 VU is a ZM review flow, not wired as a feed; this filter can never fire in production. **#270 (2026-08-24):** now reports `NOT_ENFORCED` explicitly in the trace/admin drawer instead of an implicit, indistinguishable pass — `vehicleReadinessEnforced: false`, set at the feed site (`candidate-readiness.ts`); wiring the real feed is a one-line flip there, no `hard-filters.ts` change. |
 | SE_UNAVAILABLE | not (`engineer_master.is_active` AND current `se_availability` window = AVAILABLE) | real (`se-availability.service.ts`) |
 | OVER_CAPACITY | assigned-today count ≥ `engineer_master.daily_capacity` | real — **whole-day** count (NEW-A1 fix 2026-07-21): the per-run `assigned` map is seeded from `committedDayLoad(day)` (non-removed `batch_assignment_tickets` across ALL the SE's ACTIVE `work_schedules` for the run day), so cap is enforced across zones + prior runs + intraday inserts, not just this zone-run. **#269 (2026-08-20) moved that predicate to `src/scheduling/committed-day-load.ts` as the ONE definition** — the recommender delegates to it and so does every manager read, so what a dispatcher is shown is what this filter enforces (pinned by `capacity-overload-visibility.e2e-spec.ts`, which runs a dry-run of the real recommender against the picker payload). It had forked twice before: `EngineersQueryService` counted the same thing with **no date filter**, `ZmScheduleRow.ticketCount` counted one schedule rather than one day; both are retired. Since #178, `removed_at IS NULL` also excludes work that has finished. |
 | COMMON_KIT_INCOMPLETE | `se_van_stock` fails `common_kit_definition` min quantities | real (`InventoryService.commonKitStatus`) |
-| COMPONENT_UNAVAILABLE | expected components OOS | **Stubbed `true`** — expected-component leg is open #51 |
+| COMPONENT_UNAVAILABLE | expected components OOS | **Stubbed `true`** — expected-component leg is open #22. **#270 (2026-08-24):** reports `NOT_ENFORCED` explicitly (`componentAvailabilityEnforced: false`, same feed-site seam as above). |
 
 Activity-ping staleness is deliberately NOT a filter (CONTEXT decision revised 2026-06-09,
 `hard-filters.ts:9-13`).
@@ -654,7 +654,13 @@ Activity-ping staleness is deliberately NOT a filter (CONTEXT decision revised 2
 PREVENTIVE-only `repeat_failure_bonus`/`device_age` (inactivity/7d); Plant Cluster Multiplier
 (default 1.25) on additional same-plant tickets; active weight set from `priority_rule_config`
 (default `v1`; PREVENTIVE looks for `<set>_preventive`, else code defaults). SE-Planner entry =
-soft bias among eligible candidates (ADR-0022).
+soft bias among eligible candidates (ADR-0022). **`distance` is live since #267 (2026-08-24)** — was
+seeded `distanceFromPrevStopKm: null` unconditionally (an active 0.1 seeded weight doing nothing,
+the #159 live-knob/dead-feature trap); now haversine-derived from the SE's route-chain position
+(last live stop today → `engineer_master.home_lat/home_lng` → `NOT_AVAILABLE`) to the candidate
+ticket's plant, via a per-zone-run raw-SQL PostGIS prefetch of `plants.location`
+(`recommender/plant-geometry.ts`). Wired into both the morning batch and #268's CRITICAL direct-assign
+sweep. Admin-entered home base: SE Directory (`/engineers/manage`), two inline-edit fields.
 **Canonical sort** (ADR-0017, `canonical-sort.ts`): Tier desc → Bucket desc → PriorityRank asc →
 Oldest-inactive asc → DeviceID asc; `processing_rank` persisted.
 **Output**: one `recommendations` row per ticket — SUGGESTED (with scoreBreakdown + weightSetRef +
@@ -815,7 +821,7 @@ racing delete-then-insert, doubled notification sends, duplicate dispatch runs d
 admission test rather than a check followed by an act. One instance runs; the rest log the holder and
 return `{ ran: false, reason: 'TICK_CLAIMED' }` — a no-op, never an `ERROR` (G7). `window_start` is the
 fire instant truncated to its **UTC minute**, and the claim is taken inside each scheduler's shared
-guard (`runGuarded` plus the six equivalent single-flight wrappers), not in the nineteen decorated
+guard (`runGuarded` plus the six equivalent single-flight wrappers), not in the twenty decorated
 handlers, so a sweep added later inherits the property without its author knowing it exists.
 
 - **Manual HTTP triggers are deliberately NOT tick-claimed.** They are operator actions, arbitrated by
@@ -824,7 +830,9 @@ handlers, so a sweep added later inherits the property without its author knowin
   the cron happened to fire in the same minute.
 - **Retention rides the daily `partition-maintenance` tick** — claims older than 7 days
   (`CRON_TICK_CLAIM_RETENTION_DAYS`) are deleted there rather than by a cron of their own. #263 adds
-  **no** job: `scheduler-wiring.e2e-spec.ts` still pins the same **19** registered cron names.
+  **no** job: `scheduler-wiring.e2e-spec.ts` pinned **19** registered cron names at the time (#264,
+  2026-08-24, added a 20th — `business-notification-outbox` — whose own retention rides the same
+  daily tick for the same reason).
 - **It assumes the instances agree on the time to within a minute.** Clock skew above 60 s puts two
   instances in different windows and both would run — an NTP assumption, recorded here because nothing
   in the code enforces it. Every downstream claim still holds when it happens (the per-zone dispatch
@@ -844,7 +852,7 @@ its own docstring shows the confusion, calling `30 4 * * *` "04:30 UTC … short
 05:00 dispatch tick". 05:00 dispatch is **IST** (23:30 UTC), so on a UTC host the refresh fires at
 10:00 IST — five hours *after* the batch it exists to feed, which consumes a `plant_eligible_floating_se`
 MV up to a day stale. Same defect #240 fixed for closure, still live here → filed as **#254**. `scheduler-wiring.e2e-spec.ts` pins the **exact** registered
-cron-name set (18) against the real `AppModule`, so a job that stops registering is a test failure.
+cron-name set (20, as of #264) against the real `AppModule`, so a job that stops registering is a test failure.
 
 | Cron name | Default | Env override | Master switch | Calls |
 |---|---|---|---|---|
@@ -866,6 +874,7 @@ cron-name set (18) against the real `AppModule`, so a job that stops registering
 | `business-fleet-uptime` | `0 3 1 * *` | … | 〃 | previous-month cube |
 | `business-root-cause` | `15 3 1 * *` | … | 〃 | previous-month cube |
 | `business-zm-performance` | `30 3 1 * *` | … | 〃 | previous-month cube |
+| `business-notification-outbox` **(#264, 2026-08-24)** | `*/2 * * * *` | `BUSINESS_SWEEP_NOTIFICATION_OUTBOX_CRON` | 〃 | re-drain backstop for `day_plan_notification_outbox` — retries rows the immediate post-commit drain missed (crash) or lost a duplicate-drain race on; bounded `attempts`, retention rides `partition-maintenance` |
 
 (Defaults: `business-sweep-scheduler.service.ts:27-36`, `dispatch-cron.ts:16-19`,
 `schedule-closure-scheduler.service.ts:18`, `plant-eligibility-refresh-scheduler.service.ts:10`,
@@ -883,8 +892,51 @@ POSTs) drive identical code paths with no cron.
   residual live, and commits. **`src/ticketing/assignable-work.ts` is the one predicate** it shares
   with `assignPlants`, so the count and the write cannot drift; `heldTickets` is its reported
   complement, never a subtraction. Selection is **plant-shaped** in slice 1 because `assignPlants`
-  is — a shared site's whole set moves, which the ledger counts and the row states. #275–#277 add the
-  transactional `assign-batch`, Distribute, and absorb the orphaned surfaces.
+  is — a shared site's whole set moves, which the ledger counts and the row states. #275's
+  transactional `assign-batch`, #276's Distribute and #277's absorption of the orphaned surfaces are all
+  done (below) — **P9 is closed; the console is the single manual-assignment surface (#272 R1)**.
+- **`assign-batch` — the one write path** (#275/P9, `POST /api/schedules/assign-batch` +
+  `OverrideService.assignLane`): every manual write in the codebase was N→1, committed immediately, no
+  transaction wider than one ticket. Now **one transaction per engineer lane** (matching #262's
+  per-unit shape), one result row per lane — a lane that throws (an unexpected error) is caught and
+  reported `LANE_FAILED` without touching the others. Every ticket is re-read and re-verified **under
+  that same lane transaction**, immediately before the write: `FOR UPDATE ... SKIP LOCKED`, not the
+  single-ticket `assignTicket` shape of "insert, catch the unique-violation, re-read" — #265 found a
+  P2002 aborts the *whole* Postgres transaction, and one shared across a lane's several tickets would
+  silently roll back every sibling ticket already written in it. A skip is always itemised by ticket and
+  reason (`NOT_FOUND` / `OUT_OF_ZONE` / `CONFLICT_DEFERRED` / `LOST_RACE`) — never folded into a bare
+  count, never a silent drop. The mandatory reason is one audit row per lane (`ASSIGN_BATCH_COMMIT`),
+  separate from each ticket's own assignment audit row, which stays byte-identical in shape to a plain
+  `assignTicket` call. `assignPlants` (`POST /schedules/assign-plants`) is now a **shorthand**: expands
+  plants to their assignable ticket ids and delegates to the same `assignLane` primitive —
+  `PlantAssignSummary`'s response shape is unchanged and pinned by `issue-122b-fleet-assign.e2e-spec.ts`.
+  The console's review-and-commit screen (`ReviewCommitScreen.tsx`) resolves each drafted lane's plants
+  to ticket ids via `GET /schedules/assignable-tickets`, shows the diff (coverage, load, over-capacity —
+  stated in words, never gated, #258 Q2), takes the mandatory reason, and only then commits; a skipped
+  `CONFLICT_DEFERRED` ticket is resolved per-ticket through the existing #249 confirm flow
+  (`DeferralConfirm`), not through a batch-level confirm.
+- **Distribute** (#276/P9, `POST /api/schedules/distribute-preview` + `DistributeProjectionService`):
+  several plants across several engineers, projected before anything enters the draft. RBAC (#272 Q3,
+  the issue's own "answer before building, do not widen the ladder on your own judgement") was put to
+  the operator first — **ruled: all managers**, the same `MANAGER_ROLES` ladder as the console's own
+  draft/commit, not the narrower `dispatch-run` (OH + CSM) ladder the issue text raised as the closer
+  precedent. `RecommenderService.runForZone` gained `ticketIds`/`engineerIds` scope — #250's dry-run
+  seam extended, not forked; both default `undefined`, so the real dispatch and #250's own zone-wide
+  preview are unaffected. Three strategies, one shared source of truth: eligibility, tier and readiness
+  are never re-derived — `CandidateQueryService`'s `buildCandidateReadiness`/`applyHardFilters` (the
+  same functions the engine itself calls) answer that for all three alike. `COVERAGE_TIER` calls the
+  scoped engine directly (no allocation logic of its own), which is what makes the single-ticket/
+  single-candidate AC true by construction rather than by a separately-written comparison.
+  `CAPACITY_HEADROOM`/`PLANT_WHOLE` are pure allocation over that one readiness read: coverage is
+  per-(engineer, **plant**), not per-ticket, so both decide the best available tier once per plant;
+  `PLANT_WHOLE` stops there (one winner, whole plant, never split); `CAPACITY_HEADROOM` descends to
+  per-ticket placement within that tier, sorted by remaining headroom, so a tied best tier actually
+  spreads load rather than piling onto one engineer — verified against a fixture built to force the
+  tie. The console's `DistributePanel` (engineer multi-select + strategy picker + preview) merges the
+  projection into the existing plant-shaped draft via a new `Lane.ticketOverrides` field: a plant a
+  strategy only partly placed keeps its explicit ticket ids (shown "N of M" on its chip) instead of
+  being silently widened back to the whole plant at commit; the ledger and each lane's `→ after / cap`
+  read the override when present.
 - **Candidate column** (#274/P9, `GET /api/schedules/candidates?plantIds=…` + `CandidateQueryService`):
   the engine's own `orderedCandidatesForPlant` published, in its exact order, **including the
   candidates `applyHardFilters` drops, with the reason** — drop *rows* had never been persisted or
@@ -897,6 +949,22 @@ POSTs) drive identical code paths with no cron.
   `TIER_NOT_REACHED` is deliberately **not** a verdict on this read (a human may cross tiers, so a
   never-reached tier is not a rejection). Over capacity is reported as the drop the engine actually
   makes **and** marked "still assignable" — #258 Q2 lives in selectability, not in a softened verdict.
+- **The orphaned surfaces, absorbed** (#277/P9, final slice): three dead ends, each resolved rather than
+  left ambiguous. `dashboard/CriticalQueue.tsx` — a working engineer picker, one-click assign and the
+  #249 deferral-confirm flow, imported by **zero** files — is retired outright (`git rm`): its
+  one-click *immediate* write was the exact N→1 pattern #272 R2 replaced project-wide, so it was not a
+  behaviour worth relocating unchanged. What had to survive did: the cluster-size signal lives on as the
+  console's existing per-plant `criticalCount` badge, now reachable via a **Critical+ filter chip** in
+  the work pool (matching the approved design's `fchip`); the deferral-confirm flow was already
+  reachable via #275's "Resolve hold" on the review screen. `GET /intraday-insertions/:id/available-ses`
+  returns #274's candidate row (`CandidateQueryService`) instead of a bare `string[]` — filtered on live
+  `availabilityStatus` only, never the hard-filter `verdict` (Q2: an over-capacity or kit-short SE was
+  always offered here, and filtering on verdict would have silently narrowed that set). A new
+  `IntradayManualAssignModal` gives the Intra-day Queue the manual-assign client it never had (Issue 30),
+  wired to an Assign button on `ESCALATION_REQUIRED` rows. `PlannerPage`'s Engineer column shows
+  `eng.name ?? eng.engineerId` instead of a raw uuid. #272 open question 1 (Device Detail panel: retired
+  or kept as a deep-link shortcut?) turned out not to gate this issue — its actual scope never touched
+  `AssignSePanel` — and remains open for whoever next revisits that panel.
 - **Lost-race hygiene across every manual write** (#265, `src/common/unique-violation.ts` +
   `src/common/lost-race.ts`): the manual paths were `read → check in JS → write by primary key`, so a
   second writer either crashed into a partial unique (an unhandled P2002 leaving the service as a
@@ -1074,6 +1142,22 @@ missing backend endpoints (#90 work-type mix, #94 ticket chrome, #74 scorecard c
 Known FE gaps: `window.prompt` reason legs (#80), Playwright visual baseline (FE-00 partial),
 `components/data/` untracked by git (#114).
 
+**#285 Today's Dispatch — the scheduler cockpit (done, 2026-08-25):** `/dispatch/today` is the
+primary Dispatch row and the first surface in the product scoped to the **operating day**. Three
+modes over one layout: **Live** (the crew deck — one card per engineer with tier, load as a shape,
+ordered stop chips and availability; the critical interception strip fed by `ESCALATION_REQUIRED`;
+rails for unassignable / held / policy-withheld / changes-today), **Plan** and **Replay**, which
+compose the existing Scheduler Preview and run ledger + DecisionTrace rather than rebuilding either
+(#282 R5). Backed by `GET /dispatch/today` and `GET /dispatch/changes-today` (#284) — both compose
+existing services and decide nothing; capacity comes from the one shared `committedDayPlan`.
+Provenance is rendered from #283's columns under the approved grammar (solid = system, dashed =
+human, dashed violet = tier crossed, heavy crimson = critical, `RET` = return due), with the hard
+rule that **unknown provenance renders as unknown**. `--color-tier-cross` was added to both themes.
+The four #281 surfaces remain beneath it as supporting and historical rows — none deleted. Design:
+`docs/ui/desktop/approved-designs/todays-dispatch-crew-deck.html`; decision #282; the design was lost
+outside the repo for five days, which is why #280 recorded that no wireframe existed.
+**Still open in #284:** the run-level decision stream and `/schedules?date=`.
+
 **#273 the Assign Work Console — slice 1 (done, 2026-08-20):** `/assign` exists, gated to manager
 roles, and the top-bar **Assign SE** button opens it — it called `navigate('/')` for its entire life,
 a prominent button on every manager screen that opened nothing. The console answers the question none
@@ -1087,8 +1171,9 @@ and, crucially, by **one predicate** — `src/ticketing/assignable-work.ts` — 
 facts drive the shape: `plants` carries **no `company_id`** (several companies' fleets sit at one
 site), so the tree groups by the *ticket's* company; and `assignPlants` is **plant-shaped**, so
 drafting one company's row at a shared site commits every company's work there — the ledger counts the
-whole plant and the row says so, rather than under-reporting its own commit. Ticket-level selection,
-the transactional write, Distribute and the orphaned surfaces follow in #274–#277. **Acting-zone is
+whole plant and the row says so, rather than under-reporting its own commit. The transactional write
+(#275), Distribute (#276) and the orphaned-surface absorption (#277) all landed (below) — P9 is closed.
+**Acting-zone is
 honoured on this surface** (inline collapse from the committed `RequestActor` + the shared
 `authHeaders()` client, both halves together) rather than waiting for #239's sweep: on a screen about
 what is left in *this* zone, an acting OH reading pan-India is about to hand out another zone's work.
@@ -1108,6 +1193,76 @@ over-capacity candidate `PASSED` while its own Q2 prose calls capacity a *schedu
 prose wins, and the endpoint reports the drop; and an unexpected candidates payload **took the whole
 console down**, pool and Commit included, until the read was made defensive — the column is additive
 and its rollback is "hide the column", which a crash defeats.
+
+**#275 `assign-batch` — the transactional commit, slice 3 (done, 2026-08-24):** the console's Commit
+button used to call `assignPlants` once per lane, sequentially, each one its own pre-existing
+single-ticket transaction chain — no review, no mandatory reason, no itemised skip. Now: clicking
+**Review & commit** resolves every drafted lane's plants into concrete ticket ids (`GET
+/schedules/assignable-tickets`, the same `assignableTickets` predicate as the pool) and opens a diff
+screen — coverage used, `committed → after / capacity` per lane, over-capacity stated in words and
+never gated (#258 Q2) — with a **mandatory reason**; only then does **Commit N assignments** write
+anything, through `POST /schedules/assign-batch`. The backend primitive, `OverrideService.assignLane`,
+is **one transaction per engineer lane** (#262's per-unit shape): every ticket is re-read and
+re-verified *inside* that same transaction, immediately before the write, via `FOR UPDATE ... SKIP
+LOCKED` rather than the single-ticket `assignTicket` idiom of "insert, catch the unique-violation,
+re-read" — #265 established that a P2002 aborts the *whole* interactive transaction, and one now shared
+across a lane's several tickets would silently roll back every ticket already written in it if that
+idiom were reused. A skip is always reported by ticket and reason (`NOT_FOUND` / `OUT_OF_ZONE` /
+`CONFLICT_DEFERRED` / `LOST_RACE`), never folded into a bare count; a lane that throws (an unexpected
+error, not one of those four) is caught and reported `LANE_FAILED` without touching its siblings — the
+three-lane isolation the issue's own name promises. The mandatory reason lands as one
+`ASSIGN_BATCH_COMMIT` audit row per lane, kept **separate** from each ticket's own assignment audit row
+so the per-ticket row stays byte-identical in shape to a plain `assignTicket` call — no new audit
+semantics on the row the existing trail already reads. `assignPlants` (`POST /schedules/assign-plants`)
+is now a **shorthand over the same `assignLane` primitive**: it expands plants to their assignable
+ticket ids and delegates, and `PlantAssignSummary`'s response shape is unchanged (`issue-122b-fleet-
+assign.e2e-spec.ts` pins it byte-for-byte) — a lost race there folds into `alreadyAssigned`, the one
+count that shape has, rather than the new itemised `skipped` vocabulary the console's endpoint carries.
+A `CONFLICT_DEFERRED` skip is not resolved inside the batch — `assign-batch` carries no per-ticket
+confirm, since the mandatory reason is for the plan, not a hold override — the results panel offers a
+**Resolve hold** action per skipped ticket that reuses the existing #249 confirm flow
+(`DeferralConfirm`) unchanged.
+
+**#276 Distribute — slice 4 (done, 2026-08-24):** several plants across several engineers, projected
+before anything enters the draft — the operator ask no surface answered: *two or more engineers onto
+more than one plant, from the real selection logic.* **RBAC was #272 Q3, left open with an explicit
+"answer before building, do not widen the ladder on your own judgement"** — put to the operator before
+any code was written; ruled **all managers**, the console's own `MANAGER_ROLES` ladder, not the
+narrower `dispatch-run` (OH + CSM) ladder the issue text raised as closer. `RecommenderService.
+runForZone` gained a `ticketIds`/`engineerIds` scope (#250's dry-run seam extended, both opts default
+`undefined` so every existing caller is unaffected — pinned separately in
+`recommender-scoped-projection.e2e-spec.ts`). Three strategies, one shared source of truth: eligibility
+and tier are never re-derived — `CandidateQueryService`'s `buildCandidateReadiness`/`applyHardFilters`
+(the same functions the engine itself calls) answer that for all three. `COVERAGE_TIER` calls the
+scoped engine directly, so the single-ticket/single-candidate AC ("the projection agrees with the
+engine's own choice") holds **by construction**. `CAPACITY_HEADROOM`/`PLANT_WHOLE` are pure allocation
+over that one readiness read — coverage is per-(engineer, **plant**), not per-ticket, so both decide
+the best tier once per plant; `PLANT_WHOLE` stops there (one winner, never split), `CAPACITY_HEADROOM`
+places per-ticket within the tier by remaining headroom, spreading a tied best tier rather than piling
+onto one engineer — verified against a fixture built specifically to force the tie, not trusted from
+the code's shape. The admin `DistributePanel` merges a projection into the plant-shaped draft via a new
+`Lane.ticketOverrides`: a plant a strategy only partly placed keeps its explicit ticket ids ("N of M" on
+its chip) instead of being silently widened back to the whole plant at commit.
+
+**#277 absorbs the orphaned surfaces — slice 5, the last of P9 (done, 2026-08-24):** three dead ends,
+each resolved on its own terms rather than folded into a blanket cleanup. `dashboard/CriticalQueue.tsx`
+— a working engineer picker, one-click assign and the #249 deferral-confirm flow, imported by **zero**
+files in `apps/admin/src` — is retired (`git rm`), not kept beside the console: its one-click
+*immediate* write is the exact N→1 shape #272 R2 replaced everywhere else, so preserving it unchanged
+would have reopened the gap P9 exists to close. What actually had to survive did, via existing seams:
+the cluster-size signal is the console pool's own `criticalCount` badge (a new **Critical+ filter chip**
+narrows to it, the literal `fchip` the approved design draws), and the deferral-confirm flow was already
+reachable through #275's "Resolve hold" on the review screen before this issue touched anything. `GET
+/intraday-insertions/:id/available-ses` returns #274's candidate row (via `CandidateQueryService`,
+injected through a Nest-resolvable default constructor param) instead of a bare `string[]`, filtered on
+live `availabilityStatus` only — never the hard-filter `verdict`, which would have silently narrowed the
+set Q2 requires stay wide (an over-capacity or kit-short SE was always offered here). A new
+`IntradayManualAssignModal` gives the Intra-day Queue the manual-assign admin client Issue 30 never
+built, gated to `ESCALATION_REQUIRED` rows. `PlannerPage`'s Engineer column reads `eng.name ??
+eng.engineerId`. A new `orphan-component-sweep.test.ts` guards against the next orphan recurring, with
+two pre-existing #136 exceptions (`ZoneOperatingModeCard`/`Table`) named rather than silently allowed.
+#272's open question 1 (Device Detail panel: retire or keep as a deep-link shortcut) turned out not to
+gate this issue at all — its required changes never touched `AssignSePanel` — and stays open.
 
 **#281 the dispatch timeline is navigable as one concept — P10, decision #280 (done, 2026-08-24):**
 the sidebar has a named **Dispatch** group — Scheduler Preview → Schedules → *(indented)* Intra-day
@@ -1148,8 +1303,9 @@ by counting an SE's batch rows by hand. The backend now supplies `committed` fro
 `Over Capacity` KPI tile — both drawn in v2 reference 16 and built to the image), the **Batch Schedule
 list** (joined from `/schedules/engineers`, deliberately *not* from `ScheduleRow.ticketCount`, which
 counts one schedule rather than one day), the **SE Management directory** (its bare "Active Tickets"
-column gained the denominator), and the **assign pickers** — Critical queue, Swap/Reassign/Split
-targets, commissioning cohort, and the Device-Detail `AssignSePanel`. (The cohort picker's own line
+column gained the denominator), and the **assign pickers** — the console's own lane picker (`Critical
+queue`'s picker was retired into it by #277), Swap/Reassign/Split targets, commissioning cohort, and the
+Device-Detail `AssignSePanel`. (The cohort picker's own line
 lands with the **uncommitted #236** work — that control does not exist at HEAD, so its three lines
 could not be committed with #269.) One vocabulary behind all of
 them: `lib/capacity.ts` (`isOverCapacity` / `formatLoad` / `engineerOptionLabel`) + `ui/LoadBadge`,

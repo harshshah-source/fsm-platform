@@ -136,6 +136,17 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
     groups.push({
       heading: DISPATCH_HEADING,
       items: [
+        // #285 — the cockpit, and the group's primary row. It answers "what is happening now", which
+        // none of the four below could: Schedules is not date-scoped, Preview is a projection, the
+        // ledger is history, and Intra-day reads an audit action the UI never writes. The four stay
+        // as supporting and historical surfaces — #281's grouping and cross-links are what the deck
+        // sits on, not something it replaces.
+        {
+          label: "Today's Dispatch",
+          to: '/dispatch/today',
+          icon: IconClock,
+          hint: 'What is happening now',
+        },
         // #251 — the pre-run twin of Schedules. Same manager roles; a ZM's projection is zone-clamped
         // server-side, so no extra nav gating is needed here.
         {
@@ -143,8 +154,9 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
           to: '/schedules/preview',
           icon: IconCalendar,
           hint: 'What the next run would do',
+          indent: true,
         },
-        { label: 'Schedules', to: '/schedules', icon: IconCalendar, hint: "Today's committed day plans" },
+        { label: 'Schedules', to: '/schedules', icon: IconCalendar, hint: 'Committed day plans', indent: true },
         {
           label: 'Intra-day Queue',
           to: '/intraday',
@@ -152,7 +164,7 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
           hint: "Changes to today's plan",
           indent: true,
         },
-        { label: 'Dispatch Runs', to: '/dispatch-runs', icon: IconClipboard, hint: 'What past runs did' },
+        { label: 'Dispatch Runs', to: '/dispatch-runs', icon: IconClipboard, hint: 'What past runs did', indent: true },
       ],
     });
   }

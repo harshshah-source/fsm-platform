@@ -93,6 +93,13 @@
   --color-critical-bg: #fbe3e3;
   --color-neutral: #4b5563;
   --color-neutral-bg: #eeeef0;
+  /* #283/#290 — "a human crossed a coverage tier", the violet in the approved provenance grammar
+     (#272's table, inherited by #282 R2). Its own token rather than a reuse of `verified`: the two
+     mean unrelated things, and a shared value would silently couple them the next time either
+     changes. Amber is over-capacity and crimson is critical — never the same colour for two
+     meanings, and the dashed border carries the meaning in grayscale. */
+  --color-tier-cross: #7c3aed;
+  --color-tier-cross-bg: #f1ebfe;
 
   /* ── SLA severity ramp ──────────────────────────────────────────────────────────
    * The eight SLA bands as an ORDINAL ramp: severity is carried by LIGHTNESS first and hue second,
@@ -207,6 +214,10 @@
   --color-critical-bg: #2c1315;
   --color-neutral: #a3a3a3;
   --color-neutral-bg: #1f1f1f;
+  /* Lifted for the dark ground, same as every other semantic here — a #7c3aed dashed border is
+     near-invisible against #121212. */
+  --color-tier-cross: #a78bfa;
+  --color-tier-cross-bg: #1d1630;
 
   /* SLA ramp, re-stepped for the dark canvas (see the light block for the rules). Same hue path and
    * the same monotone-lightness contract, lifted so the DARKEST step — LONG_PENDING, the one that

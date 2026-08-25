@@ -1,4 +1,5 @@
 import { istDate } from '../common/ist-day';
+import { PLANT_ELIGIBLE_FLOATING_SE_MV, isMvStale } from '../org/plant-eligible-floating-se.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { buildStampFields } from '../build-info/run-stamp';
@@ -629,6 +630,12 @@ export class DispatchRunService {
       metadata: { trigger, zonesClaimed: admitted.length, zonesContended: contended.length },
     });
 
+    // #287 — say it out loud when the floating-candidate pool is out of date. Non-blocking by design:
+    // the codebase's posture toward a degraded input is to proceed and be honest about it, not to
+    // refuse the day's dispatch. What changes is that the staleness is no longer silent — it is in
+    // this log line and frozen into the run's own `config_snapshot` for whoever reads it later.
+    await this.warnIfEligibilityStale(runId, day);
+
     const zoneOutcomes: DispatchZoneOutcomeRow[] = [];
     const summary: DispatchRunSummary = {
       zones: 0,
@@ -937,7 +944,7 @@ export class DispatchRunService {
    * overrides were live for THIS run, even once a later sweep expires or an admin cancels them.
    */
   private async captureConfigSnapshot(now: Date): Promise<Prisma.InputJsonValue> {
-    const [rules, settings, engineers, tierOverrides] = await Promise.all([
+    const [rules, settings, engineers, tierOverrides, mvFreshness] = await Promise.all([
       this.prisma.priorityRuleConfig.findMany({ where: { active: true }, orderBy: { id: 'asc' } }),
       this.prisma.systemSetting.findMany({
         where: {
@@ -965,6 +972,12 @@ export class DispatchRunService {
         orderBy: [{ companyId: 'asc' }, { zoneId: 'asc' }, { createdAt: 'desc' }],
         select: { id: true, companyId: true, zoneId: true, tier: true, expiresAt: true },
       }),
+      // #287 — the freshness of the FLOATING candidate pool this run is about to select from. Every
+      // other input here is config an operator set; this one is the state of a derived view whose
+      // 04:30 rebuild fails silently, and without it the frozen record cannot answer "what was this
+      // decided against". Optional by construction: an absent row, an unavailable delegate or a
+      // failed read all degrade to "unknown", which `isMvStale` treats as stale — the safe direction.
+      this.mvFreshnessRow(),
     ]);
     return {
       priorityRules: rules.map((r) => ({ weightSetRef: r.weightSetRef, component: r.component, weight: Number(r.weight) })),
@@ -989,7 +1002,79 @@ export class DispatchRunService {
         tier: o.tier,
         expiresAt: o.expiresAt.toISOString(),
       })),
+      // `stale` is computed here, at admission, rather than left to whoever reads the snapshot later:
+      // staleness is relative to the operating day this run belongs to, and a reader next month has
+      // no way to reconstruct which day that was without re-deriving it from `started_at`.
+      eligibilityMv: {
+        viewName: PLANT_ELIGIBLE_FLOATING_SE_MV,
+        lastSuccessAt: mvFreshness?.lastSuccessAt?.toISOString() ?? null,
+        lastAttemptAt: mvFreshness?.lastAttemptAt?.toISOString() ?? null,
+        lastError: mvFreshness?.lastError ?? null,
+        stale: isMvStale(
+          {
+            viewName: PLANT_ELIGIBLE_FLOATING_SE_MV,
+            lastAttemptAt: mvFreshness?.lastAttemptAt?.toISOString() ?? null,
+            lastSuccessAt: mvFreshness?.lastSuccessAt?.toISOString() ?? null,
+            lastError: mvFreshness?.lastError ?? null,
+          },
+          istDate(now),
+        ),
+      },
     };
+  }
+
+  /**
+   * Log a warning when the FLOATING eligibility view has not rebuilt for the operating day (#287).
+   *
+   * Reads defensively and never throws: a run must not fail because its freshness bookkeeping is
+   * unavailable, and a missing row is already treated as stale by `isMvStale`, which is the safe
+   * direction to degrade in.
+   */
+  private async warnIfEligibilityStale(runId: bigint, day: Date): Promise<void> {
+    try {
+      const row = await this.mvFreshnessRow();
+      const stale = isMvStale(
+        {
+          viewName: PLANT_ELIGIBLE_FLOATING_SE_MV,
+          lastAttemptAt: row?.lastAttemptAt?.toISOString() ?? null,
+          lastSuccessAt: row?.lastSuccessAt?.toISOString() ?? null,
+          lastError: row?.lastError ?? null,
+        },
+        day,
+      );
+      if (!stale) return;
+      this.logger.warn(
+        `run ${runId}: ${PLANT_ELIGIBLE_FLOATING_SE_MV} has not rebuilt for this operating day ` +
+          `(last success ${row?.lastSuccessAt?.toISOString() ?? 'never'}` +
+          `${row?.lastError ? `, last error: ${row.lastError}` : ''}) — ` +
+          'floating candidates may come from out-of-date territory data. Proceeding.',
+      );
+    } catch {
+      /* freshness bookkeeping must never be the thing that fails a dispatch run */
+    }
+  }
+
+  /**
+   * The freshness row, or null — including when the client has no `mvRefreshState` delegate at all.
+   *
+   * That last case is not hypothetical: several unit specs construct a hand-built Prisma stub with
+   * only the delegates the path under test needs, and a new read reaching through such a stub is a
+   * `TypeError`, not a rejected promise, so a bare `.catch()` does not contain it. Guarding on the
+   * delegate keeps this genuinely optional — #287 adds a signal, and a signal must not be able to
+   * break the run it describes.
+   */
+  private async mvFreshnessRow(): Promise<{
+    lastAttemptAt: Date | null;
+    lastSuccessAt: Date | null;
+    lastError: string | null;
+  } | null> {
+    const delegate = (this.prisma as Partial<PrismaService>).mvRefreshState;
+    if (delegate?.findUnique == null) return null;
+    try {
+      return await delegate.findUnique({ where: { viewName: PLANT_ELIGIBLE_FLOATING_SE_MV } });
+    } catch {
+      return null;
+    }
   }
 
   /** Active zones = zones with at least one plant (the only zones that can carry dispatchable work). */

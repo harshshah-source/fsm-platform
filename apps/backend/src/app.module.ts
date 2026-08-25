@@ -68,6 +68,7 @@ import { BusinessSweepSchedulerModule } from './scheduling/business-sweep-schedu
 import { SchedulesController } from './scheduling/schedules.controller';
 import { BatchesController } from './scheduling/batches.controller';
 import { DispatchRunsController } from './scheduling/dispatch-runs.controller';
+import { DispatchTodayController } from './scheduling/dispatch-today.controller';
 import { IntradayUpdatesController } from './scheduling/intraday-updates.controller';
 import { IntradayModule } from './intraday/intraday.module';
 import { CrossZoneModule } from './cross-zone/cross-zone.module';
@@ -173,6 +174,10 @@ import { MediaController } from './media/media.controller';
     SchedulesController,
     BatchesController,
     DispatchRunsController,
+    // #284 — the cockpit's reads. `/dispatch/*` is its own path, deliberately not folded into
+    // `/schedules`: that controller is the manual write surface plus the day-plan reads, and the
+    // cockpit is neither.
+    DispatchTodayController,
     IntradayUpdatesController,
     SharedPoolController,
     MeTicketsController,

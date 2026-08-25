@@ -722,6 +722,22 @@ model BatchAssignmentTicket {
   /// `REMOVAL_REASONS` (`scheduling/removal-reason.ts`). TEXT rather than an enum so #242/#243/#246
   /// add members without a schema migration — the closed set is enforced in TypeScript.
   removalReason  String?   @map("removal_reason")
+  /// Who added the row (#283). NULL for engine writes by construction — the run placed the work, no
+  /// person added it — and NULL for pre-#283 history, which is unknown, not system. Same posture as
+  /// `removed_by` being NULL on terminal closure.
+  addedBy        String?   @map("added_by") @db.Uuid
+  /// The human reason for the add, where the door required one (`assign-batch` mandates it). NULL
+  /// where no reason was collected; never invented.
+  addReason      String?   @map("add_reason")
+  /// Which door the work came through — one of `ADD_SOURCES` (`scheduling/add-source.ts`). TEXT
+  /// rather than an enum for the same reason `removal_reason` is: later slices add members without a
+  /// schema migration, and the closed set is enforced in TypeScript.
+  addSource      String?   @map("add_source")
+  /// The chosen SE's coverage of this plant when the row was written — one of `COVERAGE_AT_ASSIGN`,
+  /// including `NONE`. Stamped at write time, not derived later: `se_coverage` is mutable and hard-
+  /// deleted (#138), so a later lookup answers a different question. This is the tier-crossing signal
+  /// the approved provenance grammar draws (#282 R2).
+  coverageTypeAtAssign String? @map("coverage_type_at_assign")
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   batch  PlantBatchAssignment @relation(fields: [batchId], references: [batchId])
@@ -2795,6 +2811,26 @@ model CronTickClaim {
   @@id([jobName, windowStart], map: "cron_tick_claims_pkey")
   @@index([windowStart], map: "ix_cron_tick_claims_window_start")
   @@map("cron_tick_claims")
+}
+
+/// #287 — how fresh each materialized view its consumers depend on actually is.
+///
+/// `plant_eligible_floating_se` is rebuilt at 04:30 IST and consumed by the 05:00 dispatch run, and
+/// until this table existed the refresh swallowed its own failures while the run performed no check —
+/// a failed rebuild produced a silently wrong FLOATING candidate pool with no signal anywhere. One
+/// row per view, upserted by the refresher, read by the run's pre-check and frozen into its
+/// `config_snapshot`. Deliberately current-state, not a log: the question is "is what I am about to
+/// use fresh", which has exactly one answer per view.
+model MvRefreshState {
+  viewName      String    @id @map("view_name")
+  lastAttemptAt DateTime  @map("last_attempt_at") @db.Timestamptz(6)
+  /// When it last actually rebuilt. NULL means never — which is not the same as fresh.
+  lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz(6)
+  /// Most recent failure message, cleared on the next success. Diagnosis only, never a predicate.
+  lastError     String?   @map("last_error")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("mv_refresh_state")
 }
 
 /// #264 — durable day-plan notification outbox (executes #189). Dispatch/override write their

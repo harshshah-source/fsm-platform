@@ -140,4 +140,22 @@ describe('Issue 11 slice 2 — BatchAssignmentService.dispatchForZone', () => {
     const tickets = await prisma.ticket.findMany({ where: { ticketId: { in: ticketIds } } });
     expect(tickets.every((t) => t.assignmentState === 'FORMALLY_ASSIGNED')).toBe(true);
   });
+
+  it('#283 AC4 — stamps engine-placed work AUTO_DISPATCH with no human actor', async () => {
+    const schedule = await prisma.workSchedule.findFirstOrThrow({ where: { zoneId, seId: dedicated } });
+    const batch = await prisma.plantBatchAssignment.findFirstOrThrow({ where: { scheduleId: schedule.scheduleId } });
+    const rows = await prisma.batchAssignmentTicket.findMany({ where: { batchId: batch.batchId } });
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.addSource).toBe('AUTO_DISPATCH');
+      // NULL by construction, not by omission: the run placed this work and no person added it, so
+      // the actor column has no honest value to carry. `run_id` on the batch is the engine's handle.
+      // Same posture `close-assignment.ts` takes for `removed_by` on terminal closure.
+      expect(row.addedBy).toBeNull();
+      expect(row.addReason).toBeNull();
+      // The SE covering this plant in the fixture is DEDICATED, and the engine chose within that tier.
+      expect(row.coverageTypeAtAssign).toBe('DEDICATED');
+    }
+  });
 });

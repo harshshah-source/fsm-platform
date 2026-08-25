@@ -196,7 +196,9 @@ export interface DispatchAssignmentRow {
 }
 
 export interface DispatchBatchDetail {
-  /** The run behind the batch's schedule. Null for pre-ledger / ZM_MANUAL schedules — the batch is
+  /** The run behind the batch's schedule. Null for pre-ledger schedules and for any schedule no
+   * dispatch run produced — a manager's manual plan, and (since #283) a `SYSTEM_GENERATED` schedule
+   * the intraday CRITICAL sweep created, which is the engine's work but not a *run's*. The batch is
    * addressed by its own id, so it still resolves; only the run-keyed trace is unavailable. */
   runId: string | null;
   batchId: string;
