@@ -7,6 +7,36 @@ the per-issue audit trail rather than restating it here). Only **Q4** (committin
 audits) remains open, and Q4 does **not** block #281 — see
 [Open, and deliberately not ruled here](#open-and-deliberately-not-ruled-here).
 Type: HITL · Decision · Admin
+
+> ## ⚠ CORRECTION — 2026-08-25: this record's central factual premise was wrong
+>
+> **Nothing below is edited or deleted; this note records what was later established.** See
+> [`#282`](./282-decision-todays-dispatch-crew-deck.md) and the forensic investigation
+> [`audit/scheduler-engine-forensics-2026-08-25.md`](../../../audit/scheduler-engine-forensics-2026-08-25.md).
+>
+> This record states — at the top of the file and again under "Reference" — that **"No wireframe
+> exists for this screen set."** That was **false**. A complete wireframe set for the scheduler's
+> operator surface (*Today's Dispatch — the Crew Deck*: Plan/Live/Replay, engineer deck with ordered
+> stops, provenance grammar, critical interception, work rails, and an inspect→understand→override→
+> preview→confirm flow) was designed on **2026-08-20**, the same day as #272, in a working artifact
+> that was **never committed to the repository**. Its one surviving in-repo trace is
+> [`#272:64`](./272-decision-assign-work-console.md) — *"Carried forward from the dispatch-board
+> grammar so the two boards read as one product"* — where "the two boards" and "dispatch-board"
+> appear nowhere else in the repo. The design was recovered 2026-08-25 and is now committed at
+> [`docs/ui/desktop/approved-designs/todays-dispatch-crew-deck.html`](../../../docs/ui/desktop/approved-designs/todays-dispatch-crew-deck.html).
+>
+> **What still stands:** the problem statement (F6), and rulings **R1–R7, R9, R10** — the tense
+> model, grouping-not-merging, per-view responsibilities, the `Run → Zone → Batch` chain fix, the
+> Intra-day subordination, and **R7** (the dispatch timeline is not the Assign Work Console). #281's
+> delivered work is valid and is retained as supporting tissue beneath the cockpit.
+>
+> **What is superseded:** **R8**, whose reasoning rests directly on the false premise ("no approved
+> design is required for this"; a unified surface rejected as "new page behaviour, not navigation").
+> #282 R1 supersedes it: an approved design now exists and the unified Today's Dispatch cockpit is
+> the approved direction. Contextual cross-links stay — they are additive, not the ceiling.
+>
+> **Q4 is closed:** both 2026-08-19 source audits were committed 2026-08-25 alongside #282.
+
 Source: [`audit/navigation-ia-audit-2026-08-19.md`](../../../audit/navigation-ia-audit-2026-08-19.md)
 finding **F6 (HIGH)** + [`audit/frontend-ux-audit-2026-08-19.md`](../../../audit/frontend-ux-audit-2026-08-19.md)
 findings **10** (sub-group the Operations nav) and the dispatch-terminology note in §"Nav shape".
@@ -175,6 +205,11 @@ Only Q4 remains open, and per #281's own "Blocked by" list (Q1–Q3 only), it do
 n/a (decision record). #281 owns the surfaces.
 
 ## Reference
+
+> **Corrected 2026-08-25 — see the banner at the top of this file.** The paragraph below was true of
+> the repository on 2026-08-24 and false of the world: the Crew Deck wireframes existed from
+> 2026-08-20 but lived outside git. `docs/ui/desktop/approved-designs/` now contains
+> `todays-dispatch-crew-deck.html` (approved 2026-08-25, [`#282`](./282-decision-todays-dispatch-crew-deck.md)).
 
 **No approved design or v2 reference image covers this screen set.** `docs/ui/desktop/v2-reference/`
 has `12-batch-schedule-review.png` (the Schedules page) and no image for Scheduler Preview or the
