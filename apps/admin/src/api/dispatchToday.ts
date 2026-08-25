@@ -83,11 +83,25 @@ export interface TodayHold {
   decidedBy: string | null;
 }
 
+/** #288 — the ledger's `insertion_type` for work an engineer became unavailable on. */
+export const SE_UNAVAILABLE = 'SE_UNAVAILABLE';
+
 export interface TodayEscalation {
   insertionId: string;
   ticketId: string;
   slaBucket: string | null;
   createdAt: string;
+  /**
+   * #288 — why this row exists: `SYSTEM_CRITICAL` (no capacity-eligible engineer, #268) or
+   * `SE_UNAVAILABLE`. The strip explains itself in words, so it has to know which it is looking at.
+   */
+  insertionType: string;
+  /**
+   * The engineer the ticket is live on, or null. Non-null means manual Assign cannot resolve it —
+   * `assignTicket` refuses an assigned ticket — and a reassign on that engineer's day plan can.
+   */
+  assignedSeId: string | null;
+  assignedSeName: string | null;
 }
 
 /**

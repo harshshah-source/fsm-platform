@@ -1,6 +1,6 @@
 # 288 — An SE who becomes unavailable mid-day does not silently strand their work
 
-Status: **ready-for-agent** (policy ruled — [#282](./282-decision-todays-dispatch-crew-deck.md) R4)
+Status: **done** (2026-08-25) — report [`docs/progress/288-mid-day-unavailability-escalation.md`](../../../docs/progress/288-mid-day-unavailability-escalation.md)
 Type: AFK · Backend (+ the #285 surface)
 Decision: #282 R4 (operator, 2026-08-25) — **escalate-only. Nothing re-plans automatically.**
 
@@ -30,11 +30,22 @@ Re-use the existing re-escalation guard (`intradayInsertions: { none: { status:
 
 ## Acceptance criteria
 
-- [ ] AC1 — Approving leave covering today for an SE with live remaining work raises escalations for
-      that work and notifies the ZM.
-- [ ] AC2 — Already-resolved / already-removed tickets are not escalated.
-- [ ] AC3 — **Nothing is reassigned automatically**; the original assignment rows are untouched and
-      the day plan is not rewritten.
-- [ ] AC4 — No duplicate escalation for the same ticket (the existing guard holds).
-- [ ] AC5 — The escalations are actionable through the existing manual-assign path.
-- [ ] AC6 — Backend suite green.
+- [x] AC1 — Approving leave covering today for an SE with live remaining work raises escalations for
+      that work and notifies the ZM. **One alert, not one per ticket** — the ledger needs a row each,
+      but the decision is single, and eight alerts for eight stops is the storm the guard prevents.
+      Hooked to `SeAvailabilityService.setAvailability` (which `approve` delegates to), so a manager or
+      SE setting a window directly is covered by the same rule rather than a second definition.
+- [x] AC2 — Already-resolved / already-removed tickets are not escalated. "Remaining" is the existing
+      pair of facts: a live day-plan row (`committedDayPlan`'s predicate) whose ticket is still `OPEN`.
+- [x] AC3 — **Nothing is reassigned automatically**; the original assignment rows are untouched and
+      the day plan is not rewritten. Pinned by asserting the batch-ticket row is identical afterwards.
+- [x] AC4 — No duplicate escalation for the same ticket (#268's guard, reused verbatim).
+- [x] AC5 — The escalations are actionable — **and the path is the override/reassign one, not the
+      queue's Assign.** AC3 and the queue's Assign cannot both hold: `assignTicket` refuses a
+      `FORMALLY_ASSIGNED` ticket, and stranded work is still formally assigned precisely because AC3
+      requires it. Freeing the work first would be the automatic re-plan #282 R4 forbids. So the rows
+      carry who holds the work, the queue offers "Reassign on the day plan →" instead of a button that
+      would 409, and the cockpit strip stops asserting the capacity cause over a mixed list. The dead
+      end itself is pinned by a spec. See the report's "The conflict between AC3 and AC5".
+- [x] AC6 — Backend suite green (blast radius + full run); admin **112 files / 657 tests**;
+      `tsc --noEmit` clean on both.

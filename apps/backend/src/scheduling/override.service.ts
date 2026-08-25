@@ -997,6 +997,18 @@ export class OverrideService {
               });
             }
             await this.flagOverridden(tx, batch.batchId, batch.scheduleId, reasonCode, actor, now);
+            // #288 — a move is the human decision the stranded-work escalation was asking for, so it
+            // closes it, in the same transaction that makes the move. Left open, the queue and the
+            // cockpit strip would keep asking for a decision already taken, and #268's re-escalation
+            // guard would key on a row nothing could ever clear. `ACCEPTED` is the terminal value
+            // `manualAssign` already writes when a human places escalated work — one vocabulary rather
+            // than a new enum member for the same fact. Removal is deliberately NOT a closer: a ticket
+            // taken off the plan is genuinely unassigned work, still needing somebody, and the read
+            // surfaces flip to offering Assign for it on their own.
+            await tx.intradayInsertion.updateMany({
+              where: { ticketId: { in: rows.map((r) => r.ticketId) }, status: 'ESCALATION_REQUIRED' },
+              data: { status: 'ACCEPTED', offeredSeId: newSeId, respondedAt: now },
+            });
             const outboxId = await queueDayPlanOverridden(tx, { seId: newSeId, scheduleId: sched.scheduleId, batchId: batch.batchId, action });
             return { scheduleId: sched.scheduleId, outboxId };
           },

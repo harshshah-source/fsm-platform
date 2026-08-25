@@ -50,6 +50,15 @@ export interface IntradayInsertionRow {
   retryCount: number;
   whatsappSent: boolean;
   createdAt: string;
+  /**
+   * #288 — the engineer this ticket is live on right now, or null when it is on nobody's plan.
+   *
+   * Not `offeredSeId` under another name: that is who was *offered* the work. This is who *holds* it,
+   * and a non-null value means the queue's Assign cannot resolve the row — `assignTicket` refuses an
+   * assigned ticket — so the action offered has to be a reassign on that engineer's day plan instead.
+   */
+  assignedSeId: string | null;
+  assignedSeName: string | null;
 }
 
 export async function apiIntradayInsertions(): Promise<IntradayInsertionRow[]> {

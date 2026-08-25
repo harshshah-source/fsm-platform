@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
   apiDispatchChangesToday,
   apiDispatchToday,
+  SE_UNAVAILABLE,
   type DispatchChangesTodayView,
   type DispatchTodayView,
 } from '../../api/dispatchToday';
@@ -168,10 +169,16 @@ export default function TodaysDispatchPage() {
             {view.escalations.length} critical{' '}
             {view.escalations.length === 1 ? 'ticket needs' : 'tickets need'} manual assignment
           </h2>
-          <p className="mt-0.5 text-[11px] text-ink-muted">
-            No capacity-eligible engineer was available, so the scheduler escalated rather than
-            overloading anyone.
-          </p>
+          {/* #288 — the capacity sentence is only printed when it is true of every row. Two causes now
+              write an escalation: no capacity-eligible engineer (#268), and an engineer going
+              unavailable on work already committed to them. One explanation over a mixed list would be
+              wrong about half of it, so each row carries its own instead. */}
+          {view.escalations.every((e) => e.insertionType !== SE_UNAVAILABLE) && (
+            <p className="mt-0.5 text-[11px] text-ink-muted">
+              No capacity-eligible engineer was available, so the scheduler escalated rather than
+              overloading anyone.
+            </p>
+          )}
           <ul className="mt-2 flex flex-col gap-1">
             {view.escalations.map((e) => (
               <li key={e.insertionId} className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -182,9 +189,23 @@ export default function TodaysDispatchPage() {
                 <span className="text-ink-muted">
                   escalated {new Date(e.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
-                <Link to="/intraday" className="ml-auto text-link">
-                  Assign manually →
-                </Link>
+                {e.insertionType === SE_UNAVAILABLE && (
+                  <span className="text-ink">
+                    {e.assignedSeName ?? e.assignedSeId ?? 'The assigned engineer'} is unavailable
+                  </span>
+                )}
+                {/* Assign is the door for work nobody holds. Stranded work is still formally assigned
+                    (escalate-only, #282 R4), and `assignTicket` refuses an assigned ticket — so the
+                    door that works is a reassign on the holder's day plan. */}
+                {e.assignedSeId ? (
+                  <Link to={`/schedules/${e.assignedSeId}`} className="ml-auto text-link">
+                    Reassign on the day plan →
+                  </Link>
+                ) : (
+                  <Link to="/intraday" className="ml-auto text-link">
+                    Assign manually →
+                  </Link>
+                )}
               </li>
             ))}
           </ul>

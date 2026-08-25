@@ -246,3 +246,60 @@ describe('#277 — intra-day manual-assign modal', () => {
     expect(confirmed).toBe(true);
   });
 });
+
+/**
+ * #288 — work stranded by an engineer going unavailable mid-day arrives in this queue as an
+ * `ESCALATION_REQUIRED` row like any other. It is **not** resolvable like any other: the ticket is
+ * still formally assigned (escalate-only, #282 R4 — nothing is reassigned automatically), and
+ * `assignTicket` refuses an assigned ticket, so the queue's own Assign would 409 on exactly the rows
+ * it looks most needed on. The row carries who holds the work; the door that works is a reassign on
+ * that engineer's day plan.
+ */
+const stranded = {
+  insertionId: '203',
+  ticketId: 't-5555eeee',
+  zoneId: '1',
+  companyId: 'c-1',
+  companyTier: 'GOLD',
+  insertionType: 'SE_UNAVAILABLE',
+  slaBucket: 'CRITICAL',
+  offeredSeId: null,
+  offeredAt: '2026-06-25T07:00:00.000Z',
+  acceptanceDeadline: null,
+  status: 'ESCALATION_REQUIRED',
+  declineReasonCode: null,
+  retryCount: 0,
+  whatsappSent: false,
+  createdAt: '2026-06-25T07:00:00.000Z',
+  assignedSeId: 'se-7777',
+  assignedSeName: 'Ramesh Kumar',
+};
+
+describe('#288 — stranded work in the queue', () => {
+  beforeEach(() => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.endsWith('/intraday-updates')) return json(rows);
+      if (u.endsWith('/intraday-insertions')) return json([...insertions, stranded]);
+      return json([]);
+    });
+  });
+
+  it('names the engineer the work is stranded on and sends the manager to their day plan', async () => {
+    renderPage();
+    const table = within(await screen.findByRole('table', { name: /intra-day queue/i }));
+    const row = within(table.getByTestId('iq-row-ins-203'));
+
+    expect(row.getByText(/Ramesh Kumar/)).toBeInTheDocument();
+    const link = row.getByRole('link', { name: /day plan/i });
+    expect(link).toHaveAttribute('href', '/schedules/se-7777');
+  });
+
+  it('does not offer the Assign that cannot resolve it', async () => {
+    renderPage();
+    const table = within(await screen.findByRole('table', { name: /intra-day queue/i }));
+    expect(within(table.getByTestId('iq-row-ins-203')).queryByRole('button', { name: /assign/i })).toBeNull();
+    // The capacity escalation, whose ticket nobody holds, still offers it.
+    expect(within(table.getByTestId('iq-row-ins-202')).getByRole('button', { name: /assign/i })).toBeInTheDocument();
+  });
+});

@@ -30,6 +30,7 @@ import {
 } from '../scheduling/override.service';
 import { CandidateQueryService, type CandidateRow } from '../scheduling/candidate-query.service';
 import { committedDayPlan } from '../scheduling/committed-day-load';
+import { type CurrentAssignee, currentAssigneesFor } from './current-assignee';
 import { ZmScope } from '../scheduling/zm-schedule-query.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -58,6 +59,16 @@ export interface IntradayInsertionRow {
   retryCount: number;
   whatsappSent: boolean;
   createdAt: string;
+  /**
+   * #288 — the engineer this ticket is live on right now, or null when it is on nobody's plan.
+   *
+   * Not the same question as `offeredSeId`, and the difference is the whole point: an escalation whose
+   * ticket is **already assigned** cannot be resolved by the queue's Assign (`assignTicket` refuses an
+   * assigned ticket), only by a reassign on that engineer's day plan. A surface that cannot tell the
+   * two apart offers a button that 409s on exactly the rows it looks most needed on.
+   */
+  assignedSeId: string | null;
+  assignedSeName: string | null;
 }
 
 export interface CriticalAssignOutcome {
@@ -91,6 +102,7 @@ type ActiveInsertionTicket = Prisma.TicketGetPayload<{
 
 function toRow(
   r: Prisma.IntradayInsertionGetPayload<{ include: { ticket: { select: { companyId: true; companyTier: true } } } }>,
+  assignee: CurrentAssignee | null = null,
 ): IntradayInsertionRow {
   return {
     insertionId: String(r.insertionId),
@@ -108,6 +120,8 @@ function toRow(
     retryCount: r.retryCount,
     whatsappSent: r.whatsappSentAt !== null,
     createdAt: r.createdAt.toISOString(),
+    assignedSeId: assignee?.seId ?? null,
+    assignedSeName: assignee?.seName ?? null,
   };
 }
 
@@ -450,7 +464,12 @@ export class IntradayInsertionService {
       orderBy: { createdAt: 'desc' },
       include: { ticket: { select: { companyId: true, companyTier: true } } },
     });
-    return rows.map((r) => toRow(r));
+    // #288 — one query for the whole page rather than one per row; absent means "on nobody's plan".
+    const assignees = await currentAssigneesFor(
+      this.prisma,
+      rows.map((r) => r.ticketId),
+    );
+    return rows.map((r) => toRow(r, assignees.get(r.ticketId) ?? null));
   }
 
   /** Escalate to the zone's ZM "Manual assignment needed" Action-Required alert (Issue 30). */

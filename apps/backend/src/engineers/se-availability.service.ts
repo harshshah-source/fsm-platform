@@ -1,5 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { istDayStartInstant } from '../common/ist-day';
 import { type SeAvailabilityStatus } from '../generated/prisma/enums';
+import { StrandedWorkEscalationService } from '../intraday/stranded-work-escalation.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -37,7 +39,21 @@ export interface AvailabilityRow {
 
 @Injectable()
 export class SeAvailabilityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    /**
+     * #288 — the escalate-only response to an engineer becoming unavailable with work still on their
+     * day.
+     *
+     * `@Optional()` **with a real default**, the shape `NotificationService`'s channel gateway uses:
+     * this service is provided in four modules that do not provide the escalator, and a required
+     * dependency would take all four down at boot. The default is a working instance, never a no-op —
+     * a dependency that silently does nothing when unwired is a recovery path nothing exercises, which
+     * is the class of bug #286 found in `reapStaleDispatchRuns`.
+     */
+    @Optional()
+    private readonly stranded: StrandedWorkEscalationService = new StrandedWorkEscalationService(prisma),
+  ) {}
 
   /** The SE's current planning status: the active window's status (else AVAILABLE). */
   async currentStatus(seId: string, now: Date = new Date()): Promise<SeAvailabilityStatus> {
@@ -92,8 +108,18 @@ export class SeAvailabilityService {
    * whatever status is active *right now*, regardless of who set it — the narrowing this pairs with
    * is specifically about ON_LEAVE/OFF_SHIFT/WEEKLY_OFF (ZM-only decisions), not about who last
    * touched a SOFT_UNAVAILABLE row, which an SE already has full self-service authority over.
+   *
+   * **#288 — this write has a consequence beyond planning.** A window that takes the engineer off
+   * today's remaining field day escalates the work still committed to them, so a ZM is told rather
+   * than finding an unworked plan at 18:00. Nothing is reassigned (#282 R4, escalate-only); see
+   * {@link strandsWork} for exactly which windows count, and `StrandedWorkEscalationService` for what
+   * is raised.
    */
-  async setAvailability(input: SetAvailabilityInput, actor: AvailabilityActor): Promise<SetAvailabilityOutcome> {
+  async setAvailability(
+    input: SetAvailabilityInput,
+    actor: AvailabilityActor,
+    now: Date = new Date(),
+  ): Promise<SetAvailabilityOutcome> {
     const engineer = await this.prisma.engineerMaster.findUnique({ where: { engineerId: input.seId } });
     if (!engineer) return { result: 'NOT_FOUND' };
 
@@ -132,6 +158,34 @@ export class SeAvailabilityService {
       });
       return row;
     });
+
+    // #288 — outside the transaction on purpose. The availability window is the decision; the
+    // escalations are a consequence of it, and a failure to raise them must not roll back the fact
+    // that the engineer is unavailable. The same posture `IntradayInsertionService.escalate` holds.
+    if (this.strandsWork(input, created.windowStart, now)) await this.stranded.escalateStrandedWork(input.seId, now);
+
     return { result: 'OK', id: String(created.id) };
+  }
+
+  /**
+   * Does this window take the engineer off **today's remaining** field day?
+   *
+   * Three things it is deliberately not. It is not "the status is not AVAILABLE" alone: leave approved
+   * on Monday for Friday strands nothing today, and escalating Friday's plan on Monday would put work
+   * in the ZM's queue that nobody can act on yet. It is not "the window contains right now" either — a
+   * window starting at 14:00 today still takes the afternoon's stops away, and waiting until 14:00 to
+   * say so wastes the hours in which the day could have been redistributed. And a window that has
+   * already **ended** strands nothing: the engineer is back.
+   *
+   * So: the window overlaps `[now, end of the IST operating day]`. `AVAILABLE` is excluded because it
+   * is the clearing status — the one write here that gives an engineer back to the day rather than
+   * taking them from it. `availabilityStatus === 'AVAILABLE'` is the same test
+   * `candidate-readiness.ts` makes, and for the same reason: one definition of unavailable.
+   */
+  private strandsWork(input: SetAvailabilityInput, windowStart: Date, now: Date): boolean {
+    if (input.status === 'AVAILABLE') return false;
+    const dayEnd = new Date(istDayStartInstant(now).getTime() + 24 * 60 * 60_000);
+    const endsAfterNow = input.windowEnd == null || input.windowEnd > now;
+    return windowStart < dayEnd && endsAfterNow;
   }
 }

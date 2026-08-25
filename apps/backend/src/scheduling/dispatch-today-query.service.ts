@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { istDate } from '../common/ist-day';
+import { currentAssigneesFor } from '../intraday/current-assignee';
 import { PrismaService } from '../prisma/prisma.service';
 import { isSystemAddSource } from './add-source';
 import { committedDayPlan } from './committed-day-load';
@@ -108,6 +109,20 @@ export interface TodayEscalation {
   ticketId: string;
   slaBucket: string | null;
   createdAt: string;
+  /**
+   * #288 — why this row exists. `SYSTEM_CRITICAL` is #268's "no capacity-eligible engineer";
+   * `SE_UNAVAILABLE` is work an engineer became unavailable on. The strip above this list asserts a
+   * cause in words, so it has to be able to tell them apart — one sentence over a mixed list would be
+   * wrong about half of it.
+   */
+  insertionType: string;
+  /**
+   * The engineer the ticket is live on, or null. Non-null means the queue's Assign cannot resolve it
+   * (`assignTicket` refuses an assigned ticket) and the door that works is a reassign on that
+   * engineer's day plan.
+   */
+  assignedSeId: string | null;
+  assignedSeName: string | null;
 }
 
 export interface DispatchTodayView {
@@ -408,19 +423,37 @@ export class DispatchTodayQueryService {
     }));
   }
 
-  /** CRITICAL work the engine refused to self-authorise an overload for (#258 Q-B). */
+  /**
+   * Open escalations for the zone — every ticket a manager has been asked to decide about.
+   *
+   * Two causes now reach this list: CRITICAL work the engine refused to self-authorise an overload for
+   * (#258 Q-B), and work stranded by an engineer going unavailable mid-day (#288). Each row carries
+   * its `insertionType` and, when the ticket is still on somebody's live plan, who holds it — because
+   * those two facts decide which action resolves the row, and a surface that cannot see them offers
+   * the wrong one.
+   */
   private async escalationsOpen(zoneId: bigint): Promise<TodayEscalation[]> {
     const rows = await this.prisma.intradayInsertion.findMany({
       where: { zoneId, status: 'ESCALATION_REQUIRED' },
       orderBy: { createdAt: 'desc' },
-      select: { insertionId: true, ticketId: true, slaBucket: true, createdAt: true },
+      select: { insertionId: true, ticketId: true, slaBucket: true, createdAt: true, insertionType: true },
     });
-    return rows.map((r) => ({
-      insertionId: String(r.insertionId),
-      ticketId: r.ticketId,
-      slaBucket: r.slaBucket,
-      createdAt: r.createdAt.toISOString(),
-    }));
+    const assignees = await currentAssigneesFor(
+      this.prisma,
+      rows.map((r) => r.ticketId),
+    );
+    return rows.map((r) => {
+      const holder = assignees.get(r.ticketId) ?? null;
+      return {
+        insertionId: String(r.insertionId),
+        ticketId: r.ticketId,
+        slaBucket: r.slaBucket,
+        createdAt: r.createdAt.toISOString(),
+        insertionType: r.insertionType,
+        assignedSeId: holder?.seId ?? null,
+        assignedSeName: holder?.seName ?? null,
+      };
+    });
   }
 
   /**

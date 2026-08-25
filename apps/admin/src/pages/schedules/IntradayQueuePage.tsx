@@ -75,6 +75,32 @@ const INSERTION_LABEL: Partial<Record<IntradayInsertionStatus, string>> = {
   ASSIGNED_DIRECT: 'System CRITICAL assignment',
   ESCALATION_REQUIRED: 'System escalation — no capacity',
 };
+
+/** #288 — work an engineer became unavailable on. The ledger's `insertion_type` for that path. */
+const SE_UNAVAILABLE = 'SE_UNAVAILABLE';
+
+/**
+ * What this escalation *is*. Status alone stopped being enough with #288: two causes now write
+ * `ESCALATION_REQUIRED` — no capacity-eligible engineer (#268), and an engineer going unavailable on
+ * work already committed to them — and they are resolved by different actions. Labelling both "no
+ * capacity" would tell a manager the wrong thing about half the queue.
+ */
+function insertionLabel(row: IntradayInsertionRow): string {
+  if (row.status === 'ESCALATION_REQUIRED' && row.insertionType === SE_UNAVAILABLE) {
+    return 'Engineer unavailable — work needs a new engineer';
+  }
+  return INSERTION_LABEL[row.status] ?? row.status;
+}
+
+/**
+ * The row is stranded work: still formally assigned, so the queue's Assign cannot resolve it.
+ *
+ * Truthiness rather than `!== null`, deliberately — a payload from before this field existed carries
+ * `undefined`, and treating that as "somebody holds it" would take the Assign button away from every
+ * capacity escalation in the queue.
+ */
+const isStranded = (row: IntradayInsertionRow): boolean =>
+  row.status === 'ESCALATION_REQUIRED' && Boolean(row.assignedSeId);
 const INSERTION_TONE: Partial<Record<IntradayInsertionStatus, BadgeTone>> = {
   ASSIGNED_DIRECT: 'success',
   ESCALATION_REQUIRED: 'critical',
@@ -151,9 +177,7 @@ export function IntradayQueuePage() {
         row.kind === 'update' ? (
           <Badge tone={EVENT_TONE[row.updateType]}>{EVENT_LABEL[row.updateType]}</Badge>
         ) : (
-          <Badge tone={INSERTION_TONE[row.status] ?? 'neutral'}>
-            {INSERTION_LABEL[row.status] ?? row.status}
-          </Badge>
+          <Badge tone={INSERTION_TONE[row.status] ?? 'neutral'}>{insertionLabel(row)}</Badge>
         ),
     },
     {
@@ -184,20 +208,31 @@ export function IntradayQueuePage() {
       key: 'se',
       header: 'SE',
       render: (row) => {
-        const seId = row.kind === 'update' ? row.seId : row.offeredSeId;
+        // #288 — an escalation that names no offered SE may still be *held* by one: work stranded when
+        // an engineer went unavailable is still formally theirs, and who holds it is the whole reason
+        // this row cannot be resolved with Assign.
+        const seId = row.kind === 'update' ? row.seId : (row.offeredSeId ?? row.assignedSeId);
         if (!seId) return <span className="text-xs text-ink-muted">—</span>;
+        // The stranded row's engineer comes named from the server (#288). The `engineers` lookup below
+        // is zone-scoped and would fall back to a uuid stub for anyone outside it — a name the backend
+        // already resolved should not be thrown away and re-derived worse.
+        const name = row.kind === 'insertion' && !row.offeredSeId && row.assignedSeName ? row.assignedSeName : seLabel(seId);
         return (
           <Link
             to={`/schedules/${seId}`}
             onClick={(e) => e.stopPropagation()}
-            title={`Today's day plan for ${seLabel(seId)}`}
+            title={
+              row.kind === 'insertion' && isStranded(row)
+                ? `${name} holds this work — open their day plan to reassign it`
+                : `Today's day plan for ${name}`
+            }
             className="text-xs text-link hover:underline"
           >
-            {seLabel(seId)}
+            {name}
           </Link>
         );
       },
-      exportValue: (row) => seLabel(row.kind === 'update' ? row.seId : row.offeredSeId),
+      exportValue: (row) => seLabel(row.kind === 'update' ? row.seId : (row.offeredSeId ?? row.assignedSeId)),
     },
     {
       key: 'acceptance',
@@ -226,8 +261,26 @@ export function IntradayQueuePage() {
       key: 'action',
       header: '',
       exportable: false,
-      render: (row) =>
-        row.kind === 'insertion' && row.status === 'ESCALATION_REQUIRED' ? (
+      render: (row) => {
+        if (row.kind !== 'insertion' || row.status !== 'ESCALATION_REQUIRED') return null;
+        // #288 — Assign goes through `assignTicket`, which refuses a ticket that is already formally
+        // assigned. Stranded work is still assigned (escalate-only, #282 R4: nothing is reassigned
+        // automatically), so this button would 409 on exactly the rows it looks most needed on. The
+        // action that resolves them is a reassign on the holder's day plan — where, since #289, the
+        // impact of the move is shown before it is committed.
+        if (isStranded(row)) {
+          return (
+            <Link
+              to={`/schedules/${row.assignedSeId}`}
+              data-testid={`iq-reassign-ins-${row.insertionId}`}
+              onClick={(e) => e.stopPropagation()}
+              className="whitespace-nowrap text-xs text-link hover:underline"
+            >
+              Reassign on the day plan →
+            </Link>
+          );
+        }
+        return (
           <Button
             size="sm"
             data-testid={`iq-assign-ins-${row.insertionId}`}
@@ -238,7 +291,8 @@ export function IntradayQueuePage() {
           >
             Assign
           </Button>
-        ) : null,
+        );
+      },
     },
   ];
 

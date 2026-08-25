@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DispatchChangesTodayView, DispatchTodayView } from '../src/api/dispatchToday';
@@ -200,6 +200,10 @@ describe("#285 — Today's Dispatch cockpit", () => {
             ticketId: 'dddddddd-0000-0000-0000-000000000000',
             slaBucket: 'CRITICAL',
             createdAt: '2026-08-25T11:42:00Z',
+            // #268's cause, and nobody holds the ticket — the row Assign is the right door for.
+            insertionType: 'SYSTEM_CRITICAL',
+            assignedSeId: null,
+            assignedSeName: null,
           },
         ],
       }),
@@ -371,5 +375,61 @@ describe("#285 — Today's Dispatch cockpit", () => {
 
     await waitFor(() => expect(screen.getByText(/Could not load/i)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+  });
+});
+
+/**
+ * #288 — two causes now write `ESCALATION_REQUIRED`, and the strip asserts one of them in words ("no
+ * capacity-eligible engineer was available"). Over a mixed list that sentence is wrong about half the
+ * rows, and the action each needs is different: a capacity escalation is assigned from the queue, work
+ * stranded by an unavailable engineer is reassigned on that engineer's day plan.
+ */
+describe('#288 — stranded work in the interception strip', () => {
+  const stranded = {
+    insertionId: 'i2',
+    ticketId: 'eeeeeeee-0000-0000-0000-000000000000',
+    slaBucket: 'CRITICAL',
+    createdAt: '2026-08-25T11:50:00Z',
+    insertionType: 'SE_UNAVAILABLE',
+    assignedSeId: 'se-7777',
+    assignedSeName: 'Ramesh Kumar',
+  };
+
+  it('says why this row is here and sends the manager to the day plan that owns it', async () => {
+    vi.mocked(apiDispatchToday).mockResolvedValue(
+      view({
+        situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0 },
+        escalations: [stranded],
+      }),
+    );
+    renderPage();
+
+    const strip = within(await screen.findByTestId('critical-interception'));
+    expect(strip.getByText(/Ramesh Kumar/)).toBeInTheDocument();
+    expect(strip.getByRole('link', { name: /day plan/i })).toHaveAttribute('href', '/schedules/se-7777');
+    // The capacity sentence is not asserted over a row it is not true of.
+    expect(screen.queryByText(/No capacity-eligible engineer was available/i)).toBeNull();
+  });
+
+  it('keeps the capacity explanation when every row really is a capacity escalation', async () => {
+    vi.mocked(apiDispatchToday).mockResolvedValue(
+      view({
+        situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0 },
+        escalations: [
+          {
+            insertionId: 'i1',
+            ticketId: 'dddddddd-0000-0000-0000-000000000000',
+            slaBucket: 'CRITICAL',
+            createdAt: '2026-08-25T11:42:00Z',
+            insertionType: 'SYSTEM_CRITICAL',
+            assignedSeId: null,
+            assignedSeName: null,
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByText(/No capacity-eligible engineer was available/i)).toBeInTheDocument();
   });
 });

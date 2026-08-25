@@ -1096,6 +1096,33 @@ POSTs) drive identical code paths with no cron.
   REMOVE/DEFER/REORDER are deliberately outside it. The rule lives in `assignTicket`, so the same-day
   ADD leg and every other caller inherit it. Deliberately the existing `CONFLICT_ON_SITE` mechanism
   (same 409 shape, same confirm+reason, same admin banner) rather than a second confirm vocabulary.
+- **Mid-day unavailability strands nothing silently** (#288/P11, `StrandedWorkEscalationService` +
+  the hook in `SeAvailabilityService.setAvailability`): nothing re-planned committed work when
+  availability changed — a window only affected the **next** selection pass — so an engineer who went
+  on leave at 11:00 kept an afternoon of work on a plan nobody would execute. The documented recovery
+  path had also been deleted: `hard-filters.ts` retires the ADR-0016 heartbeat filter pointing at
+  "Acceptance Timeout + reroute (Issue 29/30)", machinery **#268 removed**, with no replacement filed.
+  Now every write of a non-`AVAILABLE` window overlapping `[now, end of the IST operating day]` raises
+  one `ESCALATION_REQUIRED` row per live remaining ticket (`removed_at IS NULL` on a live schedule
+  covering the day — `committedDayPlan`'s predicate — with the ticket still `OPEN`) and alerts the
+  zone's ZM **once**: the ledger needs a row each, but the decision is single, and one alert per stop
+  is the storm #268's re-escalation guard exists to prevent (that guard is reused verbatim, so a second
+  availability write neither duplicates nor re-alerts). Hooked to the availability write rather than to
+  `LeaveRequestService.approve`, which delegates to it — one rule, one definition of "unavailable",
+  covering a manager or SE setting a window directly. **Escalate-only** (#282 R4): no assignment row is
+  written, removed or moved, no capacity is bypassed, the plan history stays intact. **AC3 and the
+  Intra-day Queue's Assign cannot both hold** — `assignTicket` refuses a `FORMALLY_ASSIGNED` ticket,
+  and stranded work is still formally assigned precisely because AC3 requires it — so the resolution
+  path is the existing override/reassign surface: `intraday/current-assignee.ts` derives who holds each
+  escalated ticket at read time, `IntradayInsertionRow` and `TodayEscalation` carry it with the
+  `insertion_type`, the queue offers "Reassign on the day plan →" in place of a button that would 409,
+  and the cockpit strip prints "no capacity-eligible engineer was available" only when that is true of
+  **every** row. `insertion_type` is TEXT, so `SE_UNAVAILABLE` needed no migration. A **move closes the
+  escalation it answered** — `moveTickets` stamps any open `ESCALATION_REQUIRED` row for the tickets it
+  moves to `ACCEPTED` inside the same audited transaction, because an escalation nothing can clear
+  would leave the queue asking for a decision already taken and the re-escalation guard keyed on a
+  permanent row. A *removal* deliberately does not close one: that ticket is genuinely unassigned work
+  still needing somebody, and the read surfaces start offering Assign for it on their own.
 - **Same-day update** (#31, `same-day-update.service.ts` header): ZM add/remove/reorder mid-shift;
   applies immediately (no SE acceptance); logged `MANUAL_ZM_UPDATE`; the **Intra-day Queue is a view
   over AuditLog** (2026-06-25 decision — no new model); reuses the #13 override engine.

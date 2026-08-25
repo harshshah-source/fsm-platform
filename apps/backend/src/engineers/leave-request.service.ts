@@ -76,8 +76,15 @@ export class LeaveRequestService {
     return { result: 'OK', id: String(created.id) };
   }
 
-  /** Own-zone ZM (or CSM acting) approves → write the availability window + mark APPROVED. */
-  async approve(id: string, actor: LeaveActor): Promise<LeaveOutcome> {
+  /**
+   * Own-zone ZM (or CSM acting) approves → write the availability window + mark APPROVED.
+   *
+   * `now` is threaded rather than read inside because the write it delegates to has a **time-dependent
+   * consequence** since #288: approving leave that covers today escalates the engineer's remaining
+   * committed work, and approving leave for next month does not. A clock read inside the service
+   * would make that difference untestable at a fixed instant.
+   */
+  async approve(id: string, actor: LeaveActor, now: Date = new Date()): Promise<LeaveOutcome> {
     const req = await this.prisma.leaveRequest.findUnique({
       where: { id: BigInt(id) },
       include: { engineer: true },
@@ -89,6 +96,7 @@ export class LeaveRequestService {
     const avail = await this.availability.setAvailability(
       { seId: req.seId, status: req.type, windowStart: req.windowStart, windowEnd: req.windowEnd, reason: req.reason },
       { userId: actor.userId, role: actor.role, zoneId: actor.zoneId, actedAsRole: actor.actedAsRole ?? null },
+      now,
     );
     if (avail.result !== 'OK') return avail.result === 'FORBIDDEN' ? { result: 'FORBIDDEN' } : { result: 'NOT_FOUND' };
 
