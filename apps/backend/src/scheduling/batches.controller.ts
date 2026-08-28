@@ -11,7 +11,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import type { RequestActor } from '../common/request-actor';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -27,6 +31,19 @@ const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_H
  * transparency read (Issue 123) resolves a batch BY ITS OWN ID — the run is derived, not required,
  * because most live batches have no `run_id` at all. Both are manager-roled and zone-scoped (a ZM
  * gets NOT_FOUND for an out-of-zone batch).
+ *
+ * ## #239 (Console scope) — why all three reads/writes here take `@CurrentScope()`
+ *
+ * These three hand-built their scope from the claims, which structurally cannot carry
+ * `X-Acting-As-Zone`. Across separate pages that was confusing. On the Scheduler Console it is
+ * **incorrect**: the deck, the candidate column and the target-SE picker are all acting-clamped, and
+ * an override committed pan-India beside them would let a CSM acting in one zone move work in another
+ * from a screen that never showed it — and record an audit row that cannot say they were acting.
+ *
+ * The judgement #239 asks for, made explicitly rather than swept: **acting narrows, and narrowing a
+ * write can only reduce reach.** A CSM acting as zone 7 who genuinely needs to override in zone 9 stops
+ * acting first, which is the same thing every read on this product already requires of them. Audit
+ * attribution is unaffected — that has always come from `RequestActor`, not from this scope.
  */
 @Controller('batches')
 @UseGuards(AuthGuard, RoleGuard)
@@ -40,7 +57,7 @@ export class BatchesController {
   @Get(':batchId')
   @Roles(...MANAGER_ROLES)
   async batchDetail(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('batchId') batchId: string,
   ): Promise<DispatchBatchDetail> {
     let id: bigint;
@@ -49,7 +66,7 @@ export class BatchesController {
     } catch {
       throw new NotFoundException({ code: 'DISPATCH_BATCH_NOT_FOUND' });
     }
-    const detail = await this.query.getBatchDetail(id, { role: user.role, zoneId: user.zone_id });
+    const detail = await this.query.getBatchDetail(id, scope);
     if (!detail) throw new NotFoundException({ code: 'DISPATCH_BATCH_NOT_FOUND' });
     return detail;
   }
@@ -71,7 +88,7 @@ export class BatchesController {
   @HttpCode(200)
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   async previewOverride(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('id') id: string,
     @Body() body: OverrideCommand,
   ): Promise<OverrideImpact> {
@@ -81,10 +98,9 @@ export class BatchesController {
     } catch {
       throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
     }
-    const impact = await this.projection.projectOverride(batchId, body, {
-      role: user.role,
-      zoneId: user.zone_id,
-    });
+    // The preview must resolve under **exactly** the scope the commit will use, or an operator can be
+    // shown an impact for a move the write then refuses.
+    const impact = await this.projection.projectOverride(batchId, body, scope);
     if (impact.result === 'NOT_FOUND') throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
     if (impact.result === 'NOT_PROJECTABLE') {
       throw new BadRequestException({
@@ -100,14 +116,19 @@ export class BatchesController {
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   async overrideBatch(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
+    @CurrentScope() scope: ManagerScope,
     @Param('id') id: string,
     @Body() body: OverrideCommand,
   ): Promise<OverrideOutcome> {
     const outcome = await this.override.override(
       BigInt(id),
       body,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
+      scope,
+      // `actedAsRole` was hard-coded null here, so an override committed by an acting CSM recorded as
+      // an ordinary CSM action and the acting was lost from the ticket's history. `RequestActor`
+      // already resolves it for every other audited write; this one simply never asked.
+      { userId: user.user_id, role: user.role, actedAsRole: actor.actedAsRole },
     );
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
     if (outcome.result === 'CONFLICT_ON_SITE') {

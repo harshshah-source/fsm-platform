@@ -22,6 +22,14 @@ export interface TodayTicket {
   systemPlaced: boolean;
   /** The vehicle is due back today (#248's `RET` chip). */
   returnDueToday: boolean;
+  /**
+   * How many failure cycles this ticket's device has ever had — the chronic predicate's input.
+   *
+   * **A number, not a boolean**, so the surface can say *how* chronic ("×4") rather than only *that* it
+   * is, and so the threshold lives in one place instead of being re-derived per client. Null when the
+   * ticket resolves to no device.
+   */
+  failureCycles: number | null;
 }
 
 /** One plant stop in the engineer's ordered day. */
@@ -51,7 +59,20 @@ export interface TodayEngineer {
   stops: TodayStop[];
 }
 
-/** The header's counters. Every one is a count of something in this payload or beside it. */
+/**
+ * The header's counters. Every one is a count of something in this payload or beside it.
+ *
+ * **They are never summed.** Eight populations with different owners and different next actions do not
+ * add up to one "not dispatched" number, and a surface that adds them invites an operator to chase a
+ * total nobody can act on.
+ *
+ * **B1 — the last two are why this interface grew.** The funnel always had more than six populations:
+ * `componentBlockedWithheld` and `bucketlessDropped` are recorded per run *and per zone*, and were
+ * simply not published here — so the strip implied an exhaustiveness it did not have. Both are
+ * `number | null`, and **null is "this run did not record it", not zero**: the columns are nullable for
+ * runs that predate #177, and drawing an unrecorded population as an empty one is the same lie the
+ * provenance grammar exists to prevent.
+ */
 export interface TodaySituation {
   placed: number;
   unassignable: number;
@@ -59,6 +80,10 @@ export interface TodaySituation {
   criticalNeedsYou: number;
   overCapacity: number;
   changesToday: number;
+  /** Tickets the run withheld because the device is component-blocked. Null = not recorded by this run. */
+  componentBlockedWithheld: number | null;
+  /** Tickets dropped before ranking for having no SLA bucket. Null = not recorded by this run. */
+  bucketlessDropped: number | null;
 }
 
 export interface TodayRun {
@@ -85,6 +110,7 @@ export interface TodayHold {
   /** From the ticket's OPEN vehicle-unavailability report, when one backs the hold. */
   expectedFrom: string | null;
   decidedBy: string | null;
+  failureCycles: number | null;
 }
 
 /**
@@ -264,6 +290,9 @@ export class DispatchTodayQueryService {
               coverageTypeAtAssign: t.coverageTypeAtAssign,
               systemPlaced: isSystemAddSource(t.addSource),
               returnDueToday: returnDue.has(t.ticketId),
+              // Seeded null and filled by `attachFailureCycles` in one pass over the whole payload —
+              // counting per ticket here would be one query per chip on the board.
+              failureCycles: null,
             })),
           })),
       };
@@ -278,6 +307,7 @@ export class DispatchTodayQueryService {
       this.changesTodayCount(zoneId, day),
       this.policyWithheldCount(zoneId, day),
     ]);
+    const funnelTail = await this.funnelTail(zoneId, day);
 
     return {
       operatingDay: day.toISOString().slice(0, 10),
@@ -292,6 +322,8 @@ export class DispatchTodayQueryService {
         criticalNeedsYou: escalations.length,
         overCapacity: lanes.filter((e) => e.overCapacity).length,
         changesToday,
+        componentBlockedWithheld: funnelTail.componentBlockedWithheld,
+        bucketlessDropped: funnelTail.bucketlessDropped,
       },
       rails: { unassignable, held, policyWithheld: { count: policyWithheld, itemised: false } },
       escalations,
@@ -418,6 +450,7 @@ export class DispatchTodayQueryService {
       deviceId: t.deviceId,
       plantName: t.plant?.name ?? null,
       heldUntil: t.deferredUntil!.toISOString().slice(0, 10),
+      failureCycles: null,
       expectedFrom: byTicket.get(t.ticketId)?.expectedFrom?.toISOString() ?? null,
       decidedBy: byTicket.get(t.ticketId)?.decidedBy ?? null,
     }));
@@ -475,6 +508,28 @@ export class DispatchTodayQueryService {
       }),
     ]);
     return adds + removes;
+  }
+
+  /**
+   * B1 — the two funnel populations that were recorded and never published.
+   *
+   * Read from the same `dispatch_run_zones` row `policyWithheldCount` reads, so all three describe the
+   * same run of the same zone by construction. **No row, or a null column, returns null** — the caller
+   * renders "not recorded", never `0`.
+   */
+  private async funnelTail(
+    zoneId: bigint,
+    day: Date,
+  ): Promise<{ componentBlockedWithheld: number | null; bucketlessDropped: number | null }> {
+    const row = await this.prisma.dispatchRunZone.findFirst({
+      where: { zoneId, run: { startedAt: { gte: day, lt: new Date(day.getTime() + 86_400_000) } } },
+      orderBy: { runId: 'desc' },
+      select: { componentBlockedWithheld: true, bucketlessDropped: true },
+    });
+    return {
+      componentBlockedWithheld: row?.componentBlockedWithheld ?? null,
+      bucketlessDropped: row?.bucketlessDropped ?? null,
+    };
   }
 
   /** The below-threshold count the run recorded. A count, not a list — see `policyWithheld` above. */

@@ -289,14 +289,18 @@ export interface ActionRequiredCard {
  * issue, so all are stubs (`available:false`, `count:0`) today; each owning issue flips its card on.
  */
 const ACTION_REQUIRED_CARDS: ReadonlyArray<Omit<ActionRequiredCard, 'count' | 'available'>> = [
-  { key: 'unreviewed_batches', label: 'Auto-dispatched batches awaiting review', urgency: 1, source: 'Issue 11' },
+  // Label corrected 2026-08-28 (field-ops P0-3): the batch-review gate was removed by Decisions §7,
+  // so "awaiting review" described a flow that no longer exists. Same for the two below — SE
+  // Acceptance and the Acceptance-Timeout retry ladder were retired, so their labels stop implying
+  // a step somebody could be late on. Keys are wire contract and stay; labels are display.
+  { key: 'unreviewed_batches', label: 'Auto-dispatched batches today', urgency: 1, source: 'Issue 11' },
   { key: 'vehicle_unavailability', label: 'Vehicle Unavailability & readiness conflicts', urgency: 2, source: 'Issue 28' },
-  { key: 'critical_insertions_awaiting_accept', label: 'CRITICAL insertions awaiting SE Acceptance', urgency: 3, source: 'Issue 29' },
+  { key: 'critical_insertions_awaiting_accept', label: 'CRITICAL insertions (direct-assigned)', urgency: 3, source: 'Issue 29' },
   { key: 'failed_verification', label: 'Failed Verification items', urgency: 4, source: 'Issue 18/19' },
   { key: 'component_blocked', label: 'Component-Blocked Tickets', urgency: 5, source: 'Issue 21' },
   { key: 'waiting_component_overdue', label: 'WAITING_COMPONENT over 7 days', urgency: 6, source: 'Issue 22/23' },
   { key: 'non_op_awaiting_manager', label: 'Non-Op requests awaiting manager confirmation', urgency: 7, source: 'Issue 35' },
-  { key: 'manual_assignment_required', label: 'Manual assignment required (retry exhausted)', urgency: 8, source: 'Issue 30' },
+  { key: 'manual_assignment_required', label: 'Manual assignment required', urgency: 8, source: 'Issue 30' },
   { key: 'recovery_stalled', label: 'Recovery Tickets stalled 14+ days', urgency: 9, source: 'Issue 37' },
 ];
 
@@ -869,26 +873,99 @@ export class DashboardService {
   }
 
   /**
-   * The Action Required panel cards in urgency order. Most sources are later issues and stay graceful
-   * stubs (`available:false`, `count:0`); the `waiting_component_overdue` card is wired here (Issue 23)
-   * with a real, zone-scoped count of WAITING_COMPONENT cycles paused over 7 days.
+   * The Action Required panel cards in urgency order.
+   *
+   * Four are wired; the rest stay graceful stubs (`available:false`, `count:0`) that the UI renders as
+   * "coming soon" rather than as zero work. **A stub must never be drawn as a real zero** — "0 failed
+   * verifications" and "we do not count failed verifications yet" are opposite statements, and the
+   * `available` flag is the whole reason this shape carries a boolean beside a number.
+   *
+   * **B6 — two of the seven stubs cost one `COUNT(*)` each** over data that already ships and already
+   * renders on its own page (`/readiness/vehicle-unavailability`, `/verification`). Lighting them fixes
+   * the **dashboard** from the same definition the Console's attention band reads, which is why they
+   * were done here rather than as Console-local queries.
+   *
+   * **B5 — `filters.zoneId` narrows a CSM/OH.** A ZM is clamped by scope regardless and cannot widen.
    */
-  async actionRequired(scope: ZoneScope, now: Date = new Date()): Promise<ActionRequiredCard[]> {
-    const waitingComponentOverdue = await this.waitingComponentOverdueCount(scope, now);
-    const recoveryStalled = await this.recoveryStalledCount(scope, now);
-    return ACTION_REQUIRED_CARDS.map((c) => {
-      if (c.key === 'waiting_component_overdue') return { ...c, count: waitingComponentOverdue, available: true };
-      if (c.key === 'recovery_stalled') return { ...c, count: recoveryStalled, available: true };
-      return { ...c, count: 0, available: false };
-    });
+  async actionRequired(
+    scope: ZoneScope,
+    filters: { zoneId?: string } = {},
+    now: Date = new Date(),
+  ): Promise<ActionRequiredCard[]> {
+    const zone = this.actionRequiredZone(scope, filters.zoneId);
+    const waitingComponentOverdue = await this.waitingComponentOverdueCount(scope, now, zone);
+    const recoveryStalled = await this.recoveryStalledCount(scope, now, zone);
+    const vehicleUnavailability = await this.openVehicleUnavailabilityCount(zone);
+    const failedVerification = await this.failedVerificationCount(zone);
+    const wired: Record<string, number> = {
+      waiting_component_overdue: waitingComponentOverdue,
+      recovery_stalled: recoveryStalled,
+      vehicle_unavailability: vehicleUnavailability,
+      failed_verification: failedVerification,
+    };
+    return ACTION_REQUIRED_CARDS.map((c) =>
+      c.key in wired ? { ...c, count: wired[c.key], available: true } : { ...c, count: 0, available: false },
+    );
+  }
+
+  /**
+   * The one zone every card counts over, resolved once.
+   *
+   * A ZM's own zone always wins — the query parameter narrows a role that sees everything, and can
+   * never widen one that does not. `null` means "every zone", which only a CSM/OH who named none can
+   * reach.
+   */
+  private actionRequiredZone(scope: ZoneScope, requested: string | undefined): bigint | null {
+    if (scope.role === 'ZONAL_MANAGER' && scope.zoneId != null) return BigInt(scope.zoneId);
+    if (requested && /^\d+$/.test(requested)) return BigInt(requested);
+    return null;
+  }
+
+  /**
+   * B6 — open Vehicle-Unavailability reports in scope. One count over rows `/readiness` already lists.
+   *
+   * `OPEN` only: a `RESOLVED` report is history for a ticket, not work waiting on anybody, and the
+   * page that renders these makes the same split for the same reason.
+   */
+  private async openVehicleUnavailabilityCount(zone: bigint | null): Promise<number> {
+    const zoneFilter = zone !== null ? Prisma.sql`AND z.zone_id = ${zone}` : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<{ n: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS n
+      FROM vehicle_unavailability_reports vu
+      JOIN tickets t ON t.ticket_id = vu.ticket_id
+      JOIN plants p ON p.plant_id = t.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      WHERE vu.status = 'OPEN' ${zoneFilter}`);
+    return rows[0]?.n ?? 0;
+  }
+
+  /**
+   * B6 — verification runs that came back FAILED_VERIFICATION in scope.
+   *
+   * Counted off `verification_runs.outcome`, which is where the verdict actually lives — the same
+   * column `/verification`'s review queue reads. Counting `tickets.status = 'FAILED_VERIFICATION'`
+   * instead would drift the moment a ticket moves on from that status while its failed run stands.
+   */
+  private async failedVerificationCount(zone: bigint | null): Promise<number> {
+    const zoneFilter = zone !== null ? Prisma.sql`AND z.zone_id = ${zone}` : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<{ n: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS n
+      FROM verification_runs vr
+      JOIN tickets t ON t.ticket_id = vr.ticket_id
+      JOIN plants p ON p.plant_id = t.plant_id
+      JOIN zones z ON z.zone_id = p.zone_id
+      WHERE vr.outcome = 'FAILED_VERIFICATION'::"verify_outcome" ${zoneFilter}`);
+    return rows[0]?.n ?? 0;
   }
 
   /**
    * Count RECOVERY Tickets with no state progression for 14+ days (Issue 37 AC#5). Zone-scoped for a
    * ZM (via the ticket's plant→zone); CSM / Operations Head see all zones.
    */
-  private async recoveryStalledCount(scope: ZoneScope, now: Date): Promise<number> {
-    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+  private async recoveryStalledCount(scope: ZoneScope, now: Date, zone: bigint | null = null): Promise<number> {
+    // B5 — `zone` is already the resolved answer (ZM clamp, then the optional narrowing). Falling back
+    // to the scope keeps the two existing callers that pass no zone behaving exactly as before.
+    const restrictZone = zone ?? (scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null);
     const zoneFilter =
       restrictZone !== null ? Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
     const cutoff = new Date(now.getTime() - RECOVERY_STALL_DAYS * 24 * 60 * 60 * 1000);
@@ -907,8 +984,12 @@ export class DashboardService {
    * (CONTEXT §8 auto-escalation). Zone-scoped for a ZM (via the ticket's plant→zone); CSM / Operations
    * Head see all zones.
    */
-  private async waitingComponentOverdueCount(scope: ZoneScope, now: Date): Promise<number> {
-    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
+  private async waitingComponentOverdueCount(
+    scope: ZoneScope,
+    now: Date,
+    zone: bigint | null = null,
+  ): Promise<number> {
+    const restrictZone = zone ?? (scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null);
     const zoneFilter =
       restrictZone !== null ? Prisma.sql`AND z.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
     const cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);

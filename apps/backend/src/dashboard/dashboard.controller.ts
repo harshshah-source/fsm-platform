@@ -1,6 +1,6 @@
 import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -25,6 +25,11 @@ const DEVICE_STATUS_SCOPES: DeviceStatusScope[] = ['ALL', 'INACTIVE', 'ACTIVE', 
 /**
  * The `/api/dashboard/*` manager read surface (Issue 06). Scoped to the manager roles; a ZM is
  * filtered to their own zone inside the service, CSM / Operations Head see all zones.
+ *
+ * Every read takes its scope from `@CurrentScope()`, which folds in the `X-Acting-As-Zone` header
+ * (Issue 27): a CSM / Operations Head acting in a zone reads that zone only, exactly as its ZM would.
+ * Using the raw claims here is what made "Act as ZM" cosmetic — the Zone Operations view rendered over
+ * pan-India numbers.
  */
 @Controller('dashboard')
 @UseGuards(AuthGuard, RoleGuard)
@@ -33,22 +38,19 @@ export class DashboardController {
 
   @Get('zone-overview')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
-  zoneOverview(@CurrentUser() user: AccessTokenClaims): Promise<ZoneOverviewRow[]> {
-    return this.dashboard.zoneOverview({ role: user.role, zoneId: user.zone_id });
+  zoneOverview(@CurrentScope() scope: ManagerScope): Promise<ZoneOverviewRow[]> {
+    return this.dashboard.zoneOverview(scope);
   }
 
   @Get('company-plant-overview')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   companyPlantOverview(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('companyId') companyId?: string,
     @Query('plantId') plantId?: string,
     @Query('zoneId') zoneId?: string,
   ): Promise<CompanyPlantRow[]> {
-    return this.dashboard.companyPlantOverview(
-      { role: user.role, zoneId: user.zone_id },
-      { companyId, plantId, zoneId },
-    );
+    return this.dashboard.companyPlantOverview(scope, { companyId, plantId, zoneId });
   }
 
   /**
@@ -59,26 +61,38 @@ export class DashboardController {
   @Get('zone-operations')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   zoneOperations(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('zoneId') zoneId?: string,
     @Query('status') status?: string,
   ): Promise<ZoneOperationsSummary> {
-    return this.dashboard.zoneOperations(
-      { role: user.role, zoneId: user.zone_id },
-      { zoneId, status: parseStatusScope(status) },
-    );
+    return this.dashboard.zoneOperations(scope, { zoneId, status: parseStatusScope(status) });
   }
 
   @Get('critical-queue')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
-  criticalQueue(@CurrentUser() user: AccessTokenClaims): Promise<CriticalQueueGroup[]> {
-    return this.dashboard.criticalQueue({ role: user.role, zoneId: user.zone_id });
+  criticalQueue(@CurrentScope() scope: ManagerScope): Promise<CriticalQueueGroup[]> {
+    return this.dashboard.criticalQueue(scope);
   }
 
+  /**
+   * **B5 — `?zoneId=` is a correctness fix, not a filter.**
+   *
+   * These counts are zone-scoped for a ZM and **global for a CSM / Operations Head**, which was right
+   * while this only ever rendered on a dashboard that was itself pan-India for those roles. The
+   * Scheduler Console renders the same cards beside a deck that is always **one zone**, and two panes
+   * on one screen disagreeing about how much trouble a zone is in is a defect, not a preference — a
+   * CSM would read "14 failed verifications" next to a North Zone board and act on a national number.
+   *
+   * Follows `zone-operations` exactly: a ZM is still clamped server-side and the parameter cannot widen
+   * them; it only narrows a role that would otherwise see everything.
+   */
   @Get('action-required')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
-  actionRequired(@CurrentUser() user: AccessTokenClaims): Promise<ActionRequiredCard[]> {
-    return this.dashboard.actionRequired({ role: user.role, zoneId: user.zone_id });
+  actionRequired(
+    @CurrentScope() scope: ManagerScope,
+    @Query('zoneId') zoneId?: string,
+  ): Promise<ActionRequiredCard[]> {
+    return this.dashboard.actionRequired(scope, { zoneId });
   }
 
   /**
@@ -88,22 +102,22 @@ export class DashboardController {
    */
   @Get('fleet-composition')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
-  fleetComposition(@CurrentUser() user: AccessTokenClaims): Promise<FleetComposition> {
-    return this.dashboard.fleetComposition({ role: user.role, zoneId: user.zone_id });
+  fleetComposition(@CurrentScope() scope: ManagerScope): Promise<FleetComposition> {
+    return this.dashboard.fleetComposition(scope);
   }
 
   /** Headline fleet counts for the KPI strip: companies / plants / operational breakdown in scope. */
   @Get('fleet-summary')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
-  fleetSummary(@CurrentUser() user: AccessTokenClaims): Promise<FleetSummary> {
-    return this.dashboard.fleetSummary({ role: user.role, zoneId: user.zone_id });
+  fleetSummary(@CurrentScope() scope: ManagerScope): Promise<FleetSummary> {
+    return this.dashboard.fleetSummary(scope);
   }
 
   /** The Companies/Plants KPI click-through (Issue 122b): every company + plant in scope, by name. */
   @Get('fleet-directory')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
-  fleetDirectory(@CurrentUser() user: AccessTokenClaims): Promise<FleetDirectory> {
-    return this.dashboard.fleetDirectory({ role: user.role, zoneId: user.zone_id });
+  fleetDirectory(@CurrentScope() scope: ManagerScope): Promise<FleetDirectory> {
+    return this.dashboard.fleetDirectory(scope);
   }
 
   /**
@@ -114,14 +128,14 @@ export class DashboardController {
   @Get('activity-trend')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   activityTrend(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('range') range?: string,
     @Query('zoneId') zoneId?: string,
   ): Promise<ActivityTrendReport> {
-    return this.dashboard.activityTrend(
-      { role: user.role, zoneId: user.zone_id },
-      { range: parseRange(range), zoneId: parseOptZoneId(zoneId) },
-    );
+    return this.dashboard.activityTrend(scope, {
+      range: parseRange(range),
+      zoneId: parseOptZoneId(zoneId),
+    });
   }
 }
 

@@ -14,7 +14,9 @@ import {
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { istWindowStart } from '../common/ist-day';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -160,8 +162,19 @@ export class SchedulesController {
    * re-registered so the change takes effect without a restart. `PUT /api/settings/dispatch_cron` is
    * refused and points here, so there is exactly one door.
    */
+  /**
+   * **B2 — reading the schedule is widened to the three manager roles; writing is not.**
+   *
+   * A Zonal Manager could not answer *"why is my deck empty at 04:55?"* — the run hour is configurable,
+   * so it cannot be inferred, and this was the only place it is published. That is a hole in the ZM's
+   * own primary screen, and it is a read of a single configured time: no zone scoping applies, because
+   * the cron is global by construction.
+   *
+   * `PUT` below stays `OPERATIONS_HEAD`. Knowing when the run fires and being able to move it are
+   * different permissions, and only the first one was ever the gap.
+   */
   @Get('dispatch-schedule')
-  @Roles('OPERATIONS_HEAD')
+  @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER', 'ZONAL_MANAGER')
   dispatchScheduleGet(): Promise<DispatchScheduleView> {
     return this.dispatchSchedule.current();
   }
@@ -184,24 +197,56 @@ export class SchedulesController {
   /**
    * Issue 113 — manual override for the daily Recommender → Day-Plan dispatch run: force a run now
    * without waiting for the cron. Reuses the exact `runForActiveZones` path the scheduler tick drives.
-   * #179 slice 2 — optional `zoneId` narrows the run to a single zone (the bulk-unassign rebalance's
-   * "Run dispatch" button, zone-scoped); omitted → every active zone, unchanged from before.
+   * #179 slice 2 — optional `zoneId` narrows the run to a single zone; omitted → every active zone.
+   *
+   * ## B3 / #291 — the Zonal Manager widening, and the clamp that makes it safe
+   *
+   * A ZM could not trigger a run at all, which left the Scheduler Console's primary user unable to use
+   * the Console's only engine control. The role list is widened here — and **the clamp below is not
+   * separable from that widening.**
+   *
+   * This endpoint used to read its zone straight off the request body and never check it against the
+   * caller. That was safe *only* because `OPERATIONS_HEAD` and `CENTRAL_SERVICE_MANAGER` are both
+   * global-scope roles, for whom "any zone" and "your zone" are the same permission. Widen the roles
+   * without the clamp and a Zonal Manager can rebuild another manager's day plans — or omit `zoneId`
+   * entirely and trigger a run across every zone in the country.
+   *
+   * **The clamp ignores the body rather than validating it**, and the distinction is the whole point.
+   * A validating clamp (403 when `body.zoneId` disagrees with the caller's zone) is passed trivially by
+   * a client that simply stops sending the field — and the un-scoped path is pan-India. Deriving the
+   * zone from the scope means there is no request a ZM can compose that reaches another zone or reaches
+   * all of them.
+   *
+   * `@CurrentScope()` rather than the claims: it folds in `X-Acting-As-Zone`, so a CSM working a zone
+   * through the backup cascade runs *that* zone — matching every read on the deck they are looking at,
+   * which is the #239 property that turns "confusing" into "correct" once both sit on one screen.
+   * A non-acting CSM/OH still has `zoneId === null` and keeps the pan-India path exactly as before.
    */
   @Post('dispatch-run')
   @HttpCode(200)
-  @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
+  @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER', 'ZONAL_MANAGER')
   async dispatchRunNow(
     @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
+    @CurrentScope() scope: ManagerScope,
     @Body() body: { zoneId?: number; reason?: string } = {},
   ): Promise<DispatchRunSummary> {
+    // The clamp. A zone-scoped caller runs their own zone, whatever the body says; only a caller with
+    // no zone of their own may name one, and only they may name none.
+    const zoneId =
+      scope.zoneId != null
+        ? BigInt(scope.zoneId)
+        : body.zoneId != null
+          ? BigInt(body.zoneId)
+          : undefined;
+
     // MANUAL + actor land on the dispatch_runs ledger row and its audit bracket; #213 adds the
     // optional operator "why" beside them.
     const outcome = await this.dispatchRun.runForActiveZones(new Date(), {
       trigger: 'MANUAL',
       actorUserId: user.user_id,
       actorRole: user.role,
-      zoneId: body.zoneId != null ? BigInt(body.zoneId) : undefined,
+      zoneId,
       reason: typeof body.reason === 'string' ? body.reason : null,
     });
     // #213 — a populated refusal, not a queued run, a silent no-op, or a bare 409: the operator is told
@@ -219,15 +264,22 @@ export class SchedulesController {
   /**
    * #213 — which zones currently have a run in flight, so admin can disable the Run-dispatch button and
    * show why *before* anyone presses it, rather than letting them discover the conflict by pressing
-   * twice. Same role gate as the trigger it guards.
+   * twice. Same role gate as the trigger it guards — which is why it is widened **and clamped in the
+   * same change** as `dispatch-run` above (B3 / #291).
    *
-   * #259 — the answer is now read from the claim ledger, so it is truthful about a run this instance
-   * did not start and about one that was in flight across a restart. Same response shape.
+   * Clamping this one is not symmetry for its own sake. A guard that returns every zone in the country
+   * to a Zonal Manager leaks the national run schedule through a control whose only job is to grey out
+   * one button, and it would disable that button for a run in a zone the ZM cannot act on.
+   *
+   * #259 — the answer is read from the claim ledger, so it is truthful about a run this instance did
+   * not start and about one that was in flight across a restart. Same response shape.
    */
   @Get('dispatch-run/in-flight')
-  @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
-  async dispatchInFlight(): Promise<{ inFlight: DispatchInFlight[] }> {
-    return { inFlight: await this.dispatchRun.inFlightZones() };
+  @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER', 'ZONAL_MANAGER')
+  async dispatchInFlight(@CurrentScope() scope: ManagerScope): Promise<{ inFlight: DispatchInFlight[] }> {
+    return {
+      inFlight: await this.dispatchRun.inFlightZones(scope.zoneId != null ? BigInt(scope.zoneId) : undefined),
+    };
   }
 
   /**
@@ -473,10 +525,22 @@ export class SchedulesController {
   }
 
   // Static route — must be declared before `:engineerId` so it is not captured as a param.
+  /**
+   * #239 (Console scope) — the target-SE picker behind Swap / Reassign / Split.
+   *
+   * Converted to the acting-aware scope because the Console puts this list *on the same screen* as a
+   * deck that is already acting-clamped. Left on the claims, a CSM acting in a zone would be offered
+   * engineers from every zone as reassign targets for work the deck only ever showed for one — the
+   * exact "a pool clamped to the acting zone beside a candidate column scoped pan-India" failure #239
+   * names, which is merely confusing across two pages and is **incorrect** on one.
+   */
   @Get('engineers')
   @Roles(...MANAGER_ROLES)
-  zoneEngineers(@CurrentUser() user: AccessTokenClaims): Promise<ZoneEngineerRow[]> {
-    return this.zm.listZoneEngineers({ role: user.role, zoneId: user.zone_id });
+  zoneEngineers(
+    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
+  ): Promise<ZoneEngineerRow[]> {
+    return this.zm.listZoneEngineers(scopeFor(user, actor));
   }
 
   /**
@@ -564,9 +628,12 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async detail(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Param('engineerId', new ParseUUIDPipe()) engineerId: string,
   ): Promise<ZmScheduleDetail> {
-    const detail = await this.zm.getScheduleDetail(engineerId, { role: user.role, zoneId: user.zone_id });
+    // #239 (Console scope) — the Console's Inspector deep-links here, so it must resolve the same
+    // engineer set the deck did; acting must not change which page answers and which 404s.
+    const detail = await this.zm.getScheduleDetail(engineerId, scopeFor(user, actor));
     if (!detail) throw new NotFoundException({ code: 'SCHEDULE_NOT_FOUND' });
     return detail;
   }

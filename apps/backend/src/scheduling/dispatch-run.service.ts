@@ -827,9 +827,14 @@ export class DispatchRunService {
    *
    * #259 — read from the claim rows rather than from process memory, so the disabled state is truthful
    * about runs this instance did not start and about runs that were in flight when it last restarted.
+   *
+   * **B3/#291 — `zoneId` narrows it to one zone.** The unscoped form answered "is anything running
+   * anywhere", which was harmless while only global-scope roles could ask. A Zonal Manager may now ask,
+   * and must not learn which other zones are mid-run from the control that guards their own button.
+   * Omitted is still global, for the roles that legitimately see every zone.
    */
-  inFlightZones(): Promise<DispatchInFlight[]> {
-    return this.holdersFor(null);
+  inFlightZones(zoneId?: bigint): Promise<DispatchInFlight[]> {
+    return this.holdersFor(zoneId != null ? [zoneId] : null);
   }
 
   /**

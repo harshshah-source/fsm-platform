@@ -12,6 +12,14 @@ export interface DispatchChange {
   ticketId: string;
   /** Who did it. Never null on a returned row — a change with no actor is the engine, not a change. */
   actorId: string;
+  /**
+   * B7 — who that is, resolved to the name an operator knows.
+   *
+   * *"Ravi moved it"* is the operator-facing fact; a UUID is not, and the ledger published nothing but
+   * the UUID. Null when the id resolves to no user (a system actor, or a deleted account) — the client
+   * then falls back to the id rather than inventing a name.
+   */
+  actorName: string | null;
   at: string;
   reason: string | null;
   /** Where the work went (ADD, SWAP) and where it came from (REMOVE, SWAP). */
@@ -109,6 +117,7 @@ export class DispatchChangesTodayService {
             kind: 'SWAP',
             ticketId: a.ticketId,
             actorId: a.addedBy!,
+            actorName: null,
             at: a.createdAt.toISOString(),
             reason: a.addReason ?? null,
             fromSeId: source.batch?.seId ?? null,
@@ -119,6 +128,7 @@ export class DispatchChangesTodayService {
             kind: 'ADD',
             ticketId: a.ticketId,
             actorId: a.addedBy!,
+            actorName: null,
             at: a.createdAt.toISOString(),
             reason: a.addReason ?? null,
             fromSeId: null,
@@ -136,6 +146,7 @@ export class DispatchChangesTodayService {
         kind: 'REMOVE',
         ticketId: r.ticketId,
         actorId: r.removedBy!,
+        actorName: null,
         at: r.removedAt!.toISOString(),
         reason: null,
         fromSeId: r.batch?.seId ?? null,
@@ -153,6 +164,8 @@ export class DispatchChangesTodayService {
       const sy = seqOf.get(y) ?? 0n;
       return sx < sy ? -1 : sx > sy ? 1 : 0;
     });
+    await this.nameActors(changes);
+
     const counts = {
       adds: changes.filter((c) => c.kind === 'ADD').length,
       removes: changes.filter((c) => c.kind === 'REMOVE').length,
@@ -161,5 +174,27 @@ export class DispatchChangesTodayService {
     };
 
     return { operatingDay: istDate(now).toISOString().slice(0, 10), zoneId: String(zoneId), counts, changes };
+  }
+
+  /**
+   * B7 — resolve the ledger's actor ids to names, in one query for the whole page.
+   *
+   * The ledger published bare UUIDs, so the change rail could say *"someone moved it"* and nothing
+   * more. One `IN` over the distinct ids rather than a join on each leg: the two legs are read
+   * separately and paired in memory, so a per-leg include would fetch the same user twice for every
+   * swap and still leave the pairing to do the merging.
+   *
+   * An id that resolves to nothing stays null. That is a real case — a system actor, or a user since
+   * removed — and the client renders the id rather than a fabricated name.
+   */
+  private async nameActors(changes: DispatchChange[]): Promise<void> {
+    const ids = [...new Set(changes.map((c) => c.actorId).filter(Boolean))];
+    if (ids.length === 0) return;
+    const users = await this.prisma.user.findMany({
+      where: { userId: { in: ids } },
+      select: { userId: true, name: true },
+    });
+    const nameById = new Map(users.map((u) => [u.userId, u.name]));
+    for (const c of changes) c.actorName = nameById.get(c.actorId) ?? null;
   }
 }
