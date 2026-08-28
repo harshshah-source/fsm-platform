@@ -1,6 +1,12 @@
 # 285 — Today's Dispatch: the cockpit (Plan / Live / Replay)
 
-Status: **ready-for-agent** (after #284, #283)
+Status: **done-with-follow-up** — built 2026-08-25; header corrected 2026-08-27.
+> **Correction, 2026-08-27.** This header still read `ready-for-agent` two days after the cockpit
+> shipped, while `INDEX.md` row 4 claimed the issue DONE *including* "Run-dispatch relocated".
+> Both were wrong in opposite directions. The cockpit **is** built (Plan/Live/Replay, deck, rails,
+> interception strip); **Run-dispatch was never relocated** — `PlanMode` links to `/bulk-unassign`,
+> an `OPERATIONS_HEAD`-only route that redirects a ZM or CSM to the dashboard. That remainder is
+> owned by Scheduler Console Phase 1.2, not by this issue.
 Type: AFK · Admin
 Decision: [#282](./282-decision-todays-dispatch-crew-deck.md) R1. Design (authoritative):
 [`docs/ui/desktop/approved-designs/todays-dispatch-crew-deck.html`](../../../docs/ui/desktop/approved-designs/todays-dispatch-crew-deck.html)

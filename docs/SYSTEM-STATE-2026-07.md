@@ -1269,20 +1269,53 @@ Known FE gaps: `window.prompt` reason legs (#80), Playwright visual baseline (FE
 `components/data/` untracked by git (#114).
 
 **#285 Today's Dispatch — the scheduler cockpit (done, 2026-08-25):** `/dispatch/today` is the
-primary Dispatch row and the first surface in the product scoped to the **operating day**. Three
-modes over one layout: **Live** (the crew deck — one card per engineer with tier, load as a shape,
-ordered stop chips and availability; the critical interception strip fed by `ESCALATION_REQUIRED`;
-rails for unassignable / held / policy-withheld / changes-today), **Plan** and **Replay**, which
-compose the existing Scheduler Preview and run ledger + DecisionTrace rather than rebuilding either
-(#282 R5). Backed by `GET /dispatch/today` and `GET /dispatch/changes-today` (#284) — both compose
+primary Dispatch row and the first surface in the product scoped to the **operating day**. It shipped
+as three modes (Plan / Live / Replay) over one layout of engineer crew cards — a shape the
+2026-08-28 composition correction later dissolved into the Console's day axis (see the Scheduler
+Console entry below; the mode nav and `CrewCard` no longer exist). The critical interception strip
+fed by `ESCALATION_REQUIRED` and the rails for unassignable / held / policy-withheld / changes-today
+survive. Backed by `GET /dispatch/today` and `GET /dispatch/changes-today` (#284) — both compose
 existing services and decide nothing; capacity comes from the one shared `committedDayPlan`.
 Provenance is rendered from #283's columns under the approved grammar (solid = system, dashed =
-human, dashed violet = tier crossed, heavy crimson = critical, `RET` = return due), with the hard
-rule that **unknown provenance renders as unknown**. `--color-tier-cross` was added to both themes.
+human, dashed violet = tier crossed, `RET` = return due; since the correction, **critical is the
+inline `CRIT` token, not a border** — D11), with the hard rule that **unknown provenance renders as
+unknown**. `--color-tier-cross` was added to both themes.
 The four #281 surfaces remain beneath it as supporting and historical rows — none deleted. Design:
 `docs/ui/desktop/approved-designs/todays-dispatch-crew-deck.html`; decision #282; the design was lost
 outside the repo for five days, which is why #280 recorded that no wireframe existed.
 **Still open in #284:** the run-level decision stream and `/schedules?date=`.
+
+**The Scheduler Console (built 2026-08-27/28, recomposed 2026-08-28; committed `3bbaff3`
+backend + `59a925d` admin):** `/dispatch/today` grew into the Console rather than being replaced by one — no new
+top-level route exists. The Phase 1–4 build was **rejected on composition** by the operator ("not
+the Scheduler Console product we agreed to build") and rebuilt the same day per
+`docs/audits/scheduler-console-ui-composition-correction.md` — same data contracts, write paths,
+RBAC clamps and honesty rules, on the composition of a workforce-scheduling product. The shape now:
+a compact **top bar** (zone picker with remembered last zone for CSM/OH — a ZM gets none; day
+navigation; find; run badge; next-run pill; Run Now; the attention strip; run-facts and grammar
+popovers), the **ENGINEER × DAY board as the dominant canvas** (`console/BoardGrid.tsx`), the People
+rail left, one right-rail **slot with two occupants** (Work Pool by default, the Attention list on
+demand), and a **contextual Inspector** as the bottom band that renders only while something is
+selected. **The day axis replaced the Plan/Live/Replay mode nav (D9):** a past column answers from
+`GET /schedules?date=` at count fidelity, today from the **one lifted `GET /dispatch/today`**
+(`console/useConsoleData.ts` — never given a date; every mutation still invalidates it), a future
+column from `GET /schedules/preview?date=` as non-selectable ghost chips (fetched only for the
+focused day — it runs the real recommender), with committed schedules beating the projection on any
+future date. The run's decision replay is an inspectable object (`?sel=run:<id>`) reached from the
+today column. **Drag and drop shipped as a dialog initiator only (D10):** a legal drop opens the
+authoritative action dialog prefilled (reassign / defer / assign / swap / remove) and nothing
+commits on release; past and projected columns refuse drops by construction. **The chip grammar has
+four channels (D11):** border = provenance, inline tokens = urgency/`RET`/`CHR ×n` (critical is the
+`CRIT` token — it travels with the ticket whoever assigned it, fixing the field-ops P0), cell
+treatment = capacity, and chip fill is **reserved for operational state pending the day-scoped board
+read (D13, deferred)**. The six override controls remain the Inspector's Actions band (one
+implementation); Assign mode (`?assign=1`, today-scoped) still replaces the board, rails and
+Inspector — see the #273 entry below. Specification: the slice doc
+`docs/audits/scheduler-console-implementation-slice-2026-08-27.md` for phases/decisions D1–D8, the
+correction doc for the composition and D9–D13. Open: **D7** (route retirement —
+`/intraday`'s live escalation modal must be relocated first) and **D13** (the day-scoped board read
+that would light past-day chips, operational-state fill, carry-forward markers and device ids on
+chips).
 
 **#273 the Assign Work Console — slice 1 (done, 2026-08-20):** `/assign` exists, gated to manager
 roles, and the top-bar **Assign SE** button opens it — it called `navigate('/')` for its entire life,
@@ -1299,7 +1332,23 @@ site), so the tree groups by the *ticket's* company; and `assignPlants` is **pla
 drafting one company's row at a shared site commits every company's work there — the ledger counts the
 whole plant and the row says so, rather than under-reporting its own commit. The transactional write
 (#275), Distribute (#276) and the orphaned-surface absorption (#277) all landed (below) — P9 is closed.
-**Acting-zone is
+**Two surfaces, one implementation (2026-08-28).** The workspace itself is
+`pages/assign/AssignWorkspace.tsx`; `/assign` is a thin route that renders it, and so is the Scheduler
+Console's **Assign mode**. They differ in exactly three props. `zoneId` narrows the pool, *its ledger*
+and the lane roster to one zone for the Console (slice §14 **D4**) — `assignable-work` **and**
+`/schedules/engineers` both answer pan-India for a CSM or Operations Head who is not acting in a zone,
+and only the first of those is obvious; the second would have offered another zone's engineers as lane
+targets. `/assign` passes no `zoneId` and keeps the pan-India pool on purpose: *where in the country is
+the work?* is a different question from *what is left in this zone today?*, and only the second has a
+zone-scoped deck beside it to contradict. `engineers` lets the Console pass the roster from its own
+lifted payload, so one screen never carries two counts of one engineer's day (#269). `header` is the
+page header on one and the mode banner on the other. The extraction exists because the *draft state
+machine* — not the five components, which were always reusable — is what a second surface would
+otherwise have re-implemented, and it is a machine whose entire contract is "nothing is written until
+commit". **The mixed-commitment rule** (slice §3.4, a written condition of D2's approval): draft work
+and committed work may share a screen, a frame and a grammar but **never a lane object**, which is why
+Assign mode replaces the Console's board, both rails and Inspector instead of sitting beside them, and
+why entering it drops the selection. **Acting-zone is
 honoured on this surface** (inline collapse from the committed `RequestActor` + the shared
 `authHeaders()` client, both halves together) rather than waiting for #239's sweep: on a screen about
 what is left in *this* zone, an acting OH reading pan-India is about to hand out another zone's work.
