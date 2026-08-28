@@ -1,14 +1,15 @@
 // Typed client for the Zone Operations Dashboard endpoints (Issue 06). Mirrors the backend
 // DashboardService view types; token comes from the same sessionStorage key AuthProvider writes.
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
+import { authHeaders } from './authHeaders';
 
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
+
+// The shared `authHeaders()` (not a local bearer-only copy): it also carries `X-Acting-As-Zone`, so a
+// CSM / Operations Head acting in a zone gets that zone's aggregations. Without it the dashboard
+// swapped to the Zone Operations view but kept asking for — and showing — pan-India numbers.
 async function get<T>(path: string): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as T;
 }
@@ -179,7 +180,17 @@ export const apiZoneOperations = (params: { zoneId?: string; status?: string } =
 
 export const apiCriticalQueue = () => get<CriticalQueueGroup[]>('/dashboard/critical-queue');
 
-export const apiActionRequired = () => get<ActionRequiredCard[]>('/dashboard/action-required');
+/**
+ * B5 — `zoneId` narrows a CSM/OH to one zone; a ZM is clamped server-side either way.
+ *
+ * The Scheduler Console **must** pass it. Rendered beside a single-zone deck, the unscoped counts are
+ * a national number under a zone's heading, and the two panes disagree about how much trouble that
+ * zone is in. The dashboard keeps calling it with no argument, which is correct there.
+ */
+export const apiActionRequired = (zoneId?: string) =>
+  get<ActionRequiredCard[]>(
+    `/dashboard/action-required${zoneId ? `?zoneId=${encodeURIComponent(zoneId)}` : ''}`,
+  );
 
 // ---- Fleet-activity trend (Issue 134) ------------------------------------------
 

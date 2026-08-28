@@ -24,6 +24,14 @@ export interface TodayTicket {
   coverageTypeAtAssign: string | null;
   systemPlaced: boolean;
   returnDueToday: boolean;
+  /**
+   * Failure cycles recorded against this ticket's device — the **chronic** predicate's input (3.4).
+   *
+   * A count rather than a flag, so the chip can say *how* chronic and the threshold stays server-side
+   * in one place. Null = the ticket resolves to no device, which is not the same as a device that has
+   * never failed.
+   */
+  failureCycles: number | null;
 }
 
 export interface TodayStop {
@@ -56,6 +64,16 @@ export interface TodaySituation {
   criticalNeedsYou: number;
   overCapacity: number;
   changesToday: number;
+  /**
+   * B1 — two funnel populations the six counters silently omitted, so the strip implied an
+   * exhaustiveness it did not have.
+   *
+   * **Null is "this run did not record it", never zero.** The columns are nullable for runs predating
+   * #177, and rendering an unrecorded population as an empty one is the same class of lie the
+   * provenance grammar exists to prevent.
+   */
+  componentBlockedWithheld: number | null;
+  bucketlessDropped: number | null;
 }
 
 export interface TodayRun {
@@ -72,6 +90,7 @@ export interface TodayUnassignable {
   plantId: string | null;
   plantName: string | null;
   poolEmptyReason: string | null;
+  failureCycles: number | null;
 }
 
 export interface TodayHold {
@@ -81,6 +100,7 @@ export interface TodayHold {
   heldUntil: string;
   expectedFrom: string | null;
   decidedBy: string | null;
+  failureCycles: number | null;
 }
 
 /** #288 — the ledger's `insertion_type` for work an engineer became unavailable on. */
@@ -121,6 +141,8 @@ export interface TodayRecovery {
 
 export interface DispatchTodayView {
   operatingDay: string;
+  /** The chronic threshold in force. Published so no client hard-codes it (#244's precedent). */
+  chronicThreshold: number;
   zone: { zoneId: string; name: string };
   run: TodayRun | null;
   /** #286 — null on an ordinary day; set when this zone was owed a re-dispatch. */
@@ -143,6 +165,8 @@ export interface DispatchChange {
   kind: ChangeKind;
   ticketId: string;
   actorId: string;
+  /** B7 — the name behind `actorId`. Null when it resolves to no user; render the id, never a guess. */
+  actorName: string | null;
   at: string;
   reason: string | null;
   toSeId: string | null;

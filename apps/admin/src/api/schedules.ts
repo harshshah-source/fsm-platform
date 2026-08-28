@@ -306,14 +306,25 @@ export interface OverrideOk {
   status: string;
 }
 
-export interface OverrideConflict {
-  code: 'OVERRIDE_ON_SITE_CONFLICT';
-  message: string;
-  ticketIds: string[];
-}
+/**
+ * The two 409s an override can answer with — **and they are two, not one.**
+ *
+ * `POST /batches/:id/override` returns `OVERRIDE_ON_SITE_CONFLICT` when the engineer is physically at
+ * the site, and `CONFLICT_DEFERRED` when the work is held to a future vehicle-return date. Both are
+ * populated, both are answered by resending with `confirm: true`, and **both used to be typed here as
+ * the ON_SITE code** — so a deferral conflict reached the UI wearing the ON_SITE label and
+ * `ScheduleDetailPage` told the operator "SE is ON_SITE on affected work" about a ticket whose engineer
+ * was nowhere near it. The confirm still worked; the sentence explaining what they were confirming was
+ * about the wrong thing.
+ *
+ * Discriminated on `code` so a caller must handle which one it got.
+ */
+export type OverrideConflict =
+  | { code: 'OVERRIDE_ON_SITE_CONFLICT'; message: string; ticketIds: string[] }
+  | { code: 'CONFLICT_DEFERRED'; message: string; ticketIds: string[] };
 
-/** Thrown on a 409 when an override targets work an SE holds ON_SITE on; carries the conflict payload
- *  so the caller can show the warning and re-submit with `confirm: true` + the mandatory reason. */
+/** Thrown on either override 409; carries the payload so the caller can state which conflict it is and
+ *  re-submit with `confirm: true` + the mandatory reason. */
 export class OverrideConflictError extends Error {
   constructor(public readonly conflict: OverrideConflict) {
     super(conflict.message);

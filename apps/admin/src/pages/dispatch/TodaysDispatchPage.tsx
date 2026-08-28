@@ -1,98 +1,223 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import {
-  apiDispatchChangesToday,
-  apiDispatchToday,
-  SE_UNAVAILABLE,
-  type DispatchChangesTodayView,
-  type DispatchTodayView,
-} from '../../api/dispatchToday';
-import { EmptyState, MetricStrip, PageHeader, type Metric } from '../../components/data';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { SE_UNAVAILABLE, type DispatchTodayView } from '../../api/dispatchToday';
+import { EmptyState, PageHeader } from '../../components/data';
 import { Badge } from '../../components/ui';
 import { Button } from '../../components/ui/Button';
-import {
-  apiDispatchRunDecisions,
-  type DispatchRunDecisions,
-  type PoolEmptyReason,
-} from '../../api/dispatch-runs';
-import { CrewCard, ProvenanceLegend } from './CrewCard';
-import { TracePanel } from './DecisionTrace';
-import { POOL_EMPTY_LABEL, ordinal } from './format';
-
-type Mode = 'plan' | 'live' | 'replay';
-
-const MODES: { id: Mode; label: string; question: string }[] = [
-  { id: 'plan', label: 'Plan', question: 'What the next run will do' },
-  { id: 'live', label: 'Live', question: 'What is happening today' },
-  { id: 'replay', label: 'Replay', question: 'What a past run did, and why' },
-];
+import { Input } from '../../components/ui/Input';
+import { useAuth } from '../../auth/AuthProvider';
+import { AssignMode } from './console/AssignMode';
+import { AttentionRail, AttentionStrip, useActionRequired } from './console/AttentionBand';
+import { BoardGrid, type DropIntent } from './console/BoardGrid';
+import { addDays, parseDayParam, visibleDays, type Span } from './console/dayAxis';
+import { Inspector } from './console/Inspector';
+import { PeopleRail } from './console/PeopleRail';
+import { ChooseZoneState, readLastZone, rememberZone, ZonePicker } from './console/ZonePicker';
+import { RunNowControl } from './console/RunNowControl';
+import { NextRunPill } from './console/NextRunPill';
+import { encodeSelection, parseSelection, sameSelection, type Selection } from './console/selection';
+import { useConsoleData } from './console/useConsoleData';
+import { useDayContext } from './console/useDayContext';
+import { GrammarLegend, type ChipDragPayload } from './console/WorkChip';
+import { WorkRail } from './console/WorkRail';
 
 /**
- * Today's Dispatch — the scheduler engine's operator cockpit (#285, design #282).
+ * The roles `POST /schedules/dispatch-run` serves. A ZM joined them in **#291**, together with the
+ * server-side clamp that derives the zone from the caller instead of the body — the two are one change,
+ * and this list must never be widened ahead of that clamp.
+ */
+const CAN_RUN_DISPATCH = ['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD', 'ZONAL_MANAGER'];
+/** The roles `GET /org/zones` serves, and therefore the roles that get a zone picker. */
+const CAN_CHOOSE_ZONE = ['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'];
+/** Escalation rows shown before the strip collapses to a count — the full list is one click each. */
+const ESCALATION_STRIP_ROWS = 6;
+
+/**
+ * **The Scheduler Console** — one zone-scoped operational workspace (`/dispatch/today`).
  *
- * One zone, one operating day, three modes over one layout. It is a **composition**, not a new
- * engine: every number comes from `GET /dispatch/today`, which itself reads the persisted plan and
- * the one shared capacity counter (#269). Nothing here decides anything, and nothing here is
- * hard-coded — the wireframe's "42 placed · 3 unassignable" are example values, and #282 R6 forbids
- * shipping them.
+ * > The Console is the single zone-scoped operating-day workspace in which a manager sees what the
+ * > engine did, understands why, sees what needs them, changes it, and sees the cost of the change —
+ * > without leaving the screen.
  *
- * Plan stays deliberately thin: it links to the Scheduler Preview that already owns the projection
- * (#250/#251) rather than reimplementing it. Replay is no longer thin — #284's decision stream landed,
- * so it lists the run's own decisions in `processing_rank` order and expands each into the existing
- * `TracePanel`, which is what #285 AC8 asked for and what a pair of links could not deliver. Live is
- * the mode that had no home at all before.
+ * **Recomposed 2026-08-28** per the operator-approved composition correction
+ * (`docs/audits/scheduler-console-ui-composition-correction.md`): the same data contracts, write
+ * paths, RBAC clamps and honesty rules as the Phase 1–4 build, on the composition of a professional
+ * workforce-scheduling product —
+ *
+ * - **The board is the canvas**: an ENGINEER × DAY grid takes all remaining width and height between
+ *   two fixed rails. Rows are engineers in People-rail order; columns are operating days.
+ * - **The day axis replaces the Plan / Live / Replay mode nav** (D9). A past column answers from the
+ *   committed-schedule read, today from the one lifted `GET /dispatch/today` fetch — which is
+ *   **never given a date** — and a future column from the projection. Each column says which mood it
+ *   is in; `TODAY` is always one click away.
+ * - **The top bar owns the frame**: zone, day navigation, find, run state, next run, Run Now, the
+ *   attention strip and the run-facts / legend popovers. Nothing else is full-width except the rare
+ *   recovery notice and the critical-escalation strip, which earn it.
+ * - **The right rail is one slot with two occupants** — Work Pool by default, the Attention list on
+ *   demand. The **contextual Inspector** is the bottom band, rendered only while something is
+ *   selected (the direction's four-region shape; the empty placeholder is gone per correction §5.5).
+ * - **Drag initiates, never commits** (D10): a legal drop opens the authoritative action dialog
+ *   prefilled — same validation, impact preview and mandatory reason as the typed path.
+ *
+ * Role variance here is **rendering only**; every permission is enforced server-side already.
+ * Controls a role does not have are **hidden, never disabled**.
  */
 export default function TodaysDispatchPage() {
   const [params, setParams] = useSearchParams();
-  const mode = (params.get('mode') as Mode | null) ?? 'live';
+  const { session } = useAuth();
+  const role = session?.role ?? '';
+  const mayChooseZone = CAN_CHOOSE_ZONE.includes(role);
+
+  // A ZM sends no zoneId: the backend resolves their own zone from the token and refuses any other.
+  // A CSM/OH must name one — `parseZoneId` throws ZONE_REQUIRED rather than guessing — so the URL
+  // wins, then the zone they last looked at, and failing both they get an explicit chooser.
   const zoneParam = params.get('zoneId') ?? undefined;
+  const [rememberedZone] = useState(() => (mayChooseZone ? readLastZone() : null));
+  const zoneId = zoneParam ?? (mayChooseZone ? (rememberedZone ?? undefined) : undefined);
+  const mustChooseZone = mayChooseZone && !zoneId;
 
-  const [view, setView] = useState<DispatchTodayView | null>(null);
-  const [changes, setChanges] = useState<DispatchChangesTodayView | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const assigning = params.get('assign') === '1';
+  const selection = parseSelection(params.get('sel'));
+  const dayParam = parseDayParam(params.get('day'));
+  const span: Span = params.get('span') === 'week' ? 'week' : 'day';
+  const [filter, setFilter] = useState('');
+  const findRef = useRef<HTMLInputElement>(null);
+  const [railView, setRailView] = useState<'pool' | 'attention'>('pool');
+  const [drag, setDrag] = useState<ChipDragPayload | null>(null);
+  const [dropIntent, setDropIntent] = useState<DropIntent | null>(null);
 
-  const load = useCallback(() => {
-    let alive = true;
-    setLoading(true);
-    setError(null);
-    apiDispatchToday(zoneParam)
-      .then((v) => alive && setView(v))
-      .catch((e: Error) => alive && setError(e.message || 'Failed to load today’s dispatch'))
-      .finally(() => alive && setLoading(false));
-    // The change ledger is secondary content: its failure must not take the deck down with it.
-    apiDispatchChangesToday(zoneParam)
-      .then((c) => alive && setChanges(c))
-      .catch(() => alive && setChanges(null));
-    return () => {
-      alive = false;
-    };
-  }, [zoneParam]);
+  const { view, changes, loading, error, invalidate, version } = useConsoleData(zoneId, !mustChooseZone);
+  const attention = useActionRequired(view?.zone.zoneId);
 
-  useEffect(() => load(), [load]);
+  const patchParams = useCallback(
+    (mutate: (p: URLSearchParams) => void) => {
+      const p = new URLSearchParams(params);
+      mutate(p);
+      setParams(p, { replace: true });
+    },
+    [params, setParams],
+  );
 
-  const setMode = (next: Mode) => {
-    const p = new URLSearchParams(params);
-    p.set('mode', next);
-    setParams(p, { replace: true });
+  /**
+   * §3.4 — entering Assign mode **drops the selection**, and leaving does not restore it.
+   *
+   * A selection is a committed object: the Inspector's whole subject, and an Actions band that
+   * writes on confirm. Carrying one into a drafting surface would put immediate writes on the same
+   * screen as lanes that write nothing, which is the one thing the mixed-commitment rule forbids.
+   */
+  const setAssigning = (next: boolean) =>
+    patchParams((p) => {
+      if (next) {
+        p.set('assign', '1');
+        p.delete('sel');
+      } else {
+        p.delete('assign');
+      }
+    });
+
+  const setZone = (next: string) => {
+    rememberZone(next);
+    patchParams((p) => {
+      p.set('zoneId', next);
+      p.delete('sel'); // a selection from another zone's deck means nothing on this one
+      // …and neither does a draft: Assign mode's pool is narrowed to the zone on screen (§14 D4),
+      // and a client-side draft surviving the switch would stage the old zone's plants under the
+      // new zone's heading. Leaving the mode is the honest answer.
+      p.delete('assign');
+    });
   };
 
-  const metrics: Metric[] = useMemo(() => {
-    const s = view?.situation;
-    return [
-      { label: 'Placed', value: s?.placed ?? 0, hint: 'devices on a plan today', tone: 'brand' },
-      { label: 'Unassignable', value: s?.unassignable ?? 0, hint: 'no eligible engineer', tone: 'warning' },
-      { label: 'Held', value: s?.held ?? 0, hint: 'deferred past today', tone: 'info' },
-      { label: 'Critical needs you', value: s?.criticalNeedsYou ?? 0, hint: 'escalated to a human', tone: 'critical' },
-      { label: 'Over capacity', value: s?.overCapacity ?? 0, hint: 'engineers at or past cap', tone: 'warning' },
-      { label: 'Changes today', value: s?.changesToday ?? 0, hint: 'since dispatch', tone: 'neutral' },
-    ];
-  }, [view]);
+  const select = useCallback(
+    (next: Selection | null) => {
+      setDropIntent(null); // a click is not a drop; a stale prefill must not reopen a dialog
+      patchParams((p) => {
+        if (next === null || sameSelection(next, selection)) p.delete('sel');
+        else p.set('sel', encodeSelection(next));
+      });
+    },
+    [patchParams, selection],
+  );
+
+  /** A legal drop selects the object *and* opens its dialog prefilled — one gesture, zero writes. */
+  const onDropIntent = useCallback(
+    (intent: DropIntent) => {
+      setDropIntent(intent);
+      patchParams((p) => p.set('sel', encodeSelection(intent.sel)));
+    },
+    [patchParams],
+  );
+
+  const setFocusedDay = (day: string) =>
+    patchParams((p) => {
+      if (view && day === view.operatingDay) p.delete('day');
+      else p.set('day', day);
+    });
+  const setSpan = (next: Span) =>
+    patchParams((p) => {
+      if (next === 'day') p.delete('span');
+      else p.set('span', next);
+    });
+
+  // §3.5 — `/` focuses find, `Esc` peels back one layer: selection first, then the attention rail.
+  // Deliberately nothing that fires a write: a shortcut that commits an irreversible override is out
+  // of scope.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
+      if (e.key === '/' && !typing) {
+        e.preventDefault();
+        findRef.current?.focus();
+      } else if (e.key === 'Escape') {
+        if (typing && target === findRef.current) findRef.current?.blur();
+        else if (selection) select(null);
+        else setRailView('pool');
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selection, select]);
+
+  const engineers = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!view) return [];
+    if (!q) return view.engineers;
+    // Filters, never fetches: every object on this screen is already in the one payload. An engineer
+    // whose own name misses but who is carrying a matched plant or ticket stays, because hiding the
+    // lane would hide the match.
+    return view.engineers.filter(
+      (e) =>
+        e.name.toLowerCase().includes(q) ||
+        e.stops.some(
+          (s) =>
+            s.plantName.toLowerCase().includes(q) ||
+            s.tickets.some((t) => t.ticketId.toLowerCase().includes(q)),
+        ),
+    );
+  }, [view, filter]);
+
+  const today = view?.operatingDay ?? '';
+  const focused = dayParam ?? today;
+  const days = useMemo(() => (today ? visibleDays(focused, span) : []), [focused, span, today]);
+  const rosterSeIds = useMemo(() => (view ? view.engineers.map((e) => e.seId) : []), [view]);
+
+  const dayContext = useDayContext(view?.zone.zoneId ?? '', view ? days : [], today, focused, rosterSeIds, version);
+
+  const zonePicker = mayChooseZone ? <ZonePicker value={zoneId} onChange={setZone} /> : null;
+
+  if (mustChooseZone) {
+    return (
+      <div className="flex flex-col gap-4">
+        <PageHeader title="Scheduler Console" actions={zonePicker} />
+        <ChooseZoneState hasZones />
+      </div>
+    );
+  }
 
   if (loading && !view) {
     return (
       <div className="flex flex-col gap-4">
-        <PageHeader title="Today's Dispatch" subtitle="Loading the operating day…" />
+        <PageHeader title="Scheduler Console" subtitle="Loading the operating day…" actions={zonePicker} />
         <div className="h-40 animate-pulse rounded-lg border border-line bg-surface-sunken" />
       </div>
     );
@@ -101,10 +226,10 @@ export default function TodaysDispatchPage() {
   if (error) {
     return (
       <div className="flex flex-col gap-4">
-        <PageHeader title="Today's Dispatch" />
+        <PageHeader title="Scheduler Console" actions={zonePicker} />
         <EmptyState
-          message={`Could not load today’s dispatch — ${error}`}
-          action={<Button onClick={load}>Try again</Button>}
+          message={`Could not load the operating day — ${error}`}
+          action={<Button onClick={invalidate}>Try again</Button>}
         />
       </div>
     );
@@ -115,12 +240,78 @@ export default function TodaysDispatchPage() {
   const run = view.run;
 
   return (
-    <div className="flex flex-col gap-4">
-      <PageHeader
-        title="Today's Dispatch"
-        subtitle={`${view.zone.name} · ${view.operatingDay}`}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col gap-3">
+      {/* ── TOP BAR — the whole frame in one compact strip ─────────────────────────────────── */}
+      <header
+        data-testid="console-top-bar"
+        className="flex flex-col gap-1.5 rounded-lg border border-line bg-surface px-3 py-2"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-sm font-semibold text-ink">Scheduler Console</h1>
+          {zonePicker ?? <span className="text-[11px] text-ink-muted">{view.zone.name}</span>}
+
+          {/* Day navigation — the axis that replaced the mode nav (D9). */}
+          <nav aria-label="Operating day" className="flex items-center gap-0.5 rounded-md bg-surface-sunken p-0.5">
+            <button
+              type="button"
+              data-testid="day-prev"
+              onClick={() => setFocusedDay(addDays(focused, -1))}
+              className="rounded px-1.5 py-0.5 text-[11px] text-ink-muted hover:text-ink"
+            >
+              ‹ Prev
+            </button>
+            <button
+              type="button"
+              data-testid="day-today"
+              aria-current={focused === today}
+              onClick={() => setFocusedDay(today)}
+              className={[
+                'rounded px-2 py-0.5 text-[11px]',
+                focused === today ? 'bg-surface font-semibold text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
+              ].join(' ')}
+            >
+              TODAY
+            </button>
+            <button
+              type="button"
+              data-testid="day-next"
+              onClick={() => setFocusedDay(addDays(focused, 1))}
+              className="rounded px-1.5 py-0.5 text-[11px] text-ink-muted hover:text-ink"
+            >
+              Next ›
+            </button>
+          </nav>
+          <nav aria-label="Span" className="flex items-center gap-0.5 rounded-md bg-surface-sunken p-0.5">
+            {(['day', 'week'] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                data-testid={`span-${s}`}
+                aria-current={span === s}
+                onClick={() => setSpan(s)}
+                className={[
+                  'rounded px-2 py-0.5 text-[11px] capitalize',
+                  span === s ? 'bg-surface font-semibold text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
+                ].join(' ')}
+              >
+                {s}
+              </button>
+            ))}
+          </nav>
+
+          <label className="relative">
+            <span className="sr-only">Find ticket or engineer</span>
+            <Input
+              ref={findRef}
+              data-testid="console-find"
+              className="h-7 w-40 text-xs"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Find ticket or SE  /"
+            />
+          </label>
+
+          <span className="ml-auto flex flex-wrap items-center gap-2">
             {run ? (
               <Badge tone={run.status === 'SUCCESS' ? 'success' : run.status === 'RUNNING' ? 'info' : 'warning'} dot>
                 {run.status === 'RUNNING'
@@ -130,40 +321,70 @@ export default function TodaysDispatchPage() {
             ) : (
               <Badge tone="neutral">No run today</Badge>
             )}
-            <Button onClick={load} variant="secondary">
-              Refresh
-            </Button>
-          </div>
-        }
-      />
+            {/* B2 — a ZM could not answer "why is my deck empty at 04:55?" The hour is configurable,
+                so it cannot be inferred, and this is the only place it is published. */}
+            <NextRunPill />
+            {/* CONTROL — a real trigger, not a link; hidden (never disabled) for roles without it. */}
+            {CAN_RUN_DISPATCH.includes(role) && (
+              <RunNowControl zoneId={view.zone.zoneId} zoneName={view.zone.name} onCompleted={invalidate} />
+            )}
+          </span>
+        </div>
 
-      <nav aria-label="Dispatch mode" className="flex flex-wrap gap-1 rounded-lg bg-surface-sunken p-1">
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => setMode(m.id)}
-            aria-current={mode === m.id}
-            data-testid={`mode-${m.id}`}
-            className={[
-              'rounded-md px-3 py-1.5 text-sm transition-colors',
-              mode === m.id ? 'bg-surface font-semibold text-ink shadow-sm' : 'text-ink-muted hover:text-ink',
-            ].join(' ')}
-          >
-            {m.label}
-            <span className="ml-2 hidden text-[10px] font-normal text-ink-muted sm:inline">{m.question}</span>
-          </button>
-        ))}
-      </nav>
+        <div className="flex flex-wrap items-center gap-2">
+          <AttentionStrip
+            state={attention}
+            expanded={railView === 'attention'}
+            onToggle={() => setRailView((v) => (v === 'attention' ? 'pool' : 'attention'))}
+          />
 
-      <MetricStrip metrics={metrics} />
+          {!assigning && (
+            <button
+              type="button"
+              data-testid="assign-mode-toggle"
+              onClick={() => setAssigning(true)}
+              className="rounded-md border border-line px-2 py-1 text-[11px] text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink"
+            >
+              Assign work
+              <span className="ml-1.5 hidden text-[10px] sm:inline">hand out what the engine left</span>
+            </button>
+          )}
 
+          {/* Run facts — the two nullable funnel counters keep their `—` ≠ 0 distinction here (B1),
+              and the manual refresh lives beside them rather than competing with Run Now (§5.7). */}
+          <details className="relative" data-testid="run-facts">
+            <summary className="cursor-pointer list-none rounded-md border border-line px-2 py-1 text-[11px] text-ink-muted hover:text-ink">
+              Run facts ▾
+            </summary>
+            <div className="absolute z-20 mt-1 w-72 rounded-lg border border-line bg-surface p-3 shadow-lg">
+              <SituationFacts view={view} />
+              <Button className="mt-2" size="sm" variant="secondary" onClick={invalidate}>
+                Refresh the operating day
+              </Button>
+            </div>
+          </details>
+
+          <details className="relative" data-testid="grammar-legend">
+            <summary
+              className="cursor-pointer list-none rounded-md border border-line px-2 py-1 text-[11px] text-ink-muted hover:text-ink"
+              title="What the chips mean"
+            >
+              ?
+            </summary>
+            <div className="absolute z-20 mt-1 w-80 rounded-lg border border-line bg-surface p-3 shadow-lg">
+              <GrammarLegend />
+            </div>
+          </details>
+        </div>
+      </header>
+
+      {/* ── HEALTH — properties of *this run of this zone*, not the cross-cutting queue ──────── */}
       {view.recovery && <RecoveryNotice recovery={view.recovery} />}
 
       {view.escalations.length > 0 && (
         <section
           data-testid="critical-interception"
-          className="rounded-lg border-2 border-critical bg-critical-bg/40 p-3"
+          className="rounded-lg border-2 border-critical bg-critical-bg/40 px-3 py-2"
         >
           <h2 className="text-sm font-semibold text-critical">
             {view.escalations.length} critical{' '}
@@ -179,12 +400,20 @@ export default function TodaysDispatchPage() {
               overloading anyone.
             </p>
           )}
-          <ul className="mt-2 flex flex-col gap-1">
-            {view.escalations.map((e) => (
+          <ul className="mt-1.5 flex flex-col gap-1">
+            {/* Compact under the corrected composition: a zone can carry dozens of escalations, and a
+                strip that scrolls the board off-screen defeats the board. The count above is the whole
+                population; the rows below are the most recent slice, and every one resolves the same
+                way — select, then assign or reassign from the Inspector. */}
+            {view.escalations.slice(0, ESCALATION_STRIP_ROWS).map((e) => (
               <li key={e.insertionId} className="flex flex-wrap items-center gap-2 text-[11px]">
-                <Link to={`/tickets/${e.ticketId}`} className="font-mono text-link">
+                <button
+                  type="button"
+                  className="font-mono text-link"
+                  onClick={() => select({ kind: 'ticket', id: e.ticketId })}
+                >
                   {e.ticketId.slice(0, 8)}
-                </Link>
+                </button>
                 {e.slaBucket && <Badge tone="critical">{e.slaBucket.replace('_', ' ')}</Badge>}
                 <span className="text-ink-muted">
                   escalated {new Date(e.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -194,124 +423,145 @@ export default function TodaysDispatchPage() {
                     {e.assignedSeName ?? e.assignedSeId ?? 'The assigned engineer'} is unavailable
                   </span>
                 )}
-                {/* Assign is the door for work nobody holds. Stranded work is still formally assigned
-                    (escalate-only, #282 R4), and `assignTicket` refuses an assigned ticket — so the
-                    door that works is a reassign on the holder's day plan. */}
-                {e.assignedSeId ? (
-                  <Link to={`/schedules/${e.assignedSeId}`} className="ml-auto text-link">
-                    Reassign on the day plan →
-                  </Link>
-                ) : (
-                  <Link to="/intraday" className="ml-auto text-link">
-                    Assign manually →
-                  </Link>
-                )}
+                {/* Both doors are in the Inspector, so the row resolves in place (Phase 2.4):
+                    stranded work is formally assigned and resolves to PLACED → Reassign; work nobody
+                    holds resolves to UNPLACED → Assign. Selecting is one action either way. */}
+                <button
+                  type="button"
+                  data-testid={`escalation-resolve-${e.ticketId}`}
+                  className="ml-auto text-link"
+                  onClick={() => select({ kind: 'ticket', id: e.ticketId })}
+                >
+                  {e.assignedSeId ? 'Reassign this work →' : 'Assign this work →'}
+                </button>
               </li>
             ))}
           </ul>
+          {view.escalations.length > ESCALATION_STRIP_ROWS && (
+            <p className="mt-1 text-[10px] text-ink-muted">
+              …and {view.escalations.length - ESCALATION_STRIP_ROWS} more. Each resolves the same way —
+              select it, then assign or reassign from the Inspector.
+            </p>
+          )}
         </section>
       )}
 
-      {mode === 'plan' && <PlanMode zoneId={view.zone.zoneId} />}
-      {mode === 'replay' && <ReplayMode runId={run?.runId ?? null} zoneId={view.zone.zoneId} />}
+      {/* ── ASSIGN MODE — its own board region (§3.4, correction §10) ────────────────────────
+          It replaces the board, both rails and the Inspector rather than sitting beside them:
+          draft lanes and committed lanes may share a screen and a grammar but never a lane object.
+          The frame above — zone, day, run state, attention, Run Now — stays throughout. */}
+      {assigning ? (
+        <AssignMode view={view} onExit={() => setAssigning(false)} onCommitted={invalidate} />
+      ) : (
+        <>
+          {/* ── ENGINEERS │ BOARD │ WORK-or-ATTENTION ──────────────────────────────────────── */}
+          <div className="grid gap-3 xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
+            <PeopleRail engineers={engineers} selection={selection} onSelect={select} />
 
-      {mode === 'live' && (
-        <div className="grid gap-4 lg:grid-cols-[1fr_18rem]">
-          <section className="flex flex-col gap-3">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-sm font-semibold text-ink">Crew</h2>
-              <span className="text-[11px] text-ink-muted">{view.engineers.length} engineers</span>
-            </div>
-            {view.engineers.length === 0 ? (
-              <EmptyState message="No engineers on this zone's roster yet." />
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {view.engineers.map((e) => (
-                  <CrewCard key={e.seId} engineer={e} />
-                ))}
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[11px] text-ink-muted">
+                  {engineers.length}
+                  {filter.trim() && ` of ${view.engineers.length}`} engineers ·{' '}
+                  <span className="tabular-nums">{view.situation.placed}</span> devices placed today
+                </span>
               </div>
+              {view.engineers.length === 0 ? (
+                <EmptyState message="No engineers on this zone's roster yet." />
+              ) : engineers.length === 0 ? (
+                <EmptyState message={`No engineer, plant or ticket matches “${filter.trim()}”.`} />
+              ) : (
+                <BoardGrid
+                  view={view}
+                  engineers={engineers}
+                  days={days}
+                  focused={focused}
+                  selection={selection}
+                  onSelect={select}
+                  context={dayContext}
+                  drag={drag}
+                  onDragChange={setDrag}
+                  onDropIntent={onDropIntent}
+                  onFocusDay={setFocusedDay}
+                />
+              )}
+            </div>
+
+            {/* One slot, two occupants — Work Pool by default, Attention on demand. Never both. */}
+            {railView === 'attention' ? (
+              <AttentionRail state={attention} zoneName={view.zone.name} onClose={() => setRailView('pool')} />
+            ) : (
+              <WorkRail
+                rails={view.rails}
+                changes={changes}
+                selection={selection}
+                onSelect={select}
+                filter={filter}
+                chronicThreshold={view.chronicThreshold}
+                drag={drag}
+                onDragChange={setDrag}
+                onDropIntent={onDropIntent}
+              />
             )}
-            <ProvenanceLegend />
-          </section>
+          </div>
 
-          <aside className="flex flex-col gap-3">
-            <Rail
-              title="Unassignable"
-              count={view.rails.unassignable.length}
-              empty="Everything found an engineer."
-            >
-              {view.rails.unassignable.map((u) => (
-                <li key={u.ticketId} className="flex flex-col">
-                  <Link to={`/tickets/${u.ticketId}`} className="font-mono text-link">
-                    {u.deviceId ?? u.ticketId.slice(0, 8)}
-                  </Link>
-                  <span className="text-ink-muted">
-                    {u.plantName ?? '—'} ·{' '}
-                    {u.poolEmptyReason === 'NO_COVERAGE'
-                      ? 'no coverage'
-                      : u.poolEmptyReason === 'ALL_DROPPED'
-                        ? 'all candidates dropped'
-                        : 'reason not recorded'}
-                  </span>
-                </li>
-              ))}
-            </Rail>
-
-            <Rail title="Held / deferred" count={view.rails.held.length} empty="Nothing is being held back.">
-              {view.rails.held.map((h) => (
-                <li key={h.ticketId} className="flex flex-col">
-                  <Link to={`/tickets/${h.ticketId}`} className="font-mono text-link">
-                    {h.deviceId ?? h.ticketId.slice(0, 8)}
-                  </Link>
-                  <span className="text-ink-muted">
-                    {h.plantName ?? '—'} · returns {h.heldUntil}
-                    {h.decidedBy ? ' · manager-approved' : ''}
-                  </span>
-                </li>
-              ))}
-            </Rail>
-
-            <section className="rounded-lg border border-line bg-surface p-3">
-              <h3 className="flex items-baseline justify-between text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
-                Withheld by policy
-                <span className="tabular-nums text-ink">{view.rails.policyWithheld.count}</span>
-              </h3>
-              {/* The engine counts this work and never itemises it — those tickets get no
-                  recommendation, no row and no trace. Saying "a count, not a list" is the honest
-                  rendering; a truncated-looking list would be an invention. */}
-              <p className="mt-1 text-[10px] text-ink-muted">
-                Below the assignment threshold. Counted by the run, not itemised.
-              </p>
-            </section>
-
-            <Rail
-              title="Changes today"
-              count={changes?.counts.total ?? 0}
-              empty="Nobody has changed today's plan."
-              subtitle={
-                changes
-                  ? `${changes.counts.adds} adds · ${changes.counts.removes} removes · ${changes.counts.swaps} swaps`
-                  : undefined
-              }
-            >
-              {(changes?.changes ?? []).slice(0, 8).map((c, i) => (
-                <li key={`${c.ticketId}-${c.at}-${i}`} className="flex flex-col">
-                  <span>
-                    <Badge tone={c.kind === 'SWAP' ? 'warning' : c.kind === 'ADD' ? 'info' : 'neutral'}>
-                      {c.kind.toLowerCase()}
-                    </Badge>{' '}
-                    <Link to={`/tickets/${c.ticketId}`} className="font-mono text-link">
-                      {c.ticketId.slice(0, 8)}
-                    </Link>
-                  </span>
-                  {c.reason && <span className="text-ink-muted">{c.reason}</span>}
-                </li>
-              ))}
-            </Rail>
-          </aside>
-        </div>
+          {/* ── CONTEXTUAL INSPECTOR — rendered only while something is selected ───────────── */}
+          <Inspector
+            selection={selection}
+            view={view}
+            onClose={() => select(null)}
+            onCommitted={invalidate}
+            prefill={dropIntent && selection && sameSelection(dropIntent.sel, selection) ? dropIntent.prefill : null}
+          />
+        </>
       )}
     </div>
+  );
+}
+
+/**
+ * B1 — the situation counters, relocated from the full-width strip into the run-facts popover and
+ * the regions that own them (correction §4): placed lives on the board header, unassignable / held /
+ * changes are the Work Pool's tab counts, over-capacity is per-engineer in the People rail, and
+ * critical is the interception strip. The two *nullable* funnel populations live here with their
+ * `—` ≠ 0 distinction intact — null is "this run did not record it", never zero.
+ */
+function SituationFacts({ view }: { view: DispatchTodayView }) {
+  const s = view.situation;
+  // `sub` is printed, not tucked into a tooltip: "—" needs its explanation beside it, because "not
+  // recorded" and "zero" are opposite claims and the dash alone does not say which this is.
+  const rows: { label: string; value: string; hint?: string; sub?: string }[] = [
+    { label: 'Placed', value: String(s.placed), hint: 'devices on a plan today' },
+    { label: 'Unassignable', value: String(s.unassignable), hint: 'no eligible engineer' },
+    { label: 'Held', value: String(s.held), hint: 'deferred past today' },
+    { label: 'Critical needs you', value: String(s.criticalNeedsYou), hint: 'escalated to a human' },
+    { label: 'Over capacity', value: String(s.overCapacity), hint: 'engineers at or past cap' },
+    { label: 'Changes today', value: String(s.changesToday), hint: 'since dispatch' },
+    {
+      label: 'Component-blocked',
+      value: s.componentBlockedWithheld == null ? '—' : String(s.componentBlockedWithheld),
+      sub: s.componentBlockedWithheld == null ? 'not recorded by this run' : 'withheld — device blocked',
+    },
+    {
+      label: 'No SLA bucket',
+      value: s.bucketlessDropped == null ? '—' : String(s.bucketlessDropped),
+      sub: s.bucketlessDropped == null ? 'not recorded by this run' : 'dropped before ranking',
+    },
+  ];
+  return (
+    <dl className="flex flex-col gap-1">
+      {rows.map((r) => (
+        <div key={r.label} className="text-[11px]">
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-ink-muted" title={r.hint}>
+              {r.label}
+            </dt>
+            <dd className="tabular-nums font-semibold text-ink">{r.value}</dd>
+          </div>
+          {r.sub && <p className="text-[10px] text-ink-muted">{r.sub}</p>}
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -319,15 +569,13 @@ export default function TodaysDispatchPage() {
  * #286 — what happened to a zone whose dispatch run died this morning.
  *
  * Rendered above the deck rather than in the work rail on purpose: it is not a queue of work, it is a
- * statement about whether this zone's day is intact. Four states, and the operator has to be able to
- * tell them apart at a glance —
+ * statement about whether this zone's day is intact — the one thing besides the escalation strip that
+ * keeps full width in the corrected composition, because it earns it. Four states, and the operator
+ * has to be able to tell them apart at a glance —
  *  - `RECOVERED`: the system put it right by itself. Reassurance, not an alarm.
  *  - `PENDING`: still owed, and the collector will come back for it.
  *  - `EXHAUSTED`: the system tried its budget and stopped. Somebody has to look.
  *  - `EXPIRED`: the field day ran out first. The work did not happen and will not happen today.
- *
- * The attempt count and the last failure are shown for the two that need action, because "it gave up"
- * without saying after how many tries or why is an alert nobody can act on.
  */
 function RecoveryNotice({ recovery }: { recovery: NonNullable<DispatchTodayView['recovery']> }) {
   const needsAction = recovery.state === 'EXHAUSTED' || recovery.state === 'EXPIRED';
@@ -367,186 +615,6 @@ function RecoveryNotice({ recovery }: { recovery: NonNullable<DispatchTodayView[
           Nothing further will be attempted automatically today — run dispatch for this zone manually
           once the cause is cleared.
         </p>
-      )}
-    </section>
-  );
-}
-
-function Rail({
-  title,
-  count,
-  empty,
-  subtitle,
-  children,
-}: {
-  title: string;
-  count: number;
-  empty: string;
-  subtitle?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border border-line bg-surface p-3">
-      <h3 className="flex items-baseline justify-between text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
-        {title}
-        <span className="tabular-nums text-ink">{count}</span>
-      </h3>
-      {subtitle && <p className="mt-0.5 text-[10px] text-ink-muted">{subtitle}</p>}
-      {count === 0 ? (
-        <p className="mt-1 text-[10px] text-ink-muted">{empty}</p>
-      ) : (
-        <ul className="mt-2 flex flex-col gap-1.5 text-[11px]">{children}</ul>
-      )}
-    </section>
-  );
-}
-
-/**
- * Plan mode points at the projection that already exists rather than rebuilding it.
- *
- * #250 made the preview project the *real* recommender and #251 shipped the page; #282 R5 says reuse
- * it. What the cockpit adds is adjacency — the projection and the button that executes it finally in
- * one place, instead of two nav groups apart.
- */
-function PlanMode({ zoneId }: { zoneId: string }) {
-  return (
-    <section className="rounded-lg border border-line bg-surface p-4">
-      <h2 className="text-sm font-semibold text-ink">What the next run will do</h2>
-      <p className="mt-1 max-w-prose text-[12px] text-ink-muted">
-        The projection runs the real recommender with every write suppressed, so it is what would
-        happen — not a second scheduler’s opinion. Holding a ticket back is the only change available
-        before a run; approval was never required.
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Link to={`/schedules/preview?zoneId=${encodeURIComponent(zoneId)}`}>
-          <Button>Open the projection</Button>
-        </Link>
-        <Link to="/bulk-unassign">
-          <Button variant="secondary">Run dispatch</Button>
-        </Link>
-      </div>
-    </section>
-  );
-}
-
-/**
- * Replay — the run's own decisions, in the order the engine made them (#285 AC8, #284 §C).
- *
- * `processing_rank` is the whole reason this is a replay and not a report: it is the order the engine
- * actually considered tickets in, and any other sort describes the same decisions in an order the run
- * never used. Each row expands into the per-ticket trace that already owns "why this SE" — the deep
- * view is not rebuilt here, it is reached from here.
- *
- * An **unassignable** decision is a decision and gets a row. Listing only the placements would show a
- * run doing less than it did, which is the same class of omission #282 R6 forbids on the counters.
- */
-function ReplayMode({ runId, zoneId }: { runId: string | null; zoneId: string }) {
-  const [data, setData] = useState<DispatchRunDecisions | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [openTicket, setOpenTicket] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!runId) return;
-    let live = true;
-    setData(null);
-    setError(null);
-    apiDispatchRunDecisions(runId, { zoneId })
-      .then((d) => live && setData(d))
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : 'Failed to load the decisions'));
-    return () => {
-      live = false;
-    };
-  }, [runId, zoneId]);
-
-  return (
-    <section className="flex flex-col gap-3">
-      <div className="rounded-lg border border-line bg-surface p-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-sm font-semibold text-ink">What a past run did, and why</h2>
-          <div className="flex flex-wrap gap-2">
-            {runId && (
-              <Link to={`/dispatch-runs/${runId}`}>
-                <Button variant="secondary">Run detail</Button>
-              </Link>
-            )}
-            <Link to="/dispatch-runs">
-              <Button variant="secondary">All runs</Button>
-            </Link>
-          </div>
-        </div>
-        <p className="mt-1 max-w-prose text-[12px] text-ink-muted">
-          Decisions in the order the engine made them. Open one for the candidates it compared, the
-          tier it evaluated and the capacity at the moment it chose.
-        </p>
-      </div>
-
-      {!runId ? (
-        <EmptyState message="No dispatch run for this zone today — there is nothing to replay yet." />
-      ) : error ? (
-        <EmptyState message={`Could not load this run’s decisions — ${error}`} />
-      ) : !data ? (
-        <EmptyState message="Loading decisions…" />
-      ) : data.rows.length === 0 ? (
-        <div data-testid="replay-empty">
-          <EmptyState message="This run recorded no decisions for this zone." />
-        </div>
-      ) : (
-        <section className="rounded-lg border border-line bg-surface">
-          <h3 className="border-b border-line px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
-            Decisions
-            <span className="ml-2 tabular-nums text-ink">
-              {data.rows.length} of {data.total}
-            </span>
-          </h3>
-          <ul className="divide-y divide-line">
-            {data.rows.map((d) => (
-              <li key={d.ticketId} data-testid={`decision-row-${d.ticketId}`} className="px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                  <span className="tabular-nums text-ink-muted">
-                    {d.processingRank == null ? '—' : ordinal(d.processingRank)}
-                  </span>
-                  <Link to={`/tickets/${d.ticketId}`} className="font-mono text-link">
-                    {d.ticketId.slice(0, 8)}
-                  </Link>
-                  <span className="text-ink">{d.plantName ?? d.plantId ?? '—'}</span>
-                  {d.deviceBucket && <Badge tone="neutral">{d.deviceBucket.replace('_', ' ')}</Badge>}
-                  {d.seName ? (
-                    <span className="text-ink">{d.seName}</span>
-                  ) : (
-                    <span className="text-warning">
-                      Unassignable
-                      {d.poolEmptyReason && ` — ${POOL_EMPTY_LABEL[d.poolEmptyReason as PoolEmptyReason] ?? d.poolEmptyReason}`}
-                    </span>
-                  )}
-                  {d.status && d.status !== 'DISPATCHED' && d.status !== 'UNASSIGNABLE' && (
-                    // RETIRED (#286) and SUGGESTED both mean "intended, not placed" — worth saying,
-                    // because the row otherwise reads as work that landed on somebody's plan.
-                    <Badge tone="warning">{d.status.toLowerCase()}</Badge>
-                  )}
-                  <button
-                    type="button"
-                    className="ml-auto text-link"
-                    aria-expanded={openTicket === d.ticketId}
-                    onClick={() => setOpenTicket(openTicket === d.ticketId ? null : d.ticketId)}
-                  >
-                    {openTicket === d.ticketId ? 'Hide why' : 'Why?'}
-                  </button>
-                </div>
-                {openTicket === d.ticketId && runId && (
-                  <div className="mt-2">
-                    <TracePanel runId={runId} ticketId={d.ticketId} />
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-          {data.total > data.rows.length && (
-            <p className="border-t border-line px-3 py-2 text-[10px] text-ink-muted">
-              Showing the first {data.rows.length} of {data.total} decisions. Open the run detail for
-              the full ledger.
-            </p>
-          )}
-        </section>
       )}
     </section>
   );

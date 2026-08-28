@@ -71,8 +71,13 @@ export interface SchedulerPreviewResult {
 export type HoldResult =
   | { result: 'OK'; ticketId: string; heldUntil: string }
   | { result: 'NOT_FOUND' }
-  | { result: 'NOT_HOLDABLE'; status: string; assignmentState: string }
-  | { result: 'CONFLICT_VEHICLE_UNAVAILABLE'; expectedFrom: string; reportId: string };
+  | { result: 'NOT_HOLDABLE'; status: string; assignmentState: string; message: string }
+  | {
+      result: 'CONFLICT_VEHICLE_UNAVAILABLE';
+      expectedFrom: string;
+      reportId: string;
+      message: string;
+    };
 
 export type ReleaseResult =
   | { result: 'OK'; ticketId: string }
@@ -107,13 +112,49 @@ export function getSchedulerPreview(date: string): Promise<SchedulerPreviewResul
  * report — the server refuses that case first and returns the return-date context, so the operator
  * decides knowingly rather than discovering it afterwards.
  */
-export function placeHold(input: {
+export async function placeHold(input: {
   ticketId: string;
   heldUntil: string;
   reasonCode: string;
   confirm?: boolean;
 }): Promise<HoldResult> {
-  return post<HoldResult>('/schedules/holds', input);
+  const res = await fetch(`${BASE_URL}/schedules/holds`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(input),
+  });
+  // The two refusals are **409 bodies, not failures** — the backend says so in its own words
+  // ("returned as a 409 body rather than thrown away: the client needs the return-date context to show
+  // the operator what they would be overwriting before offering the confirm"). Routing them through the
+  // shared `post` helper threw on `!res.ok`, so both variants declared in `HoldResult` were unreachable
+  // and every refusal surfaced as a bare `REQUEST_FAILED_409`. Read them.
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as {
+      code?: string;
+      message?: string;
+      status?: string;
+      assignmentState?: string;
+      expectedFrom?: string;
+      reportId?: string;
+    };
+    if (body.code === 'CONFLICT_VEHICLE_UNAVAILABLE') {
+      return {
+        result: 'CONFLICT_VEHICLE_UNAVAILABLE',
+        expectedFrom: String(body.expectedFrom ?? ''),
+        reportId: String(body.reportId ?? ''),
+        message: String(body.message ?? 'A vehicle-unavailability report already sets this return date.'),
+      };
+    }
+    return {
+      result: 'NOT_HOLDABLE',
+      status: String(body.status ?? ''),
+      assignmentState: String(body.assignmentState ?? ''),
+      message: String(body.message ?? 'This ticket cannot be held.'),
+    };
+  }
+  if (res.status === 404) return { result: 'NOT_FOUND' };
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as HoldResult;
 }
 
 export function releaseHold(ticketId: string): Promise<ReleaseResult> {

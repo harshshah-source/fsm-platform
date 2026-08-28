@@ -22,8 +22,15 @@ export interface CandidateColumnProps {
   /** The plant the operator is working on; null before the pool has loaded. */
   plant: PlantCandidates | null;
   loading: boolean;
-  /** Put this engineer on a lane holding the focused plant. Never disabled — see below. */
-  onAssign: (seId: string) => void;
+  /**
+   * Put this engineer on a lane holding the focused plant. Never disabled — see below.
+   *
+   * **Omitted makes the column read-only**, which is how the Scheduler Console's Alternatives band
+   * uses it: the same engine order, the same tiers, the same drop reasons, with no per-row Assign.
+   * Hidden rather than disabled, per the Console's hide-don't-disable rule — a greyed-out Assign
+   * would advertise the action as broken instead of as belonging to another surface.
+   */
+  onAssign?: (seId: string) => void;
 }
 
 /**
@@ -95,7 +102,13 @@ export function CandidateColumn({ plant, loading, onAssign }: CandidateColumnPro
   );
 }
 
-function Candidate({ candidate, onAssign }: { candidate: CandidateRow; onAssign: (seId: string) => void }) {
+function Candidate({
+  candidate,
+  onAssign,
+}: {
+  candidate: CandidateRow;
+  onAssign?: (seId: string) => void;
+}) {
   const dropped = candidate.verdict === 'DROPPED';
   // Over capacity is read from the published figures with #269's one helper rather than from the drop
   // reason, so the marking survives an engineer who is over capacity *and* dropped for something the
@@ -121,9 +134,11 @@ function Candidate({ candidate, onAssign }: { candidate: CandidateRow; onAssign:
           committed={candidate.committed}
           dailyCapacity={candidate.dailyCapacity ?? undefined}
         />
-        <Button size="sm" variant="ghost" onClick={() => onAssign(candidate.seId)}>
-          Assign
-        </Button>
+        {onAssign && (
+          <Button size="sm" variant="ghost" onClick={() => onAssign(candidate.seId)}>
+            Assign
+          </Button>
+        )}
       </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-1">

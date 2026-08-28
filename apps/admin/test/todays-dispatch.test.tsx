@@ -1,7 +1,9 @@
+import type { SessionView } from '@fsm/shared';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DispatchChangesTodayView, DispatchTodayView } from '../src/api/dispatchToday';
+import { AuthProvider } from '../src/auth/AuthProvider';
 import TodaysDispatchPage from '../src/pages/dispatch/TodaysDispatchPage';
 
 vi.mock('../src/api/dispatch-runs', async () => {
@@ -28,11 +30,13 @@ const ticket = (over: Partial<DispatchTodayView['engineers'][0]['stops'][0]['tic
   coverageTypeAtAssign: 'DEDICATED',
   systemPlaced: true,
   returnDueToday: false,
+  failureCycles: null,
   ...over,
 });
 
 const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
   operatingDay: '2026-08-25',
+  chronicThreshold: 3,
   zone: { zoneId: '7', name: 'North Zone' },
   run: { runId: '42', status: 'SUCCESS', trigger: 'CRON', startedAt: '2026-08-25T05:00:00Z', finishedAt: null },
   engineers: [
@@ -59,7 +63,7 @@ const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
       ],
     },
   ],
-  situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 0, overCapacity: 0, changesToday: 0 },
+  situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 0, overCapacity: 0, changesToday: 0, componentBlockedWithheld: null, bucketlessDropped: null },
   rails: { unassignable: [], held: [], policyWithheld: { count: 5, itemised: false } },
   escalations: [],
   recovery: null,
@@ -74,12 +78,18 @@ const changes = (over: Partial<DispatchChangesTodayView> = {}): DispatchChangesT
   ...over,
 });
 
-const renderPage = () =>
+const ZM: SessionView = { user_id: 'zm1', role: 'ZONAL_MANAGER', zone_id: 7, acted_as_role: null };
+
+const renderAt = (entry: string, session: SessionView = ZM) =>
   render(
-    <MemoryRouter initialEntries={['/dispatch/today']}>
-      <TodaysDispatchPage />
-    </MemoryRouter>,
+    <AuthProvider initialSession={session}>
+      <MemoryRouter initialEntries={[entry]}>
+        <TodaysDispatchPage />
+      </MemoryRouter>
+    </AuthProvider>,
   );
+
+const renderPage = (session: SessionView = ZM) => renderAt('/dispatch/today', session);
 
 describe("#285 — Today's Dispatch cockpit", () => {
   beforeEach(() => {
@@ -90,9 +100,14 @@ describe("#285 — Today's Dispatch cockpit", () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(view());
     renderPage();
 
-    expect(await screen.findByTestId('crew-card-se-1')).toBeInTheDocument();
-    expect(screen.getByText('Ramesh K.')).toBeInTheDocument();
-    expect(screen.getByText('Acme Cement')).toBeInTheDocument();
+    // Scoped to the board lane on purpose. Under the Console's approved four-region layout an
+    // engineer is legitimately named twice — once in the People rail, once on their board lane — so an
+    // unscoped query matches both. The assertion that matters is that the *lane* carries the name and
+    // the stop, which is what a plain `getByText` was only incidentally checking before.
+    const lane = await screen.findByTestId('cell-se-1-2026-08-25');
+    expect(within(lane).getByText('Acme Cement')).toBeInTheDocument();
+    expect(within(screen.getByTestId('console-board')).getByTestId('lane-se-1')).toHaveTextContent('Ramesh K.');
+    expect(within(screen.getByTestId('console-people-rail')).getByText('Ramesh K.')).toBeInTheDocument();
   });
 
   it('shows an engineer with no stops rather than omitting them — an empty lane is a fact', async () => {
@@ -116,8 +131,8 @@ describe("#285 — Today's Dispatch cockpit", () => {
     );
     renderPage();
 
-    expect(await screen.findByTestId('crew-card-se-idle')).toBeInTheDocument();
-    expect(screen.getByText(/available for work/i)).toBeInTheDocument();
+    expect(await screen.findByTestId('cell-se-idle-2026-08-25')).toBeInTheDocument();
+    expect(screen.getByText(/no stops — available/i)).toBeInTheDocument();
   });
 
   it('draws a human override differently from a system decision', async () => {
@@ -193,7 +208,7 @@ describe("#285 — Today's Dispatch cockpit", () => {
   it('surfaces critical escalations as an interception strip', async () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(
       view({
-        situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0 },
+        situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0, componentBlockedWithheld: null, bucketlessDropped: null },
         escalations: [
           {
             insertionId: 'i1',
@@ -225,12 +240,12 @@ describe("#285 — Today's Dispatch cockpit", () => {
   it('takes every counter from the payload — none are hard-coded', async () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(
       view({
-        situation: { placed: 42, unassignable: 3, held: 2, criticalNeedsYou: 1, overCapacity: 1, changesToday: 4 },
+        situation: { placed: 42, unassignable: 3, held: 2, criticalNeedsYou: 1, overCapacity: 1, changesToday: 4, componentBlockedWithheld: null, bucketlessDropped: null },
       }),
     );
     renderPage();
 
-    await screen.findByTestId('crew-card-se-1');
+    await screen.findByTestId('lane-se-1');
     for (const n of ['42', '3', '2', '1', '4']) {
       expect(screen.getAllByText(n).length).toBeGreaterThan(0);
     }
@@ -244,7 +259,7 @@ describe("#285 — Today's Dispatch cockpit", () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(view());
     renderPage();
 
-    await screen.findByTestId('crew-card-se-1');
+    await screen.findByTestId('lane-se-1');
     expect(screen.queryByTestId('recovery-notice')).not.toBeInTheDocument();
   });
 
@@ -286,13 +301,14 @@ describe("#285 — Today's Dispatch cockpit", () => {
   });
 
   /**
-   * #285 AC8 / #284 §C — Replay renders the run's own decisions, in the order the engine made them.
+   * #285 AC8 / #284 §C — the run's own decisions, in the order the engine made them.
    *
-   * It shipped as a pair of links to the ledger, which was honest but was not Replay: the question
-   * "what did this run decide, and in what order" had no answer on the page. `processing_rank` had
-   * persisted that order the whole time.
+   * The Plan/Live/Replay mode nav dissolved into the day axis (composition correction §4), so the
+   * run is now an *inspectable object*: `?sel=run:<id>`, reached from the today column's
+   * "Run decisions →" header link, opening the same single Inspector everything else opens.
+   * `processing_rank` is still the spine — any other order describes decisions the run never made.
    */
-  it('replay lists the run decisions in processing_rank order', async () => {
+  it('the run inspector lists the decisions in processing_rank order', async () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(view());
     vi.mocked(apiDispatchRunDecisions).mockResolvedValue({
       runId: '42',
@@ -335,11 +351,7 @@ describe("#285 — Today's Dispatch cockpit", () => {
       ],
     });
 
-    render(
-      <MemoryRouter initialEntries={['/dispatch/today?mode=replay']}>
-        <TodaysDispatchPage />
-      </MemoryRouter>,
-    );
+    renderAt('/dispatch/today?sel=run:42');
 
     const rows = await screen.findAllByTestId(/^decision-row-/);
     expect(rows).toHaveLength(2);
@@ -350,7 +362,7 @@ describe("#285 — Today's Dispatch cockpit", () => {
     expect(rows[1]).toHaveTextContent(/no coverage/i);
   });
 
-  it('replay says so when a past run made no decisions, rather than rendering nothing', async () => {
+  it('the run inspector says so when a run made no decisions, rather than rendering nothing', async () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(view());
     vi.mocked(apiDispatchRunDecisions).mockResolvedValue({
       runId: '42',
@@ -360,11 +372,7 @@ describe("#285 — Today's Dispatch cockpit", () => {
       rows: [],
     });
 
-    render(
-      <MemoryRouter initialEntries={['/dispatch/today?mode=replay']}>
-        <TodaysDispatchPage />
-      </MemoryRouter>,
-    );
+    renderAt('/dispatch/today?sel=run:42');
 
     expect(await screen.findByTestId('replay-empty')).toBeInTheDocument();
   });
@@ -395,10 +403,19 @@ describe('#288 — stranded work in the interception strip', () => {
     assignedSeName: 'Ramesh Kumar',
   };
 
-  it('says why this row is here and sends the manager to the day plan that owns it', async () => {
+  /**
+   * **Updated by Console Phase 2.4.** #288's substance is unchanged and still asserted: the row says
+   * *this* engineer is unavailable, and the capacity sentence is withheld over a row it is not true of.
+   * What changed is only the door. The link to `/schedules/se-7777` existed because reassigning was two
+   * pages away — `assignTicket` refuses an assigned ticket, so a reassign on the holder's day plan was
+   * the only path that worked. The Inspector now offers that reassign in place, and `placementOf` makes
+   * the same distinction the link encoded: stranded work is formally assigned, so it resolves to PLACED
+   * and is offered Reassign rather than Assign.
+   */
+  it('says why this row is here and offers the reassign that resolves it', async () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(
       view({
-        situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0 },
+        situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0, componentBlockedWithheld: null, bucketlessDropped: null },
         escalations: [stranded],
       }),
     );
@@ -406,7 +423,8 @@ describe('#288 — stranded work in the interception strip', () => {
 
     const strip = within(await screen.findByTestId('critical-interception'));
     expect(strip.getByText(/Ramesh Kumar/)).toBeInTheDocument();
-    expect(strip.getByRole('link', { name: /day plan/i })).toHaveAttribute('href', '/schedules/se-7777');
+    // Work somebody already holds is reassigned, never assigned — the distinction the old link carried.
+    expect(strip.getByTestId(`escalation-resolve-${stranded.ticketId}`)).toHaveTextContent(/reassign/i);
     // The capacity sentence is not asserted over a row it is not true of.
     expect(screen.queryByText(/No capacity-eligible engineer was available/i)).toBeNull();
   });
@@ -414,7 +432,7 @@ describe('#288 — stranded work in the interception strip', () => {
   it('keeps the capacity explanation when every row really is a capacity escalation', async () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(
       view({
-        situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0 },
+        situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0, componentBlockedWithheld: null, bucketlessDropped: null },
         escalations: [
           {
             insertionId: 'i1',

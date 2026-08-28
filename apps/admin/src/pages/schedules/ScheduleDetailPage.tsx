@@ -142,7 +142,14 @@ export function ScheduleDetailPage() {
           data-testid="onsite-conflict-banner"
           className="mb-4 rounded-card border border-warning/40 bg-warning-bg p-3 text-sm text-warning"
         >
-          <p className="font-semibold">SE is ON_SITE on affected work</p>
+          {/* Two distinct 409s reach here, and until now both printed the ON_SITE headline — telling an
+              operator the engineer was at the site when the real blocker was a future vehicle-return
+              date. The server has always sent which one it is; the client simply never read it. */}
+          <p className="font-semibold">
+            {conflict.info.code === 'CONFLICT_DEFERRED'
+              ? 'Affected work is held to a future vehicle-return date'
+              : 'SE is ON_SITE on affected work'}
+          </p>
           <p className="mt-1">{conflict.info.message}</p>
           <p className="mt-1 text-xs">Affected tickets: {conflict.info.ticketIds.join(', ')}</p>
           <div className="mt-2 flex gap-2">
