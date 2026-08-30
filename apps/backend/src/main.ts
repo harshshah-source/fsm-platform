@@ -1,12 +1,21 @@
 import 'reflect-metadata'; //Librabry for decorator
-import { Logger } from '@nestjs/common';
+import { Logger, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { configureApp } from './app.config';
 import { AppModule } from './app.module';
-import { runWithFatalGuard } from './bootstrap-guard';
+import { installFatalHandlers, runWithFatalGuard } from './bootstrap-guard';
 import { validateBootConfig } from './config/boot-config';
 import { PrismaService } from './prisma/prisma.service';
 import { DispatchScheduleService } from './scheduling/dispatch-schedule.service';
+
+/**
+ * The live Nest app, for the fatal handlers' graceful shutdown only.
+ *
+ * Module-scoped rather than passed in, because the handlers are installed *before* `bootstrap()` runs
+ * (a rejection during boot has to be caught too) while the app only exists partway through it. The
+ * closure below reads whatever is current at the moment of death, and `null` is a legitimate answer.
+ */
+let app: INestApplication | null = null;
 
 async function bootstrap(): Promise<void> { //async because starting the application takes time
   // Fail-fast before any module boots: refuse to start on a missing/unsafe secret or bad DB URL (#98).
@@ -26,7 +35,7 @@ async function bootstrap(): Promise<void> { //async because starting the applica
     await preflight.onModuleDestroy();
   }
   // bodyParser off so configureApp's explicit, env-tunable JSON limit is the ONLY parser (#99).
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  app = await NestFactory.create(AppModule, { bodyParser: false });
 // NestJS reads AppModule (which lists every feature module: auth, tickets, scheduling, etc.) and wires the entire application together: every controller, every service, every database connection, every scheduled job.
 
 
@@ -47,6 +56,23 @@ async function bootstrap(): Promise<void> { //async because starting the applica
 }
 
 const logger = new Logger('Bootstrap');
+
+/**
+ * Installed **before** `bootstrap()`, so a rejection thrown while the module graph is still wiring is
+ * caught too. Until 2026-08-28 nothing held these: after `listen()` resolved, one unhandled rejection
+ * from any of the ~20 `@Cron` sweeps or any request path killed the API with no log line, and
+ * `npm run start` has no supervisor to restart it. See `installFatalHandlers` for why this exits
+ * rather than soldiering on.
+ */
+installFatalHandlers({
+  on: (event, handler) => {
+    process.on(event, handler);
+  },
+  exit: (code) => process.exit(code),
+  logFatal: (message) => logger.fatal(message),
+  closeApp: () => (app ? app.close() : Promise.resolve()),
+});
+
 void runWithFatalGuard(bootstrap, {
   exit: (code) => process.exit(code),
   logFatal: (message) => logger.fatal(message),

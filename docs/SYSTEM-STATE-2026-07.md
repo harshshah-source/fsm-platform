@@ -1230,6 +1230,19 @@ replacement, and `test/dev-seed.e2e-spec.ts` is now the tripwire against that re
 (done 2026-07-12, 4 slices `25a46d4`…`55183e6`): fail-fast boot config (no JWT fallback), public
 liveness/readiness probes, graceful shutdown + fatal bootstrap guard, global exception filter with
 error correlation ids (pino swap deliberately not adopted — Nest Logger retained).**
+
+**Runtime fatal handlers (2026-08-30, after the 2026-08-28 silent-death incident).** #98's guard
+covers `bootstrap()` **only**; once `listen()` resolved nothing held `uncaughtException` /
+`unhandledRejection`, so on Node 18 a single stray rejection — any of the ~20 `@Cron` sweeps, any
+request path — terminated the API with **no log line at all**, and `npm run start` (bare
+`node dist/main.js`, no supervisor) left port 3000 dead until a human noticed. `installFatalHandlers`
+(`src/bootstrap-guard.ts`, installed in `main.ts` *before* `bootstrap()` so a boot-time rejection is
+caught too) now logs one FATAL line carrying the stack, runs a **bounded** `app.close()` so Prisma
+`$disconnect` and the AutoPlant MySQL pool release, and exits 1. **The lifecycle is deliberately
+unchanged** — Node already terminated on an unhandled rejection, and soldiering on would leave ~20
+jobs *writing dispatch data* from a state nobody can vouch for, the hazard #130 exists to prevent.
+Surviving a crash is a supervisor's job, not a swallowed exception's; **the platform still has no
+process manager**, which is the remaining half of that incident ([#294](../.scratch/fsm-platform-v1/issues/294-backend-silent-death-no-supervisor.md)).
 Guard chain AuthGuard → RoleGuard → ZoneScopeGuard is now **global `APP_GUARD`** (#99, done
 2026-07-13 `aaf233e`): every route authenticates by default, `@Public()` opts out (login/refresh,
 health probes, non-op customer confirm — allowlist pinned by the route-sweep e2e). A global
