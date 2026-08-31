@@ -1,1154 +1,898 @@
-# The Scheduler Engine — an end-to-end operating guide
+# Today's Dispatch — a guide for managers
 
-**Audience:** the manager who has to use it (ZM / CSM / Operations Head), and the engineer who has to
-maintain it. Written 2026-08-31 against `feat/autoplant-integration`.
+**Who this is for:** anyone who has to run a zone's day — a Zonal Manager, a Central Service Manager,
+or an Operations Head. You do not need to know anything about how the software is built.
 
-**What this is:** a walkthrough of `/dispatch/today` — the **Scheduler Console** — from the moment you
-open it, region by region, control by control, with the backend behaviour behind each one. Every claim
-here was read from the code, not from a spec.
+**What it covers:** the screen called **Today's Dispatch**, from the moment you open it. What every
+part of it means, what happens when you click things, and what you can and cannot trust.
 
-**What this is not:** a state document. `docs/SYSTEM-STATE-2026-07.md` is the only current-state
-authority and `.scratch/fsm-platform-v1/INDEX.md` is the only work tracker. When this guide and those
-disagree, **they win** — this file explains how the thing works, not what is or is not built.
+**How long:** about twenty minutes to read once. After that, use the [Common jobs](#14-common-jobs)
+section as a quick reference.
 
----
-
-## Table of contents
-
-1. [The thirty-second model](#1-the-thirty-second-model)
-2. [Before you arrive: what the engine did at 05:00](#2-before-you-arrive-what-the-engine-did-at-0500)
-3. [Getting to the Console, and the first screen](#3-getting-to-the-console-and-the-first-screen)
-4. [The top bar — the frame](#4-the-top-bar--the-frame)
-5. [The health band — recovery and critical escalations](#5-the-health-band--recovery-and-critical-escalations)
-6. [Region 1 (left) — Engineers](#6-region-1-left--engineers)
-7. [Region 2 (centre) — the board](#7-region-2-centre--the-board)
-8. [Region 3 (right) — Work Pool, or Attention](#8-region-3-right--work-pool-or-attention)
-9. [The Inspector — the bottom band](#9-the-inspector--the-bottom-band)
-10. [The eight write actions](#10-the-eight-write-actions)
-11. [Drag and drop](#11-drag-and-drop)
-12. [Run Now](#12-run-now)
-13. [Assign mode — handing out work](#13-assign-mode--handing-out-work)
-14. [The day axis — past, today, future](#14-the-day-axis--past-today-future)
-15. [How to read the numbers without being misled](#15-how-to-read-the-numbers-without-being-misled)
-16. [Roles — what changes, and what does not](#16-roles--what-changes-and-what-does-not)
-17. [What reaches the engineer's phone](#17-what-reaches-the-engineers-phone)
-18. [Recipes — six common jobs](#18-recipes--six-common-jobs)
-19. [Glossary](#19-glossary)
+> **A note for engineers reading this:** this is deliberately a plain-language manual. The technical
+> record lives in the code comments, in `docs/SYSTEM-STATE-2026-07.md`, and in the design documents
+> under `docs/audits/`. If this guide and those disagree, those are right.
 
 ---
 
-## 1. The thirty-second model
+## Contents
 
-The platform's job is to decide, every morning, **which Service Engineer visits which plant to fix
-which device** — and then to let a human correct that decision all day without losing the audit trail.
-
-There are three moving parts, and the Console is where all three meet:
-
-| Part | What it is | Where it lives |
-|---|---|---|
-| **The engine** | A nightly cron that scores and places work, per zone | `apps/backend/src/recommender/` + `scheduling/` |
-| **The plan** | What the engine committed: day plans, stops, tickets | `work_schedules` → `plant_batch_assignments` → `batch_assignment_tickets` |
-| **The Console** | Where a manager sees the plan, understands it, and changes it | `/dispatch/today` |
-
-Two sentences that explain most of the design:
-
-> **The engine plans one zone at a time.** There is no pan-India dispatch view, deliberately — the
-> Console refuses to guess a zone rather than inventing a national number.
-
-> **The Console never re-implements the engine.** Every "why" you read on this screen was computed by
-> the backend and persisted; the frontend explains it, never re-derives it.
+1. [What this screen is for](#1-what-this-screen-is-for)
+2. [Six words you need first](#2-six-words-you-need-first)
+3. [What happens overnight](#3-what-happens-overnight)
+4. [Opening the screen](#4-opening-the-screen)
+5. [The strip along the top](#5-the-strip-along-the-top)
+6. [Red and amber banners: things that need you](#6-red-and-amber-banners-things-that-need-you)
+7. [The left column: your engineers](#7-the-left-column-your-engineers)
+8. [The middle: the plan itself](#8-the-middle-the-plan-itself)
+9. [Reading the little boxes](#9-reading-the-little-boxes)
+10. [The right column: work that did not get planned](#10-the-right-column-work-that-did-not-get-planned)
+11. [Clicking something: the detail panel](#11-clicking-something-the-detail-panel)
+12. [Changing the plan](#12-changing-the-plan)
+13. [Handing out unassigned work](#13-handing-out-unassigned-work)
+14. [Common jobs](#14-common-jobs)
+15. [Numbers that could mislead you](#15-numbers-that-could-mislead-you)
+16. [Who is allowed to do what](#16-who-is-allowed-to-do-what)
+17. [What your engineers actually see on their phones](#17-what-your-engineers-actually-see-on-their-phones)
+18. [Word list](#18-word-list)
 
 ---
 
-## 2. Before you arrive: what the engine did at 05:00
+## 1. What this screen is for
 
-Understanding the screen means understanding what already happened. This is the whole run, in order.
+Every night the system works out **which engineer should visit which site to fix which device
+tomorrow**. It does that automatically, for one zone at a time.
 
-### 2.1 The trigger
+It is good at this, but it is not always right, and it cannot know everything. Somebody called in
+sick. A customer escalated. A part arrived early. **Today's Dispatch is where you see what the system
+decided, understand why it decided that, and change it.**
 
-Three cron jobs make up the dispatch family
-(`apps/backend/src/scheduling/dispatch-scheduler.service.ts`):
+Three things to hold on to:
 
-| Job | Default | Purpose |
-|---|---|---|
-| `business-dispatch` | `0 5 * * *` **IST** | the real run — `DispatchRunService.runForActiveZones` |
-| `business-dispatch-reaper` | every 3 min | frees zones held by runs whose process died, and records that the zone is *owed a day* |
-| `business-dispatch-recovery` | every 5 min | collects on those marks — bounded re-dispatch, 3 attempts, 18:00 IST cutoff |
+**The system plans one zone at a time.** There is no single national view of dispatch, on purpose. If
+you look after several zones you pick one, look at it, then pick another. A screen showing you a
+country-wide number would be showing you a number nobody can act on.
 
-**The 05:00 is not hard-coded.** It comes from `system_settings.dispatch_cron`, and
-`DispatchScheduleService` re-points the live job at boot and on every write — an Operations Head can
-move the dispatch hour with no redeploy. This is why the Console publishes **Next run** as a fact read
-from the server rather than printing a constant (§4.5).
+**Nothing on this screen is a guess.** Every explanation you read — why an engineer was chosen, why a
+ticket could not be placed — was worked out by the system when it made the decision and saved at the
+time. The screen is reporting, not re-calculating.
 
-### 2.2 Who is allowed to run, and who is not
+**You can always overrule it.** The system will not overload an engineer. You can. It will not send a
+floating engineer where a dedicated one was available. You can. In every one of those cases the screen
+tells you what you are doing and lets you do it, and it records that you did.
 
-Concurrency is layered, and every layer is coordinated in the database, not in process memory:
+---
 
-1. **Tick claim** — `cron_tick_claims`, `INSERT … ON CONFLICT DO NOTHING`. One instance runs a given
-   (job, UTC-minute) window; the rest return `TICK_CLAIMED`.
-2. **Zone claim** — the `dispatch_run_zones` row *is* the claim, behind a unique index
-   (`one_running_per_zone`). Every requested zone already held → **409 with zero rows written**, because
-   a run that never happened must leave no history.
-3. **Per-SE transaction** with `SELECT … FOR UPDATE SKIP LOCKED` — one engineer's failure costs that
-   engineer only, never the whole zone.
-4. **Heartbeat + reaper**, with the checkable invariant `reap ≤ retry deadline`.
-5. **Bounded patient retry** on the cron path only. A manual run is *never* patient — it refuses
-   immediately and tells you who is holding the zone.
+## 2. Six words you need first
 
-### 2.3 What work enters the run
+The rest of this guide leans on these. There is a fuller list at the end.
 
-Only tickets that are **OPEN and UNASSIGNED**. That single fact explains the most common "is it
-broken?" moment (§12). Work already on somebody's plan is never re-planned.
-
-Four populations are then held back, and the engine counts each **separately** because they have
-different owners and different next actions:
-
-| Population | Meaning | Whose problem |
-|---|---|---|
-| `withheldBelowThreshold` | the device has not been silent long enough yet | nobody's — policy working |
-| `componentBlockedWithheld` | waiting on a part; SLA paused | the warehouse's |
-| `bucketlessDropped` | no computed SLA bucket, so nothing to rank on | a **data fault** |
-| held / deferred | a human deliberately parked it until a date | the manager who did it |
-
-They are never summed into one "not dispatched" number. A total nobody can act on is worse than four
-numbers each of which someone owns.
-
-### 2.4 The order tickets are considered in
-
-`canonical-sort.ts` — pure, deterministic, and the **only** thing that orders the dispatch path (there
-is no SQL mirror, and the docstring says so explicitly to stop someone "restoring" one):
-
-```
-Company Tier ↓ → Device Bucket ↓ → Return-Due-Today ↓ (below CRITICAL+ only)
-  → Company Priority Rank ↑ → Oldest Inactive ↑ → Device ID ↑
-```
-
-This order matters to you because it is the order the **Run decisions** replay shows (§9.4), and
-`processing_rank` is what makes that a replay rather than a report.
-
-### 2.5 Choosing an engineer — four steps, in this order
-
-For each ticket, in that order:
-
-**Step 1 — candidates, by strict coverage precedence.**
-`CandidateSelectionService.orderedCandidatesForPlant` returns, in this order:
-`DEDICATED` → `MULTI_PLANT` (both from `se_coverage`) → `FLOATING` (from the
-`plant_eligible_floating_se` materialized view, **re-validated live** against `engineer_master`, so a
-now-dedicated or deactivated engineer cannot be resurrected by a stale MV).
-
-**Step 2 — hard filters.** `hard-filters.ts`. Five filters, evaluated in a fixed order, first failure
-wins:
-
-| Filter | Fires when |
+| Word | What it means |
 |---|---|
-| `VEHICLE_ON_TRIP` | the engineer's vehicle is out |
-| `SE_UNAVAILABLE` | leave / off-shift |
-| `OVER_CAPACITY` | at or past `daily_capacity` |
-| `COMMON_KIT_INCOMPLETE` | missing standard kit |
-| `COMPONENT_UNAVAILABLE` | missing the expected part |
+| **Zone** | A region. Everything on this screen is about one zone at a time. |
+| **Engineer** (or SE) | A Service Engineer — the person who goes out and fixes things. |
+| **Ticket** | One device that needs attention. One ticket, one device. |
+| **Stop** | One site visit. A stop covers all the tickets at that site. |
+| **Day plan** | One engineer's stops for one day, in the order they should do them. |
+| **Capacity** | How many stops an engineer can handle in a day. Shown as `7/25`. |
 
-Each filter reports **three** states, not two: `PASSED` / `FAILED` / **`NOT_ENFORCED`**.
-`NOT_ENFORCED` means *the data source does not exist yet* and it **never drops a candidate**. Two
-filters sit there today (`VEHICLE_ON_TRIP` awaiting the vehicle feed, `COMPONENT_UNAVAILABLE` awaiting
-the component feed). This is a correct representation of an incomplete input — the run records that it
-did not enforce the filter rather than pretending it passed. You see this tri-state verbatim in the
-Inspector's **Why** band.
+And one distinction that matters more than any of the above:
 
-> **Note:** an engineer's activity ping is *deliberately not* a hard filter. Someone working offline in
-> a no-network area must stay a candidate.
-
-**Step 3 — the winning tier.** `tier-score-chooser.ts`. The winning tier is the **first non-empty tier
-in precedence order**. This is a scan, not a sort — which means:
-
-> **A floating engineer can never out-score an eligible dedicated one.** The score is only ever
-> consulted *within* one tier. A lower tier is reached only when every higher-tier candidate was
-> filtered out.
-
-**Step 4 — the score, within that tier only.** `scoring.ts`:
-
-```
-baseScore = w_rank·rankScore + w_urgency·urgency − w_repeat·repeatPenalty
-          + w_repeatBonus·repeatPenalty + w_age·ageScore + w_distance·distanceScore
-
-score     = max(baseScore, 0) × clusterMultiplier
-```
-
-Selection order is then: **an SE-Planner pin** (a human's explicit pin crosses tiers), then the
-winning tier's top score, then `se_id` ascending as a deterministic tie-break.
-
-Every term above is persisted per decision and rendered term-by-term in the Inspector (§9.3.1).
-
-### 2.6 Two operating modes
-
-The zone runs in one of two modes, switched automatically off the **Soft Inactive Count**:
-
-| Internal name | What you see | Behaviour |
-|---|---|---|
-| `DEFICIT` | **Catch-up** | repeat failure is a *penalty*; device age is not weighted |
-| `PREVENTIVE` | **Steady** | repeat failure becomes a *bonus*; aged devices add |
-
-The switch is `softInactive > 2% × eligible devices` (configurable). The enum names never reach a
-user-facing surface — you always see *Catch-up* or *Steady*.
-
-### 2.7 The write, and the announcement
-
-`BatchAssignmentService.dispatchForZone` writes, **per engineer, in one transaction**:
-
-- one `ACTIVE` **WorkSchedule** (the day plan)
-- one `PlantBatchAssignment` per plant (a **stop**)
-- its `batch_assignment_tickets`, carrying provenance (`added_by`, `add_source`)
-
-There is **no approval gate** — the plan is dispatched directly and the manager overrides afterwards.
-
-The *"Day Plan is live"* intent is written to `day_plan_notification_outbox` **inside that same
-transaction**, so it commits with the plan or not at all. A rolled-back plan can never announce
-itself. Delivery is attempted after commit and retried by a sweep. (What actually reaches the handset
-is §17 — read it, because it is the one place reality is thinner than it looks.)
-
-### 2.8 Critical work that nobody could take
-
-If a `CRITICAL` / `HIGH_CRITICAL` ticket has no capacity-eligible engineer, the engine does **not**
-overload someone silently. It writes an **escalation** (`intraday_insertions`, type
-`ESCALATION_REQUIRED`) and hands the decision to a human. That is the crimson strip at the top of your
-Console (§5.2).
+> **Assigned** means the work is on somebody's day plan. **Unassigned** means it is not on anybody's.
+> Almost every question on this screen is really a question about which of those two a ticket is in.
 
 ---
 
-## 3. Getting to the Console, and the first screen
+## 3. What happens overnight
 
-### 3.1 The door
+You do not need this to use the screen. You do need it to trust the screen, and to answer engineers
+who ask "why did I get this one?"
 
-Left sidebar → **Dispatch** group → **Today's Dispatch** *("What is happening now")*.
-Route: `/dispatch/today`.
+### It runs early, usually 5am
 
-Three sibling rows sit under it, indented, and they are four views of one concept at four points in
-time. Knowing which is which saves a lot of confusion:
+The planner runs once, early, before the working day. **5am is the normal time but it is not fixed** —
+an Operations Head can change it. The screen always tells you when the next one is, rather than
+assuming.
 
-| Row | Answers |
+If the run fails, the system notices within a few minutes and tries again, up to three times, and
+stops trying at 6pm. After that, the day has run out and somebody has to step in.
+
+### It only looks at work nobody has yet
+
+This one sentence explains most surprises:
+
+> **The planner only considers tickets that are open and not yet assigned to anyone.**
+
+Work already on someone's plan is never re-planned. This is why running the planner a second time
+usually places nothing — and that is correct behaviour, not a fault. See
+[Running the planner yourself](#125-running-the-planner-yourself).
+
+It also deliberately holds some work back, and it keeps these separate rather than lumping them
+together, because they need different people to fix them:
+
+| Held back because | Who needs to do something |
 |---|---|
-| **Today's Dispatch** | what is happening **now** |
-| Scheduler Preview | what the next run **would** do |
-| Schedules | committed day plans (not date-scoped) |
-| Intra-day Queue | changes made to today's plan |
-| Dispatch Runs | the ledger of what already ran |
+| The device has not been quiet long enough yet to be worth a visit | Nobody. This is the policy working. |
+| It is waiting on a spare part | The warehouse |
+| Somebody parked it until a future date | Whoever parked it |
+| Its severity could not be worked out | **Somebody technical — this is a data problem** |
 
-### 3.2 First arrival — what you see depends on your role
+### How it picks an engineer
 
-**If you are a Zonal Manager:** the Console loads straight into your zone. You never name it; the
-backend resolves it from your token and refuses any other. There is no zone picker — not because it is
-disabled, but because `GET /org/zones` genuinely returns nothing for you, and a dropdown with one
-unchangeable option teaches a choice that does not exist.
+For each ticket, in strict order:
 
-**If you are a CSM or Operations Head:** you get a **Choose a zone** card:
+**First, who covers this site?** Engineers fall into three groups, and the order is absolute:
+
+1. **Dedicated** — this site is theirs
+2. **Multi-plant** — they cover this site among several
+3. **Floating** — they cover the area, not the site
+
+**Second, who is actually able to go?** Five checks: is their vehicle free, are they available (not on
+leave), do they have room in their day, do they have their standard kit, do they have the part.
+
+Anyone who fails a check is set aside — **and the screen will show you them anyway, greyed out, with
+the reason.** That matters: the system will not send someone who fails a check, but you might decide
+to, and you cannot decide about people you cannot see.
+
+> **Two of those five checks are not switched on yet** (vehicle status and part availability), because
+> the data does not exist. When that is the case the screen says **"not enforced"** rather than
+> pretending the check passed. Do not read a blank as an all-clear.
+
+**Third, the strongest group wins — always.** If even one dedicated engineer passes the checks, the
+job goes to a dedicated engineer. It only drops to multi-plant when every dedicated engineer was ruled
+out, and to floating when every multi-plant engineer was too.
+
+> **A floating engineer can never beat an available dedicated one, no matter how good their score.**
+> Scores are only ever compared *within* one group.
+
+**Fourth, within that group, a score decides.** The score balances how important the customer is, how
+urgent the device is, whether it has failed repeatedly, how long it has been silent, and how far it is
+from where the engineer already is. You can see this broken down term by term for any ticket
+(§[11.3](#113-you-clicked-a-device)).
+
+A manual pin from the SE Planner beats all of this. If somebody pinned an engineer, they get it.
+
+### Two moods
+
+The zone runs in one of two modes, chosen automatically depending on how much work is backing up:
+
+- **Catch-up** — there is a backlog. Clear the urgent things first.
+- **Steady** — things are under control. Get ahead: revisit repeat offenders and older devices.
+
+You will see the mode named on future-day projections and in the score breakdown. It changes the
+priorities, not the rules.
+
+### When nobody can take a critical job
+
+If a **critical** ticket has no engineer with room to spare, the system does **not** quietly overload
+someone. It stops and escalates it to you. That is the red banner at the top of your screen
+(§[6.2](#62-the-red-banner-critical-work-nobody-could-take)).
+
+### Then it writes the plans
+
+It creates one day plan per engineer, one stop per site, and sends each engineer a "your day plan is
+live" message. **Each engineer's plan is written separately**, so if something goes wrong for one
+person it does not wreck everybody else's day.
+
+There is no approval step. The plans go live, and you adjust them afterwards.
+
+---
+
+## 4. Opening the screen
+
+**Left menu → Dispatch → Today's Dispatch** ("What is happening now").
+
+There are four related screens in that menu, and it is worth knowing which is which:
+
+| Screen | Answers |
+|---|---|
+| **Today's Dispatch** | What is happening **right now** |
+| Scheduler Preview | What the next run **would** do |
+| Schedules | Committed day plans |
+| Intra-day Queue | What has been changed today |
+| Dispatch Runs | A history of past runs |
+
+### The first thing you see
+
+**If you look after one zone**, it opens straight into it. There is no zone selector because you do
+not have a choice to make.
+
+**If you look after several zones**, you get a card asking you to choose one:
 
 > *The Console shows one zone's operating day. There is no pan-India dispatch view — the scheduler
 > plans, and this screen reports, one zone at a time.*
 
-This is not a loading state and not an error. `GET /dispatch/today` **refuses to guess** a zone for a
-multi-zone role (`400 ZONE_REQUIRED`), because any number shown on an "all zones" screen would be
-invented. Pick a zone from the picker; the Console remembers it in `localStorage` and opens there next
+That is not an error and not a loading screen. Pick a zone. The screen remembers your choice for next
 time.
 
-### 3.3 What loads
+### The address bar is shareable
 
-**One fetch.** `GET /dispatch/today` is called once by the page shell and every region reads that same
-object. This is deliberate and it is the reason the four regions can never disagree about an
-engineer's load:
+Everything you are looking at — the zone, the day, what you have selected — is in the web address. If
+you want a colleague to see exactly what you are seeing, copy the URL and send it. It will open on the
+same thing.
 
-> Every write in the Console calls `invalidate()` — it refetches the whole payload. No region is
-> allowed to refresh itself independently.
+---
 
-A second, secondary fetch (`changes-today`) is graded differently: if it fails, the change list goes
-empty and **the board still stands**. A rail that cannot load must not take the operating day down
-with it.
+## 5. The strip along the top
 
-### 3.4 The URL is the state
+This strip tells you **where you are standing**. It never goes away, whatever else you are doing.
 
-Everything you are looking at is in the query string, so you can paste it to a colleague and they see
-exactly your screen:
+```
+Scheduler Console  [Zone ▾]  ‹Prev [TODAY] Next›  [Day|Week]  [Find ticket or SE]
+                              ● Dispatched 10:53 · SUCCESS   Next run 05:00 1 Sept   [Run now]
+[⚠ 6 need attention ▸]   [Assign work]   [Run facts ▾]   [?]
+```
 
-| Param | Meaning |
+| Control | What it does |
 |---|---|
-| `?zoneId=7` | which zone (CSM/OH only) |
-| `?day=2026-08-27` | which day column is focused |
-| `?span=week` | three days either side instead of one |
-| `?sel=ticket:abc123` | what is selected (`ticket:` / `stop:` / `engineer:` / `run:`) |
-| `?assign=1` | Assign mode is on |
+| **Zone** | Switch zones. Doing so clears whatever you had selected, because it belonged to the old zone. |
+| **‹ Prev · TODAY · Next ›** | Move to another day. `TODAY` is always one click away. |
+| **Day / Week** | Show one day either side, or three. |
+| **Find ticket or SE** | Type to narrow the screen down. Press `/` to jump into it. |
+| **Dispatched 10:53 · SUCCESS** | Whether the planner has run today, and how it went. Or **No run today**. |
+| **Next run 05:00 1 Sept** | When the next automatic run happens. Real, not assumed — if it cannot be looked up, it is left blank rather than guessed. |
+| **Run now** | Run the planner immediately. See §[12.5](#125-running-the-planner-yourself). |
+| **⚠ 6 need attention** | Things across the zone waiting on a manager. Click to see the list. |
+| **Assign work** | Hand out work the planner could not place. See §[13](#13-handing-out-unassigned-work). |
+| **Run facts ▾** | The full set of counts from today's run, plus a refresh button. |
+| **?** | What the little boxes mean. Same as §[9](#9-reading-the-little-boxes). |
 
-A malformed value degrades to "nothing selected" — it never throws.
+Two useful keyboard shortcuts: **`/`** jumps to the search box, **`Esc`** backs out one step. Nothing
+you can do with the keyboard changes any data — that is deliberate.
 
----
-
-## 4. The top bar — the frame
-
-One compact strip that owns *where you are standing*. Everything in it stays true and stays visible in
-every mode, including Assign mode.
-
-```
-Scheduler Console  [Zone ▾]  ‹Prev [TODAY] Next›  [Day|Week]  [Find ticket or SE /]
-                                   ● DISPATCHED 10:53 · SUCCESS   Next run 05:00 1 Sept  [Run now]
-[⚠ 6 need attention ▸]  [Assign work]  [Run facts ▾]  [?]
-```
-
-### 4.1 Zone
-
-A picker for CSM/OH; plain text for a ZM. Changing it **clears your selection and leaves Assign mode**
-— a selection from another zone's deck means nothing on this one, and a draft staged against the old
-zone must never be committed under the new zone's heading.
-
-### 4.2 Day navigation — `‹ Prev · TODAY · Next ›`
-
-Moves the focused column. `TODAY` is always one click away. This axis **replaced** the old
-Plan / Live / Replay mode navigation: a future column *is* the plan, today *is* live, a past column *is*
-the replay. See §14.
-
-### 4.3 Day / Week
-
-How many context columns surround the focused day — one either side, or three.
-
-### 4.4 Find ticket or SE (`/`)
-
-Press `/` anywhere to focus it; `Esc` peels back one layer — the selection first, then the attention
-rail. **No shortcut fires a write**, deliberately: a keystroke that commits an irreversible override is
-out of scope.
-
-It **filters, never fetches** — every object on this screen is already
-in the one payload. An engineer whose own name misses but who is carrying a matched plant or ticket
-**stays visible**, because hiding the lane would hide the match. In Assign mode the same box filters
-the assignable pool.
-
-### 4.5 Run state and Next run
-
-- `● Dispatched 10:53 · SUCCESS` — today's run for this zone, or **No run today**.
-- **Next run 05:00 1 Sept** — read from the server, never a hard-coded constant. If the day is not
-  today, the date is printed, because *"next run 05:00"* on a screen at 23:00 reads as "in five
-  minutes". If your role cannot read the schedule, the pill is **absent** rather than guessing.
-
-### 4.6 Run now
-
-See §12. Rendered for CSM, OH **and** ZM — a ZM's run is clamped server-side to their own zone
-whatever the request body says.
-
-### 4.7 Attention strip
-
-`⚠ 6 need attention · 3 chronic · 2 approvals ▸` — click to expand it into the right rail (§8.2).
-It reads the same `action-required` cards the dashboard uses, scoped to **this zone**, so a CSM never
-sees a national number under a zone's heading.
-
-### 4.8 Assign work
-
-Enters Assign mode (§13). Entering **drops your current selection** — a selection is a committed object
-and must not sit beside draft lanes that write nothing.
-
-### 4.9 Run facts ▾
-
-A popover holding the eight funnel counters plus **Refresh the operating day**. It lives here rather
-than as a strip because eight numbers competing with the board is exactly the clutter this composition
-removed. Two of the eight are nullable and keep a hard distinction:
-
-> **`—` is not `0`.** A dash means *this run did not record that population*; a zero means it recorded
-> it and found none. The popover prints the explanation next to the dash rather than hiding it in a
-> tooltip.
-
-### 4.10 `?`
-
-The chip grammar legend. Reference content, not screen content — see §7.3.
+**A word about the search box:** it filters what is already on screen; it does not go and fetch more.
+If an engineer's name does not match but they are carrying a site or ticket that does, **they stay
+visible** — otherwise the search would hide the very thing you searched for.
 
 ---
 
-## 5. The health band — recovery and critical escalations
+## 6. Red and amber banners: things that need you
 
-These are the only two things besides the top bar that get full width, and they earn it.
+These only appear when there is something to say. When they appear, read them before anything else.
 
-### 5.1 Recovery notice
+### 6.1 The amber banner: this zone's planning run failed
 
-Appears only when this zone's dispatch run **died** today. Four states, and you must be able to tell
-them apart at a glance:
+Four versions, and the difference matters:
 
-| State | Meaning | Do you act? |
+| It says | Meaning | Do you need to act? |
 |---|---|---|
-| `RECOVERED` | the system put it right itself | no — reassurance, not an alarm |
-| `PENDING` | still owed; the collector will come back | no |
-| `EXHAUSTED` | the system tried its budget and stopped | **yes** |
-| `EXPIRED` | the field day ran out first | **yes** — that work will not happen today |
+| …was automatically re-dispatched | It broke and the system fixed it | **No.** This is reassurance. |
+| …a re-dispatch is queued | It broke, the system is still working on it | **No.** Check back. |
+| …could not be recovered automatically | The system tried and gave up | **Yes.** |
+| …the operating day ended first | It ran out of time | **Yes.** That work did not happen. |
 
-The last two are drawn with a heavy amber border and say plainly: *nothing further will be attempted
-automatically today — run dispatch for this zone manually once the cause is cleared.*
+The last two say plainly that nothing more will be tried today, and that you should run dispatch
+manually once whatever caused it is sorted out.
 
-### 5.2 Critical escalation strip
+### 6.2 The red banner: critical work nobody could take
 
 > **225 critical tickets need manual assignment**
-> No capacity-eligible engineer was available, so the scheduler escalated rather than overloading anyone.
+> No capacity-eligible engineer was available, so the scheduler escalated rather than overloading
+> anyone.
 
-Each row is one escalated ticket: short id, SLA badge, when it escalated, and a verb on the right.
-Two causes write these rows and the strip does not blur them:
+Each line is one urgent ticket that needs a decision from you. On the right of each line is what to do
+about it, and there are two versions:
 
-- **no capacity-eligible engineer** (§2.8) → the row's verb is **Assign this work →**
-- **the assigned engineer became unavailable** → the row names them, and the verb is
-  **Reassign this work →**
+- **Assign this work →** — nobody has it. You need to give it to someone.
+- **Reassign this work →** — somebody *does* have it, but they have become unavailable. It needs
+  moving.
 
-The distinction is not cosmetic: `assignTicket` *refuses* an already-assigned ticket, so offering
-"Assign" on a stranded ticket would be a button that always 409s.
+Those are genuinely different situations and the button changes accordingly. Click either one and the
+ticket opens in the detail panel at the bottom, where you can act on it.
 
-The explanatory sentence about capacity is printed **only when it is true of every row** — one
-explanation over a mixed list would be wrong about half of it.
-
-The strip shows six rows and then a count. Every one resolves the same way: select it, then assign or
-reassign from the Inspector.
-
-Inside Assign mode the verb changes to **Leave assigning and resolve →**, and clicking it takes you
-out of the mode first (asking about your draft on the way — §13.7), because the Inspector is not on
-screen while you are drafting.
+The banner shows six lines and then a count. They all get resolved the same way.
 
 ---
 
-## 6. Region 1 (left) — Engineers
+## 7. The left column: your engineers
 
-The board answers *who is carrying what, in what order*. This rail answers the question that comes
-first: **who have I got today, and how loaded are they?**
+Everyone on this zone's roster today, whether or not they have work.
 
 Each row shows:
 
-| Element | Meaning |
-|---|---|
-| **Name** | click to select the engineer — the Inspector opens on them |
-| **Load badge `3/25`** | committed stops today / daily capacity. **Amber at or past capacity.** |
-| **Coverage** | `DEDICATED` · `MULTI PLANT` · `FLOATING` |
-| **`2 stops · 7 devices`** | today's plan at a glance |
-| **Availability** | printed in amber when not `AVAILABLE` (leave, off-shift) |
+- **Name** — click it to see their details
+- **A load badge like `3/25`** — three stops today, twenty-five is their limit. **It turns amber when
+  they are at or over their limit.**
+- **Their coverage type** — dedicated, multi-plant or floating
+- **`2 stops · 7 devices`**
+- **Their availability** — shown in amber if they are on leave or off shift
 
-Two rules worth knowing:
+Two things worth knowing:
 
-**The load number is the one the engine enforces.** `committed` and `dailyCapacity` come from
-`committedDayPlan` — the same function dispatch itself uses to decide whether an engineer can take
-more. This rail never recomputes a load from the stops it can see, because a number you read as *"can
-this person carry it?"* has to be the number the engine will actually check.
+**That load number is the real one.** It is the same number the planner itself checks before deciding
+whether someone can take more work. It is not a separate estimate that might disagree.
 
-**An unavailable engineer still holds their work.** Nothing is silently reassigned when someone goes on
-leave. The rail says both things: they are unavailable, *and* the work is still theirs. Reassigning it
-is your decision.
+**An engineer going on leave does not empty their plan.** Their work stays theirs until a human moves
+it. The screen shows both facts: they are unavailable, *and* they are still holding this work. Moving
+it is your call.
 
 ---
 
-## 7. Region 2 (centre) — the board
+## 8. The middle: the plan itself
 
-The dominant canvas. Axes are **ENGINEER × DAY**: rows are engineers in People-rail order, columns are
-operating days, and a cell holds that engineer's stops and tickets for that day.
+This is the main event. **Rows are engineers. Columns are days.** Where they cross, you see that
+engineer's work for that day.
 
-### 7.1 A cell, read top to bottom
+Today's column is the detailed one. A cell looks like this:
 
 ```
-1  Kotputli Works                    ← stop sequence + plant name (click to select the stop)
-   ●a1b2c3d4 CRIT   a3f9…  ●b7c2…    ← the tickets on that stop (chips)
+1  Kotputli Works
+   ●a1b2c3d4  CRIT       ●e5f6a7b8
 2  Neem Works
-   ●d4e5f6a7 RET  CHR ×4
+   ●c9d0e1f2  RET  CHR ×4
 ```
 
-- The number is the **stop sequence** — the order the engineer is expected to visit.
-- The plant name is the **stop**; clicking it selects it and offers stop-level actions.
-- The chips are individual **tickets** (devices).
-- `adjusted` badge on a stop means its status is `OVERRIDDEN` — a human has changed it.
-- An amber cell means **the engineer is at or over capacity that day**. Capacity is a fact about the
-  engineer's day, so it colours the *cell*, never a chip.
-- `no stops — available` is a real and useful state, and it is distinguished from `no stops` on an
-  over-capacity engineer.
+- **`1` and `2`** are the order of visits.
+- **`Kotputli Works`** is the site — the stop. Click it to act on the whole visit at once.
+- **The little boxes underneath** are the individual devices. Click one to act on just that device.
+- **`adjusted`** next to a site name means a person has already changed it.
+- **An amber cell** means that engineer is at or over their limit for that day.
+- **`no stops — available`** means exactly that: free, and able to take work.
 
-Only the **focused** column expands chips. Context columns collapse to `5 devices` — enough to see
-shape without drowning the focus.
+Only the day you are focused on shows the individual boxes. The days either side collapse to
+`5 devices`, which is enough to see the shape of the week without drowning in it.
 
-### 7.2 A last row: *Not on today's roster*
+At the very bottom there may be a row called **Not on today's roster** — work on other days belonging
+to engineers who are not working in this zone today. It is there so a day does not look emptier than
+it really is.
 
-Committed work on other days held by engineers who are not on today's roster. It is a fact about
-those days, and omitting it would make a past column look emptier than it was.
+---
 
-### 7.3 The chip grammar — four channels, four meanings
+## 9. Reading the little boxes
 
-This is the single most useful thing to learn on the screen. Four **independent** channels, no
-overlap, and every one survives grayscale:
+**This is the most useful page in this guide.** Each little box is one device. Its appearance tells
+you four separate things at once, and they never interfere with each other.
 
-| Channel | Carries |
-|---|---|
-| **Border style** | **provenance** — who put this here |
-| **Inline tokens** | urgency (`CRIT`), vehicle return (`RET`), chronic device (`CHR ×n`) |
-| **Cell fill (amber)** | capacity — the engineer's day |
-| **Chip fill** | **reserved and currently unused** — it claims nothing |
-
-**Borders — provenance:**
+### The border: who put this here
 
 | Border | Means |
 |---|---|
-| **solid + dot** | the **engine** placed this |
-| **dashed** | a **human** placed this |
-| **dashed violet** | a human placed it **and crossed a coverage tier** |
-| **dotted, muted** | provenance **not recorded** — this predates provenance tracking |
+| **Solid, with a dot** | The **system** planned this |
+| **Dashed** | A **person** put this here |
+| **Dashed and purple** | A person put this here **and went outside the normal coverage order** |
+| **Dotted and faded** | **We do not know who put this here** — it predates our record-keeping |
 
-That last one is load-bearing. Absence is a fact about the record, and drawing an unknown as a system
-decision would be the one lie this grammar exists to prevent.
+That last one is important. Faded-and-dotted does not mean "system". It means "unknown", and the
+screen refuses to guess.
 
-**Tokens:**
+### The labels: what kind of work this is
 
-| Token | Means |
+| Label | Means |
 |---|---|
-| `CRIT` | critical work — **travels with the ticket whoever assigned it** |
-| `RET` | the vehicle is due back today |
-| `CHR ×4` | chronic device — 4 lifetime failure cycles. Dispatch treats it normally; the question this raises is whether to *replace the unit*. |
-| `~ghost` | projected by the preview — **nothing committed** |
+| **`CRIT`** | Urgent. **This stays on the box no matter who assigned it.** |
+| **`RET`** | The vehicle is due back today. |
+| **`CHR ×4`** | This device has broken four times. Worth asking whether to replace the unit rather than fix it again. |
+| **`~` and faded italic** | A *prediction* for a future day. Nothing has been decided. |
 
-`CRIT` is a token rather than a border for a specific reason: it used to be a crimson border drawn only
-on system-placed chips, so a critical ticket *lost its urgency mark the moment a human reassigned it*.
-A token renders on every chip regardless.
+### The cell colour: capacity
 
-Selection adds a **ring**, never a border change — the border already means provenance.
+**Amber background** = this engineer is at or over their limit that day. It colours the whole cell,
+not individual boxes, because being overloaded is a fact about the person's day rather than about one
+device.
 
-### 7.4 The column header
+### Selecting
 
-Each column says what mood it is in:
-
-- `LIVE` (green) — today
-- `history` — a past day
-- `projected` (blue) — a future day with no committed plan
-- `committed` — a future day that already has a live `WorkSchedule` (committed beats projected)
-
-The focused column's header also carries its own door:
-
-- **today** → `Run decisions →` (opens the run replay in the Inspector) and `All runs →`
-- **past** → *counts only · open a run for detail →*
-- **future** → the projection summary (`Catch-up mode · 42 would be assigned · 3 unassignable · 7
-  withheld · ranking as of …`) and `Open the full projection →`
+Clicking a box puts a **ring** around it. The ring is only ever a selection marker — it never changes
+the border, because the border is already saying who put the work there.
 
 ---
 
-## 8. Region 3 (right) — Work Pool, or Attention
+## 10. The right column: work that did not get planned
 
-**One slot, two occupants, never both.** The Work Pool by default; the Attention list when you click the
-top-bar strip.
+The middle shows what landed. This column shows what did not, and why. Three tabs:
 
-### 8.1 Work Pool — what did *not* land
-
-Three tabs plus a panel. Together they answer *what is not on anybody's plan, and why?*
-
-| Tab | Population |
+| Tab | What is in it |
 |---|---|
-| **Unassigned** | the engine looked and found nobody eligible |
-| **Held** | deliberately deferred to a future date, with the date and who decided |
-| **Changes** | what a human has changed since the run |
+| **Unassigned** | The planner looked and could not find anyone eligible |
+| **Held** | Deliberately parked until a date, with the date and who decided |
+| **Changes** | What people have changed since the run |
 
-Plus a **chronic** toggle that cuts across the current tab (chronic is a property of the *device*, not
-a location, so it is a filter and not a fourth tab). Its threshold comes from the payload, never from a
-constant in the frontend.
+Plus a **chronic** filter that works across whichever tab you are on — because "this device keeps
+breaking" is a fact about the equipment, not about where the ticket sits.
 
-Three rules this rail must not break:
+Clicking any row here opens the same detail panel you would get by clicking the same ticket on the
+board. It is a different door into the same thing.
 
-1. **`policyWithheld` is a count and never becomes a list.** The engine counts that work and never
-   itemises it — those tickets have no recommendation, no row and no trace. It renders as a *panel*
-   rather than a tab precisely so nobody tries to "finish" it.
-2. **"reason not recorded" is never rendered as a guess.** An unassignable row with no recorded reason
-   says so.
-3. **Every row selects the same underlying ticket the board would have selected**, and drives the same
-   single Inspector. A rail row is a different *door* to the same object, not a different kind of thing.
+**One thing you will see and should not chase:** some work is counted but never listed, with a note
+saying so. That work was held back by policy before the planner looked at it in detail, so there is
+genuinely nothing to list. It is shown as a count on purpose, so that nobody goes hunting for a list
+that does not exist.
 
-### 8.2 Attention — what needs a manager, ranked
+### The attention list
 
-The expanded strip. Nine urgency-ordered cards, from the same definition the dashboard uses (a
-Console-local queue would drift from it the day either changed). Each card names its own count and one
-verb.
+Clicking **⚠ 6 need attention** in the top strip swaps this column for a ranked list of everything in
+**this zone** waiting on a manager — failed verifications, overdue parts, vehicle reports, and so on.
+Each line has a count and a link to the right screen.
 
-Two honesty rules:
-
-- **A stub is not a zero.** A category that is not counted yet renders as *not counted*, collapsed
-  below the live cards — never as `0`, which would report the absence of a counter as the absence of
-  work.
-- **A count with no destination says so** — *"no queue page yet"* rather than a link that goes nowhere.
+If a category is not being counted yet, it says **not counted** rather than showing `0`. Those are
+different statements and the screen keeps them apart.
 
 ---
 
-## 9. The Inspector — the bottom band
+## 11. Clicking something: the detail panel
 
-Selecting anything opens a band beneath the board. **Exactly one object is selected at a time**, and
-selecting the same engineer in the People rail or on the board is the *same* selection — one object,
-one Inspector, regardless of which door you used.
+Click anything — an engineer, a site, a device, a run — and a panel opens along the bottom. **Only one
+thing is ever selected at a time.**
 
-With nothing selected, the Inspector does not render at all. (The old empty "select something"
-placeholder cost vertical space to say nothing.)
+### 11.1 You clicked an engineer
 
-### 9.1 Engineer selected
+Their coverage, availability, stops and devices today, and their load. If they are over their limit it
+says so: *"Dispatch will not add to this engineer; a human still may."*
 
-Coverage, availability, stops today, devices today, day-plan status, load badge. If they are over
-capacity: *"Dispatch will not add to this engineer; a human still may."*
+There are no buttons here, and that is on purpose — every change is really a change to a *site visit*
+or a *device*. The panel tells you so.
 
-There are **no actions here**, and that is deliberate: every move is a property of a *stop* or a
-*ticket*. The band tells you so: *"Select a stop or a ticket on this engineer's lane to move, split,
-reorder or remove work."*
+### 11.2 You clicked a site visit
 
-### 9.2 Stop selected
+Which engineer, which position in their day, the site, how many devices, and the list of them. Three
+buttons: **Swap engineer**, **Split stop**, **Reorder**.
 
-Engineer, stop number, plant, device count, status, the device list, a `Why dispatch chose this →`
-link, and three actions: **Swap engineer · Split stop · Reorder** (§10).
+### 11.3 You clicked a device
 
-### 9.3 Ticket selected — three bands
+Three tabs.
 
-The identity strip carries only what the decision trace does *not* know: which engineer, which stop,
-SLA bucket, company tier, and a provenance badge.
+**Why** — the system's own explanation of this decision. Who it considered, which coverage group it
+was working in, who it ruled out and for what reason, and how full everyone's day was at the time.
 
-#### Why
+Underneath is the score, broken down:
 
-The engine's own decision trace for this ticket in this run: the candidates it compared, the tier it
-evaluated, the hard-filter verdicts (including every `NOT_ENFORCED`), the capacity at the moment it
-chose.
-
-If there is no run today, it says so. If the ticket has no trace in that run, it says *that* rather
-than inventing one.
-
-##### 9.3.1 The score breakdown
-
-Underneath the trace, the per-term arithmetic — the engine's numbers restated, not re-derived.
-A worked example (the figures below are illustrative; yours come from the persisted breakdown):
-
-| Term | Value | Weight | Contribution |
+| Term | Value | Weight | Effect |
 |---|---|---|---|
 | Company priority | 0.900 | 0.40 | +0.360 |
-| Dispatch urgency | 0.571 | 0.30 | +0.171 |
+| Urgency | 0.571 | 0.30 | +0.171 |
 | Repeat-failure penalty | 1.000 | 0.20 | −0.200 |
-| Repeat-failure bonus | 1.000 | 0.00 | +0.000 *· not weighted here* |
-| Device age | 0.480 | 0.00 | +0.000 *· not weighted here* |
+| Device age | 0.480 | 0.00 | +0.000 · *not used here* |
 | Distance | 0.250 | 0.10 | +0.025 |
-| **Base score** | | | **0.356** |
-| Same-plant cluster bonus | | | ×1.25 |
-| **Score** | | | **0.445** |
+| **Total** | | | **0.356** |
 
-Three rules:
+*(Illustrative figures.)* Terms that were not used still appear, marked **not used here**, so that you
+can see the difference between Catch-up and Steady mode rather than having to take it on trust.
 
-- **A weight of zero is shown, not hidden.** Device age and repeat-failure *bonus* default to 0 in
-  Catch-up mode — you need to see that they were not consulted, or the two modes look identical.
-- **The floor is shown when it bites.** `score = max(base, 0) × cluster`, so a negative base is
-  clamped before the bonus multiplies it. When that happens the panel says the score is not the sum of
-  the rows, and prints the true base anyway.
-- **Distance is never a fabricated `0 km`.** *not available* means no home base, no prior stop, or no
-  plant geometry — a different statement from "zero distance away".
+If distance says **not available**, that means we do not know where the engineer was starting from —
+not that the site is zero kilometres away.
 
-#### Alternatives
+**Alternatives** — everyone else who could have taken this, in the system's own order, grouped by
+coverage type. Anyone ruled out is greyed with the reason. Every group heading appears even when
+empty, because "no dedicated engineer covers this site" is exactly the fact that makes the floating
+engineer below it make sense.
 
-The engine's own candidate list, tier-grouped, in the engine's exact order. **Nothing re-sorts** — not
-by name, not by load. All three tier headings render whether populated or not, because *"No dedicated
-engineer for this plant"* is what makes the floating candidate below it legible as the fallback it is.
+**History** — everything that has happened to this ticket, and every visit attempt, with a warning if
+it has been attempted too many times.
 
-Dropped candidates are shown, muted, **with their reason** — and here they are read-only.
+### 11.4 You clicked "Run decisions"
 
-#### History
+Every decision the planner made this morning, **in the order it made them**, each one openable for the
+full explanation.
 
-The ticket's lifecycle (state changes with reason codes and actor roles) and its **visit attempts** —
-`3 countable of 5 threshold`, with a warning when the repeated-attempt threshold is reached.
-
-### 9.4 Run selected — the replay
-
-Reached from the today column's `Run decisions →`. Every decision the run made, **in the order it made
-them** (`processing_rank`), each expandable to its own trace.
-
-> An **unassignable** decision is a decision and gets a row. Listing only the placements would show a
-> run doing less than it did.
+Tickets it *could not* place appear here too. A list of only the successes would make the run look
+like it did less than it did.
 
 ---
 
-## 10. The eight write actions
+## 12. Changing the plan
 
-Every action commits **immediately** through the endpoint that already owns it. There is no draft, no
-staging, and no "commit all" here — that is Assign mode's job, and only Assign mode's.
+Everything in this section **saves immediately**. There is no draft and no undo. (The one place that
+works differently is handing out unassigned work — §[13](#13-handing-out-unassigned-work).)
 
-**Four properties that are not negotiable:**
+**Four things that are always true:**
 
-1. **Every override requires a reason.** Confirm stays disabled until it is non-empty. The reason is
-   recorded on the ticket.
-2. **The legal set is rendered and the rest is hidden.** Not greyed out. An action absent from this
-   band is an action this object cannot take in this state.
-3. **Two confirms are two-gate.** Some refusals come back as populated `409`s to be re-sent with
-   `confirm: true`. They render as a **second deliberate step**, never as an error toast.
-4. **Impact is previewed where projectable, and its absence never removes Confirm.** The preview is
-   information, not a gate.
+1. **You must give a reason.** The confirm button stays greyed out until you do. The reason is kept
+   against the ticket.
+2. **Only the buttons that make sense are shown.** If you cannot see a button, that action is not
+   possible for this thing right now. Nothing is shown greyed-out to tease you.
+3. **Some changes ask twice.** If a change would tread on something delicate, you get a second,
+   deliberate confirmation that explains what it is — not a warning that flashes past.
+4. **Where the system can show you the effect, it does.** Where it genuinely cannot, the button still
+   works. The preview is there to inform you, never to block you.
 
-### 10.1 What is legal, and when
+### 12.1 What you can do to a device
 
-A ticket is in exactly one of three placements, decided **by the data**:
+| If the device is… | You can |
+|---|---|
+| On someone's plan | **Reassign** (give it to someone else) · **Defer** (do it another day) · **Remove** (take it off the plan) |
+| On nobody's plan | **Assign** (give it to someone) · **Hold** (park it until a date) |
+| Parked | **Release hold** (put it back in the running) |
 
-| Placement | Where it is | Actions offered |
-|---|---|---|
-| **PLACED** | on a stop | Reassign · Defer · Remove |
-| **UNPLACED** | nobody holds it | Assign · Hold |
-| **HELD** | parked until a date | Release hold |
+### 12.2 What you can do to a site visit
 
-A stop always offers: Swap engineer · Split stop · Reorder.
+**Swap engineer** — move the whole visit to somebody else.
+**Split stop** — move *some* of the devices at that site to somebody else. This is the only place in
+the whole product where you tick several things at once.
+**Reorder** — move the visit earlier or later in the engineer's day.
 
-Why Assign is absent on a placed ticket: `assignTicket` *refuses* an already-assigned ticket, so the
-button would always fail. Why Hold is absent on a held ticket: the hold was already a decision, and
-offering it again would invite you to overwrite your own return date without seeing it.
+### 12.3 Choosing who to move work to
 
-### 10.2 The actions, one by one
+The list only offers engineers from this zone. The current engineer is not in it — you cannot reassign
+work to the person who already has it.
 
-| Action | Object | What it does | Endpoint |
-|---|---|---|---|
-| **Reassign** | ticket | moves one ticket to another engineer | `POST /batches/:id/override` |
-| **Defer** | ticket | *"do it then, not today"* — moves it to a later day | same |
-| **Remove** | ticket | takes it off the plan entirely (danger styling) | same |
-| **Swap engineer** | stop | moves the **whole stop** to another engineer | same |
-| **Split stop** | stop | moves **some** of a stop's devices elsewhere | same |
-| **Reorder** | stop | changes the stop's position in the day | same |
-| **Assign** | unplaced ticket | puts it on an engineer's plan | `POST /schedules/assign` |
-| **Hold** / **Release** | unplaced / held ticket | parks it until a date / returns it | `POST /schedules/holds`, `/holds/release` |
+Each name shows their load, like `Priya S. (7/25)`. Someone who is already full is **marked, not
+removed**:
 
-**Split stop is the one place multi-select exists in the entire product** — `SPLIT_BATCH` takes
-`ticketIds[]`. Everywhere else, multi-select would imply a bulk write the backend does not offer.
+> The planner will not choose an overloaded engineer. **You can.** The screen shows you what you are
+> doing and lets you do it.
 
-### 10.3 The target picker
+### 12.4 The two "are you sure?" moments
 
-Zone-scoped and acting-aware server-side: the engineers offered are the same engineers the board
-shows, never a pan-India list beside a one-zone board. The current engineer is excluded — nobody is a
-reassign target for their own work.
+**The engineer is on site right now.** They are physically at the location, working on the thing you
+are about to move. You can go ahead. It gets recorded.
 
-Options are labelled `Name (7/25)` and an over-capacity engineer is **marked, never removed**:
+**The work is parked until a vehicle comes back.** Somebody deferred it for a reason. You can override
+that. It gets recorded.
 
-> Dispatch will not pick an over-capacity engineer. **A human may.** The option says both.
+Both show you exactly which tickets are affected before you decide.
 
-### 10.4 Impact preview
+> **One thing that catches people out:** when you park a ticket, the date you choose is the day it
+> **comes back**, not the last day it stays parked. To keep something out of tomorrow's run, choose the
+> day after tomorrow. The form says this underneath the date field.
 
-Only the three two-lane moves — Reassign, Swap, Split — have a two-lane impact. The endpoint
-deliberately refuses the other three with `NOT_PROJECTABLE` rather than answering zeros, because
-`0 → 0` would read as *"removing this person's work costs nothing"*.
+Releasing a hold needs no reason and takes effect at the very next run.
 
-The preview is keyed on **the target and the selection, never on the reason** — otherwise it would fire
-a projection on every keystroke while you type your justification.
+### 12.5 Running the planner yourself
 
-### 10.5 The two conflict gates
-
-**`CONFLICT_ON_SITE`** — the engineer is standing at the site right now, on work this move touches.
-
-**`CONFLICT_DEFERRED`** — the work is held to a future vehicle-return date.
-
-Both render as an amber panel naming the affected tickets, with **Override anyway** and **Cancel**.
-They are *different facts* and the panel says which. Overriding is recorded in the audit trail.
-
-A third refusal exists on Hold: **`CONFLICT_VEHICLE_UNAVAILABLE`** — a vehicle-unavailability report
-already returns this vehicle on a stated date. You may override that date, deliberately.
-
-### 10.6 One detail that catches people out
-
-> **`heldUntil` is the day the ticket comes *back*.** The check is inclusive. Holding something off
-> tomorrow means naming the day *after* tomorrow. The form says so on the line beneath the field.
-
-Releasing a hold takes no reason and has no conflict — the ticket re-enters the very next run.
-
----
-
-## 11. Drag and drop
-
-**A drag initiates. It never commits.**
-
-Releasing a chip on a legal cell opens the same authoritative dialog the typed path uses, prefilled
-with the target or the date. The same validation, the same impact preview, the same mandatory reason
-and the same Confirm still stand between the release and any write. `Esc` or Cancel leaves the board
-exactly as it was, and **the chip does not visually move until the write returns.**
-
-Legal drops:
-
-| Drag | Onto | Opens |
-|---|---|---|
-| a ticket | another engineer, **today** | Reassign, target prefilled |
-| a ticket | the **same** engineer, a future day | Defer, date prefilled |
-| a stop | another engineer, today | Swap engineer, target prefilled |
-| a pool row | an engineer, today | Assign, target prefilled |
-| a placed ticket | the Work rail | Remove |
-
-An illegal cell **never becomes a drop target** — refusal is a cursor state during the drag, not an
-error afterwards. A **past** column refuses every drop by construction. A **future** column accepts
-exactly one: the same engineer's own ticket, which means *"do it then, not today"* and opens Defer.
-
----
-
-## 12. Run Now
-
-The real trigger — `POST /schedules/dispatch-run` — in the frame you are already standing in.
-
-Clicking it opens a confirm with three things on it, and each is a real property of the engine:
-
-**1. The warning you cannot undo:**
+**Run now** in the top strip. You will be asked to confirm, and the confirmation says three things:
 
 > **Engineers are notified.** A manual run commits day plans through the same path as the 05:00 run, so
 > any work it places is pushed to engineers' phones immediately — mid-shift, if it is mid-shift.
 
-**2. What it will consider:** work that is still open and unassigned. Anything already on a plan is
-left alone.
+That is the one consequence you cannot take back. Everything else on this screen you can adjust
+afterwards; a notification that has gone out has gone out.
 
-**3. An optional reason**, recorded on the run ledger.
+You can add a reason, which is kept on the record.
 
-### The in-flight guard
+**If a run is already going** the button is disabled and tells you when it started. If you somehow get
+past that, the system refuses and names the zone, the time and who started it.
 
-A run already going for this zone disables the button before you press it (`Dispatch running…`), and
-the server refuses independently with a populated `409` naming the zone, the time it started, and who
-started it. The pre-check is a courtesy; the server is the authority.
+**If it reports "No new assignments" — that is normal.** Read the message:
 
-### The zero-result state — read this before you conclude it is broken
+> The run completed and placed nothing — that is the expected result when nothing has changed. Dispatch
+> only considers tickets that are still open and unassigned; work already on a plan is never
+> re-planned.
 
-> **No new assignments.** The run completed and placed nothing — that is the expected result when
-> nothing has changed. Dispatch only considers tickets that are still **open** and **unassigned**; work
-> already on a plan is never re-planned, and work that is held, withheld by policy or without an
-> eligible engineer stays where the rails show it.
+Running it twice in a row legitimately does nothing the second time. This is the single most common
+reason people think the planner is broken when it is not.
 
-Pressing Run Now twice in a row legitimately places zero the second time. This state is designed, not
-incidental — without it, managers learn to distrust the scheduler.
+### 12.6 Dragging things
+
+You can drag a device, or a whole site visit, onto another engineer. The cursor turns into a hand when
+you are over something you can pick up.
+
+> **Dragging never changes anything by itself.** It opens the normal dialogue with the target already
+> filled in. You still get the preview, you still have to give a reason, and you still have to confirm.
+> The item does not visibly move until the change is actually saved.
+
+**Where you can drop things:**
+
+| Drag | Onto | Opens |
+|---|---|---|
+| a device | **an engineer's name in the left-hand list** | Reassign |
+| a device | that engineer's cell in **today's** column | Reassign (same thing, other door) |
+| a device | the **same** engineer on a **later day** | Defer — "do it then, not today" |
+| a device | the work column on the right | Remove |
+| a whole site visit | another engineer, left list or today's column | Swap engineer |
+| an unassigned row from the right | an engineer | Assign |
+
+The left-hand engineer list is usually the easiest target — it is one column, always visible, and does
+not require finding the right cell in the grid.
+
+**Anything else simply will not accept the drop.** As you drag, every place you *can* drop lights up
+with a dashed outline; anywhere else shows the "no" cursor. Nothing bad happens if you let go over the
+wrong place — nothing happens at all.
+
+Two that catch people out:
+
+- **The engineer who already has it** is not a target. There would be nothing to change.
+- **A different engineer on a different day** is not a target either. That would be two changes at
+  once — move it to someone else *and* move it to another day — and there is no single dialogue for
+  that. Do one, then the other.
 
 ---
 
-## 13. Assign mode — handing out work
+## 13. Handing out unassigned work
 
-The engine's job is to place what it can. **Assign mode is where a human places the rest.**
+The planner places what it can. **This is where you place the rest.**
 
-Enter it from the top bar's **Assign work**. The URL becomes `?assign=1`. It is a *mode of this
-Console*, not another page: the top bar, zone, day, run state, attention strip and health band all stay
-exactly where they were.
+Click **Assign work** in the top strip. You stay on the same screen — the zone, the day, the run
+status and the banners all stay exactly where they were. Only the three columns change what they hold.
 
-### 13.1 Why it replaces the board rather than sitting beside it
+### 13.1 Why this works differently
 
-This is the one rule that shapes everything about the mode:
+Everywhere else on this screen, changing something saves it immediately. Here, **nothing is saved until
+you say so.**
 
-> **Draft work and committed work may share a screen, a frame and a grammar. They may never share a
-> lane object.**
+That is deliberate: handing out work is a plan you build up across several engineers and then commit
+in one go. But it means the screen has to be absolutely clear about which of the two you are looking
+at, which is why the board disappears while you are doing it. Two things that look alike but mean
+opposite things must never be on screen together.
 
-A chip on the committed board **writes immediately**. A chip in a draft lane **writes nothing** and is
-lost when you leave. Two identically shaped objects on one screen meaning opposite things is the
-defect this rule exists to prevent — so Assign mode takes over the board region entirely, and there is
-no drag between them because there is nowhere to drag to.
+### 13.2 The three columns become three steps
 
-### 13.2 The layout — the same three regions, different occupants
-
-| Region | Normal mode | Assign mode |
-|---|---|---|
-| **Left** | Engineer roster | The same roster — **and it is the lane-target list** |
-| **Centre** | Committed board | **Your draft**, as engineer rows |
-| **Right** | Work Pool | **Not assigned yet** — the assignable pool |
-| **Bottom band** | Inspector | **Candidates** for the plant in focus |
-
-### 13.3 The three steps, on screen
-
-Across the top, replacing any prose about drafts and browser tabs:
+Across the top:
 
 ```
-① 1479  Not assigned yet          ② 606  Selected for assignment       ③ 873  Will remain unassigned
-   waiting in North                    going to 1 engineer · 98 critical      after you commit
+① 1479  Not assigned yet        ② 606  Selected for assignment      ③ 873  Will remain unassigned
+   waiting in North                  going to 1 engineer · 98 critical      after you commit
 
 Nothing has changed in the system yet — your draft is written only when you commit,
-one engineer at a time.                                          [1 ENGINEER OVER CAPACITY]
+one engineer at a time.
 ```
 
-Step ③ is **arithmetic over a draft that has written nothing** — which is exactly why the wording is
-*will remain*, never *remains*.
+Read left to right: **what is available → what you have picked → what will be left over.**
 
-The warning chips on the right are silent on a clean draft. A row reading *"0 over capacity · 0
-crossings"* would train you to stop reading the one place a real warning appears.
+That third number is a *prediction*, which is why it says **will remain** and not "remains". Nothing
+has happened yet.
 
-### 13.4 The gesture: tick, then choose a person
+Below the columns are the same three ideas laid out:
 
-1. **Tick work** in the right rail. Rows are grouped company → plant, showing outstanding count,
-   `n CRIT`, `n held`, and *oldest 61 h silent*.
-2. The left rail's heading changes to **Add to whose plan?** and every engineer row becomes
-   `Add 3 →`.
-3. **Click an engineer.** The work lands on their lane in the centre.
+- **Right** — *Not assigned yet*: everything you could hand out, grouped by customer and site
+- **Middle** — *Your draft — nothing written yet*: what you have picked, grouped by engineer
+- **Left** — your engineers, which is now the list of **people to hand work to**
 
-That is the whole thing. There are no lane numbers and no *"Select engineer…"* dropdown — the roster
-*is* the target list, and the row that performs the assignment is the row that shows you what it costs.
+### 13.3 How to actually do it
 
-### 13.5 What the draft shows you
+1. **Tick some work** on the right. Each line shows how many devices, how many are critical, and how
+   long the oldest one has been silent.
+2. The left column's heading changes to **"Add to whose plan?"** and every engineer gets an **Add 3 →**
+   button.
+3. **Click an engineer.** The work moves into their lane in the middle.
 
-**On the engineer's rail row:** `25 → 631 / 25` and `+606 staged`. Amber when the draft takes them at
-or past capacity.
+Repeat for as many engineers as you need. That is the whole operation.
 
-**On the draft lane:** *"Will be added to Rahul Verma — 606 devices"*, the coverage badge per plant,
-the same `committed → after / capacity` figure, and the work as chips. **Take back** empties the lane.
+### 13.4 What the screen tells you as you go
 
-**Chip grammar in the draft** (different from the board's, because it answers a different question):
+**On the engineer you chose:** `25 → 631 / 25` — what they had, what they would have, and their limit.
+It turns amber if you are pushing them over.
 
-| Form | Means |
+**In the middle:** *"Will be added to Rahul Verma — 606 devices"*, with a **Take back** button, and the
+work shown as small boxes. Those boxes use their own marks:
+
+| Mark | Meaning |
 |---|---|
-| solid + dot | assignment **inside the engineer's own coverage** |
-| dashed violet | a human **crossed a coverage tier** |
-| heavy crimson + ⚑ | **critical work** |
-| dashed crimson | the engineer covers this plant **at no tier at all** |
-| amber lane | this draft takes them **at or past capacity** |
+| Solid with a dot | This is within the engineer's normal coverage |
+| Dashed purple | You are going outside the normal coverage order |
+| Heavy red with a flag | Critical work |
+| Dashed red | This engineer does not cover this site at all |
+| Amber lane | This would take them over their limit |
 
-Critical work gets **its own chip** — `Kotputli Works ×3 crit` beside `Kotputli Works ×15` — because a
-plant reading `×15` says nothing about whether any of it is on a clock.
+Critical work gets its own box — `Kotputli Works ×3 crit` next to `Kotputli Works ×15` — because a
+site showing "15" tells you nothing about whether any of it is on a clock.
 
-**Nothing here is a gate.** Over capacity, a crossed tier and no coverage are all *states*. Manual
-overload is an administrative right; the screen states the fact and lets you decide.
+**None of these stop you.** They are all statements of fact. Overloading somebody is your decision to
+make, and the screen makes sure you make it knowingly.
 
-### 13.6 Two things that are easy to miss
+### 13.5 Two things that surprise people
 
-**A plant is the unit of the write.** A site shared by two companies moves **all** of its unassigned
-work together, whichever company's row you ticked. The row says so: *"shared site — all of its work
-moves together"*, and the counters count the whole plant, because a draft that counted only the ticked
-row would under-report its own commit.
+**A shared site moves as one.** If two customers have equipment at the same site, ticking one of them
+moves **all** the outstanding work at that site. The line says so — *"shared site — all of its work
+moves together"* — and the counts include the lot, because a screen that counted less than it was
+about to do would be lying to you.
 
-**"Nobody can take this."** If you use **Spread across engineers…** (a projection across several
-engineers at once), whatever it could not place stays in the draft region as a dashed rail:
+**Sometimes nobody can take something.** If you use **Spread across engineers…** to share work out
+automatically, anything it could not place stays visible in a dashed box with the reason:
 
-- *no coverage* — none of the engineers you chose covers that plant at any tier
-- *all dropped* — some do, and every one of them failed a readiness check
+- **no coverage** — none of the engineers you picked covers that site at all
+- **all dropped** — some do, but every one of them failed a readiness check
 
-Those are different problems (a coverage gap versus a readiness gap) and the rail refuses to blur them
-into "unassignable". These chips are deliberately un-actionable: nothing in your selection *can* take
-them, and the fix is coverage or a freed-up engineer, not another click.
+Those need different fixes, so the screen keeps them apart. You cannot click these — no one in your
+selection can take them. The fix is either coverage or freeing somebody up.
 
-### 13.7 Leaving without committing
+### 13.6 If you leave halfway through
 
-If your draft is empty, you leave immediately. If it is not:
+If you have picked nothing, you just leave.
+
+If you have picked something, you get asked:
 
 > **606 devices are selected for 1 engineer and nothing has been written.** Leaving now hands out none
 > of it.
 > `[Keep drafting]` `[Leave and discard]`
 
-The draft lives in this browser tab only and dies when you leave — that is by design. What is *not* by
-design is losing it without being told what you are giving up.
+Your selection lives only in this browser tab and disappears when you leave. That is by design. Being
+told what you are about to lose is also by design.
 
-### 13.8 Review, then commit
+### 13.7 Committing
 
-**Review & commit** resolves your plants into the exact ticket ids the write will move, and shows a
-**diff, not a confirmation dialog**:
+**Review & commit** shows you a summary before anything happens:
 
-- **Committing** — how many devices, to how many engineers
-- **Still unassigned after** — the residual, including *"n with no eligible engineer"*
-- **Over capacity** — `allowed — not blocked`
-- a per-engineer table: coverage used, plants, devices (`n crit`), load `25 → 631 / 25`, flags
-- a **mandatory reason**
-- when someone is being overloaded, it is stated in words: *"Rahul Verma is being taken to 25× daily
-  capacity. This is allowed and will be recorded — it is not blocked."*
+- how many devices, to how many engineers
+- how much will still be unassigned afterwards
+- how many engineers you are pushing over their limit — marked *allowed, not blocked*
+- a line per engineer: their coverage, sites, devices, and load before and after
+- **a reason, which is required**
 
-Nothing is written until you press **Commit n assignments**.
+If you are overloading somebody it says so in words: *"Rahul Verma is being taken to 25× daily
+capacity. This is allowed and will be recorded — it is not blocked."*
 
-### 13.9 What "commit" actually does
+Then **Commit**.
 
-`POST /schedules/assign-batch` runs **one transaction per engineer**, and answers with **one result row
-per engineer**.
+### 13.8 What "commit" actually does
 
-> There is no atomic "commit all". Three engineers can be written and a fourth can fail, and the
-> receipt says so rather than averaging it away.
+**Each engineer is written separately.** This matters:
 
-The receipt:
+> There is no all-or-nothing. Three engineers can be written successfully and a fourth can fail, and
+> the receipt tells you exactly that instead of averaging it into a single "done".
+
+You then get:
 
 > **606 devices are now on 1 engineer's plan**
 > Written one engineer at a time — each line below is its own transaction and its own result.
-> To move any of this again, use the engineer's lane on the board — every row here is a normal
-> assignment now, with its own audit trail.
 
-Per lane you then see `assigned 604, 2 skipped`, and a skipped ticket held to a future date offers
-**Resolve hold** in place — the same single-ticket confirm flow every other assign surface uses,
-without touching the rest of the lane.
+Per engineer you will see something like `assigned 604, 2 skipped`. Anything skipped because it was
+parked can be sorted out right there, without touching the rest.
 
-After a commit the Commit button is **gone** (the draft was consumed and the pool has moved
-underneath it) and only **Done** remains. Leaving the mode puts you back on the board, which already
-shows the work you just handed out.
+The commit button disappears afterwards, replaced by **Done** — the work is out and there is nothing
+left to commit. Going back to the board shows it already in place.
 
-### 13.10 The standalone `/assign` page
+### 13.9 The separate "Assign Work" page
 
-There is a second route, **Assign Work** in the sidebar and the top bar's **+ Assign SE** button. It
-runs the *same* draft machine with one difference: **no zone scope**.
+There is also an **Assign Work** item in the left menu (and the **+ Assign SE** button at the top of
+every screen). It works identically with one difference: **it is not limited to one zone.**
 
-That is the whole reason it exists. A CSM or Operations Head sometimes needs to ask *"where in the
-country is the work?"* — a different question from *"what is left in this zone today?"*. The Console's
-Assign mode is deliberately clamped to the zone its board is showing, because a pan-India pool beside a
-one-zone board is two panes disagreeing about where you are standing.
+That is why it exists. *"Where in the country is the outstanding work?"* is a different question from
+*"what is left in my zone today?"*, and it deserves a screen where there is no single-zone board next
+to it saying something different.
 
 ---
 
-## 14. The day axis — past, today, future
+## 14. Common jobs
 
-`GET /dispatch/today` is **never given a date**. Instead, each column picks the source that can
-honestly answer for it:
+### It is 9am. What needs me?
 
-| Column | Source | Fidelity | Can you change it? |
-|---|---|---|---|
-| **Past** | `GET /schedules?date=` | committed **counts only** | **No** — immutable by construction |
-| **Today** | the one lifted `GET /dispatch/today` | full — stops, chips, provenance, traces | **Yes** |
-| **Future** | `GET /schedules?date=` if a plan exists, else `GET /schedules/preview?date=` | committed counts, else **ghost chips** | **No** |
+1. Open **Today's Dispatch**, pick your zone if asked.
+2. **Read the banners first.** An amber failure notice or a red critical banner beats everything below.
+3. Check **⚠ n need attention** and open it if the number is not zero.
+4. Scan the board for **amber cells** (overloaded people) and **dashed boxes** (changes somebody made
+   that you may not know about).
+5. Open the right column's **Unassigned** tab to see what could not be placed.
 
-Three consequences:
+### A critical ticket has nobody — sort it out
 
-- **A past column is history.** Selection and drop are refused by construction, not by a permission
-  error after the fact. For detail, open the run.
-- **Committed beats projected.** A future day that already has a live plan shows it, badged
-  `committed`, rather than a projection of what would happen.
-- **A ghost chip is not a commitment.** It is ghosted, italic, muted, badged *projected*, and
-  deliberately **not selectable** — there is no committed object behind it to inspect, no trace to
-  explain, and no override to offer. The projection runs the *real* recommender, so it is a truthful
-  answer to a conditional question, and it carries a `ranking as of …` watermark.
+1. Click its reference in the red banner. The detail panel opens.
+2. Read **Why**. Was it *no coverage* or *everyone was ruled out*? Those need different fixes.
+3. Check **Alternatives** — people who were ruled out are listed with the reason, and you can still
+   pick them.
+4. **Assign**, pick someone, give a reason, confirm.
 
-> **Holding a ticket back is the only pre-run lever**, and it lives on the Work Pool's held
-> population — not on a future column.
+### An engineer has gone off sick
+
+1. Their row already shows it, and **their work is still theirs** — nothing moved automatically.
+2. Click each **site visit** on their row → **Swap engineer** → pick someone → check the effect → give
+   a reason → confirm.
+3. Move whole site visits rather than individual devices where you can. One action instead of ten.
+
+### Hand out this morning's backlog
+
+1. **Assign work** in the top strip.
+2. Tick sites on the right. Watch the three numbers at the top move.
+3. Click an engineer on the left for each batch. Watch their load change on their row.
+4. Not sure who should get a site? Click the site's **name** — the panel at the bottom shows everyone
+   who can cover it and everyone who cannot, with reasons.
+5. **Review & commit** → read it → give a reason → **Commit**.
+6. Read the receipt. It is per-engineer, and it tells you if any of them failed.
+
+### Why on earth did it choose them?
+
+1. Click the device on the board.
+2. Read **Why** — who was considered, who was ruled out and for what reason.
+3. Read the score breakdown below it for the actual arithmetic.
+4. For the whole morning's reasoning, click **Run decisions →** in the day's column header.
+
+### New urgent work has come in since this morning
+
+1. **Run now** → read the notification warning → give a reason → confirm.
+2. If it says **No new assignments**, that is normal — see §[12.5](#125-running-the-planner-yourself).
+3. Anything it still could not place shows up in the red banner or the Unassigned tab. Handle it as
+   above.
 
 ---
 
-## 15. How to read the numbers without being misled
+## 15. Numbers that could mislead you
 
-The whole surface is built on a small set of honesty rules. Knowing them turns the screen from
-"numbers" into "answers".
+This screen is careful about honesty in ways that are easy to miss. These are the ones worth knowing.
 
-| Rule | What it means in practice |
-|---|---|
-| **`—` ≠ `0`** | a dash means *not recorded by this run*; a zero means *recorded and none* |
-| **The counters are never summed** | eight populations with different owners do not add to one actionable number |
-| **`policyWithheld` is a count, never a list** | that work has no recommendation and no trace; there is nothing to itemise |
-| **Unknown provenance is drawn as unknown** | dotted, muted — never as a system decision |
-| **`NOT_ENFORCED` is not `PASSED`** | a filter with no data source says so, and can never drop a candidate |
-| **`not available` is not `0 km`** | no home base / no prior stop / no plant geometry |
-| **"reason not recorded" is not a guess** | absence is a fact about the record |
-| **One load definition, everywhere** | the People rail, the board, Assign mode, the review screen and the engine all read `committedDayPlan` |
-| **Over capacity is a *state*, never a barrier** | dispatch will not pick them; a human may; nothing is ever disabled for it |
-| **A projection is conditional mood** | *would be assigned*, never *is assigned* |
+**A dash is not a zero.** `—` means *this was not recorded*. `0` means *it was recorded and there were
+none*. Very different.
+
+**"Not enforced" is not "passed".** A check the system cannot currently make says so. Do not read it
+as an all-clear.
+
+**"Not available" is not "zero kilometres".** It means we do not know where the engineer was starting
+from.
+
+**"Reason not recorded" is not a reason.** Where the record is blank, the screen says the record is
+blank rather than inventing something.
+
+**The counts do not add up, on purpose.** There are several different reasons work did not get placed,
+each belonging to a different person to fix. Adding them into one number would produce a total nobody
+can act on.
+
+**A prediction is not a plan.** Future days show what *would* happen. Faded, italic, and not
+clickable, because there is nothing there yet to act on.
+
+**Being over capacity never blocks anything.** It is shown, everywhere, always — and it never stops
+you.
 
 ---
 
-## 16. Roles — what changes, and what does not
+## 16. Who is allowed to do what
 
-**Every permission is enforced server-side.** Role variance in the Console is *rendering only*, and
-controls a role does not have are **hidden, never disabled** — a greyed-out button advertises a
-capability as broken rather than as belonging to someone else.
+Permissions are enforced by the system, not by hiding buttons. If you cannot do something, **you will
+not see the button at all** rather than seeing it greyed out.
 
 | | Zonal Manager | Central Service Manager | Operations Head |
 |---|---|---|---|
-| Zone | own zone, resolved from the token | must pick one | must pick one |
-| Zone picker | **absent** | ✅ | ✅ |
-| Board, rails, Inspector | ✅ | ✅ | ✅ |
-| All eight write actions | ✅ | ✅ | ✅ |
-| Run Now | ✅ *(clamped to own zone server-side)* | ✅ | ✅ |
-| Assign mode | ✅ own zone | ✅ board's zone | ✅ board's zone |
-| `/assign` pan-India pool | own zone | ✅ | ✅ |
-| Bulk unassign (`/bulk-unassign`) | ✗ | ✗ | ✅ only |
+| Which zone | Yours, automatically | Choose one | Choose one |
+| Zone selector | Not shown | ✅ | ✅ |
+| See the board and everything on it | ✅ | ✅ | ✅ |
+| Change the plan (all the actions in §12) | ✅ | ✅ | ✅ |
+| Run now | ✅ *(your zone only)* | ✅ | ✅ |
+| Hand out work | ✅ your zone | ✅ | ✅ |
+| The country-wide Assign Work page | Your zone | ✅ | ✅ |
+| Bulk unassign | ✗ | ✗ | ✅ only |
 
-**Acting as a zone.** A CSM or OH can work inside a zone via the `Act as ZM` control. That header is
-honoured on the assignable-work read, the candidate read and the engineer list — so an acting OH sees
-that zone's pool and that zone's engineers, not the national set. This matters: on a screen about what
-is left in *this* zone, an acting OH reading pan-India is about to hand out another zone's work.
-
----
-
-## 17. What reaches the engineer's phone
-
-Be honest with your engineers about this, because the Console will not tell you.
-
-**The data is correct and the endpoints are real.** `GET /api/schedules/me` serves the ordered,
-plant-clustered day plan; `GET /api/me/tickets` serves assigned plus covered-pool work with removal and
-deferral markers. Both are IST-day-scoped and both tolerate override states correctly.
-
-**Delivery is not built.** As of this writing:
-
-- **No push.** The external channel gateway returns `UNAVAILABLE` and logs the intent; the mobile app
-  has no push dependency at all. *"Your Day Plan is live"* is written as an **in-app** row only.
-- **Nothing on the handset ever asks again.** No pull-to-refresh, no focus refetch, no polling. Each
-  screen fetches once on mount.
-- **The session dies after 15 minutes.** There is no per-request token refresh, so a working handset on
-  a working network starts rendering *"Offline"* over data that is perfectly fine on the server.
-- **The server's change signal has no reader.** `removedFromPlanAt` / `deferredToDate` are published
-  and unread; the client diffs consecutive fetches instead, which cannot see a change made while the
-  app was closed.
-
-**In practice:** an engineer sees whatever was true at cold start. A reassign you make at 11:00 is
-invisible on their handset until they force-close and reopen the app — and if they logged in more than
-fifteen minutes ago, reopening shows "Offline" until they log in again.
-
-> **Operationally: if a change matters today, phone them.** Do not assume the Console's write reached
-> the field.
+A CSM or Operations Head can work **as** a zone using the *Act as ZM* control at the top. When you do,
+the whole screen — including who is offered as a reassignment target — narrows to that zone. This is
+important: on a screen about what is left in *this* zone, seeing the whole country's engineers would
+be a good way to hand out another zone's work by mistake.
 
 ---
 
-## 18. Recipes — six common jobs
+## 17. What your engineers actually see on their phones
 
-### A. "It's 09:00. What needs me?"
+**Please read this one.** The screen will not tell you, and it changes how you should work.
 
-1. Open **Today's Dispatch**. Pick your zone if asked.
-2. Read the **health band** first — a recovery notice or a crimson escalation strip outranks everything
-   below it.
-3. Read the **attention strip** (`⚠ n need attention`) and expand it if the number is non-zero.
-4. Scan the **board** for amber cells (over-capacity engineers) and dashed chips (human overrides you
-   may not have made).
-5. Open the **Work Pool** → *Unassigned* to see what the engine could not place.
+**The data is correct.** The app asks the right questions and gets the right answers. The day plan it
+shows is real, properly ordered, and correctly grouped by site.
 
-### B. "This critical ticket is unassigned — fix it"
+**But it is not delivered to them.** Four things are missing:
 
-1. Click its id in the escalation strip → the Inspector opens on it.
-2. Read **Why** — was it *no coverage* or *all dropped*? They need different fixes.
-3. Read **Alternatives** — dropped candidates are listed **with their reason**, and remain assignable.
-4. Actions → **Assign**, pick an engineer, Confirm. If it is held, you get a second gate and a reason
-   field.
+- **There are no push notifications.** "Your day plan is live" is written down, but nothing pushes it
+  to the handset.
+- **The app never asks again.** No pull-to-refresh, no automatic refresh. Each screen loads once when
+  it opens.
+- **The session expires after 15 minutes.** After that the app shows **"Offline"** even on a perfect
+  connection, over data that is completely fine on our side.
+- **Changes you make are not signalled.** The app has no way of knowing something moved.
 
-### C. "This engineer went on leave"
+**In practice:** an engineer sees whatever was true when they last opened the app fresh. If you
+reassign something at 11am, they will not see it until they force-close the app and reopen it — and if
+they logged in more than fifteen minutes earlier, reopening shows "Offline" until they log in again.
 
-1. Their rail row already shows the availability, and their work **still stands** — nothing was
-   silently moved.
-2. Select each **stop** on their lane → **Swap engineer** → pick a target → read the impact → give a
-   reason → Confirm.
-3. Swapping a whole stop is one write; reassigning ticket by ticket is many. Prefer the stop.
-
-### D. "Hand out this morning's backlog"
-
-1. Top bar → **Assign work**.
-2. Tick sites in the right rail. Watch step ② and ③ move.
-3. Click an engineer on the left for each batch. Watch `committed → after / capacity` on their row.
-4. Click a plant's name to ask **Candidates** *"who can cover this?"* before committing to a choice.
-5. **Review & commit** → read the diff → type a reason → **Commit**.
-6. Read the receipt. It is per-engineer, and a failed lane says so.
-
-### E. "Something is wrong with today's plan — why did the engine do that?"
-
-1. Focused column header → **Run decisions →**.
-2. The replay lists every decision **in the order the engine made them**, unassignable ones included.
-3. Open any row's **Why?** for the candidates it compared, the tier, the filters and the score.
-4. For the arithmetic itself, select the ticket and read the **score breakdown** — every term, its
-   weight, and its contribution.
-
-### F. "New critical tickets arrived since this morning"
-
-1. **Run now** → read the notification warning → optional reason → **Run dispatch**.
-2. If it reports **No new assignments**, that is not a failure — see §12.
-3. If it refuses, the 409 names the zone, the start time and the holder.
-4. Anything it still cannot place lands in the escalation strip or the Unassigned rail. Handle it by
-   recipe B or D.
+> **If a change matters today, phone them.** Do not assume the change you just made has reached the
+> field.
 
 ---
 
-## 19. Glossary
+## 18. Word list
 
-| Term | Meaning |
+| Word | What it means |
 |---|---|
-| **Operating day** | the IST calendar day; the server owns which day is "today", never the browser |
-| **Day plan** | one engineer's `WorkSchedule` for a day |
-| **Stop** | one plant visit — a `PlantBatchAssignment`, with a sequence number |
-| **Chip** | one ticket (one device) on a stop |
-| **Committed load** | live day-plan stops for an engineer on a day, across every zone; what `daily_capacity` caps |
-| **Coverage tier** | `DEDICATED` → `MULTI_PLANT` → `FLOATING`, in strict precedence |
-| **Tier crossing** | a human assigned across that precedence when a stronger tier was still passing |
-| **SLA bucket** | device severity: `WARNING` … `CRITICAL` … `LONG_PENDING` |
-| **Critical+** | `CRITICAL` and `HIGH_CRITICAL` — the buckets that trigger escalation |
-| **Chronic** | a device with ≥ threshold lifetime failure cycles — a *replace-or-investigate* question |
-| **Catch-up / Steady** | the two recommender modes (`DEFICIT` / `PREVENTIVE`) |
-| **Hold / deferral** | a ticket deliberately kept out of runs until a return date (inclusive) |
-| **Escalation** | critical work with no capacity-eligible engineer, handed to a human |
-| **Provenance** | who put a ticket on a plan — the engine, a person, or *not recorded* |
-| **Draft** | Assign mode's staged, unwritten plan; lives in one browser tab and dies with it |
-| **Projection** | the real recommender run against a future date, committing nothing |
+| **Zone** | A region. One zone at a time on this screen. |
+| **Engineer / SE** | Service Engineer — the person who goes out and fixes things. |
+| **Ticket** | One device needing attention. |
+| **Stop / site visit** | One visit to one site, covering all its tickets. |
+| **Day plan** | One engineer's stops for one day, in order. |
+| **Capacity** | How many stops someone can do in a day. Shown `7/25`. |
+| **Dedicated / Multi-plant / Floating** | The three coverage types, strongest first. |
+| **Coverage** | Which sites an engineer is responsible for. |
+| **Went outside the coverage order** | A person assigned work to a weaker coverage type when a stronger one was available. Allowed, marked in purple. |
+| **Severity / SLA bucket** | How bad a device's condition is. **Critical** and **High critical** are the urgent ones. |
+| **Chronic** | A device that keeps failing. Raises the question of replacing it rather than fixing it. |
+| **Catch-up / Steady** | The two planning moods — clearing a backlog, or getting ahead. |
+| **Hold / parked / deferred** | Deliberately kept out of planning until a date. |
+| **Escalation** | Urgent work the system could not place, handed to a human. |
+| **Draft** | Work you have picked but not yet committed. Lives in your browser tab only. |
+| **Projection / prediction** | What a future day *would* look like. Nothing committed. |
+| **Run** | One execution of the planner, for one or more zones. |
+| **Unassignable** | The planner looked and found nobody eligible. |
+| **Withheld** | The planner deliberately did not consider it yet. |
 
 ---
 
-## Where the code is
+## If you need more detail
 
-| Concern | Path |
-|---|---|
-| The Console page | `apps/admin/src/pages/dispatch/TodaysDispatchPage.tsx` |
-| Its regions | `apps/admin/src/pages/dispatch/console/` |
-| Assign mode + `/assign` | `apps/admin/src/pages/dispatch/console/AssignBoard.tsx`, `apps/admin/src/pages/assign/` |
-| The draft state machine | `apps/admin/src/pages/assign/useAssignDraft.ts` |
-| The run orchestration | `apps/backend/src/scheduling/dispatch-run.service.ts` |
-| Selection and scoring | `apps/backend/src/recommender/` |
-| The write | `apps/backend/src/scheduling/batch-assignment.service.ts` |
-| Overrides | `apps/backend/src/scheduling/override.service.ts` |
-| The Console's reads | `apps/backend/src/scheduling/dispatch-today-query.service.ts` |
+This guide covers the screen. Two other places go deeper:
 
-**Design record** (historical — read for *why*, not for *what is true now*):
-`docs/audits/scheduler-console-implementation-slice-2026-08-27.md` (phases and decisions D1–D8) and
-`docs/audits/scheduler-console-ui-composition-correction.md` (composition, D9–D13, and §10's Assign
-mode).
+- **Why a specific decision was made** — the screen itself, always. Click the device, read **Why**.
+  There is nothing in a document that beats the system's own record of what it did.
+- **How the system is built** — the code comments, `docs/SYSTEM-STATE-2026-07.md`, and the design
+  documents in `docs/audits/`. Those are the technical record, and they are the authority if anything
+  here disagrees with them.
