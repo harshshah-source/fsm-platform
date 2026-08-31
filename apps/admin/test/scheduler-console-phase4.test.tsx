@@ -301,12 +301,24 @@ describe('Phase 4.2 — the mixed-commitment rule (§3.4)', () => {
    * shaped objects on one screen meaning opposite things.
    */
   it('never shows a committed lane and a draft lane at the same time', async () => {
+    const user = userEvent.setup();
     renderAt('/dispatch/today?zoneId=7&assign=1');
 
-    await screen.findByTestId('console-assign-mode');
-    expect(screen.getByTestId('lane-1')).toBeInTheDocument(); // the draft's first, empty lane
+    const region = await screen.findByTestId('console-assign-mode');
+    // The committed vocabulary is gone: no board, and no `lane-<seId>` for the engineer who has one.
     expect(screen.queryByTestId('console-board')).not.toBeInTheDocument();
     expect(screen.queryByTestId('lane-se-1')).not.toBeInTheDocument();
+
+    // …and it stays gone once the draft actually holds a lane for that *same* engineer. This is the
+    // stronger form of the assertion the numbered-lane version could only approximate: se-1 now has
+    // work in both vocabularies over the course of one session, and the two names never coincide.
+    await within(region).findByTestId('pool-plant-c-1-p-near');
+    await user.click(within(region).getByLabelText('Select Kotputli Works for UltraTech'));
+    await user.click(within(region).getByTestId('assign-target-se-1'));
+
+    expect(await within(region).findByTestId('draft-lane-se-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('lane-se-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('console-board')).not.toBeInTheDocument();
   });
 
   /**
@@ -343,17 +355,27 @@ describe('Phase 4.2 — the mixed-commitment rule (§3.4)', () => {
     // The pool is a fetch of its own: waiting on the region alone races its first render.
     await within(region).findByTestId('pool-plant-c-1-p-near');
     await user.click(within(region).getByLabelText('Select Kotputli Works for UltraTech'));
-    await user.click(within(region).getByRole('button', { name: 'Add to draft' }));
+    await user.click(within(region).getByTestId('assign-target-se-1'));
+    await within(region).findByTestId('draft-lane-se-1');
 
     await user.selectOptions(await screen.findByLabelText(/zone/i), '9');
 
     await waitFor(() => expect(screen.queryByTestId('console-assign-mode')).not.toBeInTheDocument());
   });
 
+  /**
+   * The claim survives the recomposition; the *form* of it changed deliberately. "Nothing is written
+   * until you commit — this draft lives in this browser tab only" explained a storage model. The
+   * ribbon states the consequence and puts the three populations beside it, which is the same promise
+   * in the operator's vocabulary rather than the implementation's.
+   */
   it('says out loud that nothing in the draft is written yet', async () => {
     renderAt('/dispatch/today?zoneId=7&assign=1');
     const region = await screen.findByTestId('console-assign-mode');
-    expect(within(region).getByText(/nothing is written until you commit/i)).toBeInTheDocument();
+    expect(within(region).getByTestId('assign-nothing-written')).toHaveTextContent(
+      /nothing has changed in the system yet/i,
+    );
+    expect(within(region).getByText(/written only when you commit, one engineer at a time/i)).toBeInTheDocument();
   });
 });
 
@@ -380,8 +402,10 @@ describe('Phase 4.3 — the pool is zone-scoped (D4)', () => {
     renderAt('/dispatch/today?zoneId=7&assign=1');
 
     const region = await screen.findByTestId('console-assign-mode');
+    // 5, not the payload's pan-India 21 — on the one surface whose purpose is "how much is left".
     expect(within(region).getByTestId('ledger-open')).toHaveTextContent('5');
-    expect(within(region).getByTestId('ledger-left')).toHaveTextContent('5');
+    expect(within(region).getByTestId('stage-available')).toHaveTextContent('5');
+    expect(within(region).getByTestId('stage-remaining')).toHaveTextContent('5');
   });
 
   /**
@@ -394,10 +418,10 @@ describe('Phase 4.3 — the pool is zone-scoped (D4)', () => {
     renderAt('/dispatch/today?zoneId=7&assign=1');
 
     const region = await screen.findByTestId('console-assign-mode');
-    const lane = within(region).getByLabelText('Engineer for lane 1');
-    expect(within(lane).getByRole('option', { name: /Ramesh K\./ })).toBeInTheDocument();
+    const target = within(region).getByTestId('assign-target-se-1');
+    expect(target).toHaveTextContent(/Ramesh K\./);
     // `2/8` — the deck's own committed figure, not a second count of it.
-    expect(within(lane).getByRole('option', { name: /2\/8/ })).toBeInTheDocument();
+    expect(target).toHaveTextContent(/2\s*\/\s*8/);
     expect(apiZoneEngineers).not.toHaveBeenCalled();
   });
 
@@ -418,9 +442,10 @@ describe('Phase 4 — pool → draft → review → commit, and the deck that fo
 
     await within(region).findByTestId('pool-plant-c-1-p-near');
     await user.click(within(region).getByLabelText('Select Kotputli Works for UltraTech'));
-    await user.click(within(region).getByRole('button', { name: 'Add to draft' }));
-    await user.selectOptions(within(region).getByLabelText('Engineer for lane 1'), 'se-1');
-    await user.click(within(region).getByRole('button', { name: /Review & commit/i }));
+    // Ticking work and choosing a person is the whole gesture — no lane to open, no dropdown to set.
+    await user.click(within(region).getByTestId('assign-target-se-1'));
+    await within(region).findByTestId('draft-lane-se-1');
+    await user.click(within(region).getByTestId('assign-review'));
 
     await screen.findByTestId('review-commit-screen');
     expect(screen.getByTestId('review-committing')).toHaveTextContent('2');

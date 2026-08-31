@@ -367,6 +367,17 @@ Bands become an accordion rather than a tab row in a narrow rail; **Why is open 
 
 ## 10. How Assign Mode works
 
+> **BUILT 2026-08-31, three days after the rest.** §15's build order (stages A–E) carried no stage for
+> Assign mode, so the board was recomposed on 2026-08-28 and this section was not — `?assign=1` kept
+> swapping in `/assign`'s own three-column page inside the Console's new frame. The operator reported
+> it as *"difficult to understand and feels disconnected from the main Scheduler Console"*, which is
+> the sentence below, arrived at independently. Built as written, with one deviation recorded in place:
+> **Candidates went to the bottom contextual band, not the right rail**, because D12 resolved with the
+> Inspector as the bottom band and Candidates is the same kind of object. The mixed-commitment rule,
+> D4's zone scope, `ReviewCommitScreen` and every data contract are unchanged.
+> `pages/dispatch/console/AssignBoard.tsx`; the draft machine moved to `pages/assign/useAssignDraft.ts`
+> so the two layouts could never become two machines.
+
 **Kept as a mode of the same Console, and it now fits the composition better than it did.**
 
 - **Entered** from the top bar, still `?assign=1`, still Live-only.

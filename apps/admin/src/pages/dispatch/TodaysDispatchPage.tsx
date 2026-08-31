@@ -83,6 +83,16 @@ export default function TodaysDispatchPage() {
   const [filter, setFilter] = useState('');
   const findRef = useRef<HTMLInputElement>(null);
   const [railView, setRailView] = useState<'pool' | 'attention'>('pool');
+  /**
+   * Assign mode's own "may I leave?" guard, published by {@link AssignMode} while it is mounted.
+   *
+   * The escalation strip sits **above** the mode and stays visible inside it, which until now made
+   * its verbs dead controls: clicking "Assign this work →" set `?sel=` and nothing rendered, because
+   * the Inspector is not on screen in Assign mode. That is the field-ops P1 the composition
+   * correction's §10 says the recomposition fixes. It is fixed by routing the verb through the mode's
+   * own exit — which asks before discarding a draft — rather than by leaving it inert.
+   */
+  const exitGuardRef = useRef<((leave: () => void) => void) | null>(null);
   const [drag, setDrag] = useState<ChipDragPayload | null>(null);
   const [dropIntent, setDropIntent] = useState<DropIntent | null>(null);
 
@@ -430,9 +440,28 @@ export default function TodaysDispatchPage() {
                   type="button"
                   data-testid={`escalation-resolve-${e.ticketId}`}
                   className="ml-auto text-link"
-                  onClick={() => select({ kind: 'ticket', id: e.ticketId })}
+                  onClick={() => {
+                    // In Assign mode the Inspector is not on screen, so selecting alone did nothing.
+                    // Leave the mode first — through the draft guard, so a staged draft is never
+                    // discarded without the operator being told what they are giving up.
+                    if (!assigning) return select({ kind: 'ticket', id: e.ticketId });
+                    // One patch, not two: `setAssigning` and `select` each rebuild the query from the
+                    // same render's `params`, so calling them in sequence would have the second put
+                    // `assign=1` straight back.
+                    const leave = () =>
+                      patchParams((p) => {
+                        p.delete('assign');
+                        p.set('sel', encodeSelection({ kind: 'ticket', id: e.ticketId }));
+                      });
+                    if (exitGuardRef.current) exitGuardRef.current(leave);
+                    else leave();
+                  }}
                 >
-                  {e.assignedSeId ? 'Reassign this work →' : 'Assign this work →'}
+                  {assigning
+                    ? 'Leave assigning and resolve →'
+                    : e.assignedSeId
+                      ? 'Reassign this work →'
+                      : 'Assign this work →'}
                 </button>
               </li>
             ))}
@@ -451,7 +480,19 @@ export default function TodaysDispatchPage() {
           draft lanes and committed lanes may share a screen and a grammar but never a lane object.
           The frame above — zone, day, run state, attention, Run Now — stays throughout. */}
       {assigning ? (
-        <AssignMode view={view} onExit={() => setAssigning(false)} onCommitted={invalidate} />
+        /* Keyed on the zone as a structural guarantee, not a convenience. The draft is client state
+           and would otherwise survive a zone change, leaving the old zone's plants staged under the
+           new zone's heading — one Commit from handing out another zone's work. The zone picker
+           already leaves Assign mode outright, so this key should never fire; it is here so that no
+           future path into a zone change can quietly reintroduce the defect. */
+        <AssignMode
+          key={view.zone.zoneId}
+          view={view}
+          filter={filter}
+          onExit={() => setAssigning(false)}
+          onCommitted={invalidate}
+          exitGuardRef={exitGuardRef}
+        />
       ) : (
         <>
           {/* ── ENGINEERS │ BOARD │ WORK-or-ATTENTION ──────────────────────────────────────── */}

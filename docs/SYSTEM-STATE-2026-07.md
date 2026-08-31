@@ -1322,8 +1322,9 @@ four channels (D11):** border = provenance, inline tokens = urgency/`RET`/`CHR �
 `CRIT` token — it travels with the ticket whoever assigned it, fixing the field-ops P0), cell
 treatment = capacity, and chip fill is **reserved for operational state pending the day-scoped board
 read (D13, deferred)**. The six override controls remain the Inspector's Actions band (one
-implementation); Assign mode (`?assign=1`, today-scoped) still replaces the board, rails and
-Inspector — see the #273 entry below. Specification: the slice doc
+implementation); Assign mode (`?assign=1`, today-scoped) replaces the board, rails and Inspector —
+**and since 2026-08-31 it is composed onto the Console's own three regions** (correction §10, which
+the A–E build order never carried a stage for), see the #273 entry below. Specification: the slice doc
 `docs/audits/scheduler-console-implementation-slice-2026-08-27.md` for phases/decisions D1–D8, the
 correction doc for the composition and D9–D13. Open: **D7** (route retirement —
 `/intraday`'s live escalation modal must be relocated first) and **D13** (the day-scoped board read
@@ -1345,20 +1346,42 @@ site), so the tree groups by the *ticket's* company; and `assignPlants` is **pla
 drafting one company's row at a shared site commits every company's work there — the ledger counts the
 whole plant and the row says so, rather than under-reporting its own commit. The transactional write
 (#275), Distribute (#276) and the orphaned-surface absorption (#277) all landed (below) — P9 is closed.
-**Two surfaces, one implementation (2026-08-28).** The workspace itself is
-`pages/assign/AssignWorkspace.tsx`; `/assign` is a thin route that renders it, and so is the Scheduler
-Console's **Assign mode**. They differ in exactly three props. `zoneId` narrows the pool, *its ledger*
+**Two layouts, one state machine (2026-08-28; the seam moved down 2026-08-31).** The draft state
+machine is `pages/assign/useAssignDraft.ts` — pool read, candidate read, plant-shaped lanes, the
+ledger, Distribute's remainder rail, review and the `assign-batch` commit. Two layouts render it:
+`pages/assign/AssignWorkspace.tsx` (the standalone `/assign` page, unchanged) and
+`pages/dispatch/console/AssignBoard.tsx` (the Console's Assign mode). Until 2026-08-31 there was one
+layout serving both, which is why the Console's mode was `/assign`'s three-column page dropped inside
+the Console's frame — the composition the operator reported as *difficult to understand and
+disconnected*, and the one §10 had already predicted would read that way. The hook exists so the fix
+was a second **layout** and never a second machine: a machine whose entire contract is "nothing is
+written until commit" is the one thing that must not be duplicated, because the half that diverged
+would be the half that writes. The extraction was verified behaviour-preserving before anything was
+recomposed — all 52 `/assign` and Phase-4 tests green with zero test edits.
+
+The two layouts differ in scope, not semantics. `zoneId` narrows the pool, *its ledger*
 and the lane roster to one zone for the Console (slice §14 **D4**) — `assignable-work` **and**
 `/schedules/engineers` both answer pan-India for a CSM or Operations Head who is not acting in a zone,
 and only the first of those is obvious; the second would have offered another zone's engineers as lane
 targets. `/assign` passes no `zoneId` and keeps the pan-India pool on purpose: *where in the country is
 the work?* is a different question from *what is left in this zone today?*, and only the second has a
 zone-scoped deck beside it to contradict. `engineers` lets the Console pass the roster from its own
-lifted payload, so one screen never carries two counts of one engineer's day (#269). `header` is the
-page header on one and the mode banner on the other. The extraction exists because the *draft state
-machine* — not the five components, which were always reusable — is what a second surface would
-otherwise have re-implemented, and it is a machine whose entire contract is "nothing is written until
-commit". **The mixed-commitment rule** (slice §3.4, a written condition of D2's approval): draft work
+lifted payload, so one screen never carries two counts of one engineer's day (#269). `header` is the page header on `/assign`; the Console's layout has a mode banner of its own.
+
+**The Console composition (§10, built 2026-08-31).** Left = the engineer roster, **and it is the
+lane-target list**: tick work in the pool, click a person, and it lands on their lane — no numbered
+lanes and no `Select engineer…` dropdown, because `placeOnEngineer` always reused an engineer's
+existing lane and the number was only ever a label for a row the engineer already owned. Centre = the
+draft, as engineer rows (`draft-lane-<seId>`). Right = the assignable pool, headed *Not assigned yet*.
+Bottom band = Candidates for the focused plant, in the slot the Inspector occupies (the one deviation
+from §10 as written, and it follows the Console: D12 resolved with the Inspector as the bottom band,
+so contextual detail belongs there). A **stage ribbon** replaces the prose banner with the three
+populations as counted steps — *Not assigned yet · Selected for assignment · Will remain unassigned* —
+over the standing line "Nothing has changed in the system yet"; every number is the ledger's,
+re-labelled, never a new claim. Leaving with work staged now **names what is being discarded** before
+discarding it (#272 Q2 is that a draft dies with the surface, not that it should die silently), and a
+committed batch gets a **receipt** that counts only what was written and says the write was per-lane.
+**The mixed-commitment rule** (slice §3.4, a written condition of D2's approval): draft work
 and committed work may share a screen, a frame and a grammar but **never a lane object**, which is why
 Assign mode replaces the Console's board, both rails and Inspector instead of sitting beside them, and
 why entering it drops the selection. **Acting-zone is

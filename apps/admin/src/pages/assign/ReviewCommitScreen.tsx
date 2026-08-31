@@ -105,14 +105,63 @@ export function ReviewCommitScreen({
 }) {
   const [reason, setReason] = useState('');
   const committingTotal = lanes.reduce((n, l) => n + l.ticketIds.length, 0);
+  /**
+   * The commit has come back. Every result row is per-lane — `assign-batch` runs **one transaction
+   * per engineer** (#272 R8) — so "done" is never a single verdict, and this screen must not print
+   * one. What `done` changes is only whether the operator is still *about to* write: once results
+   * exist, the draft has been consumed, the pool has reloaded underneath, and pressing Commit again
+   * would re-send ticket ids that are already assigned.
+   */
+  const done = results !== null;
+  const assignedTotal = (results ?? []).reduce((n, r) => n + (r.result === 'OK' ? r.assigned : 0), 0);
+  const okLanes = (results ?? []).filter((r) => r.result === 'OK').length;
+  const failedLanes = (results ?? []).filter((r) => r.result !== 'OK');
+  const skippedTotal = (results ?? []).reduce((n, r) => n + r.skipped.length, 0);
   const overCapacityLanes = lanes.filter((l) => l.dailyCapacity !== null && isOverCapacity({ committed: l.after, dailyCapacity: l.dailyCapacity }));
   const reasonOk = reason.trim().length > 0;
 
   return (
     <div data-testid="review-commit-screen">
       <p className="mb-2 text-xs text-ink-muted">
-        <span className="text-ink-strong">Assign work</span> › <b>Review &amp; commit</b>
+        <span className="text-ink-strong">Assign work</span> ›{' '}
+        <b>{done ? 'Committed' : 'Review & commit'}</b>
       </p>
+
+      {/*
+        **What actually changed** — the answer to "did I commit this?", stated before the diff that
+        produced it rather than in small print underneath.
+
+        It is deliberately *not* a single success message. The commit is per-lane and can be partly
+        good: three engineers written, one refused, six tickets skipped for a hold. A banner reading
+        "Committed" over a failed lane would be the one lie this screen exists to prevent, so the
+        headline counts only what was written and every other population gets its own clause.
+      */}
+      {done && (
+        <div
+          data-testid="commit-receipt"
+          className={[
+            'mb-4 rounded-card border-2 p-3',
+            failedLanes.length > 0 ? 'border-warning bg-warning-bg/40' : 'border-success bg-success-bg/30',
+          ].join(' ')}
+        >
+          <h2 className="text-sm font-semibold text-ink-strong">
+            {assignedTotal} device{assignedTotal === 1 ? '' : 's'} {assignedTotal === 1 ? 'is' : 'are'} now on{' '}
+            {okLanes} engineer{okLanes === 1 ? "'s" : "s'"} plan{okLanes === 1 ? '' : 's'}
+          </h2>
+          <p className="mt-0.5 text-[11px] text-ink-muted">
+            Written one engineer at a time — each line below is its own transaction and its own result.
+            {failedLanes.length > 0 &&
+              ` ${failedLanes.length} lane${failedLanes.length === 1 ? '' : 's'} wrote nothing.`}
+            {skippedTotal > 0 && ` ${skippedTotal} ticket${skippedTotal === 1 ? ' was' : 's were'} skipped.`}
+          </p>
+          <p className="mt-1 text-[11px] text-ink-muted">
+            {/* Undo is not offered because there is no batch-undo endpoint, and inventing the word for
+                six per-ticket reassignments would promise an atomicity the backend does not have. */}
+            To move any of this again, use the engineer's lane on the board — every row here is a normal
+            assignment now, with its own audit trail.
+          </p>
+        </div>
+      )}
 
       <div className="mb-4 grid gap-3 rounded-card border border-line bg-surface-card p-3 sm:grid-cols-4">
         <div>
@@ -200,6 +249,7 @@ export function ReviewCommitScreen({
         </table>
       </div>
 
+      {!done && (
       <div className="mt-3 rounded-card border border-line bg-surface-card p-3">
         <label htmlFor="assign-batch-reason" className="mb-1 block text-xs font-semibold text-ink-strong">
           Reason for this manual plan — required
@@ -214,6 +264,7 @@ export function ReviewCommitScreen({
           placeholder="Why is this plan being made?"
         />
       </div>
+      )}
 
       {overCapacityLanes.length > 0 && (
         <p className="mt-3 text-sm text-ink-strong" data-testid="review-overcapacity-copy">
@@ -269,18 +320,32 @@ export function ReviewCommitScreen({
       )}
 
       <div className="mt-4 flex items-center gap-2 rounded-card border border-line bg-surface-card p-3">
-        <Button variant="ghost" size="sm" onClick={onBack} disabled={committing}>
-          Back to draft
-        </Button>
-        <span className="ml-auto" />
-        <Button
-          size="sm"
-          disabled={!reasonOk || committing || lanes.length === 0}
-          loading={committing}
-          onClick={() => onCommit(reason.trim())}
-        >
-          Commit {committingTotal} assignment{committingTotal === 1 ? '' : 's'}
-        </Button>
+        {done ? (
+          <>
+            <span className="text-[11px] text-ink-muted">
+              Nothing further is staged — the draft was consumed by this commit.
+            </span>
+            <span className="ml-auto" />
+            <Button size="sm" data-testid="commit-done" onClick={onBack}>
+              Done
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" size="sm" onClick={onBack} disabled={committing}>
+              Back to draft
+            </Button>
+            <span className="ml-auto" />
+            <Button
+              size="sm"
+              disabled={!reasonOk || committing || lanes.length === 0}
+              loading={committing}
+              onClick={() => onCommit(reason.trim())}
+            >
+              Commit {committingTotal} assignment{committingTotal === 1 ? '' : 's'}
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );
