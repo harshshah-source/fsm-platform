@@ -497,7 +497,18 @@ export default function TodaysDispatchPage() {
         <>
           {/* ── ENGINEERS │ BOARD │ WORK-or-ATTENTION ──────────────────────────────────────── */}
           <div className="grid gap-3 xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
-            <PeopleRail engineers={engineers} selection={selection} onSelect={select} />
+            {/* The roster is a drop target as well as a selector: dropping a device on a person is
+                the gesture operators actually reach for, and it opens the same prefilled dialog the
+                board's cells do. */}
+            <PeopleRail
+              engineers={engineers}
+              selection={selection}
+              onSelect={select}
+              today={view.operatingDay}
+              drag={drag}
+              onDragChange={setDrag}
+              onDropIntent={onDropIntent}
+            />
 
             <div className="flex min-w-0 flex-col gap-1.5">
               <div className="flex items-baseline justify-between">

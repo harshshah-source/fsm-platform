@@ -3,11 +3,13 @@ import type { DispatchTodayView, TodayEngineer } from '../../../api/dispatchToda
 import { Badge } from '../../../components/ui';
 import { LoadBadge } from '../../../components/ui/LoadBadge';
 import { cn } from '../../../lib/cn';
-import type { ActionPrefill } from './ActionsBand';
 import { dayLabel, semanticOf, type DaySemantic } from './dayAxis';
+import { dropAction, intentFor, type DropIntent } from './dropTargets';
 import type { DayContext } from './useDayContext';
 import type { Selection } from './selection';
 import { DRAG_MIME, GhostChip, WorkChip, type ChipDragPayload } from './WorkChip';
+
+export type { DropIntent };
 
 /**
  * **THE SCHEDULING BOARD — the Console's dominant canvas** (composition correction §2, approved
@@ -34,36 +36,6 @@ import { DRAG_MIME, GhostChip, WorkChip, type ChipDragPayload } from './WorkChip
  * exactly as it was. An illegal cell simply never becomes a drop target — refusal is a cursor
  * state during the drag, not an error after it.
  */
-
-export interface DropIntent {
-  sel: Selection;
-  prefill: ActionPrefill;
-}
-
-/** What a drop on `(engineer, day)` would legally initiate — or null, which refuses the drop. */
-export function dropAction(
-  p: ChipDragPayload,
-  seId: string,
-  day: string,
-  today: string,
-): ActionPrefill | null {
-  const sem = semanticOf(day, today);
-  if (p.type === 'ticket') {
-    if (sem === 'today' && seId !== p.fromSeId) return { action: 'REASSIGN', seId };
-    // Same engineer, a later day = "do it then, not today" — the DEFER_TICKET override, date prefilled.
-    if (sem === 'future' && seId === p.fromSeId) return { action: 'DEFER_TICKET', date: day };
-    return null;
-  }
-  if (p.type === 'pool') return sem === 'today' ? { action: 'ASSIGN', seId } : null;
-  if (p.type === 'stop') return sem === 'today' && seId !== p.fromSeId ? { action: 'SWAP_SE', seId } : null;
-  return null;
-}
-
-function intentFor(p: ChipDragPayload, prefill: ActionPrefill): DropIntent | null {
-  if (p.type === 'stop' && p.batchId) return { sel: { kind: 'stop', id: p.batchId }, prefill };
-  if (p.ticketId) return { sel: { kind: 'ticket', id: p.ticketId }, prefill };
-  return null;
-}
 
 const SEMANTIC_BADGE: Record<DaySemantic, { label: string; tone: 'neutral' | 'success' | 'info' }> = {
   past: { label: 'history', tone: 'neutral' },
@@ -434,7 +406,7 @@ function BoardCell({
                           : { kind: 'stop', id: stop.batchId },
                       )
                     }
-                    className="min-w-0 flex-1 truncate text-left font-medium text-ink hover:text-link"
+                    className="min-w-0 flex-1 cursor-grab truncate text-left font-medium text-ink hover:text-link active:cursor-grabbing"
                   >
                     {stop.plantName}
                   </button>

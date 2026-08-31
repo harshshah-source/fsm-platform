@@ -108,6 +108,7 @@ export function WorkRail({
   const rowClass = (id: string) =>
     cn(
       'w-full rounded-md border px-2 py-1.5 text-left text-[11px] transition-colors',
+      onDragChange && 'cursor-grab active:cursor-grabbing',
       selectedTicket === id
         ? 'border-brand-600 bg-brand-50/40'
         : 'border-transparent hover:border-line hover:bg-surface-sunken',

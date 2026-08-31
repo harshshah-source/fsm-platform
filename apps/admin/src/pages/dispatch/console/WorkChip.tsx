@@ -173,7 +173,13 @@ export function WorkChip({
       aria-pressed={selected}
       data-testid={`chip-${ticket.ticketId}`}
       data-provenance={ticket.addSource ?? 'UNKNOWN'}
-      className={cn(shared, 'cursor-pointer hover:brightness-95')}
+      // `grab` only when it really is draggable — a grab cursor on a chip that cannot move is a
+      // worse lie than no affordance at all. Chips on past and projected columns keep `pointer`.
+      className={cn(
+        shared,
+        'hover:brightness-95',
+        draggable && dragPayload ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
+      )}
       onClick={() => onSelect({ kind: 'ticket', id: ticket.ticketId })}
       {...dragProps}
     >
@@ -243,6 +249,17 @@ export function GrammarLegend() {
       <li className="flex items-center gap-1.5">
         <span className="rounded bg-warning-soft/60 px-1.5 py-0.5">amber cell</span>
         engineer at or over capacity
+      </li>
+      {/* Drag was undiscoverable: nothing on the board said a chip could be picked up, so the whole
+          accelerator went unused and was reported as broken. The legend is where the grammar is
+          explained, so it is where this belongs too. */}
+      <li className="mt-1 flex items-start gap-1.5 border-t border-line pt-1.5">
+        <span className="rounded border border-line px-1.5 py-0.5">drag</span>
+        <span>
+          drag a device onto another engineer — in the list on the left, or their cell on today's
+          column — to reassign it; onto the same engineer on a later day to defer it. Nothing is
+          written on release: the usual dialog opens with the target filled in.
+        </span>
       </li>
     </ul>
   );

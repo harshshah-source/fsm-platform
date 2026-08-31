@@ -452,6 +452,42 @@ describe('Drag opens the authoritative dialog, prefilled — release writes noth
     expect(apiOverrideBatch).not.toHaveBeenCalled();
   });
 
+  /**
+   * The roster is a drop target too, and it shipped inert — which made the gesture operators actually
+   * reach for do nothing at all. Wanting to move a device to an engineer, you drag it onto *that
+   * engineer*: the name, in the list on the left. Reported as "I can't drag and drop a device".
+   *
+   * A row means **this engineer, today**, so it is the same question the board's today column asks and
+   * it is answered by the same `dropAction` — asserted here through the same seeded dialog, so the two
+   * doors cannot start disagreeing about one gesture.
+   */
+  it('chip → an engineer in the roster: opens Reassign seeded, exactly as the board cell does', async () => {
+    renderAt('/dispatch/today');
+    const chip = await screen.findByTestId(`chip-${SYS_TICKET}`);
+
+    const dt = dataTransfer();
+    fireEvent.dragStart(chip, { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('person-se-2'), { dataTransfer: dt });
+
+    const select = await screen.findByTestId('action-target-se');
+    await waitFor(() => expect(select).toHaveValue('se-2'));
+    expect(screen.getByTestId('action-confirm')).toBeDisabled();
+    expect(apiOverrideBatch).not.toHaveBeenCalled();
+  });
+
+  /** The engineer who already holds it is not a reassign target — in the roster as on the board. */
+  it('chip → the engineer who already holds it: the roster row refuses, nothing opens', async () => {
+    renderAt('/dispatch/today');
+    const chip = await screen.findByTestId(`chip-${SYS_TICKET}`);
+
+    const dt = dataTransfer();
+    fireEvent.dragStart(chip, { dataTransfer: dt });
+    fireEvent.drop(screen.getByTestId('person-se-1'), { dataTransfer: dt });
+
+    await waitFor(() => expect(screen.queryByTestId('action-target-se')).not.toBeInTheDocument());
+    expect(apiOverrideBatch).not.toHaveBeenCalled();
+  });
+
   it('chip → the same engineer on a later day: opens Defer with the date seeded', async () => {
     const user = userEvent.setup();
     renderAt('/dispatch/today');
