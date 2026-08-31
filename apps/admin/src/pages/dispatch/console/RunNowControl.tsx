@@ -16,13 +16,20 @@ type Phase = 'idle' | 'confirming' | 'running' | 'done' | 'refused';
  * button silently bounced them to the dashboard. This control replaces it with the real trigger,
  * `POST /schedules/dispatch-run`, in the frame where the operator already is.
  *
- * **Rendered for the roles the endpoint already serves.** Today that is `CENTRAL_SERVICE_MANAGER` and
- * `OPERATIONS_HEAD`; a ZM cannot call it. Widening it to ZM is deliberately *not* done here — it needs
- * the zone clamp shipped in the same change (see slice §9 B3: the endpoint reads `zoneId` from the
- * request body and never checks it against the caller, which is safe only while every caller is a
- * global-scope role) and an explicit decision record for the RBAC reversal. So the control is
- * **hidden** for a ZM rather than disabled — the same hide-don't-disable rule the rest of the Console
- * follows.
+ * **Rendered for the roles the endpoint already serves** — `CENTRAL_SERVICE_MANAGER`,
+ * `OPERATIONS_HEAD` and, since **#291**, `ZONAL_MANAGER`. The caller's role list lives on the page
+ * (`TodaysDispatchPage`'s `CAN_RUN_DISPATCH`), which is why this control takes no role prop: a role
+ * without the endpoint is **hidden** here rather than disabled, per the Console's hide-don't-disable
+ * rule.
+ *
+ * **The ZM widening and its clamp were one change, and that is what made it safe.** Before #291 the
+ * endpoint read `zoneId` straight off the request body and never checked it against the caller — sound
+ * only while every caller was a global-scope role, and the reason slice §9 B3 refused to widen the
+ * roles on their own. #291 shipped both halves together: `POST /schedules/dispatch-run` now derives the
+ * zone from `@CurrentScope()`, so **a zone-scoped caller runs their own zone whatever the body says**,
+ * and only a caller with no zone of their own may name one. This component still sends `zoneId` in the
+ * body — correct and necessary for a CSM/OH, and simply ignored for a ZM, which is the clamp working
+ * rather than a redundancy to tidy away.
  *
  * Three behaviours this control must have, each of which is a real property of the engine rather than
  * UI decoration:
@@ -55,8 +62,12 @@ export function RunNowControl({
   const [summary, setSummary] = useState<DispatchRunSummary | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
 
-  // The pre-check is global today — `inFlightZones()` takes no scope argument — so it is read as
-  // "is anything running", not "is this zone running". Narrowing it is part of the B3 clamp.
+  // #291 clamped this read in the same change as the trigger it guards, and for its own reason rather
+  // than for symmetry: `GET /schedules/dispatch-run/in-flight` now narrows to `@CurrentScope()`, so a
+  // ZM is answered about their own zone. Left global it would have leaked the national run schedule
+  // through a control whose only job is to grey out one button — and would have greyed that button out
+  // for a run in a zone the ZM cannot act on. The `zoneId` match below is therefore a no-op for a ZM
+  // (the response already holds only their zone) and the real filter for a CSM/OH.
   useEffect(() => {
     let live = true;
     void getDispatchInFlight()
