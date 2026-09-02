@@ -1,0 +1,29 @@
+{
+  "module": "auth-access",
+  "spineAvailable": true,
+  "spineEdgeCount": 0,
+  "persona": {
+    "role": "Central Service Manager",
+    "label": "CSM — cross-zone oversight + acting-scope backup",
+    "frequency": "acts as Zonal Manager backup whenever a ZM is unavailable (planned leave, marked-unavailable, or >24h heartbeat auto-activation) — per CONTEXT.md Decision §15 this can be several times a week across a CSM's zones, not an edge case"
+  },
+  "goals": [
+    "Authenticate and hold a working session across a full day spanning own-scope and acting-scope work",
+    "Enter acting-scope for an unavailable Zonal Manager's zone with a visible, unambiguous indicator of which authority is live",
+    "Have every acting-scope action attributed (acted_as_role) so the audit trail and the %-of-approvals-by-backup report are trustworthy, then exit acting-scope cleanly"
+  ],
+  "scopeNote": "Module boundary spans two experientially distinct gates: CSM's mid-session role-switch (acting scope) and Ravi/SE's mobile day-start login. Persona picked = CSM because the taxonomy's P4 (separation-of-duties breach) and P2 (no audit) findings live specifically in the acting-scope mechanism, not in plain login. SE mobile login/session-expiry-mid-shift is real and in-scope per the module brief, but is a second persona's day — not scored under CSM's capability list here; S2 should still check mobile auth evidence.",
+  "capabilities": [
+    {"id":"C1","name":"Credential login issues a session","src":"persona","crit":5,"why":"CSM cannot start own-zone or acting-scope work at all without authenticating first"},
+    {"id":"C2","name":"Session survives a full working day without silent logout","src":"persona","crit":4,"why":"a forced mid-acting-scope logout drops the covered ZM's zone context and stalls that zone's queue"},
+    {"id":"C3","name":"Enter acting-scope for an unavailable ZM's zone","src":"persona","crit":5,"why":"this is the backup cascade itself (CONTEXT §15) — without it a ZM absence blocks the whole zone's day, cascade has no bottom rung"},
+    {"id":"C4","name":"Persistent 'Acting as Zonal Manager for [Zone]' banner on every page","src":"prd","crit":4,"why":"without a visible indicator neither the CSM's own team nor an auditor can tell which authority is currently live — separation-of-duties breach risk (P4)"},
+    {"id":"C5","name":"acted_as_role stamped on every action taken while acting","src":"prd","crit":5,"why":"un-attributed acting-actions make the audit trail worthless — access control that cannot be audited is itself a finding (P2), not a lesser bug"},
+    {"id":"C6","name":"Clean, deliberate exit from acting-scope back to own role","src":"persona","crit":4,"why":"stale elevated access after the ZM returns is a standing separation-of-duties violation, not a one-time slip"},
+    {"id":"C7","name":"Role-scoped navigation shows only pages the active (or acted) role permits","src":"role","crit":4,"why":"wrong-role page visibility is itself an access-control breach independent of whether backend guards also hold"},
+    {"id":"C8","name":"Auto-activation of acting-scope on ZM heartbeat absence >24h + up/down-layer notification","src":"role","crit":3,"why":"without auto-activation an unnoticed ZM absence silently stalls the zone until someone manually escalates"},
+    {"id":"C9","name":"Login rate limiting / brute-force protection","src":"role","crit":3,"why":"the credential store is the single gate for all five roles; an unthrottled login is an account-takeover exposure across the whole platform"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 4, "role": 3, "spine": 0, "prd": 2}
+}

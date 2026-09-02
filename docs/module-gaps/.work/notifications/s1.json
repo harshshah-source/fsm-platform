@@ -1,0 +1,25 @@
+{
+  "module": "notifications",
+  "persona": {
+    "role": "Service Engineer",
+    "label": "Ravi, Service Engineer",
+    "frequency": "continuous through a full day of stops (mobile, app often closed between jobs)"
+  },
+  "goals": [
+    "See every work-relevant event (assignment, SLA warning, insertion, verification failure, component approval, batch/recovery decision) without polling the app",
+    "Actually receive those events on his phone when the app is closed, not just as an in-app row he never opens",
+    "Mark notifications read / read-all so the list stays usable across a full day of stops"
+  ],
+  "scopeNote": "Module bundles two different concerns under one PRD heading (lines 211-216): notifications are a CARRIER moving work state to the SE (taxonomy C2), audit trail is a LEDGER proving what happened platform-wide (taxonomy P2/O1). Ravi lives in the carrier half daily; the ledger half is Operations Head's occasional 'who changed this' concern, not a daily visit. Both kept in this yardstick because PRD scopes them as one section, but capabilities below are tagged so the split stays visible.",
+  "capabilities": [
+    {"id": "C1", "name": "in-app notification list, all SE-relevant events", "src": "persona", "crit": 5, "why": "without it Ravi only learns of new/changed work by opening the app and hunting; mid-route he has no signal anything changed"},
+    {"id": "C2", "name": "push/SMS/WhatsApp delivery to SE phone when app is closed", "src": "persona", "crit": 5, "why": "SE is mobile-first and closes the app between stops; an in-app-only row he never opens means his day plan silently diverges from truth"},
+    {"id": "C3", "name": "read / read-all state on notifications", "src": "persona", "crit": 3, "why": "without triage state, stale notifications bury the one urgent SLA warning or insertion in a growing unread pile"},
+    {"id": "C4", "name": "WhatsApp Confirmation as first-class channel for SE Acceptance (not a fallback)", "src": "prd", "crit": 4, "why": "PRD names this explicitly (Notification Delivery); without a guaranteed channel, Acceptance Timeout fires falsely and triggers unneeded reroute/escalation"},
+    {"id": "C5", "name": "full audit trail per Ticket (Recommendation through Closed, closure_type+reason on every Recovery Ticket close)", "src": "role", "crit": 4, "why": "without it, post-incident review and disputes (Shadow Use reconciliation, cross-zone escalation) have no record to arbitrate from"},
+    {"id": "C6", "name": "acted_as_role stamped on every audit entry during CSM/OH delegated-scope sessions", "src": "role", "crit": 4, "why": "CONTEXT.md Decision 15: when CSM acts in a ZM's scope, an unstamped audit entry attributes the action to the wrong hierarchical authority, breaking accountability during the backup-cascade"},
+    {"id": "C7", "name": "Snapshot freshness / FAILED-snapshot alert surfaced as a notification", "src": "role", "crit": 3, "why": "PRD story 74 + CONTEXT.md freshness-banner rule: without a pushed alert, stale data is silently mistaken for a real fleet-health improvement"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 3, "role": 3, "spine": 0, "prd": 1}
+}

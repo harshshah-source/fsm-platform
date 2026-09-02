@@ -1,0 +1,139 @@
+{
+  "module": "ingestion",
+  "generated": "2026-09-02",
+  "note": "S2 static + S3 live walk 2026-09-02. checks 3/6/8 settled on C1-C4 by api-walk (E4). C5 checks 4/5/6/8 not walked - the trend surface lives in the reports module. NO ingestion run, sync, pipeline or snapshot was triggered.",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Snapshot freshness banner (data-as-of timestamp, every page)",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "NA",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "v",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/AppRoutes.tsx:62 banner mounted above every route",
+        "apps/admin/src/components/SnapshotBanner.tsx:26 STUCK_AFTER_MS=15min, :63 60s poll",
+        "apps/admin/src/components/SnapshotBanner.tsx:111 renders data-as-of, :119 partial watermark named separately",
+        "apps/backend/src/ingestion/snapshot-query.service.ts:113 dataAsOf only from last SUCCESS",
+        "apps/backend/src/ingestion/snapshot-query.service.ts:116 PARTIAL watermark never promoted to freshness",
+        "GAP: no absolute-age threshold anywhere — an old SUCCESS with no newer run renders as the calm grey line (SnapshotBanner.tsx:126-141)",
+        "S3 E4: GET /snapshots/latest -> zm.north 200, csm 200, ops.head 200, wm 403, se.north 403. Consumer is SnapshotBanner (live, polling). C6: WM/SE see NO banner - SnapshotBanner.tsx:55 swallows the 403 and the JSX is gated on view. LIVE: dataAsOf 2026-09-01T12:00:08Z read on 2026-09-02 = ~25h stale, and isStuck() (:31) only fires on RUNNING, so it renders the calm grey line. -> ING-08, ING-03"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Snapshot run failure / stuck-run alert",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "NA",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "v",
+        "9": "x"
+      },
+      "pointers": [
+        "apps/backend/src/ingestion/snapshot-run.service.ts:39 reapStaleRuns RUNNING->FAILED",
+        "apps/backend/src/ingestion/stale-run.ts:36 staleRunFilter = heartbeat age, 30min default (INGESTION_STALE_RUN_MIN)",
+        "apps/backend/src/ingestion/snapshot-run.service.ts:63 reaper called ONLY from startRun() — no standalone cron",
+        "apps/backend/src/ingestion/ingestion-alert.ts:138 streak derivation, threshold 3 (INGESTION_PARTIAL_STREAK_RUNS)",
+        "apps/admin/src/components/SnapshotBanner.tsx:86 critical = failed||stuck||wedged",
+        "apps/admin/src/pages/admin/BuildHealthPage.tsx:128 IngestionAlertCard, self-gating on downstreamGated",
+        "GAP audit: reaper flip writes no audit row and snapshot_runs has no error column (snapshot-run.service.ts:31-34)",
+        "GAP: alert is in-app only; no notification/outbox path off this module",
+        "S3 E4: POST /snapshots/run 403 for zm.north/csm/wm/se.north; POST /integration/run-pipeline + /integration/sync-masters 403 for zm.north (guard confirmed, NO authorised call fired). Consumers exist (banner + BuildHealthPage). CAVEAT: the live payload has NO ingestion key - #300 is uncommitted working-tree work (ING-09 O4)."
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Device departure / master-sync reconciliation surfaced to a manager",
+      "crit": 4,
+      "state": "BACKEND_ONLY",
+      "checks": {
+        "1": "x",
+        "2": "x",
+        "3": "v",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/device-departure/device-departure.service.ts:137 reconcile()",
+        "apps/backend/src/device-departure/device-departure.service.ts:299 tickets updateMany -> CLOSED / DEVICE_UNDEPLOYED_CLOSE",
+        "apps/backend/src/device-departure/device-departure.service.ts:188 absence guard, :224 result only logged",
+        "apps/backend/src/device-departure/device-departure.service.ts:279 cancelledTicketsCount persisted per departure",
+        "apps/backend/src/ingestion/autoplant/health.service.ts:342 lifecycleHealth (drift, missingFromSource, quietRunsAlert) computed",
+        "GAP: zero admin route/endpoint/client for departures — grep of apps/admin/src finds only kpiCatalog prose; lifecycleHealth absent from apps/admin/src/api/integrationHealth.ts:48-55",
+        "S3 E4: zero consumer. lifecycle.missingFromSource=3376 IS in the live GET /integration/health payload but integrationHealth.ts:48-55 drops the whole lifecycle section and BuildHealthPage renders none of it. 403 measured for zm.north/csm/wm/se.north, so no manager role has any lens. Five not-found checks recorded on ING-01."
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "Integration health ledger (run history, not just latest status)",
+      "crit": 4,
+      "state": "BACKEND_ONLY",
+      "checks": {
+        "1": "x",
+        "2": "v",
+        "3": "v",
+        "4": "v",
+        "5": "?",
+        "6": "v",
+        "7": "NA",
+        "8": "x",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/ingestion/snapshots.controller.ts:34 GET /api/snapshots/runs (limit/offset/status)",
+        "apps/backend/src/ingestion/snapshot-query.service.ts:128 listRuns implemented",
+        "apps/admin/src/api/snapshots.ts:54 apiSnapshotLatest is the ONLY exported call — no client for /snapshots/runs",
+        "apps/backend/src/ingestion/autoplant/health.service.ts:203-213 check() returns source, masterSync, snapshot, reconciliation, lifecycle, ingestion, recomputes",
+        "apps/admin/src/api/integrationHealth.ts:48-55 admin type reads only build stamps + runtimeLock + recomputes + ingestion — source/freshness-age/reconciliation/lifecycle dropped",
+        "apps/admin/src/pages/admin/BuildHealthPage.tsx:100 only ledger on the page is recompute history (last 10)",
+        "S3 E4: GET /snapshots/runs as ops.head -> 200 ARRAY len=50 with real runId/status/startedAt/finishedAt/dataAsOf rows; 403 for zm.north/wm/se.north. Data is real - this is no screen, not no data. GET /integration/health top-level keys measured: source, masterSync, snapshot, reconciliation, lifecycle, runtimeLock, recomputes. source/reconciliation/lifecycle dropped whole; masterSync.ageMinutes=1293 and snapshot.ageMinutes=1288 dropped as fields."
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "Soft Inactive Count shown as an auditable, explainable input",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "v",
+        "4": "?",
+        "5": "?",
+        "6": "?",
+        "7": "NA",
+        "8": "?",
+        "9": "x"
+      },
+      "pointers": [
+        "apps/admin/src/pages/reports/ReportsPage.tsx:83 apiSoftInactiveTrend(days:14) — trend surface lives in reports module, not ingestion",
+        "apps/admin/src/api/reports.ts:90 GET /reports/soft-inactive-trend",
+        "apps/backend/prisma/schema.prisma:2644 SoftInactiveCountHistory persists count + eligible + deficitMode",
+        "apps/admin/src/lib/kpiCatalog.ts:126-153 formulas published to operator",
+        "apps/admin/src/utils/operatingModeCopy.ts:5 engine terms deliberately hidden from operator copy — provenance of the mode switch is intentionally opaque",
+        "OPEN: E-01 reverse (device returns ACTIVE) — see hypothesis H1"
+      ]
+    }
+  ],
+  "s3Walked": "2026-09-02"
+}

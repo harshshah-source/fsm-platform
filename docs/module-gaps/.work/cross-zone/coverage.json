@@ -1,0 +1,203 @@
+{
+  "module": "cross-zone",
+  "generated": "2026-09-02",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Platinum auto-escalation trigger populates CSM queue",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:74 sweepAutoEscalations",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:95 thresholds 60m CRITICAL+ / 240m OPEN",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:236 crossZoneTick cron receiver",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:83 idempotency `crossZoneEscalations: { none: {} }` — one shot per ticket, ever",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:99-114 create/audit/notify, 3 non-tx writes, no per-ticket try-catch",
+        "S3 2026-09-02: perms walked (sweep 403 ZM/WM/SE, 200 CSM/OH). checks 3+8 stay ? - UNTESTABLE, 6500 tickets scanned and 100% are SILVER, so the Platinum sweep has never fired here."
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Approve cross-zone (target zone + SE) commits the hand-off",
+      "crit": 5,
+      "state": "BROKEN",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "x",
+        "4": "x",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:162-178 assignTicket then SEPARATE escalation.update — no shared tx",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:163 ALREADY_ASSIGNED short-circuits with no reconciliation",
+        "apps/backend/src/scheduling/override.service.ts:659 `inTransaction` hook (#325) exists and is NOT passed by approve",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:170-171 targetZoneId stored but never validated against seId's zone",
+        "apps/admin/src/pages/cross-zone/CrossZonePage.tsx:56-60 window.prompt for zone id and SE user id — no picker, no validation",
+        "S3 2026-09-02 E4: approve 500d six times, assigning the ticket and leaving the escalation PENDING (esc 4-9). check 3 = x. Target zone learns nothing: check 8 = x."
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Deny/defer returns ticket to home ZM queue with reason",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "v",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:254-280 decide() writes status+reason, audits, notifies home ZM",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:62 ticket never leaves home queue — reverse path is by-design a no-op on the ticket",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:319-320 notifyHomeZm silently returns when zone.zonalManagerUserId is null",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:271 reviewDate persisted but no sweep re-surfaces a DEFERRED row on its date",
+        "S3 2026-09-02 E4: deny persisted DENIED on esc 3 (check 3 = v) but zm.north received 0 notifications after both approve and deny (check 8 = x)."
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "ZM manual flag pushes Gold/Silver ticket into CSM queue",
+      "crit": 4,
+      "state": "BACKEND_ONLY",
+      "checks": {
+        "1": "x",
+        "2": "v",
+        "3": "v",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "v",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:54 POST /cross-zone/flag",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:121-147 flag()",
+        "apps/admin/src/api/crossZone.ts:38 apiCrossZoneFlag exported",
+        "grep apps/admin/src: zero call sites for apiCrossZoneFlag — no ZM ticket-list flag control",
+        "S3 2026-09-02 E4: flag endpoint fully works - 200, row re-read in the queue, CSM+OH notified with escalationId. Only check 1 (UI) fails. C4 not C7."
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "Denied-Platinum re-escalation from home ZM to Operations Head",
+      "crit": 3,
+      "state": "BACKEND_ONLY",
+      "checks": {
+        "1": "x",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:201-220 reEscalateToOps",
+        "apps/admin/src/api/crossZone.ts:54 apiCrossZoneReEscalate exported, zero call sites",
+        "apps/admin/src/pages/cross-zone/CrossZonePage.tsx:103-120 actions column = Approve/Deny/Defer only, and gated to deciders (:122) so a ZM sees no action at all",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:225 listForScope includes ESCALATED_TO_OPS but DENIED is excluded — the re-escalable row is invisible in the queue",
+        "S3 2026-09-02 E4: re-escalate role gate walked - ZM reaches the service (409 domain), CSM/OH/SE 403. Endpoint alive, no UI, DENIED rows not listed."
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "'Acting as Zonal Manager' banner + acted_as_role audit tag",
+      "crit": 4,
+      "state": "BROKEN",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "x",
+        "4": "NA",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "x",
+        "9": "x"
+      },
+      "pointers": [
+        "apps/admin/src/components/shell/AppShell.tsx:69 acting-as banner exists shell-wide, so it renders on /cross-zone",
+        "apps/admin/src/api/authHeaders.ts:13 X-Acting-As-Zone header sent on every call",
+        "apps/backend/src/common/request-actor.ts:27 resolves actedAsRole from that header — the plumbing exists",
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:113 actor() hardcodes `actedAsRole: null`, dropping it on the floor for all 5 write endpoints",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:371 auditEscalation writes actedAsRole — always null in practice",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:287 zmOwnsZone reads actor.actedAsRole — dead branch",
+        "contrast apps/backend/src/scheduling/batches.controller.ts:129 and inventory/warehouse-stock.controller.ts:70 which pass actor.actedAsRole through",
+        "S3 2026-09-02: no permission outcome differs from the decorators, so the dead actedAsRole branch is an audit defect (P2), not a P4 breach."
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "Approved escalation lands in target-zone SE's worklist",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "x",
+        "2": "v",
+        "3": "?",
+        "4": "x",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/scheduling/override.service.ts:666 inScope: CSM/OH bypass the zone clamp, so the assignment itself does cross the boundary",
+        "apps/backend/src/scheduling/override.service.ts:655 drainRows fires the SE day-plan push post-commit",
+        "apps/backend/src/scheduling/day-plan-notifier.ts SpineDayPlanNotifier is real (in-app notification), LoggingDayPlanNotifier is the fallback port",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:180 only the HOME ZM is notified by this module; no cross-zone-specific notice to the receiving SE or the target ZM",
+        "SE mobile is auth-shell only (CLAUDE.md) — no SE worklist screen exists to receive it",
+        "S3 2026-09-02 E4 hand-off test = MANUAL. zm.south sees no notification, no queue row, 404 on the ticket, and no schedule 1238; only Ramesh Rao activeTicketCount 3->4. SE half UNTESTABLE - no zone-2 SE login is seeded and se.north has no engineerMaster row, so it cannot receive an assignment at all."
+      ]
+    },
+    {
+      "id": "C8",
+      "name": "Per-zone '% approvals by CSM this month' report for Ops Head",
+      "crit": 2,
+      "state": "NOT_STARTED",
+      "checks": {
+        "1": "x",
+        "2": "x",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "NA",
+        "7": "NA",
+        "8": "x",
+        "9": "NA"
+      },
+      "pointers": [
+        "grep CROSS_ZONE_APPROVE|crossZoneEscalation over apps/backend/src/reports + apps/backend/src/dashboard: zero hits",
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:41 only read endpoint is the live actionable queue",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:225 listForScope excludes APPROVED/DENIED — no finished-work ledger read exists"
+      ]
+    }
+  ],
+  "s3Walked": "2026-09-02"
+}

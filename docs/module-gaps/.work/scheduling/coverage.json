@@ -1,0 +1,137 @@
+{
+  "module": "scheduling",
+  "generated": "2026-09-02",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Batch dispatch monitoring list (SE, batch count, date range, AUTO_ASSIGNED/OVERRIDDEN badge)",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"?","4":"v","5":"v","6":"?","7":"NA","8":"?","9":"NA"},
+      "pointers": [
+        "apps/admin/src/pages/schedules/SchedulesPage.tsx:106 columns SE/Zone/Plan Date/Plant Stops/Tickets/Load-Cap/Status",
+        "apps/admin/src/pages/schedules/SchedulesPage.tsx:190 badge 'ZM Adjusted' vs 'Auto-Dispatched'",
+        "apps/backend/src/scheduling/zm-schedule-query.service.ts:159 listSchedules zone-scoped, LIVE statuses",
+        "apps/backend/src/scheduling/schedules.controller.ts:523 GET /api/schedules"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Batch Schedule Detail with override controls (swap SE, split batch, remove Ticket, reorder, defer)",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"?","4":"v","5":"v","6":"?","7":"v","8":"?","9":"v"},
+      "pointers": [
+        "apps/admin/src/pages/schedules/ScheduleDetailPage.tsx:233,305,320,337,437,462,482 SWAP_SE/SPLIT_BATCH/REORDER/REMOVE_TICKET/DEFER_TICKET/REASSIGN",
+        "apps/backend/src/scheduling/override.service.ts:265 override() exhaustive switch",
+        "apps/backend/src/scheduling/dto/override-command.dto.ts:73 OverrideCommandDto, NEEDS_TICKET_ID/NEEDS_NEW_SE per-action @ValidateIf",
+        "apps/backend/src/scheduling/override.service.ts:422,483,555 withAudit brackets"
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "\"Why suggested?\" reasoning panel (Company Tier, Device Bucket, Priority Rank, Plant Cluster Multiplier)",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"?","4":"NA","5":"v","6":"?","7":"NA","8":"?","9":"NA"},
+      "pointers": [
+        "apps/admin/src/pages/schedules/ScheduleDetailPage.tsx:592 `Tier .. Bucket .. Rank .. Cluster x..` all four S1 factors rendered",
+        "apps/admin/src/pages/dispatch/console/ScoreBreakdownPanel.tsx:52-87 six weighted components + clusterMultiplier:189",
+        "apps/backend/src/recommender/scoring.ts:29 ScoreBreakdown persisted as score_breakdown",
+        "apps/admin/src/pages/dispatch/DecisionTrace.tsx:124 dropped-candidate reasons"
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "ON_SITE-aware override warning with mandatory reason code",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"?","4":"v","5":"v","6":"?","7":"v","8":"?","9":"v"},
+      "pointers": [
+        "apps/backend/src/scheduling/override.service.ts:282-288 ON_SITE gate returns CONFLICT_ON_SITE, never silently clears",
+        "apps/backend/src/scheduling/override.service.ts:295 audit action OVERRIDE_AFTER_ON_SITE",
+        "apps/admin/src/pages/schedules/ScheduleDetailPage.tsx:83,93 hold command then confirmOverride with confirm:true",
+        "apps/backend/src/scheduling/dto/override-command.dto.ts:78 reasonCode trimmed + @IsNotEmpty"
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "Schedule Cadence reminder (configurable, advisory-only, no lock)",
+      "crit": 3,
+      "state": "NOT_STARTED",
+      "checks": {"1":"x","2":"x","3":"x","4":"x","5":"x","6":"x","7":"NA","8":"x","9":"x"},
+      "pointers": [
+        "route search: no /cadence, /review-window route in apps/admin/src/AppRoutes.tsx",
+        "backend search: grep cadence over apps/backend/src hits only dispatch-cron / ingestion sync cadence, never ZM review",
+        "permission: no role-gated cadence surface anywhere; not a hidden-from-role case",
+        "terminology: grep reviewCadence|scheduleCadence|'review window'|reminder over scheduling+pages/schedules+pages/dispatch = 0 hits",
+        "other module: apps/backend/src/planner is SE Planner (plant-visit intent), not a review cadence; no prisma cadence field in schema.prisma"
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "SE Planner multi-day grid (plant-vs-date, feeds Recommender as bias signal)",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"?","4":"?","5":"v","6":"?","7":"NA","8":"v","9":"?"},
+      "pointers": [
+        "apps/backend/src/planner/se-planner.controller.ts + se-planner.service.ts (module `planner`, not `scheduling`)",
+        "apps/backend/prisma/schema.prisma:762 model SePlanner @@map(\"se_planner\")",
+        "apps/admin/src/AppRoutes.tsx:365 path=\"/engineers/planner\" -> pages/planner/PlannerPage.tsx",
+        "apps/backend/src/recommender/recommender.service.ts + tier-score-chooser.ts consume planner bias — S1 scopeNote resolved: owned by `planner`, not this module"
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "Manual same-day Day Plan update (add/remove/reorder Tickets mid-shift, no SE Acceptance)",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"?","4":"v","5":"v","6":"?","7":"v","8":"?","9":"v"},
+      "pointers": [
+        "apps/backend/src/scheduling/same-day-update.service.ts:45,59,79 addTicket/removeTicket/reorder delegate to OverrideService with MANUAL_ZM_UPDATE tag",
+        "apps/backend/src/scheduling/intraday-updates.controller.ts:40,75,99 add/remove/reorder, MANAGER_ROLES",
+        "apps/admin/src/pages/schedules/IntradayQueuePage.tsx (346 loc) + IntradayManualAssignModal.tsx",
+        "apps/backend/src/scheduling/same-day-update.service.ts:103 queue is a view over AuditLog (no new model), unbounded findMany"
+      ]
+    },
+    {
+      "id": "C8",
+      "name": "Push/in-app notification to SE on new batch, override, or same-day update",
+      "crit": 5,
+      "state": "BROKEN",
+      "checks": {"1":"v","2":"v","3":"?","4":"NA","5":"v","6":"?","7":"v","8":"x","9":"v"},
+      "pointers": [
+        "apps/backend/src/notifications/notification-channel.gateway.ts:37 `return 'UNAVAILABLE'` — every external channel is a seam",
+        "apps/backend/src/scheduling/day-plan-notification-outbox.ts:22,44 queueDayPlanDispatched/Overridden rows written in-tx (the producing half works)",
+        "apps/mobile/src/navigation/screens/HomeScreen.tsx — no setInterval/refetchInterval/useFocusEffect: zero polling",
+        "apps/mobile/src/tickets/dayPlanCues.ts:12-19 client-side set-diff, in-memory, resets on cold start — the workaround, not a delivery path"
+      ]
+    },
+    {
+      "id": "C9",
+      "name": "Ordered, plant-clustered Day Plan view (stop sequence, device count/stop, Zone Warehouse pickup step)",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"?","4":"NA","5":"v","6":"?","7":"NA","8":"v","9":"NA"},
+      "pointers": [
+        "apps/backend/src/scheduling/day-plan-query.service.ts:26 getDayPlan — ordered stops, plant name, deviceCount",
+        "apps/backend/src/scheduling/day-plan-query.service.ts:15 comment: 'Zone Warehouse pickup step in AC#5 ... is added when that lands' — never landed",
+        "apps/backend/src/scheduling/schedules.controller.ts:418 GET /api/schedules/me, SERVICE_ENGINEER",
+        "apps/mobile/src/navigation/screens/StockScreen.tsx:20 'Not built: ... the Zone Warehouse row (#172)' — same gap on the stock side"
+      ]
+    },
+    {
+      "id": "C10",
+      "name": "Manual assignment fallback (3-retry exhaustion queue -> AVAILABLE-SE-only assign modal)",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"?","4":"v","5":"v","6":"?","7":"v","8":"?","9":"?"},
+      "pointers": [
+        "apps/backend/src/intraday/intraday-insertion.controller.ts:71,79 GET :id/available-ses + POST :id/manual-assign",
+        "apps/backend/src/intraday/intraday-insertion.service.ts:59,120 retryCount surfaced on the row",
+        "apps/admin/src/pages/schedules/IntradayManualAssignModal.tsx:3,48 apiAvailableSes + apiManualAssign",
+        "owned by module `intraday`; scheduling reaches it via cron criticalAssignTick (business-sweep-scheduler.service.ts:229)"
+      ]
+    }
+  ]
+}

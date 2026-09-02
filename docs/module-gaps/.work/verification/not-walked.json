@@ -1,0 +1,13 @@
+{
+  "items": [
+    "V-02 zone leak at E4 — fraud-flags returned 0 rows to every manager role, so the cross-zone read could not be reproduced. Needs one VerificationRun with fraudFlag=true on a zone-2 plant, then GET as zm.north. Cost: 1 seed row + one ~2k TEQ call.",
+    "V-01 ledger divergence at E4 — /reports/efficiency, /reports/fleet-uptime and /reports/verification-outcomes all returned zero verification counts. Needs one FAILED_NO_PINGS run, a mark-auto-recovery POST, and a re-read of both reports. Cost: 1 seed row + three ~2k TEQ calls.",
+    "Check 3 (persist) for every capability C1-C7 — no VerificationRun exists anywhere in the dev DB, so nothing can be written and re-read. This single fixture gap (V-08) blocks the persist check module-wide.",
+    "Zone clamp on GET /verification/review — both ZMs returned 0 rows; the clamp is E2-visible in source at verification-query.service.ts:174 but was not reproduced. Same fixture as V-01 settles it.",
+    "V-03 (fraud-flags endpoint has no UI consumer) — screen-only claim. NEEDS-VERIFY: would require loading /verification as zm.north and confirming no control anywhere reaches fraud-flags. Cost: one browser walk ~708k TEQ.",
+    "V-07 (auto-recovery close needs no confirmation dialog) — screen-only claim about the Mark auto-recovery control on VerificationReviewPage. NEEDS-VERIFY by browser; the API half is settled (no reason field server-side). Cost: one browser walk ~708k TEQ.",
+    "V-06 rendered appearance — that the 'overdue' chip actually paints on a stalled-watermark row was confirmed from source (VerificationReviewPage.tsx:31 hoursLeft) but not seen. Cost: folded into the same ~708k TEQ browser walk.",
+    "Wrong-role check on the three receiving report endpoints (/reports/efficiency, /reports/fleet-uptime, /reports/verification-outcomes) — only read as OH. C7 check 6 left at '?'.",
+    "SE mobile VerificationScreen (apps/mobile/src/tickets/verification/VerificationScreen.tsx) — the SE half of the verification surface. Unwalkable: se.north has 0 rows on /me/tickets (shared primer), and no mobile instrument is available in this stage."
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "module": "admin-config",
+  "persona": {
+    "role": "OPERATIONS_HEAD",
+    "label": "Operations Head",
+    "frequency": "weekly review + ad-hoc config changes; CSM co-owns exactly one dial (SE assignment threshold)"
+  },
+  "goals": [
+    "Tune the dials that govern dispatch/scoring behaviour fleet-wide (zones, plants, SE mappings/coverage, SLA rules, company tier/priority, Common Kit, SE assignment threshold) without silently corrupting historical KPIs or breaking in-flight work",
+    "Administer user accounts for every non-OH role, since no separate Admin persona exists (CONTEXT.md:934) — OH IS the system configurator",
+    "Prove and audit any figure or config change back to its source rows/actor when a number looks wrong or a change is disputed"
+  ],
+  "scopeNote": "PRD:345 draws admin-config as one /settings route bundling zones/plants/SE-mappings/SLA/tier/kit/accounts. Code reality (SPINE + issue 238/217) disagrees: plant deactivation is its own service+route (plant-deactivation.service.ts, SPINE E-26), SE assignment threshold has its own controller/page reachable by CSM outside the OH-gated Settings nav (issue 238 AC10), and Ops Explorer is a separately flag-gated route (/ops-explorer, issue 217). Boundary is 'every screen/dial only OH can turn' not 'the /settings page' — recorded, not resolved.",
+  "capabilities": [
+    {"id":"C1","name":"Zone / plant / SE-mapping configuration","src":"persona","crit":5,"why":"Recommender routing reads this directly; a wrong mapping mis-routes every Ticket in that zone until an OH notices and fixes it"},
+    {"id":"C2","name":"SE coverage type + territory (DEDICATED/MULTI_PLANT/FLOATING, hierarchical + polygon)","src":"persona","crit":4,"why":"Recommender precedence (dedicated→multi-plant→floating, CONTEXT.md:590) has nothing to key off without accurate coverage; plants silently go uncovered"},
+    {"id":"C3","name":"SLA rules per device bucket / company tier","src":"persona","crit":5,"why":"drives every SLA-bucket badge and escalation timer fleet-wide; a wrong rule is a contractual-exposure event, not a cosmetic one"},
+    {"id":"C4","name":"Company Tier/Priority (OH global) + zone-scoped expiring overrides (CSM/ZM, mandatory reason, audited, auto-revert)","src":"role","crit":5,"why":"Tier is the top key of the canonical candidate sort (CONTEXT.md Decision §17) — wrong tier reorders dispatch priority for an entire company; the override split exists specifically so a graded party (ZM) can't silently rewrite the dial they're graded on"},
+    {"id":"C5","name":"Common Kit definition + Recommender scoring weights","src":"persona","crit":4,"why":"Hard Filter and scoring are untunable without this; a wrong kit definition blocks or falsely-clears eligibility platform-wide"},
+    {"id":"C6","name":"SE assignment threshold — co-owned OH/CSM, OH lock+revert, SLA-band ladder only","src":"role","crit":5,"why":"gates both ticket creation and auto-dispatch fleet-wide (issue 238); the lock/revert split is the separation-of-duty control on a dial that can flood or starve the whole queue"},
+    {"id":"C7","name":"Plant deactivation/reactivation with dependent-work handling","src":"spine","crit":5,"why":"SPINE E-26: deactivate strips stops from live SE day plans with no outbox row queued — SE's phone is never told ('a human remembers' to call), and reactivate does not restore the plan. BROKEN, S4. This is the taxonomy's P1/P4 case: a config click with no control and no notice on someone else's live work"},
+    {"id":"C8","name":"User account management, all non-OH roles (ZM, CSM, WM)","src":"role","crit":5,"why":"CONTEXT.md:934 — no separate Admin persona; OH is the only account-provisioning path, so the persona's day stops entirely without it (no ZM/CSM/WM can exist)"},
+    {"id":"C9","name":"Audit trail on every config dial (before/after value, actor, mandatory reason where the PRD requires one, revert history)","src":"role","crit":5,"why":"every dial in this module moves dispatch volume or money; per the P-class taxonomy an unaudited config change is indistinguishable from sabotage or fat-finger, and this module is the one place all of them converge"},
+    {"id":"C10","name":"Ops Explorer — reconcile a figure back to its rows (flag-gated, OH-only)","src":"prd","crit":3,"why":"issue 217: off by default (OPS_EXPLORER_ENABLED); not day-to-day but the only way to settle 'which number is right' without a psql prompt when dashboards disagree"},
+    {"id":"C11","name":"Build health monitoring surface","src":"prd","crit":2,"why":"passive weekly-glance signal named at /build-health; SPINE E-25 notes it currently shows only ingestion health, not the device-departure export it should surface"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 4, "role": 4, "spine": 1, "prd": 2},
+  "spineAvailable": true
+}

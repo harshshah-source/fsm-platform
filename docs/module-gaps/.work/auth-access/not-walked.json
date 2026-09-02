@@ -1,0 +1,11 @@
+{
+  "items": [
+    "AA-08 sidebar nav while acting — rendered-screen only; one browser walk ~708k TEQ (login csm@fsm.test, enter acting from the TopBar zone picker, screenshot Sidebar + Manager Dashboard)",
+    "AA-09 acting banner label 'Zone 2' vs 'South' — same single browser walk as AA-08",
+    "AA-05 no admin page writes POST /api/role-unavailability — C4 asymmetry already E2-settled by S2 static read; walking the absent page can only re-prove an absence",
+    "AA-06 >24h ZM heartbeat auto-activation — S2 resolved C8 to NOT_STARTED; E2-settled, no walk owed",
+    "The other 10 of the 11 literal actedAsRole:null controller sites — one (tickets auto-recovery-close) was walked end to end and the mechanism is a shared literal, so the remaining 10 are the same defect; walking each would create real state changes (leave approvals, intraday reassignments, device writes) for no new evidence",
+    "Mobile login shell (apps/mobile/src/auth/LoginScreen.tsx) — no Expo client running on this box; the SE persona also has 0 seeded day-plan rows (shared primer), so an SE session walk is UNTESTABLE until a day plan is created",
+    "X-Device-Id one-device rule (auth.controller.ts:27) — no client sends a stable device id, so the rule is inert by construction; confirming inertness live would need a second real client"
+  ]
+}

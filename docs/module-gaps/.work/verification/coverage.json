@@ -1,0 +1,185 @@
+{
+  "module": "verification",
+  "note": "PARTIAL here means BUILT-BUT-UNWALKED unless a check is 'x'. No browser in S2, so 3/6/8-by-walk stay '?'; FUNC_COMPLETE is never awarded from a static read. S3 2026-09-02: checks 6 upgraded to v on C1/C4/C6 by wrong-role api-walk (E4); C3 check 6 stays x. Every check 3 remains ? - the module has no live rows at all (V-08), which is the single fixture blocking V-01 and V-02 from E4.",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "single-page outcome review (CLOSED/PARTIAL_RECOVERY/FAILED_VERIFICATION/fraud) per zone",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "v",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:83 useEffect -> apiVerificationReview (page DOES fetch; skeleton 'no data hook' was a react-query false negative)",
+        "apps/admin/src/api/verification.ts:73 apiVerificationReview plain fetch + sessionStorage bearer",
+        "apps/backend/src/verification/verification.controller.ts:42 GET verification/review @Roles(...MANAGER_ROLES)",
+        "apps/backend/src/verification/verification-query.service.ts:173 review() zone-scoped, default = all non-CLOSED newest-first",
+        "apps/backend/src/verification/verification.controller.ts:52 REVIEW_OUTCOMES whitelist = input validation",
+        "apps/admin/src/AppRoutes.tsx:459 /verification",
+        "S3 walk 2026-09-02 (api-walk, no browser). check 6 SETTLED for role: GET /verification/review -> 200 for ZM north, ZM south, CSM, OH; 403 for WM and SE. E4. Zone half of the clamp stays E2-only (review() clamps at verification-query.service.ts:174) because the queue returned 0 rows for BOTH ZMs - identical empty lists prove nothing (V-08).",
+        "S3 walk 2026-09-02 (api-walk, no browser). check 3 UNTESTABLE: no VerificationRun exists to save-and-reload against (V-08)."
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "PARTIAL_RECOVERY ping-count + 24h-escalation countdown",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "NA",
+        "5": "x",
+        "6": "?",
+        "7": "v",
+        "8": "NA",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:276 pings + hoursLeft() chip",
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:31 hoursLeft returns 'overdue' past deadline",
+        "apps/backend/src/verification/verification-query.service.ts:206 partialDeadline = startedAt + 24h (display rule)",
+        "apps/backend/src/verification/verification.service.ts:240 REAL expiry rule = 24h AND telemetry watermark advanced",
+        "apps/backend/src/verification/verification.service.ts:235 comment: a stalled watermark yields a window that never expires, 'must be made visible (slice 3)' — not built",
+        "check 5 = x: the displayed deadline is not the rule the sweep enforces"
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "fraud-flag highlight with Phase-1 distance delta",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "x",
+        "7": "NA",
+        "8": "v",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:282 'Failed - fraud · N m off' renders firstPingDistanceMeters",
+        "apps/backend/src/verification/verification-criteria.ts:11 FIRST_PING_RADIUS_M = 500 (threshold never shown to ZM)",
+        "apps/backend/src/verification/verification-criteria.ts:80 fraud = distance > radius",
+        "apps/backend/src/verification/verification-query.service.ts:214 fraudFlags() takes NO scope arg",
+        "apps/backend/src/verification/verification.controller.ts:111 fraudFlags() passes no @CurrentUser -> every MANAGER_ROLE incl. ZONAL_MANAGER reads all zones (check 6 = x)",
+        "grep fraud-flags|fraudFlags over apps/admin/src + apps/mobile/src: zero hits -> the dedicated endpoint has no UI consumer",
+        "S3 walk 2026-09-02 (api-walk, no browser). check 6 CONFIRMED x. GET /verification/fraud-flags -> 200 for ZM north, ZM south, CSM, OH; 403 WM/SE. Role gate real, zone clamp absent by construction (no scope param, no @CurrentUser). Leak effect not reproduced - 0 rows for every role (V-02, V-08)."
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "escalate action from a flagged/failed outcome",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:213 Escalate button on FAILED_FRAUD only; :255 reason mandatory client-side",
+        "apps/backend/src/verification/verification.controller.ts:59 ESCALATION_REASON_REQUIRED server-side",
+        "apps/backend/src/verification/verification.service.ts:84 escalateFraud: $transaction + stampOnceOrLose + ticketEvent + auditLog CONFIRMED at :103,:112,:122 (static.md yes/yes/yes holds)",
+        "apps/backend/src/verification/verification.service.ts:96 zone scope enforced (ZM out-of-zone -> NOT_FOUND)",
+        "no reverse: grep un-escalate/unescalate = none; E-10 reverse 'none'",
+        "grep VERIFICATION_FRAUD_ESCALATED outside src/verification: zero hits -> reason/reasonCode reaches no report (check 8 = x)",
+        "S3 walk 2026-09-02 (api-walk, no browser). check 6 SETTLED E4: POST /verification/:id/escalate -> 403 as SE and 403 as WM. @Roles(...MANAGER_ROLES) is enforced, not decorative.",
+        "S3 walk 2026-09-02 (api-walk, no browser). check 3 UNTESTABLE: no fraud-flagged run exists to escalate (V-08)."
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "FAILED_VERIFICATION split: no-pings vs fraud-flag reason",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "NA",
+        "5": "v",
+        "6": "?",
+        "7": "NA",
+        "8": "NA",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/verification/verification-query.service.ts:56 rowTypeFor -> FAILED_FRAUD vs FAILED_NO_PINGS",
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:279 and :285 render the two chips distinctly"
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "manual mark CLOSED_AUTO_RECOVERY",
+      "crit": 4,
+      "state": "BROKEN",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "x",
+        "5": "x",
+        "6": "v",
+        "7": "v",
+        "8": "v",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:225 button offered for PARTIAL_RECOVERY *and* FAILED_NO_PINGS",
+        "apps/backend/src/verification/verification-query.service.ts:56 FAILED_NO_PINGS implies outcome === 'FAILED_VERIFICATION' (non-null)",
+        "apps/backend/src/verification/verification.service.ts:186 verificationRun.updateMany WHERE { ticketId, outcome: null } -> matches ZERO rows for a FAILED_NO_PINGS row",
+        "apps/backend/src/verification/verification.service.ts:181 ticket.status still becomes CLOSED_AUTO_RECOVERY -> run.outcome and ticket.status permanently disagree (check 5 = x)",
+        "apps/backend/src/verification/verification.service.ts:157 tx + auditLog + ticketEvent + retireAssignmentOnClosure CONFIRMED (static.md yes/yes/yes holds)",
+        "no confirm dialog, no reason field, terminal + irreversible — while escalate demands a reason (check 4 = x)",
+        "S3 walk 2026-09-02 (api-walk, no browser). check 6 SETTLED E4: POST /verification/:id/mark-auto-recovery -> 403 as SE and 403 as WM. Write guard real; V-06/V-07 are about the missing reason and confirmation, not the role gate.",
+        "S3 walk 2026-09-02 (api-walk, no browser). check 3 UNTESTABLE and it is the check that would settle V-01: no FAILED_NO_PINGS row exists to mark and re-read (V-08)."
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "outcome tie-back into a finished-work ledger for reports",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "NA",
+        "5": "v",
+        "6": "?",
+        "7": "NA",
+        "8": "v",
+        "9": "NA"
+      },
+      "pointers": [
+        "CORRECTION to first-pass grep: reports read verification_runs by RAW SQL alias, not Prisma verificationRun",
+        "apps/backend/src/reports/reports.service.ts:549 raw query over vr with COUNT FILTER (WHERE vr.fraud_flag) AS fraudFlagged",
+        "apps/backend/src/reports/system-efficiency-aggregation.service.ts:100 COUNT FILTER (WHERE vr.outcome = 'CLOSED_AUTO_RECOVERY')",
+        "apps/backend/src/reports/fleet-uptime-aggregation.service.ts:92 status IN ('CLOSED','CLOSED_AUTO_RECOVERY') — reads TICKET status, not run outcome",
+        "O1 (no finished-work ledger) NOT confirmed: the ledger exists. The real risk is P3 — the two ledgers read different columns and V-01 makes them disagree.",
+        "apps/backend/src/reports/reports.service.ts:270 VERIFY_OUTCOME_KEYS bucket list",
+        "S3 walk 2026-09-02 (api-walk, no browser). check 8 partially settled E4: the three receiving report endpoints all answer OH with 200 - /reports/efficiency, /reports/fleet-uptime, /reports/verification-outcomes. All three return ZERO verification counts, so the tie-back carries no observable payload today and V-01 divergence stays unproven (V-08)."
+      ]
+    }
+  ]
+}

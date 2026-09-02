@@ -1,0 +1,506 @@
+{
+  "module": "ingestion",
+  "label": "AutoPlant Ingestion & Device State",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 74,
+    "afterBacklog": 86,
+    "capsScored": 5
+  },
+  "gaps": {
+    "total": 9,
+    "priced": 8,
+    "folded": [],
+    "falsified": [],
+    "needsVerification": [
+      {
+        "id": "ING-09",
+        "what": "Running backend predates the uncommitted #300 ingestion-alert work",
+        "costToSettle": "one walk ~708k TEQ"
+      }
+    ],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 4,
+    "S2": 3,
+    "S1": 2,
+    "S0": 0
+  },
+  "dangerous": [
+    "ING-01",
+    "ING-03",
+    "ING-05"
+  ],
+  "priced": [
+    {
+      "id": "ING-01",
+      "code": "O2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Departure count reaches OH payload only, then admin client drops it",
+      "type": "COMPLETE",
+      "caps": [
+        "C3",
+        "C6"
+      ],
+      "files": [
+        "apps/backend/src/device-departure/device-departure.service.ts:299",
+        "apps/backend/src/device-departure/device-departure.service.ts:279",
+        "apps/backend/src/device-departure/device-departure.service.ts:395-420",
+        "apps/backend/src/ingestion/autoplant/health.service.ts:342",
+        "apps/admin/src/api/integrationHealth.ts:48-55"
+      ],
+      "lanes": [
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1054933,
+          "t80": 1947333
+        }
+      ],
+      "score": 14,
+      "multiplier": 1.533,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 3118662,
+      "p80": 5119524,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 4,
+      "policyClause": "a queue that silently shrinks is O2; backend without its screen is C4 not done",
+      "hypothesisId": "H3"
+    },
+    {
+      "id": "ING-02",
+      "code": "C4",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "Live health JSON ships source+reconciliation+lifecycle; no screen reads them",
+      "type": "COMPLETE",
+      "caps": [
+        "C4",
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/ingestion/autoplant/health.service.ts:203-213",
+        "apps/admin/src/api/integrationHealth.ts:48-55",
+        "apps/admin/src/pages/admin/BuildHealthPage.tsx:1-204"
+      ],
+      "lanes": [
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 848400,
+          "t80": 1224000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 825600,
+          "t80": 1524000
+        }
+      ],
+      "score": 9,
+      "multiplier": 1.2,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2440692,
+      "p80": 4006584,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 2,
+      "crit": 4,
+      "policyClause": "backend computed without its admin surface is C4 asymmetry, not done",
+      "hypothesisId": "H2-adjacent"
+    },
+    {
+      "id": "ING-03",
+      "code": "O2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Aged-out pipeline reports HEALTHY, not unknown: grey banner on 25h-old data",
+      "type": "FIX",
+      "caps": [
+        "C1",
+        "C2"
+      ],
+      "files": [
+        "apps/admin/src/components/SnapshotBanner.tsx:29-33",
+        "apps/admin/src/components/SnapshotBanner.tsx:76-86",
+        "apps/backend/src/ingestion/autoplant/health.service.ts:359-381",
+        "apps/backend/src/ingestion/snapshot-run.service.ts:63",
+        "apps/backend/src/ingestion/ingestion-alert.ts:139-176"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 779733,
+          "t80": 1439333
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1195236,
+      "p80": 1962072,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "policyClause": "a detector that counts runs that happened cannot see silence; no absolute-age rule anywhere",
+      "hypothesisId": "H5"
+    },
+    {
+      "id": "ING-04",
+      "code": "O1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Run-history ledger has 50 real rows and no client - no screen, not no data",
+      "type": "NEW",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/backend/src/ingestion/snapshots.controller.ts:34",
+        "apps/backend/src/ingestion/snapshot-query.service.ts:128",
+        "apps/admin/src/api/snapshots.ts:54"
+      ],
+      "lanes": [
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 688000,
+          "t80": 1270000
+        }
+      ],
+      "score": 6,
+      "multiplier": 1,
+      "bundleFactor": 1,
+      "typeModifier": 1,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 688000,
+      "p80": 1270000,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 2,
+      "crit": 4,
+      "policyClause": "no finished-work ledger on a screen is O1 even when the endpoint answers",
+      "hypothesisId": "H2"
+    },
+    {
+      "id": "ING-05",
+      "code": "P2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Manual trigger guard is real; the missing audit row is unchanged",
+      "type": "FIX",
+      "caps": [
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/ingestion/snapshots.controller.ts:48-50",
+        "apps/backend/src/ingestion/autoplant/integration-sync.controller.ts:22",
+        "apps/backend/src/ingestion/autoplant/integration-sync.controller.ts:37",
+        "apps/backend/src/ingestion/autoplant/integration-sync.controller.ts:44"
+      ],
+      "lanes": [
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 527893,
+      "p80": 761600,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 1,
+      "crit": 4,
+      "policyClause": "privileged manual trigger with no actor audit is P2; the guard passing does not supply the ledger",
+      "hypothesisId": "none"
+    },
+    {
+      "id": "ING-06",
+      "code": "O1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Reaped run records no reason, so a wedge looks like a plain failure",
+      "type": "FIX",
+      "caps": [
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/ingestion/snapshot-run.service.ts:39",
+        "apps/backend/src/ingestion/stale-run.ts:13",
+        "apps/backend/src/ingestion/autoplant/master-sync-run.service.ts:55"
+      ],
+      "lanes": [
+        "data",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 528133,
+          "t80": 580267
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "MED",
+      "p50": 1005026,
+      "p80": 1312618,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 5,
+      "policyClause": "ORPHANED_RUN_ERROR exists in stale-run.ts:13 but snapshot_runs has no error column to hold it"
+    },
+    {
+      "id": "ING-07",
+      "code": "O4",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "Partition maintenance ships off by default in every environment",
+      "type": "NEW",
+      "caps": [
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/ingestion/partition-maintenance.service.ts:63",
+        "apps/backend/src/ingestion/partition-maintenance.service.ts:69"
+      ],
+      "lanes": [
+        "docs",
+        "integration"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "docs",
+          "anchorN": 999,
+          "weakAnchor": false,
+          "t50": 108000,
+          "t80": 108000
+        },
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1002000,
+          "t80": 1848000
+        }
+      ],
+      "score": 9,
+      "multiplier": 1.2,
+      "bundleFactor": 1.08,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "MED",
+      "p50": 1198800,
+      "p80": 2112480,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 1,
+      "crit": 3,
+      "policyClause": "flag-off, not absent: PARTITION_MAINTENANCE_ENABLED defaults OFF by design; finding is that nothing surfaces the OFF state to an operator"
+    },
+    {
+      "id": "ING-08",
+      "code": "C6",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Warehouse and SE get no freshness banner at all, silently",
+      "type": "FIX",
+      "caps": [
+        "C1",
+        "C6"
+      ],
+      "files": [
+        "apps/backend/src/ingestion/snapshots.controller.ts:28-29",
+        "apps/admin/src/components/SnapshotBanner.tsx:52-58",
+        "apps/admin/src/AppRoutes.tsx:62"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 733867,
+          "t80": 1354667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 1124928,
+      "p80": 1846656,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 2,
+      "crit": 5,
+      "policyClause": "a role with no lens on staleness is C6; a swallowed 403 is indistinguishable from healthy",
+      "hypothesisId": "H4"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 11299237,
+    "sumGapP80": 18391534,
+    "packets": 8,
+    "waves": 2,
+    "collisions": 1,
+    "screensTouched": 1,
+    "overheadTeq": 1921000,
+    "tModule50": 13220237,
+    "p50": 16921903,
+    "p80": 33843806,
+    "size": "XL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 1530133,
+    "primaryDriver": "ING-01",
+    "largestUnknown": "ING-09",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "ING-05",
+      "p80": 761600,
+      "what": "Manual trigger guard is real; the missing audit row is unchanged"
+    },
+    "over3m": [
+      "ING-01"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 4500000,
+    "screensNeedingWork": 5,
+    "bottomUpP50": 16921903,
+    "ratio": 3.76,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

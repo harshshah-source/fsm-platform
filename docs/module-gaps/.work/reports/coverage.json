@@ -1,0 +1,310 @@
+{
+  "module": "reports",
+  "generated": "2026-09-02",
+  "note": "checks 3 (persist), 6 (backend perms), 8 (named downstream consumer) held at '?' by S2 ban — no browser, no api-walk. check 7 (state transition) and 9 (audit) are NA for read-only report GETs; audit applies only to the export download. | S3 (api-walk, no browser): check 6 SETTLED by live wrong-role calls — fleet-uptime WM/SE 403, CSM 200; root-cause WM 403; efficiency SE 403; zm-scorecard ZM/CSM 403 + OH 200; exports summary ZM 403; zone clamp holds and honestly echoes (efficiency?zoneId=2 as zm.north echoes filters.zoneId=1; zm.south fleet-uptime 2026-07 sees only zone 2). check 3 SETTLED NEGATIVE on the month cubes — the row for the month the screen defaults to is never written (2026-09, 2026-08, 2026-05..03 all return 0 rows; only 2026-07 and 2026-06 have data). check 8 remains '?' for report GETs: the named consumer is the admin page, which needs a browser walk.",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Fleet Uptime Report",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "x",
+        "4": "v",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/reports/reports.controller.ts:108 GET /reports/fleet-uptime, default month = currentMonth()",
+        "apps/backend/src/reports/reports.service.ts:313 reads device_downtime_summary_monthly only",
+        "apps/backend/src/reports/reports.service.ts:703 uptimePct(): window<=0 returns 100",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:262 cron computes previousUtcMonthStart — never the current month",
+        "apps/admin/src/pages/reports/ReportsPage.tsx:107 hero metric 'Fleet Uptime' with tone 'success'",
+        "S3 E4 2026-09-02: GET /reports/fleet-uptime as ops.head -> eligibleDeviceCount 0, rows [], uptimePct 100; ?month=2026-07 -> 15311 devices, uptimePct 56.19"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Soft Inactive Trend",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/reports/reports.service.ts:351 live read of soft_inactive_count_history, days clamped 1..90",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:252 softInactiveTick recompute — capture-based, not a month cube",
+        "apps/admin/src/pages/reports/ReportsPage.tsx:83 apiSoftInactiveTrend({days:14}), non-OH sees a gated panel"
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "SE Productivity report",
+      "crit": 4,
+      "state": "NOT_STARTED",
+      "checks": {
+        "1": "x",
+        "2": "x",
+        "3": "x",
+        "4": "x",
+        "5": "x",
+        "6": "NA",
+        "7": "NA",
+        "8": "x",
+        "9": "NA"
+      },
+      "pointers": [
+        "route search: no /reports/se-* in apps/admin/src/AppRoutes.tsx:186-250",
+        "backend search: no productivity endpoint in apps/backend/src/reports/reports.controller.ts:55-266",
+        "terminology: fleet uptime splits auto vs SE closures per ZONE not per SE — apps/backend/src/reports/reports.service.ts:322",
+        "other-module entry: apps/backend/src/me-tickets/me-work-history.service.ts:18 is the SE's own history (mobile self-view), not an OH cross-SE report",
+        "permission: no handler exists at any role, so not role-hidden"
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "Auto-Recovery Rate separated from genuine repairs",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/reports/reports.service.ts:322 autoRecoveryClosures / seRepairedClosures held apart",
+        "apps/backend/src/reports/reports.service.ts:655 auto_recoveries summed separately in efficiency cube",
+        "apps/backend/src/ticketing/auto-recovery.service.ts:96 CLOSED_AUTO_RECOVERY vs CLOSED at source",
+        "apps/admin/src/pages/reports/ReportsPage.tsx:111-112 both shown as distinct KPI tiles"
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "Device Detail Downtime History",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "?",
+        "5": "?",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/reports/DeviceDetailPage.tsx:4-15 apiDeviceCycles / apiDeviceDowntimeTrend from api/devices — endpoint owned by the devices module, not reports",
+        "apps/admin/src/pages/reports/FleetDirectoryPage.tsx:317 the one working drill-through in the module"
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "Root-cause % distribution (structured field only)",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "x",
+        "4": "v",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/reports/reports.service.ts:404 reads root_cause_summary_monthly, structured enum, zero-filled — no free text",
+        "apps/backend/src/reports/reports.service.ts:389 default fromMonth = current month",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:267 cron only ever writes previousUtcMonthStart",
+        "apps/admin/src/api/reports.ts:137 apiRootCause() sends no from/to/zone — backend filters unreachable from UI",
+        "apps/admin/src/pages/reports/RootCauseAnalyticsPage.tsx:20 fires the bare call"
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "System Efficiency Report",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "x",
+        "4": "v",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/reports/reports.service.ts:626 reads system_efficiency_summary_daily",
+        "apps/backend/src/reports/reports.service.ts:730 defaultDay = today; cron finalises previousUtcDayStart (business-sweep-scheduler.service.ts:257)",
+        "apps/admin/src/api/reports.ts:172 apiSystemEfficiency() sends no from/to — always today",
+        "apps/admin/src/pages/reports/SystemEfficiencyPage.tsx:11 two reference panels shipped as gated placeholders"
+      ]
+    },
+    {
+      "id": "C8",
+      "name": "ZM Performance Scorecard",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "x",
+        "4": "v",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/reports/reports.service.ts:439 reads zm_performance_summary_monthly, default month = current",
+        "apps/backend/src/reports/reports.service.ts:495 trend[] series computed and returned",
+        "apps/admin/src/pages/reports/ZmScorecardPage.tsx:19 apiZmScorecard() — no range picker, no zone drill-down, trend[] never rendered",
+        "S3 E4: zm-scorecard 403 for ZM and CSM, 200 for OH; OH default returns rows [] and trend []"
+      ]
+    },
+    {
+      "id": "C9",
+      "name": "Commissioning cohort report",
+      "crit": 2,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "REAL CAPABILITY, not an orphan: apps/backend/src/reports/reports.controller.ts:55,80 two endpoints over a LIVE query (no cube)",
+        "apps/backend/src/reports/commissioning-aggregation.service.ts:54,155",
+        "apps/admin/src/api/reports.ts:276,308 the only reports in the module that carry generatedAt",
+        "apps/admin/src/pages/reports/CommissioningCohortPage.tsx 756 loc with population/zone/plant/remark filters wired (reports.ts:338)",
+        "apps/backend/src/reports/reports.controller.ts:52 #233 fix narrative — a real operational defect was found and fixed here"
+      ]
+    },
+    {
+      "id": "C10",
+      "name": "CSM approval / acting-role share",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "NA",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "REAL CAPABILITY, not an orphan — endpoint lives OUTSIDE the reports module, which is why skeleton.md missed it: apps/admin/src/api/roleBackup.ts apiCsmApprovalShare",
+        "apps/admin/src/pages/reports/CsmApprovalSharePage.tsx:2,15-18 attribution via audit_logs.acting_zone (Issue 27 AC#5)",
+        "no month picker and no drill to the audit rows behind the share — CsmApprovalSharePage.tsx:26"
+      ]
+    },
+    {
+      "id": "C11",
+      "name": "Exports (Finance voucher batch + report exports)",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "v",
+        "4": "NA",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "v",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/exports/exports.controller.ts:26 EXPORT_DOWNLOADED audited — the one audited write in this module",
+        "apps/backend/src/exports/exports.controller.ts:22 summary carries dataAsOf — the module's only true data-freshness stamp",
+        "apps/admin/src/pages/exports/ExportsPage.tsx:12 one card only (entity mapping); SPINE E-17 voucher finance export is not on this hub",
+        "apps/admin/src/pages/reports/ReportsPage.tsx:181-189 the only report CSV is client-side, zone-breakdown only"
+      ]
+    },
+    {
+      "id": "C12",
+      "name": "Data-as-of freshness stamp on every report",
+      "crit": 5,
+      "state": "UI_ONLY",
+      "checks": {
+        "1": "x",
+        "2": "x",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "NA",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "no computedAt/generatedAt on fleet-uptime, root-cause, zm-scorecard, efficiency, work-type-mix, verification-outcomes responses — apps/backend/src/reports/reports.service.ts:339,417,509,686",
+        "apps/admin/src/pages/reports/ReportsPage.tsx:73,240 'Data as of {asOf}' where asOf = new Date() at FETCH time, not cube time",
+        "apps/admin/src/components/SnapshotBanner.tsx:8-9 the global banner reports TELEMETRY-INGEST freshness, not report-cube freshness — it can read green while a cube is a month behind",
+        "only generatedAt in module: apps/admin/src/api/reports.ts:276,308 (commissioning, a live query that needs it least)",
+        "S3 E4: no freshness key in fleet-uptime / root-cause / efficiency / zm-scorecard JSON; GET /exports/entity-mapping/summary returns dataAsOf 2026-09-01T12:01:32.999Z; device_downtime_summary_monthly.computed_at exists (schema.prisma:2682) and is dropped by the projection"
+      ]
+    },
+    {
+      "id": "C13",
+      "name": "Metric drill-through (summary number -> source tickets/audit rows)",
+      "crit": 5,
+      "state": "NOT_STARTED",
+      "checks": {
+        "1": "x",
+        "2": "x",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "NA",
+        "7": "NA",
+        "8": "x",
+        "9": "NA"
+      },
+      "pointers": [
+        "route search: only navigation out of a report is apps/admin/src/pages/reports/FleetDirectoryPage.tsx:317 (plant -> device)",
+        "backend search: every report GET returns aggregates only — no ticketIds/auditIds anywhere in apps/backend/src/reports/reports.service.ts:339-699",
+        "terminology: cubes store counts, not id arrays — root_cause_summary_monthly SUM(submission_count) at reports.service.ts:405",
+        "permission: aggregates are returned to all three manager roles, so nothing is being withheld by role",
+        "other-module entry: /tickets list has no ?rootCause= or ?slaBreach= deep-link param consumed anywhere in apps/admin/src/pages/reports"
+      ]
+    }
+  ],
+  "s3_walked": "2026-09-02"
+}

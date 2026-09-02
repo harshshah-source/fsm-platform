@@ -1,0 +1,49 @@
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "claim": "GET /api/reports/fleet-uptime for a month with no device_downtime_summary_monthly rows returns fleet.uptimePct = 100 and eligibleDeviceCount = 0, and ReportsPage renders it as a green 100% hero KPI.",
+      "predictedCode": "O3",
+      "files": ["apps/backend/src/reports/reports.service.ts:703", "apps/backend/src/reports/reports.service.ts:339", "apps/admin/src/pages/reports/ReportsPage.tsx:107"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "an empty-cube guard exists upstream — either the controller rejects an uncomputed month, or the page suppresses the tile when eligibleDeviceCount is 0",
+      "altCheck": "grep for eligibleDeviceCount/window guards: reports.service.ts:313-345 has no zero-row branch (rows.map over an empty array falls straight through to uptimePct(0,0)); ReportsPage.tsx:107 renders `${fleet.fleet.uptimePct}%` with no count guard; reports.controller.ts:108-121 does no existence check on the month."
+    },
+    {
+      "id": "H4",
+      "claim": "On a live DB mid-month, /reports/root-cause and /reports/zm-scorecard with default params return an all-zero distribution / an empty rows[] respectively, because cron writes only previousUtcMonthStart.",
+      "predictedCode": "O3",
+      "files": ["apps/backend/src/scheduling/business-sweep-scheduler.service.ts:124", "apps/backend/src/reports/reports.service.ts:389", "apps/backend/src/reports/reports.service.ts:439"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "some other job or a migration backfills the current month continuously, so the cube is not in fact a month behind",
+      "altCheck": "grep -rn 'computeMonth(' over apps/backend/src returns only the four business-sweep ticks (business-sweep-scheduler.service.ts:262,267,272) and the four manual POST /recompute handlers (reports.controller.ts:129,180,198) — no current-month writer; the aggregation services are invoked from nowhere else."
+    },
+    {
+      "id": "H2",
+      "claim": "A ZONAL_MANAGER calling GET /api/reports/zm-scorecard is refused 403 by the backend, not merely hidden by the admin route guard.",
+      "predictedCode": "C6",
+      "files": ["apps/backend/src/reports/reports.controller.ts:187", "apps/admin/src/pages/reports/ZmScorecardPage.tsx:10"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "the RoleGuard is registered but not enforcing for this controller, making the OH-only claim a UI-level gate only — a ZM could read their own appraisal",
+      "altCheck": "reports.controller.ts:34 @UseGuards(AuthGuard, RoleGuard) is on the class and :188 @Roles('OPERATIONS_HEAD') on the handler, so enforcement is declared at both levels; whether the guard actually rejects can only be settled by calling as a ZM."
+    },
+    {
+      "id": "H3",
+      "claim": "A ZONAL_MANAGER calling /reports/efficiency?zoneId=<another zone> gets their own zone's numbers, because the service overwrites the requested zoneId rather than rejecting it.",
+      "predictedCode": "C6",
+      "files": ["apps/backend/src/reports/reports.service.ts:632", "apps/backend/src/reports/reports.service.ts:395", "apps/backend/src/reports/reports.service.ts:571"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "scoping is UI-only and the query honours the attacker-supplied zoneId, leaking a peer zone's SLA numbers",
+      "altCheck": "the clamp is in the QUERY not the UI at all three sites — reports.service.ts:632 `scope.role === 'ZONAL_MANAGER' ? scope.zoneId : (opts.zoneId ?? null)`, same shape at :395 and :571 — so the alternative is already weak; what a call settles is whether scope.zoneId is populated for a real ZM token and whether the echoed filters mislead."
+    },
+    {
+      "id": "H5",
+      "claim": "GET /api/exports/entity-mapping is the only export reachable from the OH Exports hub; the E-17 voucher finance batch is reachable only from the vouchers screen, so the monthly reimbursement run starts outside the Exports page.",
+      "predictedCode": "C5",
+      "files": ["apps/admin/src/pages/exports/ExportsPage.tsx:12", "apps/backend/src/exports/exports.controller.ts:20", "apps/admin/src/api/vouchers.ts:2"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "the vouchers module surfaces its own export prominently enough that the Exports hub is not the intended entry point, making this navigation taste rather than a gap",
+      "altCheck": "ExportsPage.tsx:12 comment states 'more export cards slot into the same grid as they land' — the hub is declared as the intended home for exports and currently holds one card; api/vouchers.ts:2 places the OH Finance export on the vouchers screen instead."
+    }
+  ]
+}

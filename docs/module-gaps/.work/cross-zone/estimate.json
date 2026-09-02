@@ -1,0 +1,636 @@
+{
+  "module": "cross-zone",
+  "label": "Cross-Zone Escalation",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 66,
+    "afterBacklog": 80,
+    "capsScored": 8
+  },
+  "gaps": {
+    "total": 13,
+    "priced": 10,
+    "folded": [],
+    "falsified": [
+      "CZ-03"
+    ],
+    "needsVerification": [
+      {
+        "id": "CZ-02",
+        "what": "Sweep one-shot predicate untestable: zero Platinum tickets exist",
+        "costToSettle": "one walk ~708k TEQ"
+      },
+      {
+        "id": "CZ-06",
+        "what": "Target zone id is free text and unvalidated; mismatch not persisted",
+        "costToSettle": "one walk ~708k TEQ"
+      }
+    ],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 6,
+    "S2": 5,
+    "S1": 1,
+    "S0": 0
+  },
+  "dangerous": [
+    "CZ-01"
+  ],
+  "priced": [
+    {
+      "id": "CZ-01",
+      "code": "P3",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Approve assigns the ticket then 500s, stranding the escalation PENDING",
+      "type": "FIX",
+      "caps": [
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:162-178",
+        "apps/backend/src/scheduling/override.service.ts:659",
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:120"
+      ],
+      "lanes": [
+        "api",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1354046,
+      "p80": 1953504,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "hypothesisId": "H-CZ-2"
+    },
+    {
+      "id": "CZ-04",
+      "code": "C4",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "ZM flag endpoint is alive and correct; no UI anywhere calls it",
+      "type": "COMPLETE",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/admin/src/api/crossZone.ts:38",
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:54",
+        "apps/admin/src/pages/tickets"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 779733,
+          "t80": 1439333
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2305098,
+      "p80": 3783996,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 4
+    },
+    {
+      "id": "CZ-05",
+      "code": "C7",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "Re-escalate is ZM-only at the API and ZM-invisible in the UI",
+      "type": "COMPLETE",
+      "caps": [
+        "C5",
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:103",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:225",
+        "apps/admin/src/pages/cross-zone/CrossZonePage.tsx:122"
+      ],
+      "lanes": [
+        "ui",
+        "api",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 4169527,
+      "p80": 6565717,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 3
+    },
+    {
+      "id": "CZ-07",
+      "code": "C7",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Deferred escalations never resurface on their review date",
+      "type": "NEW",
+      "caps": [
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:271",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:225",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:236"
+      ],
+      "lanes": [
+        "api",
+        "domain",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 707000,
+          "t80": 1020000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 707000,
+          "t80": 1020000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 688000,
+          "t80": 1270000
+        }
+      ],
+      "score": 6,
+      "multiplier": 1,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "S",
+      "conf": "MED",
+      "p50": 2438320,
+      "p80": 3839600,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 5
+    },
+    {
+      "id": "CZ-08",
+      "code": "O1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "No report of who approved what: only the live queue is readable",
+      "type": "NEW",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:223-250",
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:41"
+      ],
+      "lanes": [
+        "api",
+        "ui",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 590267,
+          "t80": 648533
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2734430,
+      "p80": 4117072,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 2
+    },
+    {
+      "id": "CZ-09",
+      "code": "C2",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "Home ZM decision notice reaches nobody: routed by a stale pointer",
+      "type": "FIX",
+      "caps": [
+        "C3",
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:317-322",
+        "apps/backend/prisma/seed-mock-engineers.ts:109-110"
+      ],
+      "lanes": [
+        "api",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 497067,
+          "t80": 546133
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 945907,
+      "p80": 1235405,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 5
+    },
+    {
+      "id": "CZ-10",
+      "code": "O4",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "Static scanner misses audit written one hop deeper in a helper",
+      "type": "REFACTOR",
+      "caps": [],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:359-378",
+        "docs/module-gaps/.work/cross-zone/static.md:14"
+      ],
+      "lanes": [
+        "analysis"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "analysis",
+          "anchorN": 32,
+          "weakAnchor": false,
+          "t50": 112667,
+          "t80": 137333
+        }
+      ],
+      "score": 1,
+      "multiplier": 0.667,
+      "bundleFactor": 1,
+      "typeModifier": 1.2,
+      "size": "XS",
+      "conf": "HIGH",
+      "p50": 135200,
+      "p80": 164800,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 1,
+      "crit": 1
+    },
+    {
+      "id": "CZ-11",
+      "code": "C2",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "Target zone is never told: no notice, no queue row, no schedule",
+      "type": "COMPLETE",
+      "caps": [
+        "C7",
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:180",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:225",
+        "apps/backend/src/scheduling/override.service.ts:666"
+      ],
+      "lanes": [
+        "api",
+        "domain",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1036933,
+          "t80": 1496000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1036933,
+          "t80": 1496000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1009067,
+          "t80": 1862667
+        }
+      ],
+      "score": 13,
+      "multiplier": 1.467,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 4827873,
+      "p80": 7602409,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "hypothesisId": "H-CZ-1"
+    },
+    {
+      "id": "CZ-12",
+      "code": "C7",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Flag accepts a ticket that is already formally assigned",
+      "type": "FIX",
+      "caps": [
+        "C4",
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:121-147",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:127-130"
+      ],
+      "lanes": [
+        "api",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 612733,
+          "t80": 884000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 612733,
+          "t80": 884000
+        }
+      ],
+      "score": 4,
+      "multiplier": 0.867,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 926452,
+      "p80": 1336608,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 4,
+      "hypothesisId": "H-CZ-2"
+    },
+    {
+      "id": "CZ-13",
+      "code": "C2",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Approve 404 lies: every non-OK assign outcome reads as not-found",
+      "type": "FIX",
+      "caps": [
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:166-167",
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:118",
+        "apps/backend/src/scheduling/override.service.ts:143-150"
+      ],
+      "lanes": [
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 659867,
+          "t80": 952000
+        }
+      ],
+      "score": 5,
+      "multiplier": 0.933,
+      "bundleFactor": 1,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 461907,
+      "p80": 666400,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 5,
+      "hypothesisId": null
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 20298760,
+    "sumGapP80": 31265511,
+    "packets": 10,
+    "waves": 2,
+    "collisions": 1,
+    "screensTouched": 2,
+    "overheadTeq": 2524000,
+    "tModule50": 22822760,
+    "p50": 29213133,
+    "p80": 58426266,
+    "size": "XXL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 1087333,
+    "primaryDriver": "CZ-11",
+    "largestUnknown": "CZ-02",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "CZ-09",
+      "p80": 1235405,
+      "what": "Home ZM decision notice reaches nobody: routed by a stale pointer"
+    },
+    "over3m": [
+      "CZ-05",
+      "CZ-11"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 4500000,
+    "screensNeedingWork": 5,
+    "bottomUpP50": 29213133,
+    "ratio": 6.49,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "module": "reports",
+  "persona": {"role": "OPERATIONS_HEAD", "label": "Operations Head", "frequency": "weekly review + ad-hoc config"},
+  "goals": [
+    "Prove fleet-wide operational health against the contractual 98% Fleet Uptime target and SLA compliance",
+    "Diagnose recurring failure drivers (root cause, chronic devices) to target intervention",
+    "Evaluate the ZM management layer objectively (override quality, zone SLA outcomes)"
+  ],
+  "scopeNote": "PRD 61a-61e names Fleet Uptime, Root Cause Analytics, System Efficiency, ZM Scorecard, Device Detail/Downtime Trend. 'commissioning cohort' and 'CSM approval share' (from the survey scope line) are not named in PRD:188-198 or CONTEXT.md lines 1-369 read here -- carried as prd/role-derived candidates below, not textually anchored. Admin routes /reports/*, /exports imply a wider surface than the PRD prose enumerates.",
+  "capabilities": [
+    {"id": "C1", "name": "Fleet Uptime Report", "src": "persona", "crit": 5, "why": "CONTEXT.md: 'the number that goes on company SLA reports' -- OH cannot answer 'are we meeting the master KPI' without it"},
+    {"id": "C2", "name": "Soft Inactive Trend", "src": "role", "crit": 3, "why": "without it OH cannot tell whether Recommender deficit-mode flips reflect real backlog growth or noise"},
+    {"id": "C3", "name": "SE Productivity report", "src": "persona", "crit": 4, "why": "weekly workforce review needs this to catch overloaded/underperforming SEs and tune Daily Capacity"},
+    {"id": "C4", "name": "Auto-Recovery Rate (separated from genuine repairs)", "src": "role", "crit": 5, "why": "CONTEXT.md: 'reports must separate auto-recoveries from genuine repairs' -- unseparated, SE productivity and component-consumption numbers are wrong (O3)"},
+    {"id": "C5", "name": "Device Detail Downtime History", "src": "persona", "crit": 4, "why": "PRD 61d -- without per-device failure history OH cannot diagnose a chronically unreliable device before replacing it"},
+    {"id": "C6", "name": "Root-cause % distribution (structured field only)", "src": "persona", "crit": 5, "why": "PRD 61b + CONTEXT.md 'structured root_cause_category, never free-text' -- main lever for fleet-wide intervention targeting; built from free text it is O3"},
+    {"id": "C7", "name": "System Efficiency Report", "src": "persona", "crit": 5, "why": "PRD 61c -- the whole system's ROI proof ('whether FSM reduces downtime and improves operations'); without it OH cannot justify the platform"},
+    {"id": "C8", "name": "ZM Performance Scorecard", "src": "persona", "crit": 4, "why": "PRD 61a -- OH's only lever to evaluate the management layer objectively; without it ZM overrides go unaudited"},
+    {"id": "C9", "name": "Commissioning cohort report", "src": "prd", "crit": 2, "why": "named only in the survey scope line, not grounded in CONTEXT.md/PRD read here -- likely an Install-Ticket cohort view; low confidence"},
+    {"id": "C10", "name": "CSM approval / acting-role share", "src": "role", "crit": 3, "why": "CONTEXT.md: CSM acting-as-ZM actions are audited as acted_as_role=CENTRAL_SERVICE_MANAGER -- OH needs the acting-share visible or acting-scope abuse is invisible"},
+    {"id": "C11", "name": "Exports (Finance voucher batch + report exports)", "src": "spine", "crit": 4, "why": "SPINE E-17: voucher export is the only bridge to Finance reimbursement (no live integration) -- without it the monthly reimbursement batch cannot run"},
+    {"id": "C12", "name": "Data-as-of freshness stamp on every report", "src": "role", "crit": 5, "why": "CONTEXT.md: 'all manager dashboards show a data-as-of timestamp' -- without it OH reads stale Snapshot-derived numbers as current (O3)"},
+    {"id": "C13", "name": "Metric drill-through (summary number -> source tickets/audit rows)", "src": "role", "crit": 5, "why": "O-class taxonomy: a report number nobody can trace is O3 -- OH facing an SLA dispute must trace Fleet Uptime %/root-cause % back to source records or the metric is unverifiable"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 6, "role": 5, "spine": 1, "prd": 1},
+  "spineAvailable": true
+}

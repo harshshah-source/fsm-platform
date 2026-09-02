@@ -1,0 +1,561 @@
+{
+  "module": "dashboard",
+  "label": "Zone Dashboard Home",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 67,
+    "afterBacklog": 84,
+    "capsScored": 9
+  },
+  "gaps": {
+    "total": 11,
+    "priced": 9,
+    "folded": [
+      {
+        "id": "DASH-G03",
+        "into": "DASH-G01"
+      }
+    ],
+    "falsified": [],
+    "needsVerification": [
+      {
+        "id": "DASH-G04",
+        "what": "Snapshot Healthy badge is a static literal, not a function of freshness",
+        "costToSettle": "the red-banner plus green-badge co-render needs a FAILED snapshot run plus one browser walk ~708k TEQ; the badge staticness is already E2-settled and needs neither"
+      }
+    ],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 3,
+    "S2": 6,
+    "S1": 1,
+    "S0": 0
+  },
+  "dangerous": [],
+  "priced": [
+    {
+      "id": "DASH-G01",
+      "code": "C4",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "ZM dashboard shows no critical work queue at all",
+      "type": "COMPLETE",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/admin/src/pages/dashboard/ZmDashboard.tsx:48-56",
+        "apps/backend/src/dashboard/dashboard.service.ts:803",
+        "apps/admin/src/api/dashboard.ts:181"
+      ],
+      "lanes": [
+        "ui",
+        "analysis"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 963200,
+          "t80": 1778000
+        },
+        {
+          "lane": "analysis",
+          "anchorN": 32,
+          "weakAnchor": false,
+          "t50": 236600,
+          "t80": 288400
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1749308,
+      "p80": 3012811,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "hypothesisId": "DASH-H2"
+    },
+    {
+      "id": "DASH-G02",
+      "code": "C2",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "Action Required cards are dead counts, click leads nowhere",
+      "type": "COMPLETE",
+      "caps": [
+        "C1"
+      ],
+      "files": [
+        "apps/admin/src/pages/dashboard/ActionRequiredPanel.tsx:27-52",
+        "apps/admin/src/pages/dispatch/console/AttentionBand.tsx:30-37",
+        "apps/admin/src/AppRoutes.tsx:375",
+        "apps/admin/src/AppRoutes.tsx:385",
+        "apps/admin/src/AppRoutes.tsx:395",
+        "apps/admin/src/AppRoutes.tsx:413",
+        "apps/admin/src/AppRoutes.tsx:431",
+        "apps/admin/src/AppRoutes.tsx:459"
+      ],
+      "lanes": [
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 733867,
+          "t80": 1354667
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1,
+      "typeModifier": 1.35,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 990720,
+      "p80": 1828800,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "hypothesisId": "DASH-H4"
+    },
+    {
+      "id": "DASH-G05",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Five of nine Action Required card types permanently return available false",
+      "type": "COMPLETE",
+      "caps": [
+        "C1"
+      ],
+      "files": [
+        "apps/backend/src/dashboard/dashboard.service.ts:292-306",
+        "apps/backend/src/dashboard/dashboard.service.ts:883-901",
+        "apps/admin/src/pages/dashboard/ActionRequiredPanel.tsx:45-47"
+      ],
+      "lanes": [
+        "api",
+        "domain",
+        "data"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 776667,
+          "t80": 853333
+        }
+      ],
+      "score": 16,
+      "multiplier": 1.667,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 4906799,
+      "p80": 6660719,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "hypothesisId": "DASH-H5"
+    },
+    {
+      "id": "DASH-G06",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Zone Overview trend-vs-yesterday column can never show a value",
+      "type": "COMPLETE",
+      "caps": [
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/dashboard/dashboard.service.ts:454",
+        "apps/admin/src/pages/dashboard/ZoneOverviewTable.tsx:145-151"
+      ],
+      "lanes": [
+        "api",
+        "data",
+        "domain"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1036933,
+          "t80": 1496000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 683467,
+          "t80": 750933
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1036933,
+          "t80": 1496000
+        }
+      ],
+      "score": 13,
+      "multiplier": 1.467,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 4317983,
+      "p80": 5861433,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5
+    },
+    {
+      "id": "DASH-G07",
+      "code": "C7",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Operating-mode card and table built but mounted on no page",
+      "type": "COMPLETE",
+      "caps": [
+        "C6"
+      ],
+      "files": [
+        "apps/admin/src/components/dashboard/ZoneOperatingModeCard.tsx:44-72",
+        "apps/admin/src/components/dashboard/ZoneOperatingModeTable.tsx:44-101",
+        "apps/backend/src/dashboard/operating-mode.controller.ts:26"
+      ],
+      "lanes": [
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 779733,
+          "t80": 1439333
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1052640,
+      "p80": 1943100,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 3
+    },
+    {
+      "id": "DASH-G08",
+      "code": "C4",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "CSM and Ops Head dashboards render no Action Required panel",
+      "type": "COMPLETE",
+      "caps": [
+        "C1",
+        "C9"
+      ],
+      "files": [
+        "apps/admin/src/pages/dashboard/CentralDashboard.tsx:19-47",
+        "apps/admin/src/pages/dashboard/OpsHeadDashboard.tsx:42",
+        "apps/admin/src/pages/dashboard/ActionRequiredPanel.tsx:13"
+      ],
+      "lanes": [
+        "ui",
+        "permissions"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 825600,
+          "t80": 1524000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 848400,
+          "t80": 1224000
+        }
+      ],
+      "score": 9,
+      "multiplier": 1.2,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2440692,
+      "p80": 4006584,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 5
+    },
+    {
+      "id": "DASH-G09",
+      "code": "C3",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "Zone Overview docblock promises a CSV export button that is absent",
+      "type": "COMPLETE",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/admin/src/pages/dashboard/ZoneOverviewTable.tsx:1-21",
+        "apps/admin/src/pages/dashboard/ScorecardTable.tsx:1-30",
+        "apps/admin/src/pages/dashboard/CompanyPlantTable.tsx:370-373"
+      ],
+      "lanes": [
+        "ui",
+        "docs"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 596267,
+          "t80": 1100667
+        },
+        {
+          "lane": "docs",
+          "anchorN": 999,
+          "weakAnchor": false,
+          "t50": 78000,
+          "t80": 78000
+        }
+      ],
+      "score": 4,
+      "multiplier": 0.867,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 983081,
+      "p80": 1718496,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 3
+    },
+    {
+      "id": "DASH-G10",
+      "code": "C6",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Escalation Queue flattens company/plant grouping the backend supplies",
+      "type": "FIX",
+      "caps": [
+        "C4",
+        "C9"
+      ],
+      "files": [
+        "apps/admin/src/pages/dashboard/EscalationQueueList.tsx:16-33",
+        "apps/backend/src/dashboard/dashboard.service.ts:803"
+      ],
+      "lanes": [
+        "ui",
+        "domain"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 825600,
+          "t80": 1524000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 848400,
+          "t80": 1224000
+        }
+      ],
+      "score": 9,
+      "multiplier": 1.2,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "MED",
+      "p50": 1265544,
+      "p80": 2077488,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 5
+    },
+    {
+      "id": "DASH-G11",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "critical-queue suggestedSes is a hardcoded empty array on every group",
+      "type": "COMPLETE",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/backend/src/dashboard/dashboard.service.ts:192",
+        "apps/backend/src/dashboard/dashboard.service.ts:851",
+        "apps/admin/src/pages/dashboard/ManagerDashboard.tsx:95-97"
+      ],
+      "lanes": [
+        "api",
+        "domain",
+        "data"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 652400,
+          "t80": 716800
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 4121712,
+      "p80": 5595005,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "hypothesisId": "DASH-H2"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 21828479,
+    "sumGapP80": 32704436,
+    "packets": 9,
+    "waves": 2,
+    "collisions": 1,
+    "screensTouched": 2,
+    "overheadTeq": 2509000,
+    "tModule50": 24337479,
+    "p50": 31151973,
+    "p80": 62303946,
+    "size": "XXL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 2112533,
+    "primaryDriver": "DASH-G05",
+    "largestUnknown": "DASH-G04",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "DASH-G02",
+      "p80": 1828800,
+      "what": "Action Required cards are dead counts, click leads nowhere"
+    },
+    "over3m": [
+      "DASH-G05",
+      "DASH-G06",
+      "DASH-G11"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 5400000,
+    "screensNeedingWork": 6,
+    "bottomUpP50": 31151973,
+    "ratio": 5.77,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "module": "cross-zone",
+  "persona": {
+    "role": "Central Service Manager",
+    "label": "CSM",
+    "frequency": "daily escalations plus backup cover for absent ZMs"
+  },
+  "goals": [
+    "Work the cross-zone escalation queue (Auto/Platinum vs Manual/Gold-Silver) and approve/deny/defer",
+    "Act with full ZM authority in a zone whose ZM is unavailable (acting-scope backup cascade)",
+    "Confirm approved hand-offs actually land with the receiving zone's SE, not just change a status"
+  ],
+  "scopeNote": "Cross-Zone Dashboard (role matrix row) is CSM/OH-only (ZM cell is blank). ZM's manual-flag action originates in the ZM's own Ticket List/'Couldn't Assign' queue, outside this module's page boundary, but its effect (the row landing in the CSM queue) is this module's job. Treat flag-origin as boundary-adjacent, not in-scope UI to build here. No mobile surface named for this module (role matrix: web-only rows); receiving SE gets the assignment through normal SE ticket surfacing, not a cross-zone-specific mobile feature.",
+  "capabilities": [
+    { "id": "C1", "name": "Platinum auto-escalation trigger (1h CRITICAL unassigned / 4h to SUBMITTED) populates CSM queue", "src": "persona", "crit": 5, "why": "no queue population means CSM's day has nothing to work and Platinum SLA breaches silently" },
+    { "id": "C2", "name": "Approve cross-zone (pick target zone + SE) commits the hand-off", "src": "persona", "crit": 5, "why": "this is the boundary crossing itself; without it approval is just a status flip, ticket never gets covered" },
+    { "id": "C3", "name": "Deny/defer returns ticket to home ZM queue with reason (reverse path)", "src": "persona", "crit": 5, "why": "no reverse path leaves denied/deferred Platinum tickets orphaned outside both the CSM and home ZM's working queues" },
+    { "id": "C4", "name": "ZM manual flag (reason) pushes Gold/Silver ticket into CSM queue", "src": "role", "crit": 4, "why": "without it only Platinum ever reaches CSM; the Gold/Silver manual-escalation promise in the role/tier model goes unmet" },
+    { "id": "C5", "name": "Denied-Platinum re-escalation from home ZM up to Operations Head", "src": "spine", "crit": 3, "why": "without the second rung, a Platinum ticket denied at CSM level has no further escalation path and stalls at the top of the tier priority it was supposed to guarantee" },
+    { "id": "C6", "name": "'Acting as Zonal Manager for [Zone]' banner + acted_as_role audit tag on backup actions", "src": "role", "crit": 4, "why": "without the visible tag, CSM backup actions are indistinguishable from the ZM's own, breaking accountability and the CSM-share report" },
+    { "id": "C7", "name": "Approved escalation actually delivers to the target-zone SE's worklist (notification/assignment reaches across the zone boundary)", "src": "spine", "crit": 5, "why": "an 'approved' escalation that never reaches the receiving SE is a fictional hand-off; this is the module's entire reason to exist" },
+    { "id": "C8", "name": "Per-zone '% approvals by CSM this month' report for Operations Head", "src": "prd", "crit": 2, "why": "without it Ops Head can't see which zones are quietly leaning on CSM backup instead of having a present ZM" }
+  ],
+  "anchorCheck": "pass",
+  "srcMix": { "persona": 3, "role": 2, "spine": 2, "prd": 1 }
+}

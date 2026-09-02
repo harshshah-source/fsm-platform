@@ -1,0 +1,30 @@
+{
+  "module": "inventory",
+  "persona": {
+    "role": "Warehouse Manager",
+    "label": "Warehouse Manager",
+    "frequency": "all day, only module — daily queue work (component approvals, shadow-use reconciliation, stock levels)"
+  },
+  "goals": [
+    "Clear the Component Request queue (approve/reject/ship) fast enough that SEs are not stuck WAITING_COMPONENT",
+    "Reconcile the Shadow Use Queue (RECONCILED/DISPUTED) so van-stock and audit trail stay accurate",
+    "Keep Zone Warehouse stock levels visible enough to reorder from Mother Warehouse before SEs get Hard-Filtered out of Day Plans"
+  ],
+  "scopeNote": "Component-Blocked Queue is a Zonal Manager read-only view (fed by the same Component Requests WM actions) — same module, two role-scoped surfaces, not a duplicate capability. SE Van Stock/Common Kit mobile screen is in-module (CLAUDE.md vertical-slice rule) but owned by the SE role, not the WM persona — captured below as role-sourced caps, not folded into WM's 3 goals.",
+  "capabilities": [
+    {"id":"C1","name":"Component Request queue (Ticket context, SE identity, requested part, destination)","src":"persona","crit":5,"why":"WM cannot approve/reject/ship without this context; without it the queue cannot function at all"},
+    {"id":"C2","name":"Approve / Reject / Mark Shipped with tracking detail","src":"persona","crit":5,"why":"core daily action; without it every WAITING_COMPONENT ticket stalls indefinitely and SLA pause never lifts"},
+    {"id":"C3","name":"Shadow Use Queue with Reconcile / Dispute actions","src":"persona","crit":4,"why":"unreconciled SHADOW_USE rows corrupt van-stock counts and break the inventory audit trail (STOCK = dangerous territory)"},
+    {"id":"C4","name":"Escalate Disputed shadow-use row to Zonal Manager with reason","src":"spine","crit":3,"why":"without escalation, genuine fraud/coordination failures (two SEs same ticket) have no resolution path above WM"},
+    {"id":"C5","name":"Zone Warehouse stock levels per component","src":"persona","crit":5,"why":"only signal telling WM what to reorder from Mother Warehouse before Hard Filter grounds SEs for missing expected_component"},
+    {"id":"C6","name":"GPS serial / SIM serial verification against Ticket record","src":"prd","crit":3,"why":"without it WM cannot verify component usage claims on Install Tickets, opening a fraud/leakage gap"},
+    {"id":"C7","name":"Inventory rollback on failed GPS verification","src":"prd","crit":3,"why":"van stock stays wrong (overstated consumption) after a failed-verification ticket if not rolled back"},
+    {"id":"C8","name":"7-day auto-escalation of stale Component Requests to ZM Action Required","src":"spine","crit":4,"why":"without it a WAITING_COMPONENT ticket can sit past SLA with no visibility above WM, silently breaching Fleet Uptime target"},
+    {"id":"C9","name":"Recovery Ticket RECEIVED_AT_WAREHOUSE confirmation","src":"prd","crit":3,"why":"only WM action that auto-closes a Recovery Ticket and logs the recovered asset back into inventory — otherwise ticket and asset both hang open"},
+    {"id":"C10","name":"SE Van Stock / Common Kit completeness view (mobile)","src":"role","crit":5,"why":"SE is Hard-Filtered out of scheduling on incomplete Common Kit; without visibility SE cannot self-correct before being silently dropped from Day Plans"},
+    {"id":"C11","name":"Common Kit low/missing stock notification (mobile)","src":"role","crit":3,"why":"proactive warning lets SE detour to Zone Warehouse before a mid-shift Hard-Filter grounding, vs. discovering it only when work stops"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona":4,"role":2,"spine":2,"prd":3},
+  "spineAvailable": false
+}

@@ -1,0 +1,14 @@
+{
+  "items": [
+    "NOTIF-01 push adapter (notification-channel.gateway.ts:37) — DELIBERATELY not walked. Settled by code at E2, standing law, owned and priced once by this module. There is no exit to observe; a walk cannot add anything.",
+    "H3 / NOTIF-07 device_tokens emptiness — not walked. The registration endpoint is proven live (SE -> 400 DEVICE_ID_REQUIRED, ZM -> 403), but confirming the table is empty needs DB read access; psql is not installed in this shell and no read-only DB instrument exists. Folds into NOTIF-01 anyway.",
+    "H4 mobile half — apps/mobile NotificationsScreen tap-to-read across an app reload (NotificationsScreen.tsx:47-60, swallowed catch at :52). The API half is settled E4; the client half is device-only. Cost: one device/Expo walk.",
+    "NOTIF-03 residual — Tickets -> Ticket Detail Drawer -> Lifecycle / Assignment History tabs, whether an OH can tell from the screen that the ACTION rows are absent. One browser walk ~708k TEQ.",
+    "NOTIF-08 residual — admin TopBar bell, whether clicking it visibly does nothing. One browser walk ~708k TEQ. No handler exists in source.",
+    "NOTIF-02 outbox-less notify() call sites — reproducing a crash between commit and notify needs process control over the shared dev backend; other walkers are on it. Stays E2.",
+    "NOTIF-05 SE_ACCEPTANCE WhatsApp branch — no production caller exists, so there is no upstream to advance. UNTESTABLE by walk; would need a caller to be written first, which a surveyor may not do.",
+    "NOTIF-06 missing SLA / snapshot-FAILED / component-approval types — an absence of emitted types; settled by call-site enumeration at S2, nothing a walk adds.",
+    "C2 check 3 (delivery persistence) — untestable while the gateway returns UNAVAILABLE unconditionally. Fixture that would settle it: any real channel adapter bound to NOTIFICATION_CHANNEL_GATEWAY.",
+    "Acted-as end-to-end — sending X-Acting-As-Zone on a real mutation to watch a non-null acted_as_role land. Would require writing a record through a delegated session; inferred instead from GET /api/reports/csm-approval-share returning totalActedActions 1..4. Fixture: one CSM acted-as mutation seeded, then re-read that report."
+  ]
+}

@@ -1,0 +1,634 @@
+{
+  "module": "reports",
+  "label": "Reports & Analytics",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 48,
+    "afterBacklog": 63,
+    "capsScored": 13
+  },
+  "gaps": {
+    "total": 11,
+    "priced": 9,
+    "folded": [],
+    "falsified": [
+      "RPT-G1"
+    ],
+    "needsVerification": [],
+    "notPriced": [
+      {
+        "id": "RPT-G2",
+        "what": "STRENGTH: ZM Scorecard is OH-only in the backend, not just the router",
+        "reason": "no files[]/lanes[] => NEEDS-SCOPING"
+      }
+    ],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 3,
+    "S2": 4,
+    "S1": 2,
+    "S0": 1
+  },
+  "dangerous": [
+    "RPT-01",
+    "RPT-08"
+  ],
+  "priced": [
+    {
+      "id": "RPT-01",
+      "code": "O3",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Empty uptime cube renders as a perfect 100% fleet score",
+      "type": "FIX",
+      "caps": [
+        "C1",
+        "C12"
+      ],
+      "files": [
+        "apps/backend/src/reports/reports.service.ts:703",
+        "apps/backend/src/reports/reports.service.ts:313",
+        "apps/backend/src/reports/reports.controller.ts:108",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:262",
+        "apps/admin/src/pages/reports/ReportsPage.tsx:107",
+        "apps/admin/src/api/reports.ts:63"
+      ],
+      "lanes": [
+        "domain",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2161977,
+      "p80": 3404446,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "hypothesisId": "H1"
+    },
+    {
+      "id": "RPT-02",
+      "code": "O3",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "Monthly report cubes never cover the month the screens ask for",
+      "type": "FIX",
+      "caps": [
+        "C1",
+        "C6",
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:124",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:262",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:267",
+        "apps/backend/src/scheduling/business-sweep-scheduler.service.ts:272",
+        "apps/backend/src/reports/reports.service.ts:389",
+        "apps/backend/src/reports/reports.service.ts:439"
+      ],
+      "lanes": [
+        "domain",
+        "data",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 652400,
+          "t80": 716800
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.16,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2137184,
+      "p80": 2901114,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "hypothesisId": "H4"
+    },
+    {
+      "id": "RPT-03",
+      "code": "O3",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "No report says when its number was computed",
+      "type": "NEW",
+      "caps": [
+        "C12"
+      ],
+      "files": [
+        "apps/backend/src/reports/reports.service.ts:339",
+        "apps/backend/src/reports/reports.service.ts:417",
+        "apps/backend/src/reports/reports.service.ts:509",
+        "apps/backend/src/reports/reports.service.ts:686",
+        "apps/backend/prisma/schema.prisma:2682",
+        "apps/backend/src/exports/exports.controller.ts:22",
+        "apps/admin/src/pages/reports/ReportsPage.tsx:240"
+      ],
+      "lanes": [
+        "api",
+        "ui",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 3088538,
+      "p80": 4863494,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5
+    },
+    {
+      "id": "RPT-04",
+      "code": "C1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "No drill-through from any report number to its source records",
+      "type": "NEW",
+      "caps": [
+        "C13"
+      ],
+      "files": [
+        "apps/backend/src/reports/reports.service.ts:404",
+        "apps/backend/src/reports/reports.service.ts:644",
+        "apps/admin/src/pages/reports/RootCauseAnalyticsPage.tsx:66",
+        "apps/admin/src/pages/reports/ZmScorecardPage.tsx:72",
+        "apps/admin/src/pages/reports/SystemEfficiencyPage.tsx:28",
+        "apps/admin/src/pages/reports/FleetDirectoryPage.tsx:317"
+      ],
+      "lanes": [
+        "api",
+        "ui",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1225467,
+          "t80": 1768000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1192533,
+          "t80": 2201333
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1225467,
+          "t80": 1768000
+        }
+      ],
+      "score": 17,
+      "multiplier": 1.733,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "L",
+      "conf": "MED",
+      "p50": 4226422,
+      "p80": 6655306,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 5
+    },
+    {
+      "id": "RPT-05",
+      "code": "C1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "No SE productivity report for the weekly workforce review",
+      "type": "NEW",
+      "caps": [
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/reports/reports.controller.ts:55",
+        "apps/admin/src/AppRoutes.tsx:186",
+        "apps/backend/src/me-tickets/me-work-history.service.ts:18",
+        "apps/backend/src/reports/reports.service.ts:322"
+      ],
+      "lanes": [
+        "analysis",
+        "domain",
+        "data",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "analysis",
+          "anchorN": 32,
+          "weakAnchor": false,
+          "t50": 292933,
+          "t80": 357067
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1225467,
+          "t80": 1768000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 807733,
+          "t80": 887467
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1225467,
+          "t80": 1768000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1192533,
+          "t80": 2201333
+        }
+      ],
+      "score": 17,
+      "multiplier": 1.733,
+      "bundleFactor": 1.32,
+      "typeModifier": 1,
+      "size": "L",
+      "conf": "MED",
+      "p50": 6262256,
+      "p80": 9216064,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 4
+    },
+    {
+      "id": "RPT-06",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Report filters exist in the API but no screen sends them",
+      "type": "COMPLETE",
+      "caps": [
+        "C6",
+        "C7",
+        "C8"
+      ],
+      "files": [
+        "apps/admin/src/api/reports.ts:137",
+        "apps/admin/src/api/reports.ts:172",
+        "apps/admin/src/api/reports.ts:201",
+        "apps/admin/src/api/reports.ts:120",
+        "apps/backend/src/reports/reports.controller.ts:149",
+        "apps/backend/src/reports/reports.controller.ts:205"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 825600,
+          "t80": 1524000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 848400,
+          "t80": 1224000
+        }
+      ],
+      "score": 9,
+      "multiplier": 1.2,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2440692,
+      "p80": 4006584,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 5
+    },
+    {
+      "id": "RPT-07",
+      "code": "C4",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "ZM scorecard monthly trend computed but never drawn",
+      "type": "COMPLETE",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/reports/reports.service.ts:495",
+        "apps/admin/src/api/reports.ts:194",
+        "apps/admin/src/pages/reports/ZmScorecardPage.tsx:19"
+      ],
+      "lanes": [
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 596267,
+          "t80": 1100667
+        }
+      ],
+      "score": 4,
+      "multiplier": 0.867,
+      "bundleFactor": 1,
+      "typeModifier": 1.35,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 804960,
+      "p80": 1485900,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 4
+    },
+    {
+      "id": "RPT-08",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": true,
+      "what": "Exports hub has no finance voucher batch card",
+      "type": "INTEGRATION",
+      "caps": [
+        "C11"
+      ],
+      "files": [
+        "apps/admin/src/pages/exports/ExportsPage.tsx:12",
+        "apps/backend/src/exports/exports.controller.ts:20",
+        "apps/admin/src/api/vouchers.ts:2"
+      ],
+      "lanes": [
+        "ui",
+        "integration",
+        "permissions"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1054933,
+          "t80": 1947333
+        },
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1280333,
+          "t80": 2361333
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        }
+      ],
+      "score": 14,
+      "multiplier": 1.533,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.25,
+      "size": "L",
+      "conf": "MED",
+      "p50": 4958033,
+      "p80": 8515366,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 4,
+      "hypothesisId": "H5"
+    },
+    {
+      "id": "RPT-09",
+      "code": "O4",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "Report tests seed a month, never test the empty month",
+      "type": "FIX",
+      "caps": [
+        "C1",
+        "C12"
+      ],
+      "files": [
+        "apps/backend/test/reports-controller.e2e-spec.ts:17",
+        "apps/backend/test/reports-controller.e2e-spec.ts:89"
+      ],
+      "lanes": [
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 612733,
+          "t80": 884000
+        }
+      ],
+      "score": 4,
+      "multiplier": 0.867,
+      "bundleFactor": 1,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 428913,
+      "p80": 618800,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 1,
+      "crit": 5
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 26508975,
+    "sumGapP80": 41667074,
+    "packets": 9,
+    "waves": 2,
+    "collisions": 1,
+    "screensTouched": 2,
+    "overheadTeq": 2509000,
+    "tModule50": 29017975,
+    "p50": 37143008,
+    "p80": 74286016,
+    "size": "XXL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 2740467,
+    "primaryDriver": "RPT-05",
+    "largestUnknown": "RPT-G2",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "RPT-02",
+      "p80": 2901114,
+      "what": "Monthly report cubes never cover the month the screens ask for"
+    },
+    "over3m": [
+      "RPT-03",
+      "RPT-04",
+      "RPT-05",
+      "RPT-08"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 6300000,
+    "screensNeedingWork": 7,
+    "bottomUpP50": 37143008,
+    "ratio": 5.9,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

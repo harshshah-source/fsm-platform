@@ -1,0 +1,572 @@
+{
+  "module": "vouchers",
+  "label": "Expense Vouchers",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 56,
+    "afterBacklog": 78,
+    "capsScored": 9
+  },
+  "gaps": {
+    "total": 12,
+    "priced": 8,
+    "folded": [
+      {
+        "id": "VCH-04",
+        "into": "VCH-03"
+      }
+    ],
+    "falsified": [
+      "VCH-03"
+    ],
+    "needsVerification": [
+      {
+        "id": "VCH-01",
+        "what": "Second tap after a timeout files a second paid claim",
+        "costToSettle": "one walk ~708k TEQ"
+      },
+      {
+        "id": "VCH-05",
+        "what": "Fraud check gets no ticket or plant, so it always warns",
+        "costToSettle": "one walk ~708k TEQ"
+      }
+    ],
+    "notPriced": [],
+    "needsYourCall": [
+      "VCH-08"
+    ],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 6,
+    "S2": 4,
+    "S1": 0,
+    "S0": 0
+  },
+  "dangerous": [
+    "VCH-02",
+    "VCH-06",
+    "VCH-08",
+    "VCH-09",
+    "VCH-10",
+    "VCH-12"
+  ],
+  "priced": [
+    {
+      "id": "VCH-02",
+      "code": "P4",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "One Operations Head can approve then pay the same voucher",
+      "type": "SECURITY",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/vouchers/vouchers.controller.ts:26",
+        "apps/backend/src/vouchers/vouchers.controller.ts:123",
+        "apps/backend/src/vouchers/vouchers.service.ts:312",
+        "apps/backend/src/vouchers/vouchers.service.ts:252"
+      ],
+      "lanes": [
+        "api",
+        "permissions",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.3,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 4051391,
+      "p80": 5845008,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 5,
+      "policyClause": "P9",
+      "hypothesisId": "H2"
+    },
+    {
+      "id": "VCH-06",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": true,
+      "what": "Ticket check only proves the ticket exists, not that it matches",
+      "type": "NEW",
+      "caps": [
+        "C5"
+      ],
+      "files": [
+        "apps/backend/src/vouchers/vouchers.service.ts:469",
+        "apps/backend/src/vouchers/vouchers.service.ts:226"
+      ],
+      "lanes": [
+        "api",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 942667,
+          "t80": 1360000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 942667,
+          "t80": 1360000
+        }
+      ],
+      "score": 11,
+      "multiplier": 1.333,
+      "bundleFactor": 1.08,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2036161,
+      "p80": 2937600,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 5,
+      "policyClause": "P9"
+    },
+    {
+      "id": "VCH-07",
+      "code": "C3",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "Screen says the engineer is notified; the notifier only writes a log",
+      "type": "INTEGRATION",
+      "caps": [
+        "C4",
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/vouchers/voucher-notifier.ts:31",
+        "apps/backend/src/vouchers/vouchers.module.ts:18",
+        "apps/backend/src/vouchers/vouchers.service.ts:280",
+        "apps/admin/src/pages/vouchers/VoucherReviewPage.tsx:228"
+      ],
+      "lanes": [
+        "integration",
+        "ui",
+        "docs"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1224667,
+          "t80": 2258667
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1009067,
+          "t80": 1862667
+        },
+        {
+          "lane": "docs",
+          "anchorN": 999,
+          "weakAnchor": false,
+          "t50": 132000,
+          "t80": 132000
+        }
+      ],
+      "score": 13,
+      "multiplier": 1.467,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.25,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 3430314,
+      "p80": 6167334,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 5,
+      "crit": 4
+    },
+    {
+      "id": "VCH-08",
+      "code": "P3",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "No way to undo a voucher marked PAID by mistake",
+      "type": "NEW",
+      "caps": [
+        "C9"
+      ],
+      "files": [
+        "apps/backend/prisma/schema.prisma:1142",
+        "apps/backend/src/vouchers/vouchers.controller.ts:121",
+        "apps/backend/src/vouchers/vouchers.service.ts:312"
+      ],
+      "lanes": [
+        "api",
+        "domain",
+        "data",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 776667,
+          "t80": 853333
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        }
+      ],
+      "score": 16,
+      "multiplier": 1.667,
+      "bundleFactor": 1.24,
+      "typeModifier": 1,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 5346466,
+      "p80": 7382133,
+      "over3m": true,
+      "needsCall": true,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 3,
+      "policyClause": "P12"
+    },
+    {
+      "id": "VCH-09",
+      "code": "P2",
+      "sev": "S2",
+      "dangerous": true,
+      "what": "Bulk export of every approved claim is not audited",
+      "type": "SECURITY",
+      "caps": [
+        "C9"
+      ],
+      "files": [
+        "apps/backend/src/vouchers/vouchers.controller.ts:108",
+        "apps/backend/src/vouchers/vouchers.service.ts:358",
+        "apps/backend/src/audit/audit-trail.controller.ts:20"
+      ],
+      "lanes": [
+        "api",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 612733,
+          "t80": 884000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 612733,
+          "t80": 884000
+        }
+      ],
+      "score": 4,
+      "multiplier": 0.867,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.3,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 1720554,
+      "p80": 2482272,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 2,
+      "crit": 3,
+      "policyClause": "P9"
+    },
+    {
+      "id": "VCH-10",
+      "code": "P3",
+      "sev": "S2",
+      "dangerous": true,
+      "what": "Half a Mark-PAID batch can commit and the rest fail",
+      "type": "FIX",
+      "caps": [
+        "C9"
+      ],
+      "files": [
+        "apps/backend/src/vouchers/vouchers.service.ts:321",
+        "apps/backend/src/vouchers/vouchers.service.ts:331"
+      ],
+      "lanes": [
+        "api",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 528133,
+          "t80": 580267
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1005026,
+      "p80": 1312618,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 2,
+      "crit": 3,
+      "policyClause": "P9"
+    },
+    {
+      "id": "VCH-11",
+      "code": "C1",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "No offline draft; a claim cannot be filed without signal",
+      "type": "NEW",
+      "caps": [
+        "C1",
+        "C2"
+      ],
+      "files": [
+        "apps/mobile/src/vouchers/VoucherFormScreen.tsx:30",
+        "apps/mobile/src/vouchers/VoucherFormScreen.tsx:60",
+        "apps/backend/src/vouchers/me-vouchers.service.ts:10"
+      ],
+      "lanes": [
+        "ui",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1238400,
+          "t80": 2286000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 838800,
+          "t80": 921600
+        }
+      ],
+      "score": 18,
+      "multiplier": 1.8,
+      "bundleFactor": 1.08,
+      "typeModifier": 1,
+      "size": "XL",
+      "conf": "HIGH",
+      "p50": 2243376,
+      "p80": 3464208,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 5,
+      "crit": 5
+    },
+    {
+      "id": "VCH-12",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": true,
+      "what": "Spend limits are hardcoded and cannot be changed by the business",
+      "type": "NEW",
+      "caps": [
+        "C6"
+      ],
+      "files": [
+        "apps/backend/src/vouchers/vouchers.service.ts:15",
+        "apps/backend/src/vouchers/vouchers.service.ts:11",
+        "apps/backend/src/vouchers/me-vouchers.service.ts:4"
+      ],
+      "lanes": [
+        "api",
+        "data",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 942667,
+          "t80": 1360000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 621333,
+          "t80": 682667
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 917333,
+          "t80": 1693333
+        }
+      ],
+      "score": 11,
+      "multiplier": 1.333,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2878346,
+      "p80": 4333760,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 4,
+      "policyClause": "P9"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 22711634,
+    "sumGapP80": 33924933,
+    "packets": 8,
+    "waves": 2,
+    "collisions": 1,
+    "screensTouched": 2,
+    "overheadTeq": 2494000,
+    "tModule50": 25205634,
+    "p50": 32263212,
+    "p80": 64526424,
+    "size": "XXL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 3989600,
+    "primaryDriver": "VCH-08",
+    "largestUnknown": "VCH-01",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "VCH-10",
+      "p80": 1312618,
+      "what": "Half a Mark-PAID batch can commit and the rest fail"
+    },
+    "over3m": [
+      "VCH-02",
+      "VCH-07",
+      "VCH-08"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 2700000,
+    "screensNeedingWork": 3,
+    "bottomUpP50": 32263212,
+    "ratio": 11.95,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

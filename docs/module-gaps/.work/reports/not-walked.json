@@ -1,0 +1,14 @@
+{
+  "items": [
+    "ReportsPage hero tile rendering — that uptimePct 100 is painted green with tone 'success' is E2 from ReportsPage.tsx:107, NOT observed. Screen-only claim ⇒ NEEDS-VERIFY, cost one browser walk ~708k TEQ (screen: Reports; control: the 'Fleet Uptime' hero KPI card and its 6-month trend chart).",
+    "'Data as of {asOf}' string on ReportsPage.tsx:240 — that the page prints today's date over a July cube is E2, not observed. Same browser walk would settle it alongside the tile.",
+    "check 8 (named downstream consumer) for C1/C2/C4/C5/C6/C7/C8/C9/C10 — every report's consumer is an admin page, unreachable by api-walk. Left '?' in coverage.json.",
+    "RPT-04 drill-through absence — no clickable metric on RootCauseAnalyticsPage / ZmScorecardPage / SystemEfficiencyPage. Absence of a control is browser-only; the five not-found checks are recorded in coverage.json C13, so it stays E2.",
+    "RPT-06 filter controls — that no screen offers a zone/date picker is a UI-absence claim; the bare zero-arg clients (api/reports.ts:120,137,172,201) are E2 and sufficient for the price, but the screens were not opened.",
+    "RPT-07 ZM scorecard trend[] not drawn — could not confirm the chart is absent; also note the OH call returned trend:[] on live data, so even a built chart would render empty today.",
+    "RPT-08 / H5 Exports hub card inventory — ExportsPage.tsx:12 shows one card in source; not visually confirmed, and the vouchers-screen export was not exercised. H5 left NEEDS-VERIFY.",
+    "POST /reports/*/recompute — not fired. Writing a cube would have made the current month non-empty and destroyed the RPT-01 evidence for later walkers; deliberately not run (SURVEYOR law, read-only).",
+    "Direct psql inspection of device_downtime_summary_monthly — no psql client on this host. Absence of rows is evidenced by the API (eligibleDeviceCount 0 + rows []) rather than by a table count.",
+    "work-type-mix and verification-outcomes endpoints — not called; RPT-03's freshness contrast was settled on four endpoints, a fifth adds nothing."
+  ]
+}

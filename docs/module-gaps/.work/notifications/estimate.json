@@ -1,0 +1,507 @@
+{
+  "module": "notifications",
+  "label": "Notifications & Audit Trail",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 58,
+    "afterBacklog": 75,
+    "capsScored": 7
+  },
+  "gaps": {
+    "total": 10,
+    "priced": 7,
+    "folded": [
+      {
+        "id": "NOTIF-07",
+        "into": "NOTIF-01"
+      }
+    ],
+    "falsified": [
+      "NOTIF-H1",
+      "NOTIF-H4"
+    ],
+    "needsVerification": [],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 1,
+    "S3": 5,
+    "S2": 1,
+    "S1": 0,
+    "S0": 0
+  },
+  "dangerous": [
+    "NOTIF-02"
+  ],
+  "priced": [
+    {
+      "id": "NOTIF-01",
+      "code": "C2",
+      "sev": "S4",
+      "dangerous": false,
+      "what": "SE never learns of a dispatched day plan unless app open",
+      "type": "INTEGRATION",
+      "caps": [
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/notifications/notification-channel.gateway.ts:37",
+        "apps/backend/src/notifications/notification-channel.gateway.ts:39",
+        "apps/backend/src/notifications/notification.service.ts:147",
+        "apps/backend/src/notifications/notifications.module.ts:10",
+        "apps/mobile/src/navigation/screens/HomeScreen.tsx:110"
+      ],
+      "lanes": [
+        "integration",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1391667,
+          "t80": 2566667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1146667,
+          "t80": 2116667
+        }
+      ],
+      "score": 16,
+      "multiplier": 1.667,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.25,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 5389167,
+      "p80": 9255834,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 5,
+      "crit": 5,
+      "policyClause": "P11"
+    },
+    {
+      "id": "NOTIF-02",
+      "code": "C2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "insertion and escalation notices lost on crash; no outbox",
+      "type": "FIX",
+      "caps": [
+        "C1"
+      ],
+      "files": [
+        "apps/backend/src/intraday/intraday-insertion.service.ts:343",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:300",
+        "apps/backend/src/ticketing/recovery-notifier.ts:76",
+        "apps/backend/src/scheduling/day-plan-notification-outbox.ts:22"
+      ],
+      "lanes": [
+        "data",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 652400,
+          "t80": 716800
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "MED",
+      "p50": 1241503,
+      "p80": 1621469,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 5
+    },
+    {
+      "id": "NOTIF-03",
+      "code": "C4",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "audit ACTION half has no admin surface; drawer shows state changes only",
+      "type": "COMPLETE",
+      "caps": [
+        "C5"
+      ],
+      "files": [
+        "apps/backend/src/audit/audit-trail.controller.ts:20",
+        "apps/backend/src/audit/audit-trail.service.ts:48",
+        "apps/backend/src/audit/audit-trail.service.ts:63",
+        "apps/admin/src/pages/tickets/TicketDetailDrawer.tsx:89",
+        "apps/admin/src/pages/tickets/TicketDetailDrawer.tsx:147",
+        "apps/admin/src/pages/tickets/TicketDetailDrawer.tsx:305"
+      ],
+      "lanes": [
+        "ui",
+        "api",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 4169527,
+      "p80": 6565717,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 4,
+      "hypothesisId": "H2"
+    },
+    {
+      "id": "NOTIF-04",
+      "code": "O1",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "audit log queryable only if you already know the ticket UUID",
+      "type": "NEW",
+      "caps": [
+        "C5",
+        "C6"
+      ],
+      "files": [
+        "apps/backend/src/audit/audit-trail.controller.ts:21",
+        "apps/backend/src/audit/audit-trail.service.ts:50",
+        "apps/backend/prisma/schema.prisma:1733",
+        "apps/backend/src/roles/role-backup.service.ts:89",
+        "apps/backend/src/engineers/leave-request.controller.ts:69",
+        "apps/backend/src/devices/devices.controller.ts:131"
+      ],
+      "lanes": [
+        "api",
+        "data",
+        "ui",
+        "permissions"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 714533,
+          "t80": 785067
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1054933,
+          "t80": 1947333
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        }
+      ],
+      "score": 14,
+      "multiplier": 1.533,
+      "bundleFactor": 1.24,
+      "typeModifier": 1,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 4882624,
+      "p80": 7266896,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 4,
+      "hypothesisId": "H5"
+    },
+    {
+      "id": "NOTIF-05",
+      "code": "C1",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "WhatsApp acceptance confirmation coded but never called",
+      "type": "COMPLETE",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/backend/src/notifications/notification.service.ts:158"
+      ],
+      "lanes": [
+        "integration",
+        "api",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1280333,
+          "t80": 2361333
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        }
+      ],
+      "score": 14,
+      "multiplier": 1.533,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "MED",
+      "p50": 5400299,
+      "p80": 8596295,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 4
+    },
+    {
+      "id": "NOTIF-06",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "no SLA-warning, snapshot-failure or component-approval notification",
+      "type": "NEW",
+      "caps": [
+        "C1",
+        "C7"
+      ],
+      "files": [
+        "apps/backend/src/scheduling/day-plan-notifier.ts:63",
+        "apps/backend/src/ticketing/install-notifier.ts:54"
+      ],
+      "lanes": [
+        "domain",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.08,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "MED",
+      "p50": 1934351,
+      "p80": 2790720,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 5
+    },
+    {
+      "id": "NOTIF-08",
+      "code": "C6",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "admin notification bell is an inert button; managers never see their notifications",
+      "type": "COMPLETE",
+      "caps": [
+        "C1"
+      ],
+      "files": [
+        "apps/admin/src/components/shell/TopBar.tsx:212",
+        "apps/admin/src/components/shell/TopBar.tsx:214",
+        "apps/backend/src/notifications/notifications.controller.ts:22",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:213"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 825600,
+          "t80": 1524000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 848400,
+          "t80": 1224000
+        }
+      ],
+      "score": 9,
+      "multiplier": 1.2,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2440692,
+      "p80": 4006584,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 4,
+      "hypothesisId": "H1-adjacent"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 25458163,
+    "sumGapP80": 40103515,
+    "packets": 7,
+    "waves": 1,
+    "collisions": 0,
+    "screensTouched": 2,
+    "overheadTeq": 2294000,
+    "tModule50": 27752163,
+    "p50": 35522769,
+    "p80": 71045538,
+    "size": "XL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 4038933,
+    "primaryDriver": "NOTIF-01",
+    "largestUnknown": "none",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "NOTIF-02",
+      "p80": 1621469,
+      "what": "insertion and escalation notices lost on crash; no outbox"
+    },
+    "over3m": [
+      "NOTIF-01",
+      "NOTIF-03",
+      "NOTIF-04",
+      "NOTIF-05"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 3600000,
+    "screensNeedingWork": 4,
+    "bottomUpP50": 35522769,
+    "ratio": 9.87,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

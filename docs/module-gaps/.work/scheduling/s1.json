@@ -1,0 +1,28 @@
+{
+  "module": "scheduling",
+  "persona": {
+    "role": "Zonal Manager",
+    "label": "Zonal Manager — Batch Schedule Review",
+    "frequency": "all day, primary admin user; reviews at own Schedule Cadence (daily/alternate-day/weekly/on-demand), not a fixed morning gate"
+  },
+  "goals": [
+    "Monitor auto-dispatched Plant-wise Batch Assignments (spot-check AUTO_ASSIGNED vs OVERRIDDEN, see Recommender reasoning) without a forced approval step",
+    "Override a dispatched batch or in-shift Day Plan at any time — swap SE, split batch, remove/defer/reorder Tickets — safely around ON_SITE work, reason-coded",
+    "Shape future dispatch via SE Planner (plant-vs-date bias signal) and resolve the manual-assignment fallback when retries exhaust"
+  ],
+  "scopeNote": "PRD Flow 10 (SE Management) houses the SE Planner grid alongside SE availability/leave admin, not inside Flow 2's Batch Schedule pages — unclear if SE Planner is this module or SE Management's. Flow 3's system-triggered CRITICAL insertion queue also straddles Scheduling (Intra-day Re-plan, CONTEXT.md) and a separate notification/queue surface (Intra-day Queue page). Recorded, not resolved.",
+  "capabilities": [
+    {"id":"C1","name":"Batch dispatch monitoring list (SE, batch count, date range, AUTO_ASSIGNED/OVERRIDDEN badge)","src":"persona","crit":5,"why":"dispatch is already live for the SE; without this list the ZM has no way to prioritise spot-checks and bad Recommender output runs unnoticed all day"},
+    {"id":"C2","name":"Batch Schedule Detail with override controls (swap SE, split batch, remove Ticket, reorder, defer)","src":"persona","crit":5,"why":"only mechanism to correct a Recommender suggestion against field reality before the SE wastes a trip"},
+    {"id":"C3","name":"\"Why suggested?\" reasoning panel (Company Tier, Device Bucket, Priority Rank, Plant Cluster Multiplier)","src":"persona","crit":4,"why":"without visible reasoning the ZM overrides blind, either rubber-stamping bad batches or over-correcting good ones"},
+    {"id":"C4","name":"ON_SITE-aware override warning with mandatory reason code","src":"persona","crit":5,"why":"an override that silently yanks a Ticket while the SE is physically on-site strands the visit and leaves no audit trail for why"},
+    {"id":"C5","name":"Schedule Cadence reminder (configurable, advisory-only, no lock)","src":"persona","crit":3,"why":"with no nudge the ZM misses their own review window and a mis-dispatched batch sits unspotted for days"},
+    {"id":"C6","name":"SE Planner multi-day grid (plant-vs-date, feeds Recommender as bias signal)","src":"persona","crit":3,"why":"without forward plant-visit intent the ZM is purely reactive, only ever correcting after the Recommender has already committed a batch"},
+    {"id":"C7","name":"Manual same-day Day Plan update (add/remove/reorder Tickets mid-shift, no SE Acceptance)","src":"persona","crit":4,"why":"field conditions change faster than the next batch cycle; ZM needs live control of the current Day Plan, not just next-cycle override"},
+    {"id":"C10","name":"Manual assignment fallback (3-retry exhaustion queue -> AVAILABLE-SE-only assign modal)","src":"persona","crit":4,"why":"an escalated CRITICAL Ticket with no action surface is a dead end — fleet uptime SLA keeps bleeding until a human assigns it"},
+    {"id":"C8","name":"Push/in-app notification to SE on new batch, override, or same-day update","src":"role","crit":5,"why":"Ravi's day plan changes underneath him; app has no polling, so a missed push means he works a stale or wrong plan"},
+    {"id":"C9","name":"Ordered, plant-clustered Day Plan view (stop sequence, device count/stop, Zone Warehouse pickup step)","src":"role","crit":5,"why":"this is Ravi's entire day; without plant-ordered stops he re-plans his own route manually and the clustering travel-savings the Recommender computed are lost"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 8, "role": 2, "spine": 0, "prd": 0}
+}

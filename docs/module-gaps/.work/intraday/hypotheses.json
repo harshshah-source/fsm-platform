@@ -1,0 +1,53 @@
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "claim": "No deployed path delivers INTRADAY_DIRECT_ASSIGNED to an SE phone: the row lands in-app only and the app must be opened to see it",
+      "predictedCode": "C2",
+      "files": [
+        "apps/backend/src/notifications/notifications.module.ts:18",
+        "apps/backend/src/notifications/notification-channel.gateway.ts:39",
+        "apps/mobile/src/notifications/NotificationsScreen.tsx:44"
+      ],
+      "unsettleableBy": "carrier-works",
+      "strongestAlternative": "a real FCM/APNs adapter is bound at runtime by env/config, so the LoggingChannelGateway default never applies in a deployed stack",
+      "altCheck": "grep -rn NOTIFICATION_CHANNEL_GATEWAY apps/backend/src — the only useClass binding is LoggingChannelGateway (notifications.module.ts:18); notification-seam.ts:77 actively ASSERTS every channel returns UNAVAILABLE, so a real adapter would fail that assertion"
+    },
+    {
+      "id": "H2",
+      "claim": "manual-assign persists: the ACCEPTED row + schedule/batch ids survive reload, so the ZM's resolution is not lost on refresh",
+      "predictedCode": "C1",
+      "files": [
+        "apps/backend/src/intraday/intraday-insertion.service.ts:445",
+        "apps/backend/src/scheduling/override.service.ts:727"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "the tx commits the assignment but the ledger update runs on a different connection and silently no-ops for a row another sweep moved first",
+      "altCheck": "read of override.service.ts:725-745 — the ledger callback takes the same `tx`; P2002 aborts the whole transaction rather than leaving a half-write"
+    },
+    {
+      "id": "H3",
+      "claim": "zone scoping on GET /intraday-insertions is enforced backend-side, so a ZM cannot read another zone's CRITICAL escalations",
+      "predictedCode": "C6",
+      "files": [
+        "apps/backend/src/intraday/intraday-insertion.service.ts:478",
+        "apps/backend/src/intraday/intraday-insertion.controller.ts:44"
+      ],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "user.zone_id is null for a ZM whose claim was never stamped, which collapses the where-clause to {} and returns every zone",
+      "altCheck": "read of listForScope:479-481 — the guard is `role === 'ZONAL_MANAGER' && zoneId != null`; a null zone_id does fall through to the cross-zone branch, which only a token walk can rule out"
+    },
+    {
+      "id": "H4",
+      "claim": "ASSIGNED_DIRECT rows have no downstream consumer at all — only ESCALATION_REQUIRED reaches the efficiency cube",
+      "predictedCode": "O3",
+      "files": [
+        "apps/backend/src/reports/system-efficiency-aggregation.service.ts:229",
+        "apps/backend/src/intraday/intraday-insertion.service.ts:140"
+      ],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "a report or dashboard counts direct assignments through the audit CRITICAL_ASSIGN action instead of the ledger, so the metric exists under another name",
+      "altCheck": "grep -rln intradayInsertion apps/backend/src outside src/intraday — only override.service.ts and dispatch-today-query.service.ts; the cube's SQL at :230 filters status='ESCALATION_REQUIRED' only"
+    }
+  ]
+}

@@ -1,0 +1,346 @@
+{
+  "module": "inventory",
+  "label": "Components, Van Stock & Warehouse",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 61,
+    "afterBacklog": 74,
+    "capsScored": 11
+  },
+  "gaps": {
+    "total": 9,
+    "priced": 4,
+    "folded": [
+      {
+        "id": "INV-G7",
+        "into": "INV-G3"
+      }
+    ],
+    "falsified": [
+      "INV-N1"
+    ],
+    "needsVerification": [
+      {
+        "id": "INV-G1",
+        "what": "disputed shadow use never gives the van stock back",
+        "costToSettle": "one walk ~708k TEQ"
+      },
+      {
+        "id": "INV-G2",
+        "what": "recovered device never re-enters any stock ledger",
+        "costToSettle": "one walk ~708k TEQ"
+      },
+      {
+        "id": "INV-G4",
+        "what": "stale component requests never escalate to a manager",
+        "costToSettle": "one walk ~708k TEQ"
+      }
+    ],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 3,
+    "S2": 4,
+    "S1": 0,
+    "S0": 0
+  },
+  "dangerous": [
+    "INV-G8"
+  ],
+  "priced": [
+    {
+      "id": "INV-G3",
+      "code": "C3",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "SE gets no alert when a part ships; ZM none on reject",
+      "type": "INTEGRATION",
+      "caps": [
+        "C2",
+        "C4"
+      ],
+      "files": [
+        "apps/backend/src/component-request/component-request.service.ts:14",
+        "apps/backend/src/component-request/component-request.service.ts:157",
+        "apps/backend/src/notifications/notification.service.ts:1"
+      ],
+      "lanes": [
+        "integration",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1057667,
+          "t80": 1950667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.25,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2636820,
+      "p80": 4377600,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 5,
+      "crit": 5,
+      "hypothesisId": "INV-H2"
+    },
+    {
+      "id": "INV-G5",
+      "code": "C6",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "zonal manager cannot see the disputes escalated to them",
+      "type": "NEW",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/backend/src/inventory/shadow-use.service.ts:95",
+        "apps/backend/src/inventory/shadow-use.controller.ts:41",
+        "apps/admin/src/AppRoutes.tsx:450"
+      ],
+      "lanes": [
+        "ui",
+        "permissions",
+        "api"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 779733,
+          "t80": 1439333
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2763430,
+      "p80": 4351546,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 2,
+      "crit": 3
+    },
+    {
+      "id": "INV-G6",
+      "code": "C1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "no serial check of fitted GPS/SIM against the ticket",
+      "type": "NEW",
+      "caps": [
+        "C6"
+      ],
+      "files": [
+        "apps/backend/src/ticketing/install-lifecycle.service.ts:146",
+        "apps/admin/src/pages/warehouse/RecoveryReceiptQueuePage.tsx:9"
+      ],
+      "lanes": [
+        "domain",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1054933,
+          "t80": 1947333
+        }
+      ],
+      "score": 14,
+      "multiplier": 1.533,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "L",
+      "conf": "MED",
+      "p50": 3738758,
+      "p80": 5887386,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 3
+    },
+    {
+      "id": "INV-G8",
+      "code": "C7",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "no HTTP field for consumed parts; van stock never depletes",
+      "type": "COMPLETE",
+      "caps": [
+        "C3",
+        "C7",
+        "C10",
+        "C11"
+      ],
+      "files": [
+        "apps/backend/src/ticketing/troubleshoot.controller.ts:44",
+        "packages/shared/src/index.ts:425",
+        "packages/shared/src/index.ts:468",
+        "apps/backend/src/ticketing/troubleshoot-submission.service.ts:296",
+        "apps/backend/src/ticketing/troubleshoot-submission.service.ts:330"
+      ],
+      "lanes": [
+        "api",
+        "domain",
+        "data",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1036933,
+          "t80": 1496000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1036933,
+          "t80": 1496000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 683467,
+          "t80": 750933
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1009067,
+          "t80": 1862667
+        }
+      ],
+      "score": 13,
+      "multiplier": 1.467,
+      "bundleFactor": 1.24,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 6304954,
+      "p80": 9383774,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "policyClause": "P9",
+      "hypothesisId": "INV-H1"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 15443962,
+    "sumGapP80": 24000306,
+    "packets": 4,
+    "waves": 1,
+    "collisions": 0,
+    "screensTouched": 1,
+    "overheadTeq": 1676000,
+    "tModule50": 17119962,
+    "p50": 21913551,
+    "p80": 43827102,
+    "size": "L",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 1741133,
+    "primaryDriver": "INV-G8",
+    "largestUnknown": "INV-G1",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "INV-G8",
+      "p80": 9383774,
+      "what": "no HTTP field for consumed parts; van stock never depletes"
+    },
+    "over3m": [
+      "INV-G6",
+      "INV-G8"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 2700000,
+    "screensNeedingWork": 3,
+    "bottomUpP50": 21913551,
+    "ratio": 8.12,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

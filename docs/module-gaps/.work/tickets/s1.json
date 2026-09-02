@@ -1,0 +1,29 @@
+{
+  "module": "tickets",
+  "persona": {
+    "role": "SERVICE_ENGINEER",
+    "label": "Ravi, Service Engineer",
+    "frequency": "mobile only, 20+ stops a day"
+  },
+  "goals": [
+    "Execute assigned ticket work (troubleshoot/install/recovery) stop-by-stop with full on-site context",
+    "Handle field exceptions cleanly (component unavailable, vehicle unavailable, 409 conflict) without losing SLA fairness or component tracking",
+    "Trust the closure/verification feedback loop without phoning the Zonal Manager"
+  ],
+  "scopeNote": "Module boundary as given (admin /tickets,/install,/readiness/* + mobile ticket screens) fuses two personas: Ravi executes tickets on mobile all day (chosen here); Zonal Manager separately OWNS the web-side oversight surfaces in this same boundary - ticket list+drawer triage, WAITING_COMPONENT/7-day escalation, repeat-failure/ESCALATED flags, Verification Review page (fraud flags, PARTIAL_RECOVERY, FAILED_VERIFICATION split), Non-Operational dual-confirmation approval, Recovery unable-to-collect decision queue (reschedule/close/escalate), Vehicle Unavailability Report review/manual-resume, and Component-Blocked Queue visibility. These are not thin admin wrappers around Ravi's actions - they are a second, PRD-substantial persona (PRD stories 20-41) hiding in the same module boundary. Recommend S2+ price ZM-oversight capabilities as a distinct capability cluster inside this module, not folded into Ravi's list.",
+  "capabilities": [
+    {"id":"C1","name":"Ticket Detail full on-site context (device/vehicle/plant/transporter/SLA bucket/Failure Cycle history/expected components/hints/telemetry)","src":"persona","crit":5,"why":"SE arrives on-site blind, wrong diagnostic hypothesis, wasted plant visit"},
+    {"id":"C2","name":"Soft-state progress (VIEWED -> ON_SITE auto-geofence/manual -> TROUBLESHOOT_STARTED)","src":"persona","crit":4,"why":"ZM loses real-time SE Activity Status; dispatch and intra-day insertion confidence erodes"},
+    {"id":"C3","name":"Structured troubleshooting form with offline dedup (client_submission_id)","src":"persona","crit":5,"why":"plant connectivity is routinely poor; without dedup, reconnect produces duplicate submissions and corrupted root-cause analytics"},
+    {"id":"C4","name":"Component-unavailable flow (toggle raises Component Request, SLA pauses, Confirm Receipt resumes SLA + new submission)","src":"persona","crit":5,"why":"without it SE is stuck with no path to log a missing part; ticket silently ages with zero parts visibility"},
+    {"id":"C5","name":"Install lifecycle (SCHEDULED->ON_SITE->FITTED->ACTIVATED->CLOSED) with mandatory GPS/SIM serial capture","src":"persona","crit":4,"why":"new fitments share Ravi's day pool; missing serials break inventory records and GPS auto-verification can't track the new device_id"},
+    {"id":"C6","name":"Recovery collection lifecycle with mandatory serial-confirmation + condition notes, plus Unable-to-Collect reason-coded exit","src":"persona","crit":4,"why":"provider-owned asset recovery has no audit trail without it; SE has no legitimate way to end a blocked collection attempt"},
+    {"id":"C7","name":"Vehicle Unavailability Report (reason code, transporter contacted, expected-availability window) pausing primary SLA","src":"persona","crit":5,"why":"without it SE has no legitimate way to log a blocked stop; SLA unfairly ages against him for a vehicle he can't reach"},
+    {"id":"C8","name":"409 Conflict screen with Shadow Use confirmation messaging","src":"role","crit":3,"why":"without a clear message SE believes his physically-used components vanished, breeding distrust of van-stock accounting"},
+    {"id":"C9","name":"Verification outcome visibility on own submitted tickets (CLOSED / FAILED_VERIFICATION / PARTIAL_RECOVERY with ping count)","src":"persona","crit":4,"why":"no feedback loop otherwise; SE can't tell if a repair held, keeps calling ZM to check"},
+    {"id":"C10","name":"Technical Hints + raw telemetry section, always visible, no collapse","src":"persona","crit":3,"why":"advisory diagnostic signal cuts guesswork before physical inspection, especially for weak-signal/no-power cases"},
+    {"id":"C11","name":"QR / barcode scan entry shortcut into Ticket Detail, with disambiguation on multi-device match","src":"role","crit":2,"why":"speeds stop start when labels are damaged; day still runs without it, just slower"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 9, "role": 2, "spine": 0, "prd": 0}
+}

@@ -1,0 +1,228 @@
+{
+  "module": "dashboard",
+  "generated": "2026-09-02",
+  "method": "S2 static E2 + S3 api-walk E4 (2026-09-02). Checks 3/6/8 settled by API for all nine capabilities; no browser walk (single shared Chrome). Check 3 is NA across the module - every dashboard capability is a read surface with no write.",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Action Required panel (8 card types, urgency-ordered)",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "v",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/dashboard/ActionRequiredPanel.tsx:27-52 — cards are <li><Card>, no onClick / no navigate: surfacing without routing",
+        "apps/admin/src/pages/dashboard/ZmDashboard.tsx:129 — only mount site; CentralDashboard.tsx:24-25 uses actions as a KPI number only; OpsHeadDashboard.tsx:42 never destructures actions",
+        "apps/backend/src/dashboard/dashboard.service.ts:292-306 — 9 card keys declared",
+        "apps/backend/src/dashboard/dashboard.service.ts:889-901 — only 4 wired (vehicle_unavailability, failed_verification, waiting_component_overdue, recovery_stalled); other 5 forced count:0 available:false",
+        "apps/admin/src/pages/dashboard/ActionRequiredPanel.tsx:45-47 — unwired keys render literal 'coming soon'",
+        "SECOND CONSUMER of the same endpoint: apps/admin/src/pages/dispatch/console/AttentionBand.tsx:3 reads apiActionRequired, and :30-37 CARD_DESTINATION maps 7 of the 9 keys to real routes + verbs, rendered as <Link to={dest.to}> at :188 — the routing the dashboard panel lacks is already written one module over",
+        "apps/admin/src/pages/dispatch/console/AttentionBand.tsx:21 — that file's own docblock states the rule the dashboard breaks: 'a live count with no destination page says...'",
+        "S3 E4 2026-09-02 · check6: WM 403 / SE 403 on GET /api/dashboard/action-required; ZM clamped by actionRequiredZone (?zoneId=2 as zm.north still returned zone-1 semantics, all counts 0). check8: real second consumer AttentionBand.tsx:3 + CARD_DESTINATION:30-37, all 7 routes ZM-gated in AppRoutes. check3 NA (read surface). MEASURED live: 4 available:true / 5 available:false, all nine counts 0 for all four manager roles."
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Zone Overview table (SLA bucket split, trend% vs yesterday)",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "NA",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/dashboard/ZoneOverviewTable.tsx:130 — byBucket columns real",
+        "apps/admin/src/pages/dashboard/ZoneOverviewTable.tsx:145-151 — Trend column renders '—' when trendPctVsPrevDay === null",
+        "apps/backend/src/dashboard/dashboard.service.ts:454 — trendPctVsPrevDay: null, hardcoded, sole assignment in repo: column can never show a value",
+        "apps/admin/src/pages/dashboard/ZoneOverviewTable.tsx:12-19 — docblock claims 'a CSV export' + 'the export button are all preserved'; no exportFile/TableDownloadButton import exists (lines 1-7). NOTE: the file DOES import from ../../api/dashboard — its data is real; the false claim is scoped to the export control only, not to the panel",
+        "S3 E4 2026-09-02 · check6: ZM 1 row zones=[1], ZM_SOUTH 1 row zones=[2], CSM/OH 5 rows zones=[1,2,3,4,5]; WM/SE 403. Row-level zone clamp CONFIRMED server-side. trendPctVsPrevDay null on all 5 rows for every role."
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Company/Plant Overview drill-down",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "NA",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "NA",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/dashboard/CompanyPlantTable.tsx:179 company→plant→ticket tree, :320-345 overview export, :608-628 per-company export, :860-879 ticket export",
+        "apps/backend/src/dashboard/dashboard.service.ts:651 companyPlantOverview()",
+        "mounted in all three variants: ZmDashboard.tsx:146, CentralDashboard.tsx:93, OpsHeadDashboard.tsx:176",
+        "S3 E4 2026-09-02 · check6: company-plant-overview ZM 82 rows zones=[1], ZM_SOUTH 38 rows zones=[2], CSM/OH 340 rows zones=[1..5]; WM/SE 403. Widening blocked: ZM passing ?zoneId=2 got len=0, never zone-2 rows."
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "Grouped Critical Work Queue (by company/plant, suggested SE, one-click assign)",
+      "crit": 5,
+      "state": "BACKEND_ONLY",
+      "checks": {
+        "1": "x",
+        "2": "v",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "v",
+        "7": "x",
+        "8": "x",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/dashboard/dashboard.service.ts:803 criticalQueue() returns grouped CriticalQueueGroup[]",
+        "apps/admin/src/pages/dashboard/ZmDashboard.tsx:48-56 — the ZM persona's body never destructures `critical`, `engineers` or `onAssigned`; no queue rendered anywhere in ZmDashboard",
+        "apps/admin/src/pages/dashboard/CentralDashboard.tsx:91 — CSM gets EscalationQueueList only",
+        "apps/admin/src/pages/dashboard/EscalationQueueList.tsx:16-33,60-79 — flattens the grouping away, read-only <li>, no assign control, no suggested SE, no link",
+        "apps/admin/src/pages/dashboard/ManagerDashboard.tsx:95-97,150,152 — apiZoneEngineers() + onAssigned wired into DashboardData and consumed by zero components",
+        "apps/admin/src/pages/dashboard/OpsHeadDashboard.tsx:42 — OH gets no queue at all",
+        "S3 E4 2026-09-02 · check6: critical-queue ZM 28 groups/391 tickets zones=[1], ZM_SOUTH 25/206 zones=[2], CSM+OH 178/3038 zones=[1..5]; WM/SE 403. check8 = x: grep apiCriticalQueue over apps/admin/src finds ONLY api/dashboard.ts:181 and ManagerDashboard.tsx - no assign-capable consumer anywhere in the product. NEW: suggestedSes is [] on all 231 live groups (see DASH-G11)."
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "Snapshot data-as-of freshness banner",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "v",
+        "7": "v",
+        "8": "NA",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/AppRoutes.tsx:62 — SnapshotBanner rides every admin page",
+        "apps/admin/src/components/SnapshotBanner.tsx:111-138 — real dataAsOf, degrades to 'No successful snapshot yet', :29 isStuck, :119-123 partialDataAsOf: honest",
+        "apps/admin/src/pages/dashboard/ZmDashboard.tsx:106-108 — hardcoded <Badge tone='success'>Snapshot Healthy</Badge>, no data behind it",
+        "apps/admin/src/pages/dashboard/CentralDashboard.tsx:56-58 — same hardcoded green badge; can sit green under a red banner",
+        "S3 E3 2026-09-02 · check6: GET /api/snapshots/latest 200 for ZM/ZM_SOUTH/CSM, 403 for WM and SE. Live verdict: latest run 169 SUCCESS, dataAsOf 2026-09-01T12:00:08Z (~21h old). Banner is NOT red today, so the red-banner/green-badge pairing stays UNREPRODUCED; separately measured, SnapshotBanner has no AGE threshold at all (:26,:29 only FAILED / stuck-RUNNING / gated)."
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "Zone operating-mode (DEFICIT/PREVENTIVE) + reason, plain language",
+      "crit": 3,
+      "state": "BACKEND_ONLY",
+      "checks": {
+        "1": "x",
+        "2": "v",
+        "3": "NA",
+        "4": "NA",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "x",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/dashboard/operating-mode.controller.ts:26 GET /api/dashboard/operating-mode, guarded",
+        "apps/admin/src/api/operatingMode.ts:22 apiOperatingMode()",
+        "apps/admin/src/components/dashboard/ZoneOperatingModeCard.tsx:52 and ZoneOperatingModeTable.tsx:52 — both fully built, both self-fetching",
+        "grep ZoneOperatingMode over apps/admin/src/**/*.tsx returns only those two definition files: neither is imported by any page — unreachable from the dashboard route",
+        "apps/admin/src/pages/schedules/SchedulerPreviewPage.tsx:154 — only surfaced label lives in another module",
+        "S3 E4 2026-09-02 · check6: GET /api/dashboard/operating-mode 200 and zone-clamped (ZM zones=[1], ZM_SOUTH zones=[2], CSM 5 zones), WM/SE 403. Backend is complete and correct; check8 = x purely because no page mounts the two finished components."
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "Fleet activity trend chart (inactive/troubleshoot/install, 1D-MAX)",
+      "crit": 2,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "NA",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "NA",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/dashboard/dashboard.service.ts:1008 activityTrend(), ZM clamped to own zone",
+        "apps/admin/src/pages/dashboard/ActivityTrendSection.tsx:1-134",
+        "mounted ZmDashboard.tsx:127 (canSelectZone=false), CentralDashboard.tsx:74, OpsHeadDashboard.tsx:147",
+        "S3 E4 2026-09-02 · check6: activity-trend clamps a ZM - zm.north with ?zoneId=2 came back zoneId:1 in the payload, while zm.south with ?zoneId=2 came back zoneId:2. The parameter narrows a CSM/OH and cannot widen a ZM, exactly as the controller docblock claims."
+      ]
+    },
+    {
+      "id": "C8",
+      "name": "Excel export (Zone Overview, Company/Plant Overview)",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "x",
+        "2": "NA",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "NA",
+        "7": "NA",
+        "8": "NA",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/dashboard/CompanyPlantTable.tsx:370-373 — Company/Plant export present",
+        "apps/admin/src/pages/dashboard/ZoneOverviewTable.tsx:1-7 — no exportFile / TableDownloadButton import; no export control in the file",
+        "apps/admin/src/pages/dashboard/ScorecardTable.tsx — no exportTable / TableDownloadButton (CSM + OH zone table has no export either)",
+        "S3 2026-09-02 · not walkable by API: an export CONTROL is screen-only. Listed in not-walked.json at ~708k TEQ."
+      ]
+    },
+    {
+      "id": "C9",
+      "name": "Role-scoped lens: ZM vs CSM vs OH",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "NA",
+        "4": "NA",
+        "5": "x",
+        "6": "v",
+        "7": "v",
+        "8": "NA",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/dashboard/ManagerDashboard.tsx:157-161 — three genuinely different bodies branch on role; acting-zone collapses all roles to ZmDashboard: this is a real lens, NOT taxonomy C6",
+        "apps/admin/src/pages/dashboard/ManagerDashboard.tsx:105 — actingZone in the dep list, refetch on acting change; :53-61 clears prior scope rows first",
+        "apps/admin/src/pages/dashboard/DashboardHome.tsx:13 — WM diverted before the manager endpoints are called",
+        "lens content is inverted vs persona need: ZM (crit-5 persona) alone lacks the critical queue (ZmDashboard.tsx:48-56) while CSM/OH alone lack the Action Required panel (CentralDashboard.tsx:19, OpsHeadDashboard.tsx:42)",
+        "backend scoping (check 6) unsettleable statically — clamp asserted at apps/backend/src/dashboard/dashboard.service.ts:910-918 but only S3 can call as the wrong role",
+        "S3 E4 2026-09-02 · check6 SETTLED = v. The lens is a DATA lens, not just a layout lens: ZM north and ZM south receive disjoint single-zone payloads on all five dashboard reads, while CSM and OH receive genuine pan-India aggregates (33 companies / 340 plants / 29394 devices vs the ZM 9 / 82 / 6560) - fleet-wide numbers, not one zone relabelled. WM and SE are 403 on every dashboard endpoint, so neither reaches a manager payload. The dashboard is as clamped as /tickets."
+      ]
+    }
+  ],
+  "s3": "walked 2026-09-02 by the dashboard S3 walker; 4 hypotheses resolved (H1 confirm/no-gap, H2 confirm, H4 confirm, H5 confirm), 1 new gap DASH-G11."
+}

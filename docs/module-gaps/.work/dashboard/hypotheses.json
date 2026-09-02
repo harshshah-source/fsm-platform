@@ -1,0 +1,40 @@
+{
+  "hypotheses": [
+    {
+      "id": "DASH-H1",
+      "claim": "The ZM zone clamp is real server-side: a ZM calling /api/dashboard/action-required?zoneId=<other> still gets only their own zone, and CSM/OH genuinely receive all zones — so C9's lens is a data lens, not just a layout lens.",
+      "predictedCode": "none",
+      "files": ["apps/backend/src/dashboard/dashboard.service.ts:910-918", "apps/backend/src/dashboard/dashboard.controller.ts:88-93"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "the clamp only covers action-required; critical-queue / company-plant-overview take scope but never narrow it, so a ZM sees cross-zone rows",
+      "altCheck": "sed -n '803,930p' apps/backend/src/dashboard/dashboard.service.ts — actionRequiredZone() clamps at :912, but criticalQueue(scope) at :803 takes scope with no visible zoneId argument; cannot confirm the SQL filter from the read"
+    },
+    {
+      "id": "DASH-H2",
+      "claim": "There is no assign-from-dashboard path in the product at all: the critical-queue rows have no consumer that can dispatch, so DASH-G01 is COMPLETE work, not a re-mount of an existing widget.",
+      "predictedCode": "C4",
+      "files": ["apps/admin/src/pages/dashboard/ManagerDashboard.tsx:95-97", "apps/admin/src/pages/dashboard/EscalationQueueList.tsx:41-79", "apps/backend/src/dashboard/dashboard.service.ts:803"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "the Scheduler Console / Today's Dispatch already renders a grouped assignable queue over the same aggregation, making the dashboard queue a duplicate rather than a gap",
+      "altCheck": "grep -rn 'apiZoneEngineers|CriticalQueueGroup' apps/admin/src — apiZoneEngineers imported from api/schedules into ManagerDashboard.tsx:15 and passed to nothing; CriticalQueueGroup only typed in api/dashboard.ts, ManagerDashboard, ZmDashboard, CentralDashboard, EscalationQueueList"
+    },
+    {
+      "id": "DASH-H4",
+      "claim": "The seven CARD_DESTINATION routes are actually reachable by a Zonal Manager, so wiring the dashboard panel to that existing map (DASH-G02) genuinely lands the ZM on a working page rather than a role-blocked one.",
+      "predictedCode": "C2",
+      "files": ["apps/admin/src/pages/dispatch/console/AttentionBand.tsx:30-37", "apps/admin/src/pages/dashboard/ActionRequiredPanel.tsx:27-52", "apps/admin/src/AppRoutes.tsx"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "some destinations (/verification, /intraday, /component-requests) are gated to CSM/OH, so the same map wired onto a ZM dashboard produces dead links for the very persona that needs them",
+      "altCheck": "grep -rn 'ActionRequiredPanel' apps/admin/src --include=*.tsx — the panel is mounted ONLY in ZmDashboard.tsx:129 (ZM-facing), while the map it would borrow lives in the Scheduler Console, a surface a ZM may not reach; route-level role guards in AppRoutes.tsx are not resolvable statically"
+    },
+    {
+      "id": "DASH-H5",
+      "claim": "The five unwired Action Required card keys have no counting source anywhere in the backend, so DASH-G05 is five new aggregations rather than five wire-ups.",
+      "predictedCode": "C5",
+      "files": ["apps/backend/src/dashboard/dashboard.service.ts:292-306", "apps/backend/src/dashboard/dashboard.service.ts:889-901"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "the owning modules (Issue 11 batches, 21 component-blocked, 29 insertions, 30 manual assignment, 35 non-op) already expose count endpoints and only the dashboard fan-in is missing",
+      "altCheck": "sed -n '883,1000p' apps/backend/src/dashboard/dashboard.service.ts — the four wired counts are all bespoke $queryRaw in this service, none reused from another module, so the pattern predicts new SQL per card"
+    }
+  ]
+}

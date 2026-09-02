@@ -1,0 +1,55 @@
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "claim": "Clicking Mark auto-recovery on a FAILED_NO_PINGS row closes the ticket but leaves verification_runs.outcome at FAILED_VERIFICATION, so the row keeps rendering 'Failed — no pings' and stays re-clickable forever, while system-efficiency (reads vr.outcome) and fleet-uptime (reads ticket.status) report the same closure two different ways.",
+      "predictedCode": "C2",
+      "files": [
+        "apps/backend/src/verification/verification.service.ts:186",
+        "apps/backend/src/verification/verification-query.service.ts:56",
+        "apps/backend/src/reports/system-efficiency-aggregation.service.ts:100",
+        "apps/backend/src/reports/fleet-uptime-aggregation.service.ts:92"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "Some later writer stamps the run outcome on terminal ticket closure, so the two ledgers reconcile anyway and only the optimistic UI is briefly stale.",
+      "altCheck": "grep -rn \"verificationRun\\.(update|create|upsert)\" apps/backend/src --include=*.ts | grep -v generated | grep -v src/verification/ -> zero hits; no writer outside the module, and inside it only the outcome:null updateMany at verification.service.ts:186"
+    },
+    {
+      "id": "H2",
+      "claim": "A ZONAL_MANAGER calling GET /api/verification/fraud-flags receives fraud-flagged runs from zones outside their own — the same cross-zone read that #162 closed on GET /tickets/:id/verification.",
+      "predictedCode": "P4",
+      "files": [
+        "apps/backend/src/verification/verification-query.service.ts:214",
+        "apps/backend/src/verification/verification.controller.ts:111"
+      ],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "A global interceptor or Prisma middleware applies zone scoping outside the service, so the missing scope arg is harmless.",
+      "altCheck": "verification.controller.ts:111 injects no @CurrentUser at all (every other handler in the file does), and verification-query.service.ts:214 findMany where is `{ fraudFlag: true }` with no zone/ticket clause — no scope value even reaches the query layer for an interceptor to have applied"
+    },
+    {
+      "id": "H3",
+      "claim": "The reason a ZM types when escalating a fraud flag appears in no report or ticket-facing screen — only in auditLog.metadata — so the compliance follow-through E-10 promises to /reports/root-cause never carries the 'why'.",
+      "predictedCode": "C2",
+      "files": [
+        "apps/backend/src/verification/verification.service.ts:122",
+        "apps/backend/src/reports/root-cause-aggregation.service.ts:1"
+      ],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "root-cause aggregates on the TicketEvent.reasonCode rather than the audit row, so the escalation is represented downstream even if the free-text reason is not.",
+      "altCheck": "grep -rn VERIFICATION_FRAUD_ESCALATED apps/backend/src apps/admin/src | grep -v src/verification/ -> zero hits: neither the reasonCode nor the audit action is read anywhere outside this module"
+    },
+    {
+      "id": "H4",
+      "claim": "When the telemetry watermark stalls, the review row's countdown reads 'overdue' indefinitely while the sweep deliberately refuses to expire the window, giving the ZM a permanent false-overdue with no cause shown and no control to act on.",
+      "predictedCode": "O3",
+      "files": [
+        "apps/backend/src/verification/verification.service.ts:240",
+        "apps/backend/src/verification/verification-query.service.ts:206",
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:31"
+      ],
+      "unsettleableBy": "carrier-works",
+      "strongestAlternative": "The page surfaces the watermark condition some other way (a staleness banner or chip) so the ZM is not actually misled.",
+      "altCheck": "grep for watermark/telemetryAsOf/stale in VerificationReviewPage.tsx and api/verification.ts -> zero; VerificationReviewRow (api/verification.ts:23) carries no watermark or staleness field, so the page has nothing to render even if it wanted to"
+    }
+  ]
+}

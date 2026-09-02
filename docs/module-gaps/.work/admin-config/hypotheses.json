@@ -1,0 +1,49 @@
+{
+  "hypotheses": [
+    {
+      "id": "H-AC-1",
+      "claim": "An account created through Settings -> Users cannot log in: no user_credentials row is ever written outside seed code, so the console's only provisioning path produces a dead account.",
+      "predictedCode": "C2",
+      "files": ["apps/backend/src/org/users.service.ts:44", "apps/backend/src/auth/credential-seed.ts:21", "apps/backend/src/auth/prisma-user-store.ts:32"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "A hook, subscriber or auth-side listener mints the credential on user creation, or login falls back to a first-time set-password path when credential is null.",
+      "altCheck": "grep -rn 'userCredential\\.' --include=*.ts --exclude-dir=generated apps/backend/src -> only credential-seed.ts:17,21; grep -rn 'ensureCredential' -> auth-fixture-seed.ts:141 and dev-seed.ts only. No org/ caller."
+    },
+    {
+      "id": "H-AC-2",
+      "claim": "GET /api/org/geo/{states,regions,districts} answer 200 to a SERVICE_ENGINEER token — AuthGuard without RoleGuard means every authenticated role reads the geography reference set.",
+      "predictedCode": "C6",
+      "files": ["apps/backend/src/org/geography.controller.ts:11", "apps/backend/src/org/geography.controller.ts:16"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "A global APP_GUARD RoleGuard applies a default deny to undecorated handlers, making the missing @Roles inert.",
+      "altCheck": "static.md totals line: 4 endpoints with no @Roles, 0 @Public; geography.controller.ts:12 declares @UseGuards(AuthGuard) only — RoleGuard is not in the decorator list, unlike every other org/ controller."
+    },
+    {
+      "id": "H-AC-3",
+      "claim": "Deactivating a plant removes stops from an SE's live day plan with no push, no outbox row and no in-app notice — the SE keeps driving to a site whose ticket is already CLOSED.",
+      "predictedCode": "C2",
+      "files": ["apps/backend/src/plant-deactivation/plant-deactivation.service.ts:229", "apps/backend/prisma/schema.prisma:2899"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "The mobile day-plan read is live enough that the stop simply vanishes on next poll, or a generic ticket-cancelled notifier fires off the ticket_events row written at :188.",
+      "altCheck": "grep -rln 'notificationOutbox|NotificationOutbox' apps/backend/src -> only scheduling/day-plan-notification-outbox.ts and business-sweep-scheduler.service.ts; plant-deactivation/ appears in neither."
+    },
+    {
+      "id": "H-AC-4",
+      "claim": "A threshold changed by the CSM at 09:00 governs the 10:00 dispatch run, and that run's config_snapshot stores the new number — the value in force is recoverable per run.",
+      "predictedCode": "C6",
+      "files": ["apps/backend/src/settings/assignment-threshold.service.ts:219", "apps/backend/src/scheduling/dispatch-run.service.ts:1331", "apps/backend/src/settings/settings.service.ts:41"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "The dispatch path caches the threshold at module init, so the snapshot records the fresh DB row while the engine ran on a stale in-process copy — snapshot right, behaviour wrong.",
+      "altCheck": "grep -rn 'SE_ASSIGNMENT_THRESHOLD_KEY' --exclude-dir=generated apps/backend/src -> 4 hits, all reads at call time (dispatch-run.service.ts:1331 inside captureConfigSnapshot, setting-authority.ts:18, settings.service.ts:15,41); no module-scope cache found."
+    },
+    {
+      "id": "H-AC-5",
+      "claim": "A ZONAL_MANAGER calling PUT /api/settings/assignment-threshold is refused (class @Roles is OH+CSM, and canWriteSetting refuses ZM independently), so the graded party genuinely cannot move its own dial.",
+      "predictedCode": "P4",
+      "files": ["apps/backend/src/settings/assignment-threshold.controller.ts:63", "apps/backend/src/settings/setting-authority.ts:18", "apps/backend/src/settings/setting-authority.ts:57"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "The handler-level @Roles on the GET (:69, which adds ZONAL_MANAGER) overrides at class scope in this Nest setup, admitting ZM to every route on the controller — which is exactly how static.md read it.",
+      "altCheck": "sed -n '55,105p' assignment-threshold.controller.ts: ZONAL_MANAGER appears only on the @Get handler; @Put carries no @Roles, and the class decorator lists OH,CSM. static.md row 48 attributes ZM to the PUT — one of the two readings is wrong and only a call settles it."
+    }
+  ]
+}

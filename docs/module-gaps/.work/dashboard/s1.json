@@ -1,0 +1,23 @@
+{
+  "module": "dashboard",
+  "persona": {"role": "Zonal Manager", "label": "ZM — own zone", "frequency": "all day, every day, first screen on login"},
+  "goals": [
+    "Triage Action Required items same-day (unreviewed batches, VURs, readiness conflicts, failed verification, component-blocked, WAITING_COMPONENT 7d+, non-op confirmations, manual-assignment escalations)",
+    "Read zone health at a glance and spot deterioration (Zone Overview + Company/Plant drill-down, SLA bucket split, trend vs yesterday)",
+    "Act on the worst devices without hunting (Grouped Critical Work Queue, suggested SE, one-click assign)"
+  ],
+  "scopeNote": "PRD page-inventory (:321) names dashboard as 3 things (Action Required, Zone/Company tables, Grouped Critical Work Queue); Flow 1 (:347-478) adds snapshot banner + implies trend/SLA-distribution visuals not in the inventory row. Action Required cards are triage entry points into other modules (Schedules, Intraday, Component-Blocked, Non-Op) — dashboard's job is surfacing + one-click routing, not owning those workflows. Recorded, not resolved.",
+  "capabilities": [
+    {"id": "C1", "name": "Action Required panel (8 card types, urgency-ordered)", "src": "persona", "crit": 5, "why": "without it, failed verification / component-blocked / 7d-waiting items sit buried in lists, ZM misses same-day escalations"},
+    {"id": "C2", "name": "Zone Overview table (SLA bucket split, trend% vs yesterday)", "src": "persona", "crit": 5, "why": "ZM's core deteriorating-zone read; without it can't prioritize which zone to work first"},
+    {"id": "C3", "name": "Company/Plant Overview drill-down (company to plant to device)", "src": "persona", "crit": 4, "why": "without it ZM can't identify which customer accounts are at SLA-breach risk"},
+    {"id": "C4", "name": "Grouped Critical Work Queue (CRITICAL+ by company/plant, suggested SE, one-click assign)", "src": "persona", "crit": 5, "why": "without it worst-bucket devices need manual per-ticket routing, delays the highest-severity work"},
+    {"id": "C5", "name": "Snapshot data-as-of freshness banner (all panels)", "src": "persona", "crit": 4, "why": "without it ZM acts on stale device data unknowingly; CONTEXT.md: FAILED/stuck Snapshot means inactive devices may not surface in time for dispatch"},
+    {"id": "C6", "name": "Zone operating-mode (DEFICIT/PREVENTIVE) + reason, plain language", "src": "persona", "crit": 3, "why": "without it ZM can't tell why the Recommender is prioritizing devices-cleared vs repeat-offenders, can't sanity-check dispatched batches (CONTEXT.md:195-196)"},
+    {"id": "C7", "name": "Fleet activity trend chart (inactive/troubleshoot/install, 1D-MAX)", "src": "prd", "crit": 2, "why": "visual trend context; absence is a downgrade not a stoppage, tabular Zone Overview trend% already carries the signal"},
+    {"id": "C8", "name": "Excel export (Zone Overview, Company/Plant Overview)", "src": "persona", "crit": 3, "why": "without it ZM can't share zone status in operations calls"},
+    {"id": "C9", "name": "Role-scoped lens: ZM own-zone vs CSM cross-zone+acting-scope vs OH fleet-wide read", "src": "role", "crit": 4, "why": "one dashboard shown identically to all three breaks CSM's acting-zone context and OH's fleet aggregate need — taxonomy C6 'role has no lens' risk"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 7, "role": 1, "spine": 0, "prd": 1}
+}

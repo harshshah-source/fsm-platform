@@ -1,0 +1,252 @@
+{
+ "module": "tickets",
+ "capabilities": [
+  {
+   "id": "C1",
+   "name": "Ticket Detail full on-site context",
+   "crit": 5,
+   "state": "PARTIAL",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "v",
+    "4": "NA",
+    "5": "v",
+    "6": "v",
+    "7": "NA",
+    "8": "v",
+    "9": "NA"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/detail/TicketDetailScreen.tsx:57",
+    "apps/backend/src/me-tickets/me-ticket-detail.service.ts:45",
+    "apps/backend/src/me-tickets/me-ticket-detail.service.ts:99 readinessHint literal 'UNKNOWN'",
+    "apps/backend/src/me-tickets/se-ticket-access.ts:32"
+   ]
+  },
+  {
+   "id": "C2",
+   "name": "Soft-state progress VIEWED/ON_SITE/TROUBLESHOOT_STARTED",
+   "crit": 4,
+   "state": "PARTIAL",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "?",
+    "4": "v",
+    "5": "v",
+    "6": "v",
+    "7": "v",
+    "8": "?",
+    "9": "NA"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/detail/TicketDetailScreen.tsx:97-118",
+    "apps/backend/src/soft-state/soft-state.controller.ts:34",
+    "apps/backend/src/me-tickets/me-ticket-detail.service.ts:126 activeSoftState"
+   ]
+  },
+  {
+   "id": "C3",
+   "name": "Troubleshoot form + offline dedup (client_submission_id)",
+   "crit": 5,
+   "state": "PARTIAL",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "v",
+    "4": "x",
+    "5": "v",
+    "6": "v",
+    "7": "v",
+    "8": "v",
+    "9": "v"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:56 Crypto.randomUUID() inside handleSubmit",
+    "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:66-69 non-409 errors swallowed, no banner",
+    "apps/backend/src/ticketing/troubleshoot-submission.service.ts:113 seId_clientSubmissionId unique"
+   ]
+  },
+  {
+   "id": "C4",
+   "name": "Component-unavailable flow (request, SLA pause, receipt resumes)",
+   "crit": 5,
+   "state": "BROKEN",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "x",
+    "4": "x",
+    "5": "v",
+    "6": "v",
+    "7": "v",
+    "8": "x",
+    "9": "v"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:37,61 boolean only, no item picker",
+    "apps/backend/src/ticketing/troubleshoot-submission.service.ts:231 componentId: null",
+    "apps/backend/src/ticketing/troubleshoot-submission.service.ts:207-221 WAITING_COMPONENT + slaPaused",
+    "apps/mobile/src/navigation/screens/StockScreen.tsx:56 confirm-receipt exists"
+   ]
+  },
+  {
+   "id": "C5",
+   "name": "Install lifecycle SCHEDULED->ACTIVATED with GPS/SIM capture",
+   "crit": 4,
+   "state": "PARTIAL",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "?",
+    "4": "v",
+    "5": "v",
+    "6": "?",
+    "7": "v",
+    "8": "?",
+    "9": "v"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/install/InstallFormScreen.tsx:32,69",
+    "apps/backend/src/ticketing/install-lifecycle.service.ts:123-158 SERIAL_REQUIRED/INVALID_SERIAL + withAudit",
+    "apps/backend/src/ticketing/install-lifecycle.service.ts:171 runInstallVerification"
+   ]
+  },
+  {
+   "id": "C6",
+   "name": "Recovery collection + Unable-to-Collect reason-coded exit",
+   "crit": 4,
+   "state": "PARTIAL",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "?",
+    "4": "v",
+    "5": "v",
+    "6": "?",
+    "7": "v",
+    "8": "?",
+    "9": "v"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/recovery/CollectionFormScreen.tsx:27,36",
+    "apps/mobile/src/tickets/recovery/UnableToCollectScreen.tsx:31,40",
+    "apps/backend/src/ticketing/recovery.service.ts:116-131 INVALID_SERIAL/NOTES_REQUIRED",
+    "apps/backend/src/ticketing/recovery.service.ts:336,373 withAudit helpers"
+   ]
+  },
+  {
+   "id": "C7",
+   "name": "Vehicle Unavailability Report pausing primary SLA",
+   "crit": 5,
+   "state": "PARTIAL",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "v",
+    "4": "v",
+    "5": "v",
+    "6": "v",
+    "7": "v",
+    "8": "v",
+    "9": "x"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/vehicle-unavailability/VehicleUnavailabilityFormScreen.tsx:1",
+    "apps/backend/src/ticketing/vehicle-unavailability.service.ts:140-238 $transaction, no auditLog",
+    "apps/backend/src/ticketing/vehicle-unavailability.service.ts:434-457 resumeSla, no auditLog",
+    "apps/admin/src/pages/readiness/VehicleUnavailabilityPage.tsx:1"
+   ]
+  },
+  {
+   "id": "C8",
+   "name": "409 Conflict screen with Shadow Use messaging",
+   "crit": 3,
+   "state": "BROKEN",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "?",
+    "4": "NA",
+    "5": "x",
+    "6": "v",
+    "7": "v",
+    "8": "x",
+    "9": "v"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/troubleshoot/ConflictScreen.tsx:17-19 comment: permanently false over HTTP",
+    "apps/backend/src/ticketing/troubleshoot.controller.ts:26 body maps componentUnavailable only, no consumedComponents",
+    "apps/backend/src/ticketing/troubleshoot-submission.service.ts:330 consumed = input.consumedComponents ?? []",
+    "packages/shared/src/index.ts:468"
+   ]
+  },
+  {
+   "id": "C9",
+   "name": "Verification outcome visibility on own tickets",
+   "crit": 4,
+   "state": "PARTIAL",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "?",
+    "4": "NA",
+    "5": "v",
+    "6": "?",
+    "7": "v",
+    "8": "?",
+    "9": "NA"
+   },
+   "pointers": [
+    "apps/mobile/src/tickets/verification/VerificationScreen.tsx:26-29 all four verdicts",
+    "apps/mobile/src/tickets/detail/TicketDetailScreen.tsx:76-79 fetched only when VERIFICATION_PENDING"
+   ]
+  },
+  {
+   "id": "C10",
+   "name": "Technical Hints + raw telemetry, always visible",
+   "crit": 3,
+   "state": "PARTIAL",
+   "checks": {
+    "1": "v",
+    "2": "v",
+    "3": "?",
+    "4": "NA",
+    "5": "v",
+    "6": "v",
+    "7": "NA",
+    "8": "?",
+    "9": "NA"
+   },
+   "pointers": [
+    "apps/backend/src/me-tickets/technical-hints.ts:90-147",
+    "apps/mobile/src/tickets/detail/TicketDetailScreen.tsx:467 gated on technicalHealth.available"
+   ]
+  },
+  {
+   "id": "C11",
+   "name": "QR / barcode scan entry into Ticket Detail",
+   "crit": 2,
+   "state": "NOT_STARTED",
+   "checks": {
+    "1": "x",
+    "2": "x",
+    "3": "NA",
+    "4": "NA",
+    "5": "NA",
+    "6": "NA",
+    "7": "NA",
+    "8": "NA",
+    "9": "NA"
+   },
+   "pointers": [
+    "apps/mobile/package.json — no expo-camera/expo-barcode-scanner dependency",
+    "grep qr|barcode|scan across apps/mobile/src — only IconSelectGrid/Home/Stock false hits",
+    "no /scan route in apps/mobile/src/navigation, no scan endpoint in apps/backend/src/ticketing"
+   ]
+  }
+ ],
+ "zmClusterNote": "ZM web oversight (TicketsPage filters+special badge, TicketDetailDrawer Overview/Lifecycle/Forms/Verification/Assignment-History, NonOperationalQueuePage, RecoveryDecisionQueuePage 3 actions, VehicleUnavailabilityPage) is NOT systematically weaker than the SE side — every ZM endpoint in static.md has a wired admin consumer. The asymmetry runs the other way: the SE mobile side carries the unreachable and unvalidated paths.",
+ "s3Note": "S3 walked 2026-09-02 as the real SE persona after giving se.north@fsm.test an engineer_master profile + one MULTI_PLANT coverage row (2 config records via POST /org/engineers and POST /org/se-coverage as OH). Checks 3/6/8 patched only where an actual write-then-re-GET or wrong-role call settled them. C5 (install) and C6 (recovery) stay unwalked: every one of the 100 tickets is workType TROUBLESHOOT. Check 6 found ZERO permission defects across 19 wrong-role calls; the zone clamp holds on /audit-trail (ZM_SOUTH -> 404 on a zone-1 ticket)."
+}

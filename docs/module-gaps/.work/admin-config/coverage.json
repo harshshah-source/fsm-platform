@@ -1,0 +1,267 @@
+{
+  "module": "admin-config",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Zone / plant / SE-mapping configuration",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/org/zones.controller.ts:25,31",
+        "apps/backend/src/org/plants.controller.ts:16,21",
+        "apps/backend/src/org/zone-mapping.controller.ts:66,93,110",
+        "apps/backend/src/org/zone-mapping.service.ts:104,126,171,286,359 (withAudit on every mutator)",
+        "apps/admin/src/pages/settings/sections.tsx:212,262",
+        "apps/admin/src/pages/admin/PlantZonesPage.tsx",
+        "S3 WALK S3 E4: ZM/CSM/WM POST org/plants, POST org/zones, PUT org/plant-zone-overrides -> 403 each; check 6 v. SE GET org/geo/states -> 200 (AC-09, reference data only)."
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "SE coverage type + territory",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "?",
+        "5": "?",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/org/se-coverage.service.ts:73,128,160 (withAudit)",
+        "apps/backend/src/org/se-territory.service.ts:70,101",
+        "apps/admin/src/pages/settings/sections.tsx:752",
+        "apps/admin/src/pages/coverage/TerritoryPage.tsx",
+        "S3 WALK S3 E4: ZM/CSM/WM POST org/se-coverage -> 403; check 6 v. Checks 3/4/5/8 still unwalked."
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "SLA rules per device bucket / company tier",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "?",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/org/sla-rules.controller.ts:20,25",
+        "apps/backend/src/org/sla-rules.service.ts:47 (withAudit), :68-69 (validation)",
+        "apps/admin/src/pages/settings/sections.tsx:594",
+        "S3 WALK S3 E4: ZM/CSM/WM PUT org/sla-rules -> 403; check 6 v."
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "Company Tier/Priority + zone-scoped expiring overrides",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/org/tier-overrides.service.ts:71 (MIN_REASON_LENGTH enforced), :77 ZONE_SCOPE_VIOLATION for ZM, :88 max-expiry bound, :101,:146 withAudit",
+        "apps/backend/src/org/tier-override-expiry.service.ts:24-45 (ACTIVE->EXPIRED sweep + batched auditLog.createMany)",
+        "apps/backend/src/org/companies.service.ts:55,90 (withAudit on create/update)",
+        "apps/admin/src/pages/admin/TierOverridesPage.tsx",
+        "S3 WALK S3 E4: tier-override writes are OH+CSM+ZM by design (zone scope enforced in service); the OH-only dials around them all refused the wrong role. check 6 v."
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "Common Kit definition + Recommender scoring weights",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "?",
+        "5": "?",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/org/common-kit.service.ts:45 (withAudit)",
+        "apps/backend/src/org/scoring-weights.service.ts:58 (withAudit)",
+        "apps/admin/src/pages/settings/SettingsPage.tsx:10,77 (kit + weights tabs)",
+        "S3 WALK S3 E4: ZM/CSM/WM POST org/common-kit and POST org/scoring-weights -> 403; check 6 v."
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "SE assignment threshold — OH/CSM co-owned, lock + revert",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "v",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/settings/assignment-threshold.service.ts:219 withAudit carries previousHours/newHours/reason; :266 lock/unlock audited; :181 revert OH-only",
+        "apps/backend/src/settings/setting-authority.ts:18 write roles = OH+CSM only; :57 canWriteSetting lock rule",
+        "apps/backend/src/settings/assignment-threshold.controller.ts:63 class @Roles OH,CSM (ZM read-only on :69 GET) — static.md row 48 mis-attributes ZM to the PUT",
+        "apps/backend/src/scheduling/dispatch-run.service.ts:1331 run snapshot captures the key; :1355 settings map; seeded default settings.service.ts:41 so the row always exists (no code-default-vs-DB ambiguity)",
+        "apps/admin/src/pages/settings/AssignmentThresholdSection.tsx, apps/admin/src/pages/admin/AssignmentThresholdPage.tsx",
+        "S3 WALK S3 E4 check 6: ZM PUT settings/assignment-threshold with the CURRENT value 48 (inert) -> 403; WM PUT -> 403; ZM GET -> 200; WM/SE GET -> 403. static.md row 48 refuted. check 8 v: GET dispatch-runs/36 as OH shows configSnapshot.settings.se_assignment_threshold_hours = 48 = the live value, read without being told it in advance."
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "Plant deactivation / reactivation with dependent-work handling",
+      "crit": 5,
+      "state": "BROKEN",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "x",
+        "6": "v",
+        "7": "v",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/plant-deactivation/plant-deactivation.service.ts:229 batchAssignmentTicket.updateMany strips day-plan stops; no DayPlanNotificationOutbox write anywhere in the file",
+        "apps/backend/prisma/schema.prisma:2899 DayPlanNotificationOutbox exists; only writer is apps/backend/src/scheduling/day-plan-notification-outbox.ts + business-sweep-scheduler.service.ts",
+        "apps/backend/src/plant-deactivation/plant-deactivation.service.ts:116 reactivate returns cancelledTicketsAtDeactivation: null — no restore of tickets, cycles or plan stops",
+        "S3 WALK S3 E4 check 6: ZM/CSM/WM/SE POST plants/1/deactivate -> 403. Checks 3/8 NOT walked by instruction - a deactivation would corrupt other live walkers evidence (AC-02 NEEDS-VERIFY). GET plants/deactivations as OH -> 6 real rows, so the path is exercised."
+      ]
+    },
+    {
+      "id": "C8",
+      "name": "User account management (all non-OH roles)",
+      "crit": 5,
+      "state": "BROKEN",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "v",
+        "4": "v",
+        "5": "x",
+        "6": "v",
+        "7": "x",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/org/users.service.ts:44 create() writes users row only — no UserCredential",
+        "apps/backend/src/auth/credential-seed.ts:21 is the ONLY userCredential.create in the repo; callers are auth-fixture-seed.ts:141 and dev-seed.ts (seed paths)",
+        "apps/backend/src/auth/prisma-user-store.ts:32 login joins credential — a console-created account has none",
+        "apps/admin/src/api/org.ts:105-112 exposes list + create only; PATCH /org/users/:userId (users.controller.ts:29) has no admin client and no control in sections.tsx:513-590",
+        "S3 WALK S3 E4 check 3 v: PATCH org/users/<id> DISABLED persisted across a re-GET. check 6 v: ZM/CSM/WM POST org/users -> 403. check 8 x: the named downstream consumer is POST auth/login, and a console-created account gets 401 on every password - AC-01 confirmed."
+      ]
+    },
+    {
+      "id": "C9",
+      "name": "Audit trail on every config dial",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "x",
+        "2": "v",
+        "3": "?",
+        "4": "NA",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "audit write coverage verified per-service, not per-file: every org/ + settings/ mutator wraps in audit.withAudit (common-kit:45, companies:55,90, plants:45, scoring-weights:58, sla-rules:47, se-coverage:73,128,160, se-territory:70,101, sla/zone-mapping:104..359, tier-overrides:101,146, users:44,81, zones:29, settings:224, assignment-threshold:219,266, plant-deactivation:71,104)",
+        "static.md's '2 write-verb endpoints with no audit' is a false positive: ops-explorer export IS audited at the controller — apps/backend/src/ops-explorer/ops-explorer.controller.ts:131 audit.record EXPORT_DOWNLOADED",
+        "GAP: apps/backend/src/settings/settings.service.ts:224-239 SETTING_UPDATED records key only — no previousValue/newValue in metadata",
+        "GAP (lens): no admin audit route (apps/admin/src/AppRoutes.tsx has none) and the only audit read API is ticket-scoped, apps/backend/src/audit/audit-trail.controller.ts:20; config-change rows are reachable only via the flag-gated Ops Explorer auditLogs dataset (dataset-registry.ts:2490)",
+        "S3 WALK S3 E4 check 6 v: ZM/CSM/WM ops-explorer/datasets/auditLogs/query -> 403, OH -> 200. check 8 x: the only reader projects no metadata column (dataset-registry.ts:2489), so even correctly-written previousHours/newHours cannot be read - AC-04 upgraded, the fix is two files."
+      ]
+    },
+    {
+      "id": "C10",
+      "name": "Ops Explorer — reconcile a figure back to its rows",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/ops-explorer/ops-explorer.controller.ts:68,93,99,116,158",
+        "apps/backend/src/ops-explorer/ops-explorer-enabled.guard.ts:19-30 flag gate",
+        "apps/admin/src/pages/ops-explorer/OpsExplorerPage.tsx, ReconciliationPanel.tsx",
+        "S3 WALK S3 E4 check 6 v: ops-explorer roles = [OPERATIONS_HEAD] only, ZM/CSM/WM -> 403. GET ops-explorer/meta as OH -> enabled true, developerMode true on this box; OPS_EXPLORER_ENABLED unset resolves false in source."
+      ]
+    },
+    {
+      "id": "C11",
+      "name": "Build health monitoring surface",
+      "crit": 2,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "?",
+        "3": "?",
+        "4": "NA",
+        "5": "?",
+        "6": "?",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/admin/src/pages/admin/BuildHealthPage.tsx (205 loc)",
+        "apps/backend/src/build-info/build-info.ts, migration-skew.ts",
+        "SPINE E-25 claim (ingestion health only, no device-departure export) not re-verified from source this stage",
+        "S3: NOT WALKED - budget spent on C6/C7/C8/C9 and the perms sweep. See not-walked.json."
+      ]
+    }
+  ]
+}

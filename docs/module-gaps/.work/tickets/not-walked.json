@@ -1,0 +1,13 @@
+{
+  "items": [
+    "C5 Install lifecycle SCHEDULED->ACTIVATED (GPS/SIM capture) — no INSTALL ticket exists; all 100 tickets are workType TROUBLESHOOT, and POST /install/:id/activate does not resolve as a route. Fixture: one INSTALL ticket at a covered plant.",
+    "C6 Recovery collection + Unable-to-Collect — no RECOVERY ticket exists; POST /recovery/:id/on-site returned RECOVERY_NOT_FOUND on a TROUBLESHOOT ticket. Fixture: one RECOVERY ticket assigned to the SE.",
+    "C9 Verification outcome visibility — GET /verification/review as ZM stayed [] after a submission moved a ticket to VERIFICATION_PENDING. Either the review queue selects on something else or the producing hop is broken; the verification module owns the answer, not tickets. NEEDS-VERIFY, cost ~2k TEQ (read verification review query + re-walk).",
+    "C2 soft-state persist (check 3) — POST /tickets/:id/soft-state takes {target}, not {type}; my probe used the wrong shape and returned INVALID_SOFT_STATE_TRANSITION from:null. Not a product defect; the VIEWED->ON_SITE->TROUBLESHOOT_STARTED chain is unwalked. Cost ~2k TEQ.",
+    "C10 technical hints downstream (check 8) — technicalHealth was returned on the SE detail read but no hint was non-empty on the tickets walked; whether the mobile gate at TicketDetailScreen.tsx:467 hides a populated payload is screen-only. NEEDS-VERIFY, cost one browser walk ~708k TEQ.",
+    "TKT-05 offline-submit banner — the mobile form swallowing non-409 errors is screen-only. NEEDS-VERIFY, one browser walk ~708k TEQ (Metro/Expo, not the admin browser).",
+    "TKT-06 QR/barcode entry — S2 resolved NOT_STARTED; walking can only re-prove an absence.",
+    "ZM web oversight cluster (TicketsPage filters, TicketDetailDrawer tabs, NonOperationalQueuePage, RecoveryDecisionQueuePage, VehicleUnavailabilityPage) — S2 found every ZM endpoint wired to a consumer; rendering fidelity is screen-only. NEEDS-VERIFY, one browser walk ~708k TEQ."
+  ],
+  "budgetNote": "Walk stopped after 5 hypotheses + check 6 matrix + 2 unlock records + 5 domain writes. No browser instrument used; every item above needs either data this DB does not have or a screen."
+}

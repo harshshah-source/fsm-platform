@@ -1,0 +1,471 @@
+{
+  "module": "engineers",
+  "label": "SE Management, Planner & Availability",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 77,
+    "afterBacklog": 90,
+    "capsScored": 8
+  },
+  "gaps": {
+    "total": 7,
+    "priced": 7,
+    "folded": [],
+    "falsified": [],
+    "needsVerification": [],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 4,
+    "S2": 2,
+    "S1": 1,
+    "S0": 0
+  },
+  "dangerous": [
+    "ENG-G1",
+    "ENG-G2",
+    "ENG-G4",
+    "ENG-G6"
+  ],
+  "priced": [
+    {
+      "id": "ENG-G1",
+      "code": "P2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Leave approve and reject leave no audit record",
+      "type": "FIX",
+      "caps": [
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/engineers/leave-request.service.ts:103",
+        "apps/backend/src/engineers/leave-request.service.ts:126",
+        "apps/backend/src/engineers/se-availability.service.ts:148",
+        "apps/backend/src/audit/audit-trail.controller.ts:20"
+      ],
+      "lanes": [
+        "api",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 659867,
+          "t80": 952000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 659867,
+          "t80": 952000
+        }
+      ],
+      "score": 5,
+      "multiplier": 0.933,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 997719,
+      "p80": 1439424,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 4,
+      "policyClause": "CONTEXT.md mandates an audited set_by_role on every write; a leave decision is a decision about a person's working time and it changes who the Recommender can pick",
+      "hypothesisId": null
+    },
+    {
+      "id": "ENG-G2",
+      "code": "P2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Planner intent writes change dispatch but are unaudited",
+      "type": "FIX",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/backend/src/planner/se-planner.service.ts:44",
+        "apps/backend/src/planner/se-planner.service.ts:90",
+        "apps/backend/src/planner/se-planner.controller.ts:70",
+        "apps/backend/src/recommender/recommender.service.ts:862"
+      ],
+      "lanes": [
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 659867,
+          "t80": 952000
+        }
+      ],
+      "score": 5,
+      "multiplier": 0.933,
+      "bundleFactor": 1,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 461907,
+      "p80": 666400,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 4,
+      "policyClause": "ADR-0022 soft bias -- recommender.service.ts:646 lets a planner row outrank the top-scored SE and :862 stamps plannerBias on the trace; the trace names the effect, nothing names who created the cause",
+      "hypothesisId": "ENG-H2"
+    },
+    {
+      "id": "ENG-G3",
+      "code": "O4",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Spine map names no edge for this module though two live carriers exist",
+      "type": "REFACTOR",
+      "caps": [
+        "C2",
+        "C4"
+      ],
+      "files": [
+        "docs/module-gaps/.work/engineers/static.md:32",
+        "apps/backend/src/scheduling/candidate-query.service.ts:122",
+        "apps/backend/src/recommender/recommender.service.ts:1035",
+        "apps/backend/src/recommender/recommender.service.ts:529"
+      ],
+      "lanes": [
+        "docs",
+        "analysis"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "docs",
+          "anchorN": 999,
+          "weakAnchor": false,
+          "t50": 66000,
+          "t80": 66000
+        },
+        {
+          "lane": "analysis",
+          "anchorN": 32,
+          "weakAnchor": false,
+          "t50": 123933,
+          "t80": 151067
+        }
+      ],
+      "score": 2,
+      "multiplier": 0.733,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.2,
+      "size": "XS",
+      "conf": "HIGH",
+      "p50": 246153,
+      "p80": 281319,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 3
+    },
+    {
+      "id": "ENG-G4",
+      "code": "C5",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "No overlap guard: duplicate leave windows stack per SE",
+      "type": "NEW",
+      "caps": [
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/engineers/leave-request.service.ts:61",
+        "apps/backend/src/engineers/leave-request.controller.ts:48",
+        "apps/backend/prisma/schema.prisma:1514"
+      ],
+      "lanes": [
+        "domain",
+        "api",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 528133,
+          "t80": 580267
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2471574,
+      "p80": 3355030,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 4
+    },
+    {
+      "id": "ENG-G5",
+      "code": "C5",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "Availability reason is free text, no enumerated reason code",
+      "type": "NEW",
+      "caps": [
+        "C7"
+      ],
+      "files": [
+        "apps/backend/src/engineers/se-availability.service.ts:18",
+        "apps/backend/src/engineers/se-availability.service.ts:146",
+        "apps/backend/src/engineers/se-availability.service.ts:82"
+      ],
+      "lanes": [
+        "domain",
+        "data",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 707000,
+          "t80": 1020000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 466000,
+          "t80": 512000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 707000,
+          "t80": 1020000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 688000,
+          "t80": 1270000
+        }
+      ],
+      "score": 6,
+      "multiplier": 1,
+      "bundleFactor": 1.24,
+      "typeModifier": 1,
+      "size": "S",
+      "conf": "MED",
+      "p50": 3184320,
+      "p80": 4739280,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 3
+    },
+    {
+      "id": "ENG-G6",
+      "code": "P1",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Manager cannot revoke leave: oldest window silently wins",
+      "type": "FIX",
+      "caps": [
+        "C2",
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/engineers/se-availability.service.ts:60",
+        "apps/backend/src/engineers/se-availability.service.ts:88",
+        "apps/backend/src/engineers/se-availability.service.ts:94",
+        "apps/backend/src/recommender/recommender.service.ts:1035",
+        "apps/backend/src/scheduling/candidate-query.service.ts:122"
+      ],
+      "lanes": [
+        "domain",
+        "api",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 528133,
+          "t80": 580267
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.16,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1730102,
+      "p80": 2348521,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "policyClause": "currentStatusMany is the single definition of unavailable that candidate-readiness.ts:56 drops on; if it is order-arbitrary the Recommender's exclusion is order-arbitrary too",
+      "hypothesisId": null
+    },
+    {
+      "id": "ENG-G7",
+      "code": "O4",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Seeded SE persona is not an engineer_master row",
+      "type": "DATA",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/engineers/engineers.controller.ts:223",
+        "apps/backend/src/engineers/leave-request.service.ts:62"
+      ],
+      "lanes": [
+        "data"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 341733,
+          "t80": 375467
+        }
+      ],
+      "score": 2,
+      "multiplier": 0.733,
+      "bundleFactor": 1,
+      "typeModifier": 1.3,
+      "size": "XS",
+      "conf": "HIGH",
+      "p50": 444253,
+      "p80": 488107,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 2,
+      "crit": 3,
+      "hypothesisId": "ENG-H3"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 9536028,
+    "sumGapP80": 13318081,
+    "packets": 7,
+    "waves": 3,
+    "collisions": 2,
+    "screensTouched": 0,
+    "overheadTeq": 1518000,
+    "tModule50": 11054028,
+    "p50": 14149156,
+    "p80": 28298312,
+    "size": "L",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 1864000,
+    "primaryDriver": "ENG-G5",
+    "largestUnknown": "none",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "ENG-G2",
+      "p80": 666400,
+      "what": "Planner intent writes change dispatch but are unaudited"
+    },
+    "over3m": [
+      "ENG-G5"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 900000,
+    "screensNeedingWork": 1,
+    "bottomUpP50": 14149156,
+    "ratio": 15.72,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "claim": "A CSM can set X-Acting-As-Zone for a zone whose ZM has NO role_unavailability window and the backend accepts it, stamping acted_as_role — no cascade check runs.",
+      "predictedCode": "P4",
+      "files": ["apps/backend/src/auth/acting-context.ts:29", "apps/backend/src/roles/role-backup.service.ts:77"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "A guard or interceptor upstream of the decorator validates the header against role_unavailability before resolveActingContext runs.",
+      "altCheck": "grep -rn 'currentActingRoleForZone|isRoleUnavailable' apps/backend/src --exclude-dir=generated | grep -v src/roles/ -> zero hits; only resolveActingContext consumes the header (current-actor/current-scope decorators, manager-scope.ts)"
+    },
+    {
+      "id": "H2",
+      "claim": "A write through leave-request / intraday-updates / tickets while acting stores actedAsRole NULL, so the acting action is indistinguishable from an own-scope one in audit_logs.",
+      "predictedCode": "P2",
+      "files": ["apps/backend/src/engineers/leave-request.controller.ts:69", "apps/backend/src/scheduling/intraday-updates.controller.ts:52", "apps/backend/src/ticketing/tickets.controller.ts:143"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "The service layer re-derives actedAsRole from the request instead of trusting the controller's literal null.",
+      "altCheck": "grep -rn 'auditActor(' apps/backend/src -> 24 files, none of them these controllers' services; audit.service.ts:66 writes entry.actedAsRole ?? null with no re-derivation"
+    },
+    {
+      "id": "H3",
+      "claim": "csm-approval-share returns zeros or near-zeros in practice because the acting writes that would populate acting_zone are the same ones passing actedAsRole:null.",
+      "predictedCode": "O3",
+      "files": ["apps/backend/src/roles/role-backup.service.ts:88"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "Enough audit sites do use auditActor() that the report still has a representative sample.",
+      "altCheck": "grep -rn 'actedAsRole: null' apps/backend/src --exclude-dir=generated -> 11 controller sites, all on manager write paths a CSM would use while acting"
+    },
+    {
+      "id": "H4",
+      "claim": "Repeated POST /api/auth/login with wrong passwords is never blocked or slowed — no throttler, no lockout, no counter.",
+      "predictedCode": "C1",
+      "files": ["apps/backend/src/auth/auth.controller.ts:21", "apps/backend/src/auth/auth.service.ts:17"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "Rate limiting sits at a reverse proxy / platform layer outside apps/backend.",
+      "altCheck": "grep -rn 'Throttler|throttle|rate-limit|rateLimit' apps/backend/src apps/backend/package.json -> 0 hits; no nginx/ingress config in repo referencing limit_req"
+    },
+    {
+      "id": "H5",
+      "claim": "Clearing sessionStorage is the only 'exit' — a stale acting header from another tab or a restored session re-enters acting scope with no server-side revocation.",
+      "predictedCode": "P4",
+      "files": ["apps/admin/src/auth/AuthProvider.tsx:135", "apps/admin/src/api/authHeaders.ts:13"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "The access token itself carries the acting zone, so exit invalidates it server-side.",
+      "altCheck": "apps/backend/src/auth/auth.service.ts:54 signAccessToken claims are {user_id, role, zone_id} only — no acting zone in the token; acting is header-only"
+    }
+  ]
+}

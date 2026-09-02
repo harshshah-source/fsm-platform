@@ -1,0 +1,48 @@
+{
+  "module": "ingestion",
+  "stage": "S3",
+  "walkedOn": "2026-09-02",
+  "rule": "READ-ONLY walk. No ingestion run, master sync, pipeline or snapshot was triggered - ten parallel walkers share this live database and a run would rewrite device state and ticket data underneath them.",
+  "items": [
+    {
+      "name": "ING-05 P2 - does a manual trigger write an audit row?",
+      "why": "Settling it requires POST /snapshots/run or POST /integration/run-pipeline as ops.head, which fires the job. Only the 403 guard was walked.",
+      "fixture": "A disposable ingestion database (or a backend pointed at a scratch schema) where a run can be fired and audit_logs diffed before/after. Alternatively an INGESTION_DRY_RUN env flag that exercises the controller path without writing device state.",
+      "currentEvidence": "E2 - S2 directory-wide grep for withAudit|auditLog over apps/backend/src/ingestion returned zero; the grep was shown discriminating, not blind."
+    },
+    {
+      "name": "ING-01 reverse - does restoring a departed device reopen the tickets the departure closed?",
+      "why": "Requires a master sync that flips a device back to DEPLOYED/ACTIVE so restoreDepartures() runs.",
+      "fixture": "A seeded device with an open DeviceDeparture (reason ABSENT_FROM_READ) plus its CLOSED/DEVICE_UNDEPLOYED_CLOSE tickets, and a sync source row that returns it to DEPLOYED. Read at E2 today: device-departure.service.ts:395-420 performs zero ticket writes."
+    },
+    {
+      "name": "ING-03 - the actual cron-silence case (zero master_sync_runs rows in the window)",
+      "why": "Cannot stop the in-process @nestjs/schedule cron, and must not. The zero-row shape was settled by reading the SQL and deriveIngestionAlert instead.",
+      "fixture": "A database with an empty master_sync_runs / snapshot_runs table, or a unit fixture calling lifecycleHealth() and deriveIngestionAlert([], [], 3) against it. The derivation is already pure and testable - ingestion-alert.ts:139."
+    },
+    {
+      "name": "ING-09 - whether the #300 wedge alert renders on BuildHealthPage",
+      "why": "The running backend was not built from the uncommitted health.service.ts / untracked ingestion-alert.ts, so the live payload has no `ingestion` key at all.",
+      "fixture": "Restart the backend on HEAD + working tree, then re-call GET /integration/health as ops.head."
+    },
+    {
+      "name": "SnapshotBanner as actually rendered for WAREHOUSE_MANAGER",
+      "why": "ING-08 is settled at the API layer (403) plus the swallow at SnapshotBanner.tsx:55; the on-screen absence is inferred from the JSX gate, not seen.",
+      "fixture": "One browser walk, cost ~708k TEQ: log in as wm@fsm.test, open any admin page, confirm no element with aria-label='Snapshot status' exists. NO-BROWSER rule blocked it this run."
+    },
+    {
+      "name": "Coverage C5 checks 4/5/6/8 - Soft Inactive Count trend",
+      "why": "The trend surface (apiSoftInactiveTrend, GET /reports/soft-inactive-trend) lives in the reports module, not ingestion. Walking it here would double-price it.",
+      "fixture": "Owned by the reports walker; left as '?' in coverage.json."
+    },
+    {
+      "name": "Zone clamp on any ingestion surface",
+      "why": "Not applicable - every ingestion endpoint measured is OPERATIONS_HEAD-only or ZM/CSM/OH-only and fleet-wide by design; there is no zone-scoped ingestion read to clamp.",
+      "fixture": "n/a"
+    }
+  ],
+  "environmentNotes": [
+    "No timeouts, 502s or resets were observed. Every api-walk call returned a clean 200 or 403 on the first attempt.",
+    "Live data is stale by design of the moment, not by fault of the walk: last successful snapshot 2026-09-01T12:01:32Z, read on 2026-09-02. That staleness IS the ING-03 evidence."
+  ]
+}

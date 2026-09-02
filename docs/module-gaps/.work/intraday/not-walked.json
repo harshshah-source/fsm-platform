@@ -1,0 +1,14 @@
+{
+  "items": [
+    "H1 push-adapter delivery of INTRADAY_DIRECT_ASSIGNED to an SE phone — deliberately not re-priced: shared gap owned by `notifications` (standing rule, policy P11). INTRA-G1 references it.",
+    "H2 manual-assign persistence (check 3) — needs a write + re-GET against a real ESCALATION_REQUIRED row (773 exist). Not walked: out of this walker's assigned four units. Cost ~4k TEQ, 1 record mutated.",
+    "H4 ASSIGNED_DIRECT has no downstream consumer (O3) — needs a read of the system-efficiency report as ZM/OH to confirm only ESCALATION_REQUIRED is counted. Not walked: out of scope for this walk. Cost ~2k TEQ.",
+    "INTRA-G3 refresh behaviour of the Intra-day Queue screen — NEEDS-VERIFY, one browser walk ~708k TEQ.",
+    "INTRA-G2 admin bell / manager alert screen — screen-shaped, not walked; browser only.",
+    "INTRA-G4 per-stop 'I cannot do this one' on mobile — no SE day plan seeded (`/me/tickets` = 0 rows); UNTESTABLE without a fixture.",
+    "INTRA-G5 raw ACCEPTED enum label on manager-assigned rows — screen-shaped; note that the live table holds ZERO ACCEPTED rows (1936 rows are ASSIGNED_DIRECT or ESCALATION_REQUIRED only), so the unlabelled branch may be unreachable in practice — re-check before pricing.",
+    "INTRA-G8 escalation dropped when zone.zonalManagerUserId is null — UNTESTABLE: all seeded zones have a ZM. Fixture: a zone row with zonalManagerUserId NULL.",
+    "INTRA-G9 stale comment at apps/admin/src/api/schedules.ts:436 — E2 is sufficient, no walk needed.",
+    "Zone-clamp fallthrough for a ZONAL_MANAGER with zone_id NULL (intraday-insertion.service.ts:479) — UNTESTABLE with seeded data. Fixture: a ZONAL_MANAGER user row with zone_id NULL."
+  ]
+}

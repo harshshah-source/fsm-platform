@@ -1,0 +1,20 @@
+{
+  "module": "dashboard",
+  "walked": "2026-09-02",
+  "instrument": "api-walk only — NO browser (single shared Chrome, parallel walkers collide)",
+  "budgetExhausted": false,
+  "reason": "Every remaining item is screen-only: it is about paint, a control, or a click, and no API call can settle it. Cost is the same single browser session for all of them if they are batched.",
+  "items": [
+    "ZM Dashboard (/dashboard as zm.north) — Action Required panel: are the 9 cards rendered as inert <li> with no cursor/hover affordance, and do the 5 unwired ones paint the literal 'coming soon'? (DASH-G02, DASH-G05) — one browser walk ~708k TEQ",
+    "ZM Dashboard (/dashboard as zm.north) — 'Snapshot Healthy' green Badge in the DashboardHero action slot, co-rendered with the global SnapshotBanner strip: confirm both are on screen at once, then confirm the badge stays green while the banner is red. (DASH-G04) — needs a FAILED snapshot run FIRST, then one browser walk ~708k TEQ",
+    "CSM Dashboard (/dashboard as csm) — same 'Snapshot Healthy' badge at CentralDashboard.tsx:56-58. (DASH-G04) — folded into the walk above, no extra cost",
+    "ZM Dashboard — Zone Overview table 'Trend' column: confirm it paints an em-dash rather than being hidden. (DASH-G06) — one browser walk ~708k TEQ, LOW value: the null is already E4 from the payload",
+    "ZM Dashboard — Zone Overview table header/toolbar: confirm no export control exists on screen (the docblock claims one is preserved). (DASH-G09, DASH-G08 export half) — one browser walk ~708k TEQ",
+    "CSM / OH Dashboard — ScorecardTable toolbar: same missing export control. (DASH-G09) — folded into the walk above",
+    "CSM Dashboard (/dashboard as csm) — EscalationQueueList: confirm the rows render flat with no company/plant grouping headers and no assign control. (DASH-G10, DASH-G01) — one browser walk ~708k TEQ",
+    "ZM Dashboard — confirm no critical work queue section is painted anywhere on the page, including below the fold and inside any collapsed section. (DASH-G01) — one browser walk ~708k TEQ; this is the ONE screen-only item worth paying for, because it is the module's top gap and only a full-page sweep can prove an absence of paint",
+    "Any admin page — confirm ZoneOperatingModeCard / ZoneOperatingModeTable really appear nowhere. (DASH-G07) — the grep is conclusive for the admin bundle; a browser walk would add nothing and is NOT recommended",
+    "Disclosure sweep on the ZM dashboard (aria-expanded, <details>, chevrons, overflow menus, clickable rows) — NOT CHECKED, because no browser session was opened. Recorded as a failed sweep per S3, not as '0 found'."
+  ],
+  "recommendation": "Batch items 1, 2, 5, 7 and 8 into ONE browser session on /dashboard as zm.north plus one as csm — ~708k TEQ total, not 708k each. Item 2 additionally needs a deliberately failed snapshot run, so schedule it with an ingestion walker."
+}

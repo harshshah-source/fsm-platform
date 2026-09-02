@@ -1,0 +1,109 @@
+{
+  "module": "notifications",
+  "stage": "S3",
+  "clusters": { "CARRIER": ["C1", "C2", "C3", "C4"], "LEDGER": ["C5", "C6", "C7"] },
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "in-app notification list, all SE-relevant events",
+      "cluster": "CARRIER",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "v", "4": "v", "5": "x", "6": "v", "7": "NA", "8": "v", "9": "NA" },
+      "pointers": [
+        "apps/backend/src/notifications/notification.service.ts:90 listForUser, newest-first, unreadCount",
+        "apps/backend/src/notifications/notifications.controller.ts:22 GET /api/notifications",
+        "apps/mobile/src/notifications/NotificationsScreen.tsx:28 SE list screen; HomeScreen.tsx:110 unread badge",
+        "14 notify() call sites emit 12 types: DAY_PLAN_DISPATCHED/OVERRIDDEN/REBALANCED, INTRADAY_*, CROSS_ZONE_*, INSTALL_*, RECOVERY_* (day-plan-notifier.ts:63,73 · install-notifier.ts:54,66 · recovery-notifier.ts:78,95 · intraday-insertion.service.ts:345,467,500 · stranded-work-escalation.service.ts:123 · cross-zone-escalation.service.ts:213,323 · bulk-unassign.service.ts:324)",
+        "check5 x: no SLA-warning, no snapshot-FAILED, no component-approval type in that set — S1 names all three",
+        "S3 walk 2026-09-02: check3 v + check6 v. Per-user isolation and durable read state both reproduced (see gaps.jsonl NOTIF-H1, NOTIF-H4). check1 v is the MOBILE list only — the admin bell at TopBar.tsx:212 is inert and csm/ops.head each hold 3 unread rows they cannot reach: NOTIF-08."
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "push/SMS/WhatsApp delivery when app is closed",
+      "cluster": "CARRIER",
+      "crit": 5,
+      "state": "BACKEND_ONLY",
+      "checks": { "1": "x", "2": "v", "3": "?", "4": "v", "5": "x", "6": "v", "7": "x", "8": "x", "9": "x" },
+      "pointers": [
+        "apps/backend/src/notifications/notification-channel.gateway.ts:39 `return 'UNAVAILABLE'` — the only gateway implementation in the repo",
+        "no FCM/APNs/expo-notifications adapter or dependency anywhere: grep firebase|fcm|apns|expo-notifications over apps/backend/src + apps/mobile/src returns only doc-comments naming the deferral",
+        "apps/backend/prisma/schema.prisma:225 device_tokens table exists; device-token.service.ts:15 upsert; notifications.controller.ts:44 POST /api/notifications/device-token",
+        "check8 x: zero mobile caller for device-token — grep device-token|deviceToken over apps/mobile/src returns nothing",
+        "durable side exists but only for day plan: schema.prisma:2899 DayPlanNotificationOutbox, drained by business-sweep-scheduler.service.ts:275 into the same UNAVAILABLE gateway",
+        "S3 walk: check6 v — POST /api/notifications/device-token as ZM -> 403, as SE -> 400 DEVICE_ID_REQUIRED. The @Roles SERVICE_ENGINEER gate is real. check3 stays ? — untestable while the gateway is dead (NOTIF-01, do not re-walk)."
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "read / read-all state on notifications",
+      "cluster": "CARRIER",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "v", "4": "v", "5": "v", "6": "v", "7": "v", "8": "v", "9": "NA" },
+      "pointers": [
+        "apps/backend/src/notifications/notification.service.ts:115 markRead (owner-scoped updateMany), :127 markAllRead",
+        "apps/backend/src/notifications/notifications.controller.ts:27,33; id validated :36",
+        "apps/mobile/src/notifications/NotificationsScreen.tsx:47 tap marks read; ALL/UNREAD filter :30",
+        "check3 ? by ban — S3 must reload",
+        "S3 walk: check3 v — POST /notifications/3961/read as OH -> 200, independent re-GET shows read:true + readAt set, sibling 3957 untouched, ?unread=true dropped 3 -> 2. check6 v — cross-user mark-read 404s from three different accounts and the target stayed unread."
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "WhatsApp Confirmation first-class for SE Acceptance",
+      "cluster": "CARRIER",
+      "crit": 4,
+      "state": "BACKEND_ONLY",
+      "checks": { "1": "x", "2": "x", "3": "NA", "4": "NA", "5": "v", "6": "NA", "7": "x", "8": "x", "9": "x" },
+      "pointers": [
+        "apps/backend/src/notification.service.ts branch exists: notification.service.ts:158-166",
+        "check8 x: no production caller — grep SE_ACCEPTANCE over apps/backend/src (non-spec) hits only notification.service.ts:11,14,70,158",
+        "gateway returns UNAVAILABLE so the branch would record ATTEMPTED, never SENT (notification-channel.gateway.ts:39)"
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "full audit trail per Ticket",
+      "cluster": "LEDGER",
+      "crit": 4,
+      "state": "BACKEND_ONLY",
+      "checks": { "1": "x", "2": "v", "3": "NA", "4": "v", "5": "v", "6": "v", "7": "NA", "8": "x", "9": "NA" },
+      "pointers": [
+        "apps/backend/src/audit/audit-trail.service.ts:43 merges ticket_events + audit_logs(entityType='ticket'), time-ordered",
+        "apps/backend/src/audit/audit-trail.controller.ts:21 @Roles ZM/CSM/OH; ZM zone-scoped via audit-trail.service.ts:46",
+        "check1/8 x: zero admin consumer — grep audit-trail|auditTrail over apps/admin/src returns nothing; skeleton.md lists no admin UI file and no api-client call",
+        "S3 walk: check6 v — WM 403, SE 403, zm.north on a zone-3 ticket 404 TICKET_NOT_FOUND (zone clamp live), anon 401. check1/8 stay x, sharpened: the Ticket Detail Drawer DOES have Lifecycle + Assignment History tabs, but they read GET /api/tickets/:id (ticket_events only) — the audit_logs kind:ACTION half of the trail reaches no pixel. See NOTIF-03."
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "acted_as_role stamped and readable on delegated-scope actions",
+      "cluster": "LEDGER",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "NA", "4": "NA", "5": "v", "6": "v", "7": "NA", "8": "v", "9": "v" },
+      "pointers": [
+        "written uniformly: apps/backend/src/audit/audit.service.ts:30 auditActor(), :66 actedAsRole persisted in the same tx as the mutation (:60 $transaction)",
+        "column + index exist: schema.prisma:1724 acted_as_role, :1733 @@index([actedAsRole, actingZone, createdAt])",
+        "readable ONLY inside one ticket's trail: audit-trail.service.ts:69",
+        "check8 x: no reader uses that index — no endpoint queries audit_logs by actorId, actedAsRole, actingZone or date range; the CSM-backup report the schema comment (:1725) promises has no query",
+        "CORRECTED at S3 — that check8 x was WRONG. role-backup.service.ts:89 groupBy([actingZone, actedAsRole]) reads the index; GET /api/reports/csm-approval-share (role-backup.controller.ts:60, @Roles OPERATIONS_HEAD) exposes it; apps/admin/src/pages/reports/CsmApprovalSharePage.tsx renders it, routed AppRoutes.tsx:250, nav.ts:215. check1 v, check8 v, check6 v (CSM -> 403, OH -> 200). Walked 2026-09 -> 1 zone, 2026-08 / 2026-07 -> 5 zones, totalActedActions 1..4 so acted-as rows genuinely exist (H5 confirmed); csmActions 0 in every zone walked. What survives is NOT no-reader, it is no ROW-LEVEL reader: the roll-up returns counts and cannot reach an audit row. That is NOTIF-04."
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "snapshot freshness / FAILED-snapshot alert as a notification",
+      "cluster": "LEDGER",
+      "crit": 3,
+      "state": "NOT_STARTED",
+      "checks": { "1": "x", "2": "x", "3": "NA", "4": "x", "5": "x", "6": "NA", "7": "x", "8": "x", "9": "x" },
+      "pointers": [
+        "no notify() in apps/backend/src/snapshots — grep -l notify over that dir returns nothing",
+        "no SNAPSHOT_* type among the 12 emitted types (see C1 pointers)",
+        "not-found checks: route search (skeleton.md, 5 endpoints) · backend search (notify call-site grep) · permission (list is per-user, no role hides it) · terminology (grep snapshot × notif = 0) · other module (snapshots module emits none)"
+      ]
+    }
+  ]
+}

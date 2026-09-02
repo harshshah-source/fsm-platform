@@ -1,0 +1,49 @@
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "claim": "Notification scoping is by JWT subject, not role: the 3 unguarded endpoints cannot read another user's notifications.",
+      "predictedCode": "no-gap",
+      "files": ["apps/backend/src/notifications/notification.service.ts:92", "apps/backend/src/notifications/notification.service.ts:117", "apps/backend/src/notifications/notifications.controller.ts:23"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "markRead's fallback findFirst leaks existence of another user's notification, or AuthGuard is bypassable without @Roles so an unauthenticated caller reaches list().",
+      "altCheck": "read notifications.controller.ts:14-40 — class-level @UseGuards(AuthGuard, RoleGuard); every service call passes user.user_id and every where-clause carries recipientUserId (notification.service.ts:92,117,122,128). Static read says scoped; only a two-token walk settles it."
+    },
+    {
+      "id": "H2",
+      "claim": "No admin screen anywhere consumes GET /api/audit-trail/tickets/:id — an Operations Head cannot reach the audit trail from the product.",
+      "predictedCode": "C4",
+      "files": ["apps/backend/src/audit/audit-trail.controller.ts:20"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "A ticket-detail drawer calls it under a different name (history, timeline, activity) or via a generic fetch helper the grep missed.",
+      "altCheck": "grep -rniE 'audit-trail|auditTrail|/notifications' apps/admin/src = 0 hits; skeleton.md 'admin UI files' and 'admin api client calls' sections are both empty."
+    },
+    {
+      "id": "H3",
+      "claim": "device_tokens is empty in every environment — no client registers a token, so a push adapter would have nothing to send to.",
+      "predictedCode": "C4",
+      "files": ["apps/backend/src/notifications/device-token.service.ts:14", "apps/backend/src/notifications/notifications.controller.ts:44"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "A native/Expo config plugin or an admin-side registration writes tokens outside apps/mobile/src.",
+      "altCheck": "grep -rniE 'device-token|deviceToken|expo-notifications|firebase|fcm|apns' apps/mobile/src apps/mobile/package.json = 0 hits beyond unrelated array .push()."
+    },
+    {
+      "id": "H4",
+      "claim": "Mark-read persists: the SE's read state survives app reload, so the list stays usable across a full day of stops.",
+      "predictedCode": "no-gap",
+      "files": ["apps/backend/src/notifications/notification.service.ts:115", "apps/mobile/src/notifications/NotificationsScreen.tsx:47"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "markRead's swallowed catch (NotificationsScreen.tsx:52) hides a failing write, so the row re-appears unread after reload while the UI showed it read.",
+      "altCheck": "read NotificationsScreen.tsx:47-60 — the catch is empty and load(filter) refetches immediately after, which would surface a failed write; still needs a real save-and-reload."
+    },
+    {
+      "id": "H5",
+      "claim": "Audit rows carry acted_as_role from real delegated sessions, not just nulls — the write path is exercised, so only the read side is missing.",
+      "predictedCode": "O1",
+      "files": ["apps/backend/src/audit/audit.service.ts:30", "apps/backend/src/auth/acting-context.ts:30", "apps/backend/prisma/schema.prisma:1733"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "Most audited controllers hardcode actedAsRole: null instead of using auditActor(), so the column is null even during a genuine CSM-in-ZM-scope session and the whole capability is a facade.",
+      "altCheck": "grep actedAsRole across apps/backend/src — cross-zone.controller.ts:113, devices.controller.ts:131, engineers.controller.ts:254, leave-request.controller.ts:69,85,103 all pass literal null; acting-context.ts:30 is the only place a non-null is derived. A real acted-as session must be walked to see which path wins."
+    }
+  ]
+}

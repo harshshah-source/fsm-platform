@@ -1,0 +1,67 @@
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "claim": "A device returning to ACTIVE does not close the Ticket its INACTIVE state opened, so the reverse of SPINE E-01 is dead and stale tickets accumulate.",
+      "predictedCode": "C2",
+      "files": [
+        "apps/backend/src/ingestion/autoplant/integration-sync.service.ts:165",
+        "apps/backend/src/ingestion/ingestion-alert.ts:36",
+        "apps/backend/src/device-state/device-state.service.ts:71"
+      ],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "The auto-recovery stage already closes them: ingestion-alert.ts:36 names 'auto-recovery' as one of the three stages the #230 gate skips, which implies the stage exists and runs on every ungated pass.",
+      "altCheck": "grep withAudit|auditLog over apps/backend/src/ingestion returned zero, so the recovery path (wherever it lives) writes no audit row naming the closure — the ticket-side evidence cannot be read from this module's tree and needs the tickets module walked."
+    },
+    {
+      "id": "H2",
+      "claim": "GET /api/snapshots/runs has no consumer anywhere — it is a ledger endpoint nobody reads, so run history is invisible to every operator.",
+      "predictedCode": "O1",
+      "files": [
+        "apps/backend/src/ingestion/snapshots.controller.ts:34",
+        "apps/admin/src/api/snapshots.ts:54"
+      ],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "A page fetches it inline with useEffect + fetch rather than via the typed client, which the skeleton scanner would not list.",
+      "altCheck": "grep 'snapshots/runs|apiSnapshotRuns|listRuns' over apps/admin/src returned only /dispatch-runs hits and SnapshotBanner prose — no admin caller in any form, typed or inline."
+    },
+    {
+      "id": "H3",
+      "claim": "stand-down-export.ts is written to disk and read by nobody, so departure reconciliation output never reaches a human.",
+      "predictedCode": "O2",
+      "files": [
+        "apps/backend/src/device-departure/stand-down-export.ts:34",
+        "apps/backend/src/device-departure/device-departure.service.ts:224"
+      ],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "An ops runbook or a cron consumes the export outside the repo, making it a real (if manual) hand-off.",
+      "altCheck": "grep 'departur|stand-down|standDown' over apps/admin/src found only kpiCatalog prose and a BuildHealthPage 'Departed' count column — no screen renders the export or the departures ledger."
+    },
+    {
+      "id": "H4",
+      "claim": "The freshness banner is silent for roles outside ZONAL_MANAGER / CENTRAL_SERVICE_MANAGER / OPERATIONS_HEAD, because /snapshots/latest 403s and the banner swallows the error.",
+      "predictedCode": "C6",
+      "files": [
+        "apps/backend/src/ingestion/snapshots.controller.ts:28",
+        "apps/admin/src/components/SnapshotBanner.tsx:55"
+      ],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "Those three are the only roles with an admin dashboard, so no other role ever renders the banner and the gap is empty.",
+      "altCheck": "SnapshotBanner.tsx:55 catches and renders nothing on any non-2xx, so a 403 is indistinguishable from a healthy pipeline — the failure mode holds for whatever roles turn out to exist."
+    },
+    {
+      "id": "H5",
+      "claim": "If the in-process telemetry cron stops firing, nothing detects it: the reaper only runs inside startRun(), the streak counts runs that happened, and the banner has no absolute-age rule — so freshness ages silently and forever.",
+      "predictedCode": "O2",
+      "files": [
+        "apps/backend/src/ingestion/snapshot-run.service.ts:63",
+        "apps/backend/src/ingestion/ingestion-alert.ts:146",
+        "apps/admin/src/components/SnapshotBanner.tsx:86",
+        "apps/backend/src/ingestion/autoplant/integration-scheduler.service.ts:77"
+      ],
+      "unsettleableBy": "carrier-works",
+      "strongestAlternative": "A separate liveness watchdog (cron-tick claim ledger) already alarms on a missed tick — CronTickClaimService exists and partition maintenance uses it at partition-maintenance.service.ts:71.",
+      "altCheck": "Read partition-maintenance.service.ts:69-73: claimTickOrLog only DEDUPLICATES a tick that did fire across instances; it is a claim, never a missed-tick alarm, and no reader of the claim table surfaces silence."
+    }
+  ]
+}

@@ -1,0 +1,527 @@
+{
+  "module": "admin-config",
+  "label": "Settings, Org Config & Ops Explorer",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 66,
+    "afterBacklog": 83,
+    "capsScored": 11
+  },
+  "gaps": {
+    "total": 13,
+    "priced": 7,
+    "folded": [
+      {
+        "id": "AC-03",
+        "into": "AC-02"
+      }
+    ],
+    "falsified": [
+      "AC-11"
+    ],
+    "needsVerification": [
+      {
+        "id": "AC-02",
+        "what": "Plant deactivation strips day-plan stops, phone never told",
+        "costToSettle": "one walk ~708k TEQ"
+      },
+      {
+        "id": "AC-08",
+        "what": "Reconciliation tool defaults off; on in this dev box",
+        "costToSettle": "one env read on the deployed box"
+      },
+      {
+        "id": "AC-13",
+        "what": "Snapshot carries effective value; fresh-read half unproven",
+        "costToSettle": "one walk ~708k TEQ"
+      }
+    ],
+    "notPriced": [
+      {
+        "id": "AC-12",
+        "what": "NOT A GAP - check 6 clean across 32 config write probes",
+        "reason": "no files[]/lanes[] => NEEDS-SCOPING"
+      }
+    ],
+    "needsYourCall": [
+      "AC-09"
+    ],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 2,
+    "S3": 3,
+    "S2": 3,
+    "S1": 1,
+    "S0": 0
+  },
+  "dangerous": [
+    "AC-01",
+    "AC-04",
+    "AC-06"
+  ],
+  "priced": [
+    {
+      "id": "AC-01",
+      "code": "C2",
+      "sev": "S4",
+      "dangerous": true,
+      "what": "Console-created account has no password, cannot ever log in",
+      "type": "COMPLETE",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/org/users.service.ts:44",
+        "apps/backend/src/auth/credential-seed.ts:21",
+        "apps/backend/src/auth/prisma-user-store.ts:32",
+        "apps/admin/src/pages/settings/sections.tsx:513",
+        "apps/admin/src/pages/LoginPage.tsx:162"
+      ],
+      "lanes": [
+        "api",
+        "domain",
+        "ui",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1054933,
+          "t80": 1947333
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        }
+      ],
+      "score": 14,
+      "multiplier": 1.533,
+      "bundleFactor": 1.24,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 7210142,
+      "p80": 11114243,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "policyClause": "invite/first-password flow is a product decision, not just a hash write; the self-service escape hatch is a dead link too",
+      "hypothesisId": "H-AC-1"
+    },
+    {
+      "id": "AC-04",
+      "code": "P2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "No reader can see what a config dial changed FROM and TO",
+      "type": "FIX",
+      "caps": [
+        "C9"
+      ],
+      "files": [
+        "apps/backend/src/settings/settings.service.ts:224",
+        "apps/backend/src/ops-explorer/dataset-registry.ts:2489",
+        "apps/backend/prisma/schema.prisma:1729",
+        "apps/backend/src/settings/assignment-threshold.service.ts:224"
+      ],
+      "lanes": [
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 733867,
+          "t80": 1354667
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 1124928,
+      "p80": 1846656,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "policyClause": "S3 upgrade: the reader omits the column too, so the fix is two files not one"
+    },
+    {
+      "id": "AC-05",
+      "code": "C6",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "Only OH has any config-audit lens, and it is flag-gated",
+      "type": "NEW",
+      "caps": [
+        "C9"
+      ],
+      "files": [
+        "apps/admin/src/AppRoutes.tsx:329",
+        "apps/backend/src/ops-explorer/ops-explorer-access.ts:28",
+        "apps/backend/src/ops-explorer/dataset-registry.ts:2489",
+        "apps/backend/src/audit/audit-trail.controller.ts:20"
+      ],
+      "lanes": [
+        "api",
+        "ui",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 3088538,
+      "p80": 4863494,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "policyClause": "five not-found checks recorded: no /audit route; audit read API is ticket-scoped only; only lens is the flag-gated Ops Explorer auditLogs dataset"
+    },
+    {
+      "id": "AC-06",
+      "code": "C4",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Backend can disable a user; the console has no control",
+      "type": "COMPLETE",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/org/users.controller.ts:29",
+        "apps/backend/src/org/users.service.ts:71",
+        "apps/admin/src/api/org.ts:105",
+        "apps/admin/src/pages/settings/sections.tsx:580"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 688000,
+          "t80": 1270000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 707000,
+          "t80": 1020000
+        }
+      ],
+      "score": 6,
+      "multiplier": 1,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 2033910,
+      "p80": 3338820,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5
+    },
+    {
+      "id": "AC-07",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "A user's role or zone can never be changed after creation",
+      "type": "NEW",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/org/users.controller.ts:21",
+        "apps/backend/src/org/users.service.ts:39",
+        "apps/admin/src/api/org.ts:106"
+      ],
+      "lanes": [
+        "api",
+        "ui",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 3088538,
+      "p80": 4863494,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 5
+    },
+    {
+      "id": "AC-09",
+      "code": "C6",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "Geography reference reads open to every logged-in role",
+      "type": "SECURITY",
+      "caps": [
+        "C1"
+      ],
+      "files": [
+        "apps/backend/src/org/geography.controller.ts:12"
+      ],
+      "lanes": [
+        "permissions",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 518467,
+          "t80": 748000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 518467,
+          "t80": 748000
+        }
+      ],
+      "score": 2,
+      "multiplier": 0.733,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.3,
+      "size": "XS",
+      "conf": "HIGH",
+      "p50": 1455855,
+      "p80": 2100384,
+      "over3m": false,
+      "needsCall": true,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 2,
+      "crit": 5,
+      "policyClause": "AuthGuard present, RoleGuard absent by comment — reference data, judged benign pending S3",
+      "hypothesisId": "H-AC-2"
+    },
+    {
+      "id": "AC-10",
+      "code": "O2",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Build health page shows ingestion only, not device departures",
+      "type": "COMPLETE",
+      "caps": [
+        "C11"
+      ],
+      "files": [
+        "apps/admin/src/pages/admin/BuildHealthPage.tsx",
+        "apps/backend/src/build-info/build-info.ts"
+      ],
+      "lanes": [
+        "ui",
+        "api",
+        "analysis"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 825600,
+          "t80": 1524000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 848400,
+          "t80": 1224000
+        },
+        {
+          "lane": "analysis",
+          "anchorN": 32,
+          "weakAnchor": false,
+          "t50": 202800,
+          "t80": 247200
+        }
+      ],
+      "score": 9,
+      "multiplier": 1.2,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "LOW",
+      "p50": null,
+      "p80": 4690483,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E1",
+      "reach": 1,
+      "crit": 2
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 22692394,
+    "sumGapP80": 32817574,
+    "packets": 7,
+    "waves": 2,
+    "collisions": 1,
+    "screensTouched": 3,
+    "overheadTeq": 3052000,
+    "tModule50": 25744394,
+    "p50": 32952824,
+    "p80": 65905648,
+    "size": "XL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 0,
+    "primaryDriver": "AC-01",
+    "largestUnknown": "AC-02",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "AC-04",
+      "p80": 1846656,
+      "what": "No reader can see what a config dial changed FROM and TO"
+    },
+    "over3m": [
+      "AC-01",
+      "AC-05",
+      "AC-07",
+      "AC-10"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 5400000,
+    "screensNeedingWork": 6,
+    "bottomUpP50": 32952824,
+    "ratio": 6.1,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

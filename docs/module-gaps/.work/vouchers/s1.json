@@ -1,0 +1,27 @@
+{
+  "module": "vouchers",
+  "persona": {
+    "role": "Service Engineer",
+    "label": "Ravi, Service Engineer",
+    "frequency": "after every field visit with an out-of-pocket cost, offline-first, wants to get paid"
+  },
+  "goals": [
+    "Capture a voucher draft on-site with photo proof even with no signal, and have it submit itself once connectivity returns",
+    "Track a submitted voucher through DRAFT/SUBMITTED/ZONAL_MANAGER_REVIEW/APPROVED/REJECTED/NEEDS_CLARIFICATION/PAID without calling the ZM",
+    "Fix and resubmit a REJECTED or NEEDS_CLARIFICATION voucher using the reviewer's stated reason"
+  ],
+  "scopeNote": "Money path crosses 3 roles / 2 phases: SE mobile (frequent, per-expense) -> ZM admin (queue review, daily-ish) -> OH admin (monthly Finance export + Mark PAID). No one persona owns the full lifecycle end to end - this module is a connected slice, not a single-owner surface, and control gaps at any handoff (SE->ZM, ZM->OH, OH->Finance) are as dangerous as gaps within one role's screen. CONTEXT.md's Expense Voucher entry describes the full 3-role lifecycle incl. Finance export as one concept; PRD lines 264-269 draw the module boundary as SE-only ('Service Engineer - Expense Vouchers'). Recorded, not resolved.",
+  "capabilities": [
+    {"id": "C1", "name": "Offline draft with mandatory photo proof", "src": "persona", "crit": 5, "why": "no offline draft => Ravi cannot file on-site with poor plant connectivity, claim is lost or delayed a full cycle"},
+    {"id": "C2", "name": "Draft-time client_submission_id dedup", "src": "persona", "crit": 5, "why": "without draft-time id, a retried offline sync can double-submit => double reimbursement, a P1 control failure not just a UX bug"},
+    {"id": "C3", "name": "Full status-ladder visibility incl. PAID", "src": "persona", "crit": 4, "why": "without visible PAID/REJECTED state Ravi has no way to know his money moved except phoning the ZM"},
+    {"id": "C4", "name": "Resubmit carries reviewer reason forward", "src": "persona", "crit": 4, "why": "no carried reason => Ravi resubmits blind, claim stalls in a reject/clarify loop indefinitely"},
+    {"id": "C5", "name": "ZM activity cross-check against Ticket at claimed plant/date", "src": "role", "crit": 5, "why": "this is the actual fraud control (CONTEXT.md 164) - without it ZM approves unverifiable claims on trust alone, P1"},
+    {"id": "C6", "name": "Per-category configured limit enforcement, flagged not silently passed", "src": "role", "crit": 4, "why": "no limit flag => any amount clears review unexamined, no reconciliation baseline, P3"},
+    {"id": "C7", "name": "Mandatory reason on Reject/Needs Clarification, captured in audit trail", "src": "role", "crit": 5, "why": "a denial with no recorded reason is unauditable money-adjacent action, P2"},
+    {"id": "C8", "name": "Separation of duties: approver (ZM) != payer (OH)", "src": "spine", "crit": 5, "why": "SPINE E-17: OH holds export+Mark PAID with no un-pay path - if the same actor could approve and pay, two-person control on cash movement collapses, P4"},
+    {"id": "C9", "name": "PAID marking is reconciled against Finance's monthly batch, with no reversal path", "src": "spine", "crit": 3, "why": "SPINE E-17 flags 'no un-pay path' explicitly DANGEROUS - a mis-marked PAID voucher has no correction route back to reconciliation, P3"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 4, "role": 3, "spine": 2, "prd": 0}
+}

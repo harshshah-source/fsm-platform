@@ -1,0 +1,420 @@
+{
+  "module": "verification",
+  "label": "GPS Verification Review",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 69,
+    "afterBacklog": 92,
+    "capsScored": 7
+  },
+  "gaps": {
+    "total": 8,
+    "priced": 6,
+    "folded": [],
+    "falsified": [],
+    "needsVerification": [
+      {
+        "id": "V-01",
+        "what": "Mark auto-recovery on a no-pings row leaves verdict stale",
+        "costToSettle": "one walk ~708k TEQ"
+      },
+      {
+        "id": "V-02",
+        "what": "Fraud-flag list is not zone-scoped; a ZM reads every zone",
+        "costToSettle": "one walk ~708k TEQ"
+      }
+    ],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 3,
+    "S2": 4,
+    "S1": 1,
+    "S0": 0
+  },
+  "dangerous": [],
+  "priced": [
+    {
+      "id": "V-03",
+      "code": "C7",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Fraud-flags endpoint built and tested but no screen calls it",
+      "type": "COMPLETE",
+      "caps": [
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/verification/verification.controller.ts:111",
+        "apps/backend/test/verification-controller.e2e-spec.ts:211",
+        "apps/admin/src/api/verification.ts:1"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 733867,
+          "t80": 1354667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.35,
+      "size": "S",
+      "conf": "MED",
+      "p50": 2169504,
+      "p80": 3561408,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 5
+    },
+    {
+      "id": "V-04",
+      "code": "C7",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "No un-escalate: a wrongly escalated ticket cannot be returned",
+      "type": "NEW",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/backend/src/verification/verification.controller.ts:67",
+        "apps/backend/src/verification/verification.service.ts:115"
+      ],
+      "lanes": [
+        "domain",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 3088538,
+      "p80": 4863494,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 4,
+      "policyClause": "E-10 reverse=none"
+    },
+    {
+      "id": "V-05",
+      "code": "C2",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Escalation reason reaches no report, only the audit log",
+      "type": "INTEGRATION",
+      "caps": [
+        "C4",
+        "C7"
+      ],
+      "files": [
+        "apps/backend/src/verification/verification.service.ts:127",
+        "apps/backend/src/verification/verification.service.ts:135",
+        "apps/backend/src/reports/root-cause-aggregation.service.ts:1"
+      ],
+      "lanes": [
+        "integration",
+        "data",
+        "api"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1169000,
+          "t80": 2156000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 652400,
+          "t80": 716800
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.25,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 4076240,
+      "p80": 6236160,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 4,
+      "hypothesisId": "H3"
+    },
+    {
+      "id": "V-06",
+      "code": "O3",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Countdown shows overdue for windows the sweep will never expire",
+      "type": "FIX",
+      "caps": [
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/verification/verification-query.service.ts:206",
+        "apps/backend/src/verification/verification.service.ts:239",
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:31"
+      ],
+      "lanes": [
+        "domain",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 2161977,
+      "p80": 3404446,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 4,
+      "hypothesisId": "H4"
+    },
+    {
+      "id": "V-07",
+      "code": "P1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Auto-recovery close needs no reason and no confirmation",
+      "type": "UX",
+      "caps": [
+        "C6"
+      ],
+      "files": [
+        "apps/admin/src/pages/verification/VerificationReviewPage.tsx:228",
+        "apps/backend/src/verification/verification.controller.ts:88"
+      ],
+      "lanes": [
+        "ui",
+        "api",
+        "permissions"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 596267,
+          "t80": 1100667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 612733,
+          "t80": 884000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 612733,
+          "t80": 884000
+        }
+      ],
+      "score": 4,
+      "multiplier": 0.867,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "S",
+      "conf": "MED",
+      "p50": 2113210,
+      "p80": 3327654,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 4
+    },
+    {
+      "id": "V-08",
+      "code": "O4",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "Verification module has zero live rows; every walk is fixture-blocked",
+      "type": "DATA",
+      "caps": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7"
+      ],
+      "files": [
+        "apps/backend/src/verification/verification.service.ts:239"
+      ],
+      "lanes": [
+        "data"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 528133,
+          "t80": 580267
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1,
+      "typeModifier": 1.3,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 686573,
+      "p80": 754347,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 3
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 14296042,
+    "sumGapP80": 22147509,
+    "packets": 6,
+    "waves": 2,
+    "collisions": 1,
+    "screensTouched": 1,
+    "overheadTeq": 1891000,
+    "tModule50": 16187042,
+    "p50": 20719414,
+    "p80": 41438828,
+    "size": "L",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 2349533,
+    "primaryDriver": "V-05",
+    "largestUnknown": "V-01",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "V-04",
+      "p80": 4863494,
+      "what": "No un-escalate: a wrongly escalated ticket cannot be returned"
+    },
+    "over3m": [
+      "V-04",
+      "V-05"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 3600000,
+    "screensNeedingWork": 4,
+    "bottomUpP50": 20719414,
+    "ratio": 5.76,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

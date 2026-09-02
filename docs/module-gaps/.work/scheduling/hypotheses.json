@@ -1,0 +1,68 @@
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "claim": "No push/FCM adapter is registered in any environment, so every day-plan notification to an SE dies as UNAVAILABLE and the mobile app, having no polling, shows a stale plan until the SE cold-opens it",
+      "predictedCode": "C2",
+      "files": [
+        "apps/backend/src/notifications/notification-channel.gateway.ts:37",
+        "apps/mobile/src/navigation/screens/HomeScreen.tsx",
+        "apps/backend/src/scheduling/day-plan-notification-outbox.ts:22"
+      ],
+      "unsettleableBy": "carrier-works",
+      "strongestAlternative": "a real FCM/APNs gateway is provided over LoggingChannelGateway in a non-default module wiring, or the mobile app refetches on focus so the missing push costs only latency",
+      "altCheck": "grep -n 'setInterval|refetchInterval|useFocusEffect|pull|refresh' apps/mobile/src/navigation/screens/HomeScreen.tsx -> 0 hits; grep -rn 'UNAVAILABLE' notification-channel.gateway.ts -> the only deliver() implementation returns it unconditionally"
+    },
+    {
+      "id": "H2",
+      "claim": "Deactivating a plant removes stops from an already-dispatched Day Plan without queuing any outbox row, so an SE on the road drives to a plant whose work was cancelled",
+      "predictedCode": "C2",
+      "files": [
+        "apps/backend/src/plant-deactivation/plant-deactivation.service.ts:165",
+        "apps/backend/src/plant-deactivation/plant-deactivation.service.ts:229",
+        "apps/backend/src/scheduling/day-plan-notification-outbox.ts:22"
+      ],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "the SE is told through a different named consumer — an in-app notification written by NotificationService directly, or the day-plan refetch surfacing a removed-row cue",
+      "altCheck": "apps/mobile/src/tickets/dayPlanCues.ts:12-19 is a client-side in-memory set-diff that resets on cold start and explicitly notes 'the server has no added/removed since signal' — no server-side consumer named"
+    },
+    {
+      "id": "H3",
+      "claim": "The whole override surface (SWAP_SE / SPLIT_BATCH / REMOVE_TICKET / REORDER / DEFER_TICKET / REASSIGN / MOVE_TICKET) actually persists and reloads as OVERRIDDEN, making C2+C4 genuinely complete rather than a wired-but-unsaved facade",
+      "predictedCode": "C3",
+      "files": [
+        "apps/backend/src/scheduling/override.service.ts:265",
+        "apps/admin/src/pages/schedules/ScheduleDetailPage.tsx:233",
+        "apps/backend/src/scheduling/day-plan-query.service.ts:30"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "one or more actions returns UNSUPPORTED_ACTION at runtime (the DTO deliberately does not enumerate `action`, so an admin bundle ahead of the API fails only at the service switch)",
+      "altCheck": "grep -n 'UNSUPPORTED_ACTION' over override.service.ts + dto/override-command.dto.ts:33 confirms the exhaustive switch is the only enumeration — the pipe passes any action string through"
+    },
+    {
+      "id": "H4",
+      "claim": "A ZONAL_MANAGER is actually able to reach every write in this module its @Roles line admits — override, intraday add/remove/reorder, holds, dispatch-run — and is refused bulk-unassign",
+      "predictedCode": "C6",
+      "files": [
+        "apps/backend/src/scheduling/schedules.controller.ts:290",
+        "apps/backend/src/scheduling/batches.controller.ts:108",
+        "apps/backend/src/scheduling/intraday-updates.controller.ts:40"
+      ],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "the zone clamp (CurrentScope folding X-Acting-As-Zone) silently empties the ZM's result set on some of these, so the role passes the guard but the operator sees nothing to act on",
+      "altCheck": "schedules.controller.ts:236-243 clamps zoneId to the caller's own zone whatever the body says; zm-schedule-query.service.ts:159 zoneFilter(scope) applies the same clamp on the read — guard and read agree statically, only a walk shows the populated result"
+    },
+    {
+      "id": "H5",
+      "claim": "The Intra-day Queue page degrades in production because its only read loads every MANUAL_ZM_UPDATE audit row ever written before filtering by zone in JS",
+      "predictedCode": "O1",
+      "files": [
+        "apps/backend/src/scheduling/same-day-update.service.ts:103",
+        "apps/admin/src/pages/schedules/IntradayQueuePage.tsx"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "the admin page paginates or date-bounds the request, so the unbounded query is never asked for more than a day of rows",
+      "altCheck": "intraday-updates.controller.ts:34 list() takes no query params at all and listIntradayUpdates(scope) accepts no options — there is no parameter a page could pass"
+    }
+  ]
+}

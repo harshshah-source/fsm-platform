@@ -1,0 +1,137 @@
+{
+  "module": "auth-access",
+  "generated": "2026-09-02",
+  "method": "S2 static source read; S3 api-walk + direct psql read of audit_logs/role_unavailability (no browser). Checks 3/6/8 settled where marked v/x below; remaining ? are screen-only.",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Credential login issues a session",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"v","4":"v","5":"v","6":"v","7":"NA","8":"v","9":"x"},
+      "pointers": [
+        "S3 E4: all 6 seeded logins -> 200 + JWT {user_id, role, zone_id}; token authorises downstream module reads; WM/SE -> 403 on manager surfaces",
+        "S3 E4: audit_logs has 34,758 rows and ZERO login/logout/failed-auth actions (check 9 = x, measured not inferred)",
+        "apps/backend/src/auth/auth.controller.ts:21 POST /api/auth/login @Public",
+        "apps/backend/src/auth/auth.module.ts:12 providers PrismaUserStore (no InMemoryUserStore)",
+        "apps/backend/src/auth/prisma-user-store.ts:18 Postgres users JOIN user_credentials",
+        "apps/backend/src/auth/prisma-user-store.ts:39 dummy-hash on unknown email (timing)",
+        "apps/admin/src/pages/LoginPage.tsx + apps/mobile/src/auth/LoginScreen.tsx (254 loc)",
+        "no audit row on login/logout — static.md:6-8"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Session survives a full working day without silent logout",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"v","3":"v","4":"v","5":"v","6":"v","7":"NA","8":"NA","9":"x"},
+      "pointers": [
+        "S3 E4: login -> refresh rotates the token; replay of the OLD refresh -> 401; logout -> 200 then refresh -> 401. Rotation + revocation genuinely persist.",
+        "S3 E4: the ACCESS token still returns 200 for ~15min after logout — stateless JWT, no revocation list. Normal, but it means logout and 'exit acting' have no server-side effect until expiry.",
+        "apps/backend/src/auth/auth.service.ts:26 single-use refresh rotation + revoke",
+        "apps/backend/src/auth/prisma-refresh-token-store.ts:41 issue/consume/revoke persisted",
+        "apps/admin/src/auth/AuthProvider.tsx:57 proactive refresh ~1min pre-exp; reactive 401 backstop",
+        "apps/backend/src/auth/auth.controller.ts:27 no client sends stable X-Device-Id — one-device rule inert"
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Enter acting-scope for an unavailable ZM's zone",
+      "crit": 5,
+      "state": "BROKEN",
+      "checks": {"1":"v","2":"v","3":"x","4":"x","5":"x","6":"x","7":"x","8":"x","9":"x"},
+      "pointers": [
+        "S3 E4 check 6: role_unavailability is EMPTY (0 rows, direct psql) — every ZM present. csm@fsm.test with X-Acting-As-Zone:2 -> GET /api/dashboard/zone-overview 200 returning ONLY zone 2 (South, ZM 'Alla Lokesh'). Same for zone 1 and zone 5, and same for ops.head@fsm.test. No cascade check runs.",
+        "S3 E4 check 6 (good half): zm.north with X-Acting-As-Zone:2 stays clamped to zone 1; wm@fsm.test -> 403 at the role guard. A ZM cannot widen and a non-acting role cannot act.",
+        "S3 E4 check 4: X-Acting-As-Zone:99 (no such zone) -> 200 empty, no 400. X-Acting-As-Zone:abc -> NaN -> silently ignored, caller sees the pan-India view while believing they are in a zone.",
+        "S3 E4 check 8: the only named consumer, GET /api/reports/csm-approval-share, returns [] for the current month and 0% CSM share for all 5 zones in August.",
+        "apps/backend/src/auth/acting-context.ts:29-31 grants actedAsRole on ANY X-Acting-As-Zone for CSM/OH",
+        "apps/backend/src/auth/acting-context.ts:20-22 comment defers cascade authorization to 'TB6+' — never landed",
+        "apps/backend/src/roles/role-backup.service.ts:64 isRoleUnavailable / :77 currentActingRoleForZone — ZERO callers outside own file",
+        "apps/admin/src/auth/AuthProvider.tsx:135-138 entry is client sessionStorage write only",
+        "apps/admin/src/components/shell/TopBar.tsx:64 enterActing() — client-side zone picker, no server call",
+        "POST /api/role-unavailability (role-backup.controller.ts:41) has no admin caller"
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "Persistent 'Acting as Zonal Manager for [Zone]' banner on every page",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"NA","3":"v","4":"v","5":"v","6":"NA","7":"NA","8":"NA","9":"NA"},
+      "pointers": [
+        "apps/admin/src/components/shell/AppShell.tsx:63-72 banner rendered in ShellFrame above <Outlet/> — global, one component, not per-page",
+        "apps/admin/src/components/shell/AppShell.tsx:69 label reads 'Zone {number}' not the zone NAME",
+        "apps/admin/src/auth/AuthProvider.tsx:26 sessionStorage survives reload"
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "acted_as_role stamped on every action taken while acting",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {"1":"NA","2":"v","3":"x","4":"NA","5":"x","6":"x","7":"NA","8":"x","9":"x"},
+      "pointers": [
+        "S3 E4 PAIRED PROOF, same session, same header. audit_logs #34793: CSM with X-Acting-As-Zone:2 POSTed /api/tickets/f1978011.../auto-recovery-close -> 200, row stored acted_as_role NULL, acting_zone NULL. audit_logs #34794: OH with X-Acting-As-Zone:3 GET /api/ops-explorer/meta -> row stored acted_as_role OPERATIONS_HEAD, acting_zone 3. One ledger, both shapes.",
+        "S3 E4: the acting WRITE was not zone-clamped either — the ticket closed was in zone 1 while the header said zone 2. Acting narrows reads on 5 controllers only; writes still run pan-India off the raw claims.",
+        "S3 E4 ledger census: 34,758 audit rows; acted_as_role non-null on 1 row; acting_zone non-null on 31, of which 30 are BULK_UNASSIGN_ZONE where acting_zone means the TARGET zone of the unassign, not an acting context (bulk-unassign.service.ts:289,367).",
+        "S3 count: 48 auditActor() call sites vs 30 direct tx.auditLog.create sites, 16 of which never mention actedAsRole/actingZone.",
+        "apps/backend/src/audit/audit.service.ts:30-37 auditActor() maps actor->actedAsRole/actingZone; :66-67 persisted in withAudit tx",
+        "24 files call auditActor()",
+        "11 controller sites hardcode actedAsRole:null on real manager writes: engineers/leave-request.controller.ts:69,85,103 · scheduling/intraday-updates.controller.ts:52,94,115 · ticketing/tickets.controller.ts:143 · intraday/intraday-insertion.controller.ts:93 · engineers/engineers.controller.ts:254 · devices/devices.controller.ts:131 · cross-zone/cross-zone.controller.ts:113",
+        "apps/backend/src/roles/role-backup.service.ts:91 report filters actingZone!=null — unstamped acting rows never counted"
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "Clean, deliberate exit from acting-scope back to own role",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"NA","3":"v","4":"v","5":"v","6":"NA","7":"x","8":"NA","9":"x"},
+      "pointers": [
+        "S3 E4: acting is HEADER-ONLY. JWT claims carry {user_id, role, zone_id} and nothing about acting, so there is nothing for an exit to revoke; audit_logs holds ZERO rows whose action matches ACTING/SESSION/LOGIN/LOGOUT. Enter and exit leave no trace and cannot be revoked server-side.",
+        "apps/admin/src/components/shell/AppShell.tsx:71 'Exit acting mode' button",
+        "apps/admin/src/auth/AuthProvider.tsx:136 clears sessionStorage; :130 logout also clears",
+        "no server-side enter/exit event and no audit row for either transition"
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "Role-scoped navigation shows only pages the active (or acted) role permits",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {"1":"v","2":"NA","3":"NA","4":"v","5":"x","6":"?","7":"NA","8":"NA","9":"NA"},
+      "pointers": [
+        "apps/admin/src/auth/RoleRoute.tsx:16 route gate on session.role",
+        "apps/admin/src/components/shell/Sidebar.tsx:22,29 buildNav(role) — role comes from session, never the acted role",
+        "apps/admin/src/components/shell/AppShell.tsx:46 ShellFrame({role}) same source"
+      ]
+    },
+    {
+      "id": "C8",
+      "name": "Auto-activation of acting-scope on ZM heartbeat absence >24h + notification",
+      "crit": 3,
+      "state": "NOT_STARTED",
+      "checks": {"1":"x","2":"x","3":"x","4":"x","5":"x","6":"NA","7":"x","8":"x","9":"x"},
+      "pointers": [
+        "grep heartbeat over apps/backend/src (excl generated) → only ingestion run heartbeats (master-sync-run.service.ts:64)",
+        "no cron/@Cron over role_unavailability; roleUnavailability referenced only in src/roles/",
+        "no admin UI calls POST /api/role-unavailability (apps/admin/src grep: only the csm-approval-share report)"
+      ]
+    },
+    {
+      "id": "C9",
+      "name": "Login rate limiting / brute-force protection",
+      "crit": 3,
+      "state": "NOT_STARTED",
+      "checks": {"1":"NA","2":"x","3":"x","4":"NA","5":"x","6":"x","7":"NA","8":"NA","9":"x"},
+      "pointers": [
+        "S3 E4 check 6: 12 consecutive wrong-password POSTs to /api/auth/login for zm.north -> 12x 401 in 548ms total, latency flat at 31-42ms (no backoff, no growing delay), then the CORRECT password -> 200 immediately. No lockout, no throttle, no attempt counter. Volume kept to 12 deliberately.",
+        "grep Throttler|throttle|rate-limit over apps/backend/src + apps/backend/package.json → 0 hits",
+        "apps/backend/src/auth/auth.controller.ts:17 @Public on the whole controller (login+refresh+logout)",
+        "no failed-attempt counter / lockout column in auth code or schema for user_credentials"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "module": "verification",
+  "spineAvailable": true,
+  "persona": {"role": "zonal_manager", "label": "Zonal Manager", "frequency": "all day, primary"},
+  "goals": [
+    "Triage all GPS auto-verification outcomes for zone (CLOSED/PARTIAL_RECOVERY/FAILED_VERIFICATION incl. fraud-flag) on one page",
+    "Investigate fraud-flagged outcomes (Phase-1 distance delta) and escalate",
+    "Mark recovered devices CLOSED_AUTO_RECOVERY so auto-recovery is never credited as SE repair"
+  ],
+  "scopeNote": "SE has a passive Verification Result screen (mobile, outcome badge only, per-ticket, PRD:490) — receives the same outcome, cannot act on it. Verification Review's PRD stories (37-41) are 100% ZM-voiced; SE is not a second persona hiding here, just a read-only downstream receiver. Separate boundary disagreement (not resolved here): PRD frames escalate as staying inside Verification Review; SPINE E-10 shows escalate action's receiver screens are /tickets and /reports/root-cause, i.e. verification module hands off rather than owning the escalation queue.",
+  "capabilities": [
+    {"id": "C1", "name": "single-page outcome review (CLOSED/PARTIAL_RECOVERY/FAILED_VERIFICATION/fraud) per zone", "src": "persona", "crit": 5, "why": "no single triage view means ZM checks tickets one by one; escalation-worthy failures get missed under daily ticket volume"},
+    {"id": "C2", "name": "PARTIAL_RECOVERY ping-count + 24h-escalation countdown", "src": "persona", "crit": 4, "why": "no visible countdown means recovering devices silently blow through the 24h window with no ZM action"},
+    {"id": "C3", "name": "fraud-flag highlight with Phase-1 distance delta", "src": "persona", "crit": 5, "why": "this is the module's judge-the-work function; without the delta shown ZM cannot separate genuine device failure from a submission-location mismatch — the DANGEROUS class this module exists to catch"},
+    {"id": "C4", "name": "escalate action from a flagged/failed outcome", "src": "spine", "crit": 4, "why": "E-10: escalate route exists (POST /verification/:ticketId/escalate) but no un-escalate reverse — without the forward action working the flagged row is a dead end, no compliance follow-through"},
+    {"id": "C5", "name": "FAILED_VERIFICATION split: no-pings vs fraud-flag reason", "src": "prd", "crit": 3, "why": "unsplit reasons force ZM to open each ticket to learn device-silent vs suspected-fraud, misdirecting escalation effort at volume"},
+    {"id": "C6", "name": "manual mark CLOSED_AUTO_RECOVERY", "src": "persona", "crit": 4, "why": "without this control, an auto-recovered device gets miscredited as an SE repair — corrupts SE scorecards and root-cause reports downstream (E-28)"},
+    {"id": "C7", "name": "outcome tie-back into a finished-work ledger for reports", "src": "spine", "crit": 3, "why": "brief names O1 (no finished-work ledger) and P3 (no reconciliation) as the risk classes here; without a persisted outcome→report link, 'did the work actually happen' can't be audited after the fact — only live-triage exists"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 4, "role": 0, "spine": 2, "prd": 1}
+}

@@ -1,0 +1,40 @@
+{
+  "hypotheses": [
+    {
+      "id": "INV-H1",
+      "claim": "After a WM disputes a shadow-use row, the loser SE's van stock stays decremented — reload the SE van stock and the qty is still short.",
+      "predictedCode": "P3",
+      "files": ["apps/backend/src/inventory/shadow-use.service.ts:77", "apps/backend/src/ticketing/troubleshoot-submission.service.ts:375", "apps/backend/src/inventory/inventory.controller.ts:42"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "a restore runs elsewhere — a cron sweep, a Prisma middleware, or a DB trigger keyed on status DISPUTED",
+      "altCheck": "grep -rn seVanStock apps/backend/src excluding src/generated returns exactly 3 writer sites (inventory.service.ts reads, troubleshoot-submission.service.ts:377 decrement, verification.service.ts:409 rollback upsert); no @Cron in inventory/ or component-request/"
+    },
+    {
+      "id": "INV-H2",
+      "claim": "Marking a request SHIPPED produces no Notification row, so the SE sees it only by opening the Stock tab.",
+      "predictedCode": "C3",
+      "files": ["apps/backend/src/component-request/component-request.service.ts:157", "apps/backend/src/notifications/notification.service.ts:1"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "the notification is emitted generically from the audit write, so any COMPONENT_REQUEST_SHIPPED audit row fans out without a module-level call",
+      "altCheck": "grep -rn NotificationService apps/backend/src excluding generated + notifications/ lists 8 injection sites, none in component-request/ or inventory/; grep auditLog inside apps/backend/src/notifications/*.ts returns nothing"
+    },
+    {
+      "id": "INV-H3",
+      "claim": "PATCH /api/inventory/warehouse-stock is truly closed to a ZONAL_MANAGER — the write is WM/OH only despite the static sheet printing READ_ROLES.",
+      "predictedCode": "none",
+      "files": ["apps/backend/src/inventory/warehouse-stock.controller.ts:48", "apps/backend/src/inventory/warehouse-stock.controller.ts:16"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "the RoleGuard is not actually applied on this handler, so the decorator is decorative",
+      "altCheck": "warehouse-stock.controller.ts:31 carries @UseGuards(AuthGuard, RoleGuard) at class level and :50 reads @Roles(...WRITE_ROLES) where WRITE_ROLES = WAREHOUSE_MANAGER, OPERATIONS_HEAD (:16)"
+    },
+    {
+      "id": "INV-H4",
+      "claim": "Confirming warehouse receipt of a recovered device adds nothing to zone warehouse stock — the stock table is unchanged after the ticket auto-closes.",
+      "predictedCode": "C5",
+      "files": ["apps/backend/src/ticketing/recovery.service.ts:155", "apps/backend/src/inventory/warehouse-stock.service.ts:93"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "recovered units are meant to land in a separate asset/device ledger, not zone warehouse stock, so nothing is missing",
+      "altCheck": "grep -rn inventoryTransaction apps/backend/src excluding generated returns writers only in shadow-use.service.ts, troubleshoot-submission.service.ts and verification.service.ts — recovery.service.ts touches neither that table nor zoneWarehouseStock"
+    }
+  ]
+}

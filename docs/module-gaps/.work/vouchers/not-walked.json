@@ -1,0 +1,40 @@
+{
+  "module": "vouchers",
+  "stage": "S3",
+  "walkedBy": "api-walk only (browser banned this run: single shared Chrome, parallel walkers)",
+  "rootBlocker": {
+    "id": "SE-FIXTURE",
+    "symptom": "POST /api/vouchers as se.north@fsm.test -> 400 {\"code\":\"SE_NOT_FOUND\"}",
+    "cause": "apps/backend/src/auth/auth-fixture-seed.ts:74 seeds a users row for se.north@fsm.test (user_id 22222222-2222-2222-2222-222222222222, role SERVICE_ENGINEER) but no matching engineer_master row. schema.prisma:239 requires engineerId == the SE's user_id; vouchers.service.ts:162 rejects the create when the lookup misses. The same gap explains the primer's 0 rows on GET /me/tickets and GET /me/vouchers.",
+    "classification": "O4 dev-process gap (fixture), NOT a feature-backlog item",
+    "fixture": "one engineer_master row: engineer_id 22222222-2222-2222-2222-222222222222, zone_id 1, coverage_type DEDICATED, daily_capacity 5, is_active true",
+    "unblocks": "every persist (check 3) and every state-transition walk in this module, plus the SE half of E-15/E-16"
+  },
+  "items": [
+    "VCH-01 / H3 — duplicate-submit walk: POST the same voucher body twice with the SAME clientSubmissionId (expect duplicate:true, one row) then with a DIFFERENT id (expect two rows), then re-GET /me/vouchers. Blocked by SE-FIXTURE. Held at E2.",
+    "VCH-05 / H4 — NO_ACTIVITY_LINK warning on a real queue row, read as ZM from GET /vouchers. Blocked by SE-FIXTURE. Held at E2. Narrowed for free: the API accepts plantId/ticketId/vehicleId (controller.ts:36-39), so the omission is mobile-only.",
+    "VCH-02 residual — the same OH approving voucher X and then paying voucher X end to end. The GUARD overlap is walked and E4; only the same-row transition is unreached. Blocked by SE-FIXTURE.",
+    "VCH-03 residual — that a real NEEDS_CLARIFICATION row flips to ZONAL_MANAGER_REVIEW and restamps submittedAt. Route liveness is walked and E4. Blocked by SE-FIXTURE.",
+    "VCH-06 — activityCheck() passing a voucher that cites an unrelated real ticket id. Needs both a voucher and a ticket. Blocked by SE-FIXTURE. Held at E2.",
+    "VCH-08 — no un-pay path. Nothing to walk: absence of an endpoint is settled by the controller read (E2) and confirmed by the route list; the open question is a business decision (needsCall), not a measurement.",
+    "VCH-10 residual — a genuine mid-batch partial commit (some ids APPROVED, one failing mid-loop). The all-miss case is walked and E4. Needs APPROVED rows: blocked by SE-FIXTURE.",
+    "VCH-11 — offline draft behaviour. Requires the mobile app on a device with the network cut; api-walk cannot reach it and the desktop browser cannot either. UNTESTABLE by any instrument available to S3.",
+    "VCH-07 — that the admin subtitle asserts a notification the SE never receives. The backend half is settled by code (vouchers.module.ts:18, unconditional LoggingVoucherNotifier). The rendered subtitle at VoucherReviewPage.tsx:228 is a screen-only claim: NEEDS-VERIFY, one browser walk ~708k TEQ, screen /vouchers as ZM, the header subtitle under the page title.",
+    "VoucherReviewPage disclosure sweep — no hypothesis named a screen, and the queue is empty in this DB, so no sweep was run. DISCL 0/0/0 (not applicable, not skipped)."
+  ],
+  "screenOnlyClaims": [
+    {
+      "claim": "VCH-07 — the ZM review screen tells the reviewer the engineer has been notified",
+      "screen": "http://localhost:5173/vouchers as zm.north@fsm.test",
+      "control": "the page-header subtitle rendered at apps/admin/src/pages/vouchers/VoucherReviewPage.tsx:228",
+      "cost": "one browser walk ~708k TEQ",
+      "note": "the screen also needs at least one queue row to render meaningfully, so SE-FIXTURE gates this too"
+    },
+    {
+      "claim": "VCH-05 — the ZM sees the No-activity-link warning as the normal case on every row",
+      "screen": "http://localhost:5173/vouchers as zm.north@fsm.test",
+      "control": "the per-row warning chip at apps/admin/src/pages/vouchers/VoucherReviewPage.tsx:150",
+      "cost": "one browser walk ~708k TEQ, and only after SE-FIXTURE puts rows in the queue"
+    }
+  ]
+}

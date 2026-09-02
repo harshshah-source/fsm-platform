@@ -1,0 +1,13 @@
+{
+  "items": [
+    "AC-02 / H-AC-3 plant-deactivation -> DayPlanNotificationOutbox hand-off — NOT walked by explicit instruction: a deactivation would corrupt other live walkers' evidence. Fixture: deactivate a plant owning >=1 BatchAssignmentTicket on today's plan, read the outbox, reactivate. Needs an exclusive window on this backend.",
+    "AC-03 plant reactivation restores nothing — same blocker as AC-02; cannot be walked without first deactivating.",
+    "AC-13 / H-AC-4 'is the threshold read fresh per run or cached?' — needs a real threshold write plus a dispatch run. Forbidden this walk (shared dial). ~8k TEQ in an exclusive window.",
+    "AC-10 / C11 Build Health page — never opened; its 'ingestion only, no device-departure' claim stays E1/LOW. Cost: read BuildHealthPage.tsx + one GET on its endpoint, ~3k TEQ.",
+    "AC-07 role/zone immutability after user creation — backend has no PATCH for role or zone (only status); not probed live because it would need a second disposable account. Stays E2.",
+    "Check 3 (persist) on every config dial except users — no write was made to plants, zones, SLA rules, tiers, scoring weights, common kit or SE coverage, by instruction. Each needs one write + one re-GET in an exclusive window, ~2k TEQ per dial.",
+    "Check 8 (downstream) for C1/C2/C3/C4/C5 — which consumer actually reads each dial was not traced live; only C6's threshold was proven to reach a dispatch run's configSnapshot.",
+    "Screen-only claims, all NEEDS-VERIFY at ~708k TEQ for one browser walk: (a) Settings -> Users page, whether the create form warns that the account has no password (LoginPage 'Forgot Password?' anchor is already E2-dead); (b) Settings -> Users row, whether any overflow menu hides a disable control that api/org.ts does not expose; (c) Ops Explorer page, whether the auditLogs dataset is offered in its dataset picker to an OH; (d) AssignmentThresholdPage as a ZM, whether canEdit:false renders read-only rather than hiding the control as the controller docstring claims.",
+    "AC-08 production value of OPS_EXPLORER_ENABLED — unreadable from this box; off-by-default confirmed in source only."
+  ]
+}

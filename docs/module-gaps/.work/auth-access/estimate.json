@@ -1,0 +1,593 @@
+{
+  "module": "auth-access",
+  "label": "Auth, Roles & Acting-Scope",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 50,
+    "afterBacklog": 67,
+    "capsScored": 9
+  },
+  "gaps": {
+    "total": 11,
+    "priced": 8,
+    "folded": [
+      {
+        "id": "AA-03",
+        "into": "AA-02"
+      }
+    ],
+    "falsified": [],
+    "needsVerification": [
+      {
+        "id": "AA-08",
+        "what": "Sidebar keeps own-role menu while acting as zone manager",
+        "costToSettle": "one browser walk ~708k TEQ: log in as csm@fsm.test, enter acting mode from the TopBar zone picker, screenshot the Sidebar and the AppShell banner on the Manager Dashboard. Rendered nav is the only thing that settles it - the api instrument cannot see a menu."
+      },
+      {
+        "id": "AA-09",
+        "what": "Acting banner shows a zone number, not the name",
+        "costToSettle": "same single browser walk as AA-08 - the AppShell banner on any admin page while acting. The backend already returns zoneName (South) on dashboard/zone-overview, so the name is available to render."
+      }
+    ],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 0,
+    "S3": 4,
+    "S2": 4,
+    "S1": 2,
+    "S0": 0
+  },
+  "dangerous": [
+    "AA-01",
+    "AA-02",
+    "AA-04",
+    "AA-11"
+  ],
+  "priced": [
+    {
+      "id": "AA-01",
+      "code": "P4",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Any CSM or Ops Head can act in any zone while that ZM is present",
+      "type": "SECURITY",
+      "caps": [
+        "C3"
+      ],
+      "files": [
+        "apps/backend/src/auth/acting-context.ts:29",
+        "apps/backend/src/common/manager-scope.ts:31",
+        "apps/backend/src/roles/role-backup.service.ts:64",
+        "apps/backend/src/roles/role-backup.service.ts:77",
+        "apps/admin/src/components/shell/TopBar.tsx:64"
+      ],
+      "lanes": [
+        "permissions",
+        "api",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1131200,
+          "t80": 1632000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1131200,
+          "t80": 1632000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1131200,
+          "t80": 1632000
+        }
+      ],
+      "score": 15,
+      "multiplier": 1.6,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.3,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 5117549,
+      "p80": 7383168,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "policyClause": "CONTEXT.md Decision 15 backup cascade ZM->CSM->OH gated on role_unavailability",
+      "hypothesisId": "H1"
+    },
+    {
+      "id": "AA-02",
+      "code": "P2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Acting-scope writes recorded as if the manager did them himself",
+      "type": "FIX",
+      "caps": [
+        "C5"
+      ],
+      "files": [
+        "apps/backend/src/ticketing/tickets.controller.ts:143",
+        "apps/backend/src/engineers/leave-request.controller.ts:69",
+        "apps/backend/src/engineers/leave-request.controller.ts:85",
+        "apps/backend/src/engineers/leave-request.controller.ts:103",
+        "apps/backend/src/scheduling/intraday-updates.controller.ts:52",
+        "apps/backend/src/scheduling/intraday-updates.controller.ts:94",
+        "apps/backend/src/scheduling/intraday-updates.controller.ts:115",
+        "apps/backend/src/intraday/intraday-insertion.controller.ts:93",
+        "apps/backend/src/engineers/engineers.controller.ts:254",
+        "apps/backend/src/devices/devices.controller.ts:131",
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:113",
+        "apps/backend/src/scheduling/bulk-unassign.service.ts:289"
+      ],
+      "lanes": [
+        "api",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1496578,
+      "p80": 2159136,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "policyClause": "acted_as_role stamped on every acting action; two drop mechanisms - 11 controller literal nulls, plus 16 of 30 direct tx.auditLog.create sites that never mention the acting columns",
+      "hypothesisId": "H2"
+    },
+    {
+      "id": "AA-04",
+      "code": "C1",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Login has no rate limit, no lockout, no attempt counter",
+      "type": "SECURITY",
+      "caps": [
+        "C9"
+      ],
+      "files": [
+        "apps/backend/src/auth/auth.controller.ts:17",
+        "apps/backend/src/auth/auth.controller.ts:21",
+        "apps/backend/src/auth/auth.service.ts:17",
+        "apps/backend/package.json"
+      ],
+      "lanes": [
+        "permissions",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.3,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 2117605,
+      "p80": 3055104,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 3,
+      "policyClause": "credential store is the single gate for all five roles",
+      "hypothesisId": "H4"
+    },
+    {
+      "id": "AA-05",
+      "code": "C1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "No page to mark a manager unavailable; cascade table only writable by API",
+      "type": "NEW",
+      "caps": [
+        "C3",
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/roles/role-backup.controller.ts:41",
+        "apps/admin/src/components/shell/nav.ts:215"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 963200,
+          "t80": 1778000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.08,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "MED",
+      "p50": 2109240,
+      "p80": 3462480,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 5,
+      "policyClause": "C4 asymmetry: backend endpoint with no admin surface"
+    },
+    {
+      "id": "AA-06",
+      "code": "C1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Nobody is told when a manager goes missing for a day",
+      "type": "NEW",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/roles/role-backup.service.ts:64",
+        "apps/backend/src/roles/role-backup.controller.ts:41"
+      ],
+      "lanes": [
+        "domain",
+        "api",
+        "integration",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1225467,
+          "t80": 1768000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1225467,
+          "t80": 1768000
+        },
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1447333,
+          "t80": 2669333
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 807733,
+          "t80": 887467
+        }
+      ],
+      "score": 17,
+      "multiplier": 1.733,
+      "bundleFactor": 1.24,
+      "typeModifier": 1,
+      "size": "L",
+      "conf": "MED",
+      "p50": 5835440,
+      "p80": 8795072,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 3,
+      "policyClause": "CONTEXT.md Decision 15 >24h heartbeat auto-activation + up/down-layer notification"
+    },
+    {
+      "id": "AA-07",
+      "code": "P2",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Entering and leaving acting mode leaves no trace anywhere",
+      "type": "NEW",
+      "caps": [
+        "C3",
+        "C6"
+      ],
+      "files": [
+        "apps/admin/src/auth/AuthProvider.tsx:135",
+        "apps/admin/src/components/shell/AppShell.tsx:71",
+        "apps/backend/src/auth/auth.service.ts:54",
+        "apps/backend/src/audit/audit.service.ts:52"
+      ],
+      "lanes": [
+        "api",
+        "ui",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.16,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 3088538,
+      "p80": 4863494,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 4,
+      "policyClause": "acting-scope enter/exit is a state transition with no ledger",
+      "hypothesisId": "H5"
+    },
+    {
+      "id": "AA-10",
+      "code": "P2",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "No audit row for login, logout or failed sign-in",
+      "type": "SECURITY",
+      "caps": [
+        "C1",
+        "C2"
+      ],
+      "files": [
+        "apps/backend/src/auth/auth.service.ts:17",
+        "apps/backend/src/auth/auth.service.ts:44",
+        "apps/backend/src/audit/audit.service.ts:52"
+      ],
+      "lanes": [
+        "api",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 707000,
+          "t80": 1020000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 707000,
+          "t80": 1020000
+        }
+      ],
+      "score": 6,
+      "multiplier": 1,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.3,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 1985256,
+      "p80": 2864160,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "policyClause": "static.md: 0 of 6 auth endpoints write an audit row"
+    },
+    {
+      "id": "AA-11",
+      "code": "C5",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "Acting narrows five read screens; every write stays pan-India",
+      "type": "FIX",
+      "caps": [
+        "C3",
+        "C5"
+      ],
+      "files": [
+        "apps/backend/src/common/decorators/current-scope.decorator.ts:16",
+        "apps/backend/src/common/manager-scope.ts:31",
+        "apps/backend/src/ticketing/tickets.controller.ts:43",
+        "apps/backend/src/ticketing/tickets.controller.ts:137",
+        "apps/backend/src/dashboard/dashboard.controller.ts:39",
+        "apps/backend/src/reports/reports.controller.ts:108",
+        "apps/backend/src/scheduling/schedules.controller.ts:523",
+        "apps/backend/src/scheduling/batches.controller.ts",
+        "apps/backend/src/scheduling/dispatch-today.controller.ts"
+      ],
+      "lanes": [
+        "api",
+        "permissions",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1131200,
+          "t80": 1632000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1131200,
+          "t80": 1632000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1131200,
+          "t80": 1632000
+        }
+      ],
+      "score": 15,
+      "multiplier": 1.6,
+      "bundleFactor": 1.16,
+      "typeModifier": 0.7,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 2755603,
+      "p80": 3975552,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "policyClause": "CONTEXT.md Decision 15 - acting means standing in for that zone ZM, so the acting zone must bound reads AND writes",
+      "hypothesisId": "H1"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 24505809,
+    "sumGapP80": 36558166,
+    "packets": 8,
+    "waves": 6,
+    "collisions": 5,
+    "screensTouched": 0,
+    "overheadTeq": 2088000,
+    "tModule50": 26593809,
+    "p50": 34040076,
+    "p80": 68080152,
+    "size": "XL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 2255067,
+    "primaryDriver": "AA-06",
+    "largestUnknown": "AA-08",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "AA-02",
+      "p80": 2159136,
+      "what": "Acting-scope writes recorded as if the manager did them himself"
+    },
+    "over3m": [
+      "AA-01",
+      "AA-06",
+      "AA-07"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 1800000,
+    "screensNeedingWork": 2,
+    "bottomUpP50": 34040076,
+    "ratio": 18.91,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

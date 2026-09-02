@@ -1,0 +1,12 @@
+{
+  "items": [
+    "ENG-H2 run-time effect — whether plannerBias actually flips a choice. Needs: one se_planner cell on TODAY's IST date for a plant with an open ticket, then POST /schedules/dispatch-run for that zone, then read plannerBias on the decision trace. Not walked: a dispatch run mutates the shared dev board while other walkers are live.",
+    "ENG-H3 SE self-flag persistence (mobile AvailabilityScreen round-trip) — UNTESTABLE, not skipped. se.north@fsm.test (user 22222222-2222-2222-2222-222222222222) has no engineer_master row, so POST /engineers/<self>/availability returns 404 SE_NOT_FOUND and GET /me/availability returns 0 items. Fixture that would settle it is named in ENG-G7.",
+    "ENG-H5 pixel-level rendering of the van-stock drawer — the ALTERNATIVE is refuted at file:line (SeManagementPage.tsx:270-272 renders detail.vanStock with an empty state and a .map), so there is no C4 asymmetry and no gap. What is unproven is only that the drawer is reachable and legible on screen. Cost: one browser walk ~708k TEQ. Also: every seeded engineer probed returned vanStock: [], so the non-empty rendering has no data behind it either.",
+    "Admin screens — NO BROWSER for this walk by instruction. SeManagementPage, SeManagementDirectoryPage, LeaveRequestsPage and PlannerPage were read as source only. No DISCL sweep was performed; check 1 in coverage.json is a static read throughout.",
+    "Mobile screens — AvailabilityScreen, LeaveRequestScreen, LeaveRequestFormScreen, ProfileScreen. No emulator in this environment and the SE persona is not an engineer (ENG-G7), so neither half could be exercised.",
+    "POST /engineers (create SE) and the coverage add/remove pair — not walked. Both write real rows (a create mints a user), and the cross-zone question they would answer is already settled by the PATCH and status probes, which were idempotent and returned 404 out of zone.",
+    "ENG-G5 (free-text availability reason, S1) — not walked. Nothing about it is settleable by a call: the field exists and persists, the gap is that it is not enumerated. Stays E2.",
+    "The stranded-work escalation consequence of setAvailability (#288, se-availability.service.ts:165) — every window written in this walk started 2026-10-05, so strandsWork() returned false by design and the escalation branch never fired. Settling it needs a window covering today on an engineer with committed work, which would disturb the live board."
+  ]
+}

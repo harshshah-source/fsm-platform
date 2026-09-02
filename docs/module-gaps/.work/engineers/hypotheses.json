@@ -1,0 +1,73 @@
+{
+  "hypotheses": [
+    {
+      "id": "ENG-H1",
+      "claim": "A ZM flipping an SE to ON_LEAVE/SOFT_UNAVAILABLE removes that SE from the very next Recommender run with no rebuild, refresh or cron in between.",
+      "predictedCode": "candidate scoring calls currentStatusMany(seIds, now) against the live se_availability table inside the run, so a row written a second earlier is already in force",
+      "files": [
+        "apps/backend/src/engineers/se-availability.service.ts:136",
+        "apps/backend/src/recommender/recommender.service.ts:1035",
+        "apps/backend/src/recommender/candidate-readiness.ts:56",
+        "apps/backend/src/scheduling/candidate-query.service.ts:122"
+      ],
+      "unsettleableBy": "carrier-works",
+      "strongestAlternative": "The run memoises availability per-run (recommender.service.ts:531 availabilityBySe cache) or reads a materialised candidate pool, so a mid-run or post-plan flip is not seen until the next batch.",
+      "altCheck": "grep -rn 'materialized|MATERIALIZED|REFRESH|candidatePool|candidate_pool' apps/backend/src/recommender apps/backend/src/scheduling apps/backend/prisma/schema.prisma  -> no hit; the only cache is the in-run Map at recommender.service.ts:531, rebuilt per run at :624"
+    },
+    {
+      "id": "ENG-H2",
+      "claim": "A planner cell dropped in the admin grid biases tomorrow's batch run toward that SE for that plant.",
+      "predictedCode": "plannerForDate(zoneId, targetDay) loads plant_id -> se_ids and the tier pass prefers a planner-named SE over the top-scored one, stamping plannerBias on the trace",
+      "files": [
+        "apps/backend/src/planner/se-planner.service.ts:44",
+        "apps/backend/src/recommender/recommender.service.ts:529",
+        "apps/backend/src/recommender/recommender.service.ts:646",
+        "apps/backend/src/recommender/recommender.service.ts:862"
+      ],
+      "unsettleableBy": "carrier-works",
+      "strongestAlternative": "plannerForDate keys on a zone/date pair the admin grid never actually writes (wrong date normalisation, IST vs UTC), so the map is empty at run time and the bias is dead code.",
+      "altCheck": "grep -n 'plannedDate|istIsoDate|addIsoDays' apps/admin/src/pages/planner/PlannerPage.tsx apps/backend/src/planner/se-planner.service.ts -> both sides speak IST calendar dates and prisma schema.prisma:773 uniquely keys (seId, plantId, plannedDate); cannot settle the run-time join without executing a run"
+    },
+    {
+      "id": "ENG-H3",
+      "claim": "An SE self-flagging SOFT_UNAVAILABLE on the mobile Profile panel persists and is still showing after app restart.",
+      "predictedCode": "POST /engineers/:seId/availability with the caller's own id, then GET /me/availability reads the same rows back",
+      "files": [
+        "apps/mobile/src/navigation/screens/AvailabilityScreen.tsx:28",
+        "apps/mobile/src/api/client.ts:504",
+        "apps/mobile/src/api/client.ts:488",
+        "apps/backend/src/engineers/se-availability.service.ts:71"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "The write is accepted but listWindows' 10-row cap (se-availability.service.ts:71) or the screen's own local state hides the new window on reload, so the SE believes they are flagged when the board shows otherwise.",
+      "altCheck": "grep -rn 'useState|refetch|apiGetMyAvailability' apps/mobile/src/navigation/screens/AvailabilityScreen.tsx -> the screen refetches, but no static read proves a round-trip through Postgres"
+    },
+    {
+      "id": "ENG-H4",
+      "claim": "A Zonal Manager cannot approve a leave request for an SE outside their own zone, and the backend refuses it rather than the UI merely hiding it.",
+      "predictedCode": "isManagerFor compares Number(seZoneId) against actor.zoneId and returns FORBIDDEN before any write",
+      "files": [
+        "apps/backend/src/engineers/leave-request.service.ts:93",
+        "apps/backend/src/engineers/leave-request.service.ts:188",
+        "apps/backend/src/engineers/se-availability.service.ts:132"
+      ],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "actor.zoneId arrives null for a ZM whose token omits the claim, and both guards treat null as unscoped (leave-request.service.ts:190 'zoneId null = unscoped'), silently promoting every ZM to cross-zone approver.",
+      "altCheck": "grep -n 'zoneId' apps/backend/src/auth/token.service.ts apps/backend/src/engineers/leave-request.controller.ts -> the claim is threaded, but whether it is ever null in a real ZM token needs a live call"
+    },
+    {
+      "id": "ENG-H5",
+      "claim": "The admin SE roster actually shows an SE's van stock lines, not just the boolean kit-complete badge.",
+      "predictedCode": "the detail read returns vanStock[] and a drawer or row expansion renders the items and their missing common-kit parts",
+      "files": [
+        "apps/backend/src/engineers/engineers-query.service.ts:157",
+        "apps/backend/src/engineers/engineers-query.service.ts:182",
+        "apps/admin/src/pages/engineers/SeManagementPage.tsx:150",
+        "apps/admin/src/pages/engineers/SeManagementDirectoryPage.tsx:210"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "vanStock is returned by GET /engineers/:seId but no admin surface consumes it — the roster shows only kitComplete, so a ZM sees that a van is short without ever seeing what is short. That is C4 asymmetry, and it changes the price from zero to a real drawer build.",
+      "altCheck": "grep -rn 'vanStock' apps/admin/src -> no hit outside the type declarations reached from api/engineers.ts; a rendered drawer would have to name the field"
+    }
+  ]
+}

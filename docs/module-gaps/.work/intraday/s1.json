@@ -1,0 +1,54 @@
+{
+  "module": "intraday",
+  "spineAvailable": true,
+  "persona": {
+    "role": "ZonalManager",
+    "label": "Zonal Manager",
+    "frequency": "each CRITICAL/HIGH_CRITICAL qualifying event during shift; ad hoc for manual same-day plan edits"
+  },
+  "goals": [
+    "Watch each system-triggered CRITICAL/HIGH_CRITICAL insertion resolve (which SE got it, or that it escalated) without a pre-commit veto step",
+    "Resolve ESCALATION_REQUIRED tickets (no capacity-eligible SE) via explicit manual assignment, capacity override being a deliberate human act",
+    "Make manual same-day Day Plan edits (add/remove/reorder) mid-shift, with an ON_SITE conflict warning before removing a ticket the SE is physically at"
+  ],
+  "scopeNote": "PRD lines 111-120/225-231 and SE App-Flow 541-547 (Flow 4, Accept/Decline) describe a mechanic RETIRED by CONTEXT.md Decision #21 (#268, ratified 2026-08-20, superseding Decision #16): CRITICAL/HIGH_CRITICAL insertions are now assigned DIRECTLY, no offer/accept/decline/timeout/retry. Mobile Accept/Decline screen + /me/intraday-insertions endpoints deleted (#279) - so 'Mobile intra-day insertion screen' named in the task input does not exist as a target; do not build against PRD 111-120/225-231/541-547. CONTEXT.md is authority #1 per CLAUDE.md so this yardstick follows the retirement, not the PRD. SPINE.md E-20 flags the deleted accept/decline path as BROKEN/C2 from a doc-blind evidence read - that verdict is WAI (intentional retirement), not a gap; the real hand-off risk moved to the informational notify step (see C2 below) and to whether a post-assignment reverse path exists at all (see C4, unconfirmed).",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Direct-assignment resolution feed",
+      "src": "persona",
+      "crit": 5,
+      "why": "ZM has no pre-commit veto anymore (direct assign); if she can't see who a CRITICAL ticket landed on right after the fact, she finds out from the field instead of the dashboard"
+    },
+    {
+      "id": "C2",
+      "name": "SE informational notify completes the hand-off",
+      "src": "spine",
+      "crit": 5,
+      "why": "SE Acceptance retired means there is no confirmation loop at all - the informational notify (issue #268: 'Notify the SE via the spine, informational not a request') IS the entire hand-off; SPINE E-19 rides the same broken push seam as E-05 (in-app only), so a silent-notify failure has no accept-step left to catch it"
+    },
+    {
+      "id": "C3",
+      "name": "Escalation queue + explicit manual assign",
+      "src": "spine",
+      "crit": 5,
+      "why": "system path never self-authorises overload (Q2); when every candidate is at daily_capacity or none exist, escalation to ZM is the only path left - a broken or missing queue/assign here means a CRITICAL ticket sits unassigned with no human catch"
+    },
+    {
+      "id": "C4",
+      "name": "Reverse path when a directly-assigned SE can't actually do the stop",
+      "src": "role",
+      "crit": 4,
+      "why": "direct assignment removed the SE veto up front, but field reality (breakdown, wrong terrain, already overloaded) still happens after landing; no Decision text names the reverse mechanism for this specific case post-#268 - nearest analogs are the general override UI or a manual same-day update (G2/C3), unconfirmed for this path - flagged as gap-to-verify, not asserted-broken"
+    },
+    {
+      "id": "C5",
+      "name": "Manual same-day plan edit with ON_SITE conflict warning",
+      "src": "persona",
+      "crit": 4,
+      "why": "ZM's only lever for field-condition changes short of full reassignment; without the conflict warning she can silently yank a ticket out from under a physically-present SE, causing a wasted trip"
+    }
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 2, "role": 1, "spine": 2, "prd": 0}
+}

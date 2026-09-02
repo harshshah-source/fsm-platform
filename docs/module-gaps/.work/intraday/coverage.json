@@ -1,0 +1,128 @@
+{
+  "module": "intraday",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Direct-assignment resolution feed",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "v",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/admin/src/pages/schedules/IntradayQueuePage.tsx:148 \u2014 useEffect(load, []) mount-only, no poll/refresh control",
+        "apps/backend/src/intraday/intraday-insertion.service.ts:478 listForScope \u2014 zone-scoped read, all statuses",
+        "apps/backend/src/intraday/intraday-insertion.service.ts:288 currentAssigneesFor \u2014 who holds the ticket now (#288)",
+        "apps/admin/src/pages/schedules/IntradayQueuePage.tsx:74-77,105 INSERTION_LABEL/TONE map only 2 of 6 statuses",
+        "audit: apps/backend/src/scheduling/override.service.ts:727 withAudit inside assignTicket",
+        "S3 walk 2026-09-02: check6 v - SE 403, WM 403 on GET /intraday-insertions; zm.north 552 rows zone1 only, zm.south 159 zone2 only, CSM/OH 1936 across zones 1-5. check3 still ? - no write walked (H2 manual-assign persist not walked)."
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "SE informational notify completes the hand-off",
+      "crit": 5,
+      "state": "BROKEN",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "NA",
+        "5": "x",
+        "6": "v",
+        "7": "v",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/intraday/intraday-insertion.service.ts:343,465 notify() post-commit, deliveryModel GENERAL",
+        "apps/backend/src/notifications/notification-channel.gateway.ts:39 LoggingChannelGateway returns UNAVAILABLE for every external channel",
+        "apps/backend/src/notifications/notifications.module.ts:18 LoggingChannelGateway is the ONLY binding in the repo \u2014 no FCM/APNs/WhatsApp adapter exists",
+        "apps/mobile/src/notifications/NotificationsScreen.tsx:44 load on mount only \u2014 no interval, no push, no nav badge",
+        "apps/mobile/src/components/kit/TicketCard.tsx:37 'Newly Added' badge \u2014 visible only once the SE reopens the Day Plan",
+        "S3 walk 2026-09-02: check6 v - the SE is refused on all six intraday routes (403), which is correct after the S21 retirement; the SE has no lens here by design. check8 stays x - push adapter, owned and priced by notifications."
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Escalation queue + explicit manual assign",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "v",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/intraday/intraday-insertion.controller.ts:71,79 available-ses + manual-assign (scheduling's C10, priced HERE)",
+        "apps/admin/src/pages/schedules/IntradayQueuePage.tsx:290 Assign button; :275 stranded rows route to the day plan instead",
+        "apps/admin/src/pages/schedules/IntradayManualAssignModal.tsx (117 lines) \u2014 candidate rows per #277",
+        "apps/backend/src/intraday/intraday-insertion.service.ts:494 escalateToZm returns silently when zone.zonalManagerUserId is null",
+        "downstream: apps/backend/src/reports/system-efficiency-aggregation.service.ts:229-230 counts ESCALATION_REQUIRED into auto_escalations",
+        "S3 walk 2026-09-02: check6 v - manager-only (SE/WM 403) and cross-zone WRITE refused: zm.south POST /intraday-insertions/1932/manual-assign on a zone-1 row -> 404. Cross-zone READ GET :id/available-ses returns 200 [] rather than 404 - no leak, but 'not your zone' is indistinguishable from 'nobody available'."
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "Reverse path when a directly-assigned SE can't do the stop",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "x",
+        "6": "?",
+        "7": "v",
+        "8": "v",
+        "9": "?"
+      },
+      "pointers": [
+        "apps/mobile/src/navigation/screens/AvailabilityScreen.tsx:65,88 SE sets own SOFT_UNAVAILABLE",
+        "apps/backend/src/engineers/se-availability.service.ts:165 strandsWork -> escalateStrandedWork",
+        "apps/backend/src/intraday/stranded-work-escalation.service.ts:57 escalate-only (#282 R4), one row per remaining ticket",
+        "granularity: whole remaining day only \u2014 no per-stop 'I cannot do this one' anywhere (grep: no decline/refuse route survives #279)"
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "Manual same-day plan edit with ON_SITE conflict warning",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "served by the day-plan door, not this module's routes: apps/admin/src/pages/schedules/ScheduleDetailPage.tsx + POST /batches/:id/override",
+        "apps/backend/src/scheduling/override.service.ts:285-288 CONFLICT_ON_SITE gate; confirm+reason audited at :290",
+        "apps/backend/src/scheduling/scheduling.module.ts:98 PrismaSoftStateConflictPort bound \u2014 the gate is LIVE, not a no-op",
+        "apps/admin/src/api/schedules.ts:436 comment 'reads empty until soft_states exists' is STALE",
+        "apps/backend/src/scheduling/intraday-updates.controller.ts:40,75,99 add/remove/reorder have ZERO callers in admin or mobile",
+        "S3 walk 2026-09-02: check6 v - POST /intraday-updates/add|remove|reorder are LIVE (400 own-validation as zm.north, 403 as SE). check8 x - GET /intraday-updates returns 200 [] and no caller exists; the routes have never been exercised in this DB."
+      ]
+    }
+  ]
+}

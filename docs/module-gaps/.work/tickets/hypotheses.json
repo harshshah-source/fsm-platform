@@ -1,0 +1,49 @@
+{
+  "hypotheses": [
+    {
+      "id": "H-TKT-1",
+      "claim": "A failed troubleshoot submit that the SE retries creates TWO submission rows, because the mobile form mints a fresh clientSubmissionId on every tap instead of once per form session.",
+      "predictedCode": "C5",
+      "files": ["apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:56", "apps/backend/src/ticketing/troubleshoot-submission.service.ts:113"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "The id is stabilised outside the handler — a useState/useRef/useMemo seed, or the api client itself dedupes retries.",
+      "altCheck": "grep -n 'clientSubmissionId|randomUUID|useRef|useMemo' apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx — the only hit is line 56, inline in handleSubmit; no useRef/useMemo in the file, and grep -n 'randomUUID' apps/mobile/src/api/client.ts is empty."
+    },
+    {
+      "id": "H-TKT-2",
+      "claim": "A component request raised from the SE's component-unavailable toggle reaches the Warehouse Manager with componentId NULL, so nobody can tell what part to ship.",
+      "predictedCode": "C5",
+      "files": ["apps/backend/src/ticketing/troubleshoot-submission.service.ts:231", "apps/backend/src/ticketing/troubleshoot-submission.service.ts:255", "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:61"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "The WM screen resolves the part some other way — from the ticket's expected components, or the SE picks the item on a later screen.",
+      "altCheck": "grep -n 'componentUnavailableItem' across apps/mobile/src and apps/backend/src/ticketing — declared in the service input (:37) and written (:231) but never populated by any caller; the controller body map at troubleshoot.controller.ts:26 carries componentUnavailable only."
+    },
+    {
+      "id": "H-TKT-3",
+      "claim": "Filing and resuming a Vehicle Unavailability report stops and restarts the primary SLA clock with zero audit_log row, so an SLA pause cannot be attributed to an actor.",
+      "predictedCode": "P2",
+      "files": ["apps/backend/src/ticketing/vehicle-unavailability.service.ts:140", "apps/backend/src/ticketing/vehicle-unavailability.service.ts:434"],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "Audit is written by a shared helper the two methods call (foldAndResumeSlaPause), or by an interceptor, not in the method body.",
+      "altCheck": "grep -n 'withAudit|auditLog.create|audit.record' apps/backend/src/ticketing/vehicle-unavailability.service.ts returns exactly one hit, :374 (approve/override/confirm-date path); fileReport's $transaction body (:147-219) and resumeSla's (:439-456) contain none."
+    },
+    {
+      "id": "H-TKT-4",
+      "claim": "The Shadow Use reassurance line on the 409 Conflict screen is dead code over HTTP: shadowUseRecorded is always false because the request DTO carries no consumedComponents.",
+      "predictedCode": "C7",
+      "files": ["apps/mobile/src/tickets/troubleshoot/ConflictScreen.tsx:32", "apps/backend/src/ticketing/troubleshoot.controller.ts:26", "apps/backend/src/ticketing/troubleshoot-submission.service.ts:330"],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "Consumed components are inferred server-side from the SE's van stock or the ticket's expected components rather than sent by the client.",
+      "altCheck": "grep -rn 'consumedComponents' apps/backend/src/ticketing apps/mobile/src/api/client.ts packages/shared/src — only the service input type (:39), its two read sites (:296, :330) and a shared-types comment at packages/shared/src/index.ts:468 naming it a structural gap; no producer anywhere."
+    },
+    {
+      "id": "H-TKT-5",
+      "claim": "An SE can open a shared-pool ticket detail they are not assigned to, but the same SE is blocked from every write route on it, so the read surface promises work the app will refuse.",
+      "predictedCode": "C6",
+      "files": ["apps/backend/src/me-tickets/se-ticket-access.ts:32", "apps/backend/src/ticketing/recovery.service.ts:120", "apps/backend/src/ticketing/install-lifecycle.service.ts:113"],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "Shared-pool reads only ever surface TROUBLESHOOT tickets, whose submit path deliberately drops the assignment requirement, so no promise is broken.",
+      "altCheck": "grep -n 'isAssignedSe|coverage floor|assignment is not required' across recovery.service.ts, install-lifecycle.service.ts and troubleshoot-submission.service.ts — troubleshoot waives assignment (:121 comment) while recovery/install both hard-gate on isAssignedSe, and se-ticket-access.ts:32 applies one shared-pool predicate to all three work types."
+    }
+  ]
+}

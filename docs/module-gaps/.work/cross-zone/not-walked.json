@@ -1,0 +1,13 @@
+{
+  "items": [
+    "Platinum auto-escalation sweep (C1) end to end — no PLATINUM ticket exists in this DB (6500 scanned, 100% SILVER). Needs a PLATINUM/OPEN/UNASSIGNED fixture aged past 240 min.",
+    "The sweep's one-shot `crossZoneEscalations: { none: {} }` predicate (H-CZ-3) — same missing fixture.",
+    "A persisted targetZoneId/SE-zone mismatch (H-CZ-5) — blocked by the CZ-01 500; retest after CZ-01 is fixed.",
+    "The receiving SE's own surface for an approved cross-zone assignment — no zone-2 SE login is seeded and se.north has no engineerMaster row, so no SE persona can receive one.",
+    "Whether SpineDayPlanNotifier actually delivered a day-plan notice to Ramesh Rao's user — notifications are per-user reads and that user has no login.",
+    "The exact exception behind the approve HTTP 500 (correlationId 4e41c498-7ac6-412d-914f-7e20585258c3) — no backend log file on disk; needs backend stderr.",
+    "Defer + reviewDate resurfacing (CZ-07) — not walked; no defer was issued.",
+    "The CrossZonePage screen itself (window.prompt flow, decider-only actions column, disclosure sweep) — browser-only, ~708k TEQ, not spent. CZ-06's UX half stays E2.",
+    "ESCALATED_TO_OPS as a reachable state — needs a DENIED AUTO_PLATINUM row, which needs the Platinum fixture."
+  ]
+}

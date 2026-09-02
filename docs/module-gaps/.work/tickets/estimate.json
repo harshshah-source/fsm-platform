@@ -1,0 +1,683 @@
+{
+  "module": "tickets",
+  "label": "Tickets & Field Work Lifecycle",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 72,
+    "afterBacklog": 80,
+    "capsScored": 11
+  },
+  "gaps": {
+    "total": 13,
+    "priced": 11,
+    "folded": [],
+    "falsified": [
+      "TKT-03",
+      "TKT-13"
+    ],
+    "needsVerification": [],
+    "notPriced": [],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 1,
+    "S3": 2,
+    "S2": 5,
+    "S1": 3,
+    "S0": 0
+  },
+  "dangerous": [
+    "TKT-01",
+    "TKT-02"
+  ],
+  "priced": [
+    {
+      "id": "TKT-01",
+      "code": "P2",
+      "sev": "S3",
+      "dangerous": true,
+      "what": "vehicle unavailability pauses and resumes SLA with no audit row",
+      "type": "SECURITY",
+      "caps": [
+        "C7"
+      ],
+      "files": [
+        "apps/backend/src/ticketing/vehicle-unavailability.service.ts:140",
+        "apps/backend/src/ticketing/vehicle-unavailability.service.ts:434"
+      ],
+      "lanes": [
+        "api",
+        "permissions"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        },
+        {
+          "lane": "permissions",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.3,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 2117605,
+      "p80": 3055104,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "hypothesisId": "H-TKT-3"
+    },
+    {
+      "id": "TKT-02",
+      "code": "C7",
+      "sev": "S4",
+      "dangerous": true,
+      "what": "component unavailable submission is impossible - a DB check rejects it and the SE gets HTTP 500",
+      "type": "FIX",
+      "caps": [
+        "C4"
+      ],
+      "files": [
+        "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:37",
+        "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:61",
+        "apps/backend/src/ticketing/troubleshoot.controller.ts:65",
+        "apps/backend/src/ticketing/troubleshoot-submission.service.ts:231",
+        "apps/backend/prisma/schema.prisma:1101"
+      ],
+      "lanes": [
+        "ui",
+        "api",
+        "domain",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1146667,
+          "t80": 2116667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 776667,
+          "t80": 853333
+        }
+      ],
+      "score": 16,
+      "multiplier": 1.667,
+      "bundleFactor": 1.24,
+      "typeModifier": 0.7,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 3715040,
+      "p80": 5529160,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "hypothesisId": "H-TKT-2"
+    },
+    {
+      "id": "TKT-04",
+      "code": "C7",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "shadow use message on conflict screen can never render",
+      "type": "COMPLETE",
+      "caps": [
+        "C8"
+      ],
+      "files": [
+        "apps/mobile/src/tickets/troubleshoot/ConflictScreen.tsx:32",
+        "apps/backend/src/ticketing/troubleshoot.controller.ts:26",
+        "apps/backend/src/ticketing/troubleshoot-submission.service.ts:330"
+      ],
+      "lanes": [
+        "api",
+        "ui",
+        "domain"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1036933,
+          "t80": 1496000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1009067,
+          "t80": 1862667
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1036933,
+          "t80": 1496000
+        }
+      ],
+      "score": 13,
+      "multiplier": 1.467,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 4827873,
+      "p80": 7602409,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 3,
+      "hypothesisId": "H-TKT-4"
+    },
+    {
+      "id": "TKT-05",
+      "code": "C2",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "troubleshoot form shows nothing when submit fails offline",
+      "type": "UX",
+      "caps": [
+        "C3"
+      ],
+      "files": [
+        "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:66",
+        "apps/mobile/src/tickets/install/InstallFormScreen.tsx:89",
+        "apps/mobile/src/tickets/recovery/CollectionFormScreen.tsx:53"
+      ],
+      "lanes": [
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 550400,
+          "t80": 1016000
+        }
+      ],
+      "score": 3,
+      "multiplier": 0.8,
+      "bundleFactor": 1,
+      "typeModifier": 1,
+      "size": "XS",
+      "conf": "MED",
+      "p50": 550400,
+      "p80": 1016000,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": true,
+      "ev": "E2",
+      "reach": 5,
+      "crit": 5
+    },
+    {
+      "id": "TKT-06",
+      "code": "C1",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "no QR or barcode scan shortcut into ticket detail",
+      "type": "NEW",
+      "caps": [
+        "C11"
+      ],
+      "files": [
+        "apps/mobile/package.json",
+        "apps/mobile/src/navigation/screens/TicketsScreen.tsx",
+        "apps/mobile/src/tickets/detail/TicketDetailScreen.tsx"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 963200,
+          "t80": 1778000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.08,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "MED",
+      "p50": 2109240,
+      "p80": 3462480,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 2
+    },
+    {
+      "id": "TKT-07",
+      "code": "C5",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "readiness hint on ticket detail is a hardcoded UNKNOWN",
+      "type": "COMPLETE",
+      "caps": [
+        "C1"
+      ],
+      "files": [
+        "apps/backend/src/me-tickets/me-ticket-detail.service.ts:99",
+        "apps/mobile/src/tickets/detail/TicketDetailScreen.tsx:287"
+      ],
+      "lanes": [
+        "domain",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 989800,
+          "t80": 1428000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 963200,
+          "t80": 1778000
+        }
+      ],
+      "score": 12,
+      "multiplier": 1.4,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.35,
+      "size": "M",
+      "conf": "MED",
+      "p50": 4608425,
+      "p80": 7256844,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 4,
+      "crit": 5
+    },
+    {
+      "id": "TKT-08",
+      "code": "C5",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "technical hints hidden entirely when no telemetry snapshot exists",
+      "type": "UX",
+      "caps": [
+        "C10"
+      ],
+      "files": [
+        "apps/mobile/src/tickets/detail/TicketDetailScreen.tsx:467",
+        "apps/backend/src/me-tickets/technical-hints.ts:90"
+      ],
+      "lanes": [
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 642133,
+          "t80": 1185333
+        }
+      ],
+      "score": 5,
+      "multiplier": 0.933,
+      "bundleFactor": 1,
+      "typeModifier": 1,
+      "size": "S",
+      "conf": "MED",
+      "p50": 642133,
+      "p80": 1185333,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": true,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 3
+    },
+    {
+      "id": "TKT-09",
+      "code": "C2",
+      "sev": "S3",
+      "dangerous": false,
+      "what": "non operational customer confirmation link is only written to a log",
+      "type": "INTEGRATION",
+      "caps": [],
+      "files": [
+        "apps/backend/src/ticketing/customer-confirmation-notifier.ts:26",
+        "apps/backend/src/ticketing/non-operational.service.ts:210",
+        "apps/backend/src/ticketing/non-operational.controller.ts:131"
+      ],
+      "lanes": [
+        "integration",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1391667,
+          "t80": 2566667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1178333,
+          "t80": 1700000
+        }
+      ],
+      "score": 16,
+      "multiplier": 1.667,
+      "bundleFactor": 1.08,
+      "typeModifier": 1.25,
+      "size": "L",
+      "conf": "MED",
+      "p50": 3469500,
+      "p80": 5760000,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 3,
+      "crit": 4,
+      "policyClause": "external-integration seam (WhatsApp/SMS) — build-the-seam applies"
+    },
+    {
+      "id": "TKT-10",
+      "code": "C7",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "a retry after the first submit shows a conflict screen blaming a null winner",
+      "type": "FIX",
+      "caps": [
+        "C3",
+        "C8"
+      ],
+      "files": [
+        "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.tsx:56",
+        "apps/mobile/src/tickets/troubleshoot/ConflictScreen.tsx:17",
+        "apps/backend/src/ticketing/troubleshoot-submission.service.ts:322"
+      ],
+      "lanes": [
+        "ui",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 733867,
+          "t80": 1354667
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 754133,
+          "t80": 1088000
+        }
+      ],
+      "score": 7,
+      "multiplier": 1.067,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 1124928,
+      "p80": 1846656,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 5,
+      "hypothesisId": "H-TKT-1"
+    },
+    {
+      "id": "TKT-11",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "SE ticket list returns the whole shared pool unpaginated - 521 rows for one plant",
+      "type": "FIX",
+      "caps": [
+        "C1"
+      ],
+      "files": [
+        "apps/backend/src/me-tickets/me-tickets-query.service.ts:76",
+        "apps/backend/src/me-tickets/me-tickets.controller.ts:34",
+        "apps/mobile/src/navigation/screens/HomeScreen.tsx"
+      ],
+      "lanes": [
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 848400,
+          "t80": 1224000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 825600,
+          "t80": 1524000
+        }
+      ],
+      "score": 9,
+      "multiplier": 1.2,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1265544,
+      "p80": 2077488,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 5,
+      "crit": 4,
+      "hypothesisId": null
+    },
+    {
+      "id": "TKT-12",
+      "code": "C7",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "filing vehicle unavailability makes the ticket vanish from the SE's own reads",
+      "type": "FIX",
+      "caps": [
+        "C7"
+      ],
+      "files": [
+        "apps/backend/src/ticketing/vehicle-unavailability.service.ts:186",
+        "apps/backend/src/me-tickets/se-ticket-access.ts:32",
+        "apps/backend/src/me-tickets/me-tickets-query.service.ts:76"
+      ],
+      "lanes": [
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 895533,
+          "t80": 1292000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 871467,
+          "t80": 1608667
+        }
+      ],
+      "score": 10,
+      "multiplier": 1.267,
+      "bundleFactor": 1.08,
+      "typeModifier": 0.7,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1335852,
+      "p80": 2192904,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 4,
+      "crit": 5,
+      "hypothesisId": "H-TKT-3"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 25766540,
+    "sumGapP80": 40984378,
+    "packets": 11,
+    "waves": 2,
+    "collisions": 1,
+    "screensTouched": 3,
+    "overheadTeq": 3112000,
+    "tModule50": 28878540,
+    "p50": 36964531,
+    "p80": 73929062,
+    "size": "XXL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 2168333,
+    "primaryDriver": "TKT-04",
+    "largestUnknown": "none",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "TKT-01",
+      "p80": 3055104,
+      "what": "vehicle unavailability pauses and resumes SLA with no audit row"
+    },
+    "over3m": [
+      "TKT-02",
+      "TKT-04",
+      "TKT-07",
+      "TKT-09"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 8100000,
+    "screensNeedingWork": 9,
+    "bottomUpP50": 36964531,
+    "ratio": 4.56,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

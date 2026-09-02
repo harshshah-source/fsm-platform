@@ -1,0 +1,26 @@
+{
+  "module": "engineers",
+  "persona": {
+    "role": "Zonal Manager",
+    "label": "Zonal Manager — SE Management",
+    "frequency": "all day, primary"
+  },
+  "goals": [
+    "Know who is reachable right now (SE Activity Status) to make intra-day assignment calls without guessing.",
+    "Keep the SE roster fit to work: correct availability state, approved leave, stocked vans.",
+    "Plan plant-visit intent ahead of the batch run via the SE Planner grid."
+  ],
+  "scopeNote": "PRD groups SE list + Planner under one Flow (10: SE Management), matching admin routes /engineers, /engineers/manage, /engineers/planner, /leave-requests as one bounded context. Component-Blocked Queue (Flow 5, Ticket-centric, ZM read-only) is a SEPARATE module even though it shares the Common-Kit domain rule with this module's Van Stock completeness view (SE-centric) — do not merge them. Mobile SE availability/leave screens are in-scope per CLAUDE.md surfacing rule (one vertical slice) even though the picked persona is the ZM, not Ravi.",
+  "capabilities": [
+    {"id":"C1","name":"Real-time SE Activity Status board (AVAILABLE/ON_SITE/BUSY/SHIFT_ENDING/OFFLINE, derived not stored)","src":"persona","crit":5,"why":"without it ZM cannot tell who is reachable for intra-day insertions and dispatches blind"},
+    {"id":"C2","name":"Set/override SE Availability (ON_LEAVE/OFF_SHIFT/WEEKLY_OFF/SOFT_UNAVAILABLE + time window)","src":"persona","crit":5,"why":"unavailable SEs keep getting scored by the Recommender, producing failed or wasted visits"},
+    {"id":"C3","name":"Approve/deny SE-submitted Leave Requests","src":"persona","crit":4,"why":"without an approval queue ON_LEAVE/WEEKLY_OFF never lands in SE_AVAILABILITY, so absences silently don't exclude the SE from candidate scoring"},
+    {"id":"C4","name":"SE Planner: multi-day plant-visit grid, drag-to-assign plant intent","src":"persona","crit":4,"why":"no plant-intent bias signal reaches the batch run, so ZM's territory plan and Recommender output stay incoherent"},
+    {"id":"C5","name":"Van Stock / Common Kit completeness view per SE","src":"role","crit":4,"why":"SEs get silently grounded by the Hard Filter with no visibility to restock before it costs a day's assignments"},
+    {"id":"C6","name":"Coverage-type & Territory visibility (DEDICATED/MULTI_PLANT/FLOATING) on the roster","src":"role","crit":3,"why":"without visible coverage type ZM can't judge fallback precedence or spot Territory/Plant coverage gaps behind failed assignments"},
+    {"id":"C7","name":"Availability audit trail (set_by, set_by_role, reason_code per SE_AVAILABILITY row)","src":"role","crit":3,"why":"CONTEXT.md mandates an audited set_by_role on every write; without it disputes over who changed an SE's status are unresolvable"},
+    {"id":"C8","name":"Mobile: SE self-flags SOFT_UNAVAILABLE window + submits Leave Request","src":"role","crit":4,"why":"this is the only upstream source for C2/C3 — without it the ZM's availability board and leave queue have nothing to act on"}
+  ],
+  "anchorCheck": "pass",
+  "srcMix": {"persona": 4, "role": 4, "spine": 0, "prd": 0}
+}

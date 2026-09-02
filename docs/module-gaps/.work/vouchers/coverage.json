@@ -1,0 +1,215 @@
+{
+  "module": "vouchers",
+  "stage": "S3",
+  "browserBan": true,
+  "checkNote": "S3 walk 2026-09-02 (api-walk, no browser). check 6 SETTLED for all nine by wrong-role calls as the real seeded personas (P5): SE GET /vouchers 403 | WM GET /vouchers 403 | ZM POST /vouchers 403 | ZM+CSM GET /vouchers/export 403 | ZM POST /vouchers/mark-paid 403 | WM POST /:id/review 403 | ZM POST /:id/resubmit 403 | ZM GET /me/vouchers 403. C8 check 6 is 'x' BECAUSE it was verified: one OH principal cleared review (404, service reached) AND mark-paid (200). check 8 settled 'x' for C4 (resubmit route live, zero clients) and C9 (export is a CSV file, no system receiver). check 3 (persist) NOT settled anywhere and stays '?': no voucher can be written - POST /vouchers as se.north returns 400 SE_NOT_FOUND because the auth fixture seeds no engineer_master row for user 22222222-2222-2222-2222-222222222222. See not-walked.json for the fixture that unblocks it.",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Offline draft with mandatory photo proof",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "x",
+        "6": "v",
+        "7": "x",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/mobile/src/vouchers/VoucherFormScreen.tsx:30 — 'Not built: offline drafting (#17, unbuilt)'",
+        "apps/mobile/src/vouchers/VoucherFormScreen.tsx:43 — submit gated on captured photoRef (client photo rule)",
+        "apps/backend/src/vouchers/vouchers.service.ts:153 — PHOTO_REQUIRED enforced server-side",
+        "apps/backend/src/vouchers/me-vouchers.service.ts:10 — DRAFT/SUBMITTED are 'dead states in the current create flow'"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Draft-time client_submission_id dedup",
+      "crit": 5,
+      "state": "BROKEN",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/vouchers/vouchers.service.ts:157 — server idempotent on (seId, clientSubmissionId)",
+        "apps/backend/prisma/schema.prisma:1193 — @@unique([seId, clientSubmissionId])",
+        "apps/mobile/src/vouchers/VoucherFormScreen.tsx:81 — Crypto.randomUUID() generated INSIDE handleSubmit, new id per tap",
+        "apps/mobile/src/tickets/troubleshoot/TroubleshootFormScreen.test.tsx:101 — sibling test asserts a new id per resubmit; repo-wide convention"
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Full status-ladder visibility incl. PAID",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "NA",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/vouchers/me-vouchers.service.ts:69 — returns every status incl. PAID/REJECTED",
+        "apps/mobile/src/navigation/screens/VouchersScreen.tsx:102 — StatusPill per row, all 7 statuses",
+        "apps/backend/src/vouchers/me-vouchers.service.ts:103 — reviewNotes/reviewerName returned but never rendered on mobile (grep hits only the test fixture)"
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "Resubmit carries reviewer reason forward",
+      "crit": 4,
+      "state": "BACKEND_ONLY",
+      "checks": {
+        "1": "x",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/vouchers/vouchers.controller.ts:161 — POST /api/vouchers/:id/resubmit exists",
+        "apps/backend/src/vouchers/vouchers.service.ts:285 — NEEDS_CLARIFICATION -> ZONAL_MANAGER_REVIEW, owner-only",
+        "no caller: grep 'resubmit' over apps/mobile/src + apps/admin/src returns only prose comments and an unrelated troubleshoot test",
+        "apps/mobile/src/navigation/screens/VouchersScreen.tsx:102 — list is read-only, no per-row action"
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "ZM activity cross-check against Ticket at claimed plant/date",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "x",
+        "5": "x",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/vouchers/vouchers.service.ts:469 — activityCheck() tests ticket EXISTS by id only; no plant match, no date match, no SE-assignment check",
+        "apps/backend/src/vouchers/vouchers.service.ts:483 — warning 'NO_ACTIVITY_LINK' when plantId null",
+        "apps/mobile/src/vouchers/VoucherFormScreen.tsx:80 — create body sends only clientSubmissionId + items; no ticketId, plantId or vehicleId",
+        "apps/admin/src/pages/vouchers/VoucherReviewPage.tsx:150 — ZM sees '⚠ No activity link' as the normal case"
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "Per-category configured limit enforcement, flagged not silently passed",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "x",
+        "5": "v",
+        "6": "v",
+        "7": "NA",
+        "8": "?",
+        "9": "NA"
+      },
+      "pointers": [
+        "apps/backend/src/vouchers/vouchers.service.ts:15 — CATEGORY_LIMITS hardcoded constant",
+        "apps/backend/src/vouchers/vouchers.service.ts:11 — 'Not schema-enforced; a future Issue can move these to system_settings'",
+        "apps/backend/src/vouchers/vouchers.service.ts:445 — overLimit computed per item",
+        "apps/admin/src/pages/vouchers/VoucherReviewPage.tsx:120 — over-limit rows rendered in red (flag present)"
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "Mandatory reason on Reject/Needs Clarification, captured in audit trail",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "v",
+        "5": "v",
+        "6": "v",
+        "7": "v",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/vouchers/vouchers.service.ts:245 — REASON_REQUIRED when REJECT/NEEDS_CLARIFICATION has no trimmed notes",
+        "apps/backend/src/vouchers/vouchers.service.ts:271 — withAudit metadata carries { action, notes }",
+        "apps/backend/src/vouchers/vouchers.controller.ts:154 — 400 REASON_REQUIRED surfaced",
+        "apps/admin/src/pages/vouchers/VoucherReviewPage.tsx:88 — confirmReason blocks on empty reason",
+        "static.md:14 — 0 write-verb endpoints without an audit write: CONFIRMED at create:168, review:265, resubmit:291, markPaid:331"
+      ]
+    },
+    {
+      "id": "C8",
+      "name": "Separation of duties: approver (ZM) != payer (OH)",
+      "crit": 5,
+      "state": "BROKEN",
+      "checks": {
+        "1": "NA",
+        "2": "v",
+        "3": "?",
+        "4": "x",
+        "5": "x",
+        "6": "x",
+        "7": "NA",
+        "8": "?",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/vouchers/vouchers.controller.ts:26 — REVIEW_ROLES includes OPERATIONS_HEAD",
+        "apps/backend/src/vouchers/vouchers.controller.ts:123 — mark-paid is @Roles('OPERATIONS_HEAD')",
+        "apps/backend/src/vouchers/vouchers.service.ts:312 — markPaid never compares actor.userId to voucher.reviewedBy",
+        "apps/backend/src/vouchers/vouchers.service.ts:252 — the ONLY self-dealing guard is SE-cannot-self-approve; approver-vs-payer is assumed, not enforced"
+      ]
+    },
+    {
+      "id": "C9",
+      "name": "PAID marking reconciled against Finance's monthly batch, with no reversal path",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": {
+        "1": "v",
+        "2": "v",
+        "3": "?",
+        "4": "x",
+        "5": "x",
+        "6": "v",
+        "7": "x",
+        "8": "x",
+        "9": "v"
+      },
+      "pointers": [
+        "apps/backend/src/vouchers/vouchers.service.ts:342 — paidBatchRef is free text, validated nowhere",
+        "apps/backend/prisma/schema.prisma:1142 — VoucherStatus enum has no REVERSED/UNPAID member; PAID is terminal",
+        "apps/backend/src/vouchers/vouchers.controller.ts:121 — no un-pay endpoint anywhere on the controller",
+        "apps/backend/src/vouchers/vouchers.service.ts:358 — export has no PAID side effect and no reconciliation read-back"
+      ]
+    }
+  ]
+}

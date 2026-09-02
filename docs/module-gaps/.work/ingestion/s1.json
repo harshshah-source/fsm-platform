@@ -1,0 +1,53 @@
+{
+  "module": "ingestion",
+  "persona": {
+    "role": "Operations Head",
+    "label": "Operations Head (fleet-wide truth; no human natively sits in this module)",
+    "frequency": "checks fleet-wide device health multiple times daily; escalates when Snapshot/master-sync fails silently, since a stale or broken ingestion run is invisible until downstream symptoms (missing tickets, wrong uptime) surface"
+  },
+  "goals": [
+    "Trust the data-as-of timestamp before making any fleet-wide call — never mistake stale ingestion for real fleet improvement",
+    "Know immediately when a Snapshot or master-sync run fails/sticks, instead of discovering it later via missing tickets or wrong Soft Inactive Count",
+    "See device departure/undeployment reconciled against open tickets — a device that left a plant must not keep generating phantom work or silently vanish from the queue"
+  ],
+  "scopeNote": "This module has no natural human operator — CONTEXT.md frames Snapshot/AutoPlant DB purely as backend ingestion, and the PRD refs given (194-198, 820-823, 781-819) sit inside device-detail/reporting chapters, not a dedicated ingestion chapter. Persona is therefore whoever is harmed when it fails silently: Operations Head (fleet-wide truth, Snapshot freshness banner) is primary; Zonal Manager is secondary (their queue silently empties/floods off stale or unreconciled device state). SPINE.md exists and was read (E-01, E-25) — both ingestion edges are marked PARTIAL/BROKEN with no reverse-reconciliation path, which anchors C3/C5 below.",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Snapshot freshness banner (data-as-of timestamp, every page)",
+      "src": "persona",
+      "crit": 5,
+      "why": "Without a trusted data-as-of stamp, Operations Head cannot tell a real fleet-health improvement from stale ingestion — CONTEXT.md explicitly warns this is the failure mode to avoid"
+    },
+    {
+      "id": "C2",
+      "name": "Snapshot run failure / stuck-run alert",
+      "src": "persona",
+      "crit": 5,
+      "why": "A FAILED or stuck (RUNNING-past-window) Snapshot means inactive devices don't surface in time for SE dispatch; if invisible, Operations Head's fleet uptime and Soft Inactive Count are silently wrong (O3 misleading metric)"
+    },
+    {
+      "id": "C3",
+      "name": "Device departure / master-sync reconciliation surfaced to a manager",
+      "src": "spine",
+      "crit": 4,
+      "why": "SPINE E-25: master-sync departure reconcile output is a file (stand-down-export.ts), no admin screen — a departed device's open tickets have no visible closure path for any manager (P3 no reconciliation)"
+    },
+    {
+      "id": "C4",
+      "name": "Integration health ledger (run history, not just latest status)",
+      "src": "role",
+      "crit": 4,
+      "why": "Operations Head owns fleet-wide truth end to end; a single latest-status widget can't distinguish one bad run from a recurring pattern needing escalation (O1 no finished-work ledger)"
+    },
+    {
+      "id": "C5",
+      "name": "Soft Inactive Count shown as an auditable, explainable input",
+      "src": "spine",
+      "crit": 3,
+      "why": "CONTEXT.md: Soft Inactive Count silently flips the Recommender between deficit/preventive mode twice daily; SPINE E-01 shows the reverse path (device returns ACTIVE) does not close the resulting Ticket — Operations Head cannot explain fleet behavior without seeing this number's provenance and its known one-way gap"
+    }
+  ],
+  "anchorCheck": "pass",
+  "srcMix": { "persona": 2, "role": 1, "spine": 2, "prd": 0 }
+}

@@ -1,0 +1,122 @@
+{
+  "module": "engineers",
+  "generated": "2026-09-02",
+  "note": "NO BROWSER. Checks 3 (persist), 6 (backend perms), 8 (named downstream consumer) stay '?' except where a code-level consumer is literally named at file:line. No FUNC_COMPLETE from static reading.",
+  "s3": "2026-09-02 api-walk + read-only SQL against postgres:5433/fsm. Checks 3 and 6 settled at E4 for C2/C3/C4/C5/C6/C7. Check 6 is CLEAN across the whole module: every cross-zone and wrong-role probe was refused server-side (zm.north -> zone-2 engineer detail/PATCH/status = 404 SE_NOT_FOUND; zm.north -> zone-2 POST availability = 403; symmetric for zm.south; SE -> another SE availability = 403; SE -> GET /engineers = 403; SE -> leave for another SE = 403; WM -> GET /engineers = 403; OH -> approve leave = 403; zm.south -> approve zone-1 leave = 403 and its /leave-requests list is empty; zm.south -> DELETE zone-1 planner row = 403). Check 9 is x for C3/C4 at E4 (audit_logs delta ZERO on reject and on both planner writes). NO BROWSER was used, so check 1 stays as read statically.",
+  "capabilities": [
+    {
+      "id": "C1",
+      "name": "Real-time SE Activity Status board (derived not stored)",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "?", "4": "v", "5": "v", "6": "?", "7": "NA", "8": "?", "9": "NA" },
+      "pointers": [
+        "apps/backend/src/soft-state/activity-status.ts:8 deriveActivityStatus, SHIFT_ENDING window :26",
+        "apps/backend/src/engineers/engineers-query.service.ts:123 list derive, :172 detail derive",
+        "apps/admin/src/pages/engineers/SeManagementPage.tsx:26 METRIC_STATUSES BUSY/ON_SITE/AVAILABLE/OFFLINE/SHIFT_ENDING",
+        "apps/admin/src/api/engineers.ts:32 activityStatus on row",
+        "7=NA derived per-request, never a stored state machine; 9=NA read path"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "Set/override SE Availability + time window",
+      "crit": 5,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "v", "4": "v", "5": "x", "6": "v", "7": "v", "8": "v", "9": "v" },
+      "pointers": [
+        "S3 2026-09-02 check 3 PASS: POST availability -> re-GET /engineers/:seId returns the window on availabilityRows, and the row is in se_availability. check 6 PASS: cross-zone ZM write 403 both directions, SE-writes-another-SE 403.",
+        "S3 2026-09-02 check 5 FAIL (was v): the business rule 'a manager can clear an availability window' does not hold. currentStatusMany (:88-94) orders by windowStart desc with NO tie-break, so a later AVAILABLE write sharing a windowStart loses to the older ON_LEAVE/WEEKLY_OFF row, every time, reproduced 3x. See ENG-G6.",
+        "apps/backend/src/engineers/se-availability.service.ts:118 setAvailability, :136 $transaction, :148 auditLog SE_AVAILABILITY_SET",
+        "se-availability.service.ts:127-134 role narrowing: SE self only SOFT_UNAVAILABLE, :128 self-clear of active SOFT_UNAVAILABLE",
+        "se-availability.service.ts:165 -> StrandedWorkEscalationService (#288), :185 strandsWork predicate",
+        "check 8 CONSUMER NAMED: apps/backend/src/scheduling/candidate-query.service.ts:122 currentStatusMany(seIds, now) and apps/backend/src/recommender/recommender.service.ts:1035 same call — LIVE read, no materialised view",
+        "apps/admin/src/pages/engineers/SeManagementPage.tsx:27 SETTABLE statuses",
+        "apps/mobile/src/navigation/screens/AvailabilityScreen.tsx:28"
+      ]
+    },
+    {
+      "id": "C3",
+      "name": "Approve/deny SE-submitted Leave Requests",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "v", "4": "v", "5": "x", "6": "v", "7": "v", "8": "v", "9": "x" },
+      "pointers": [
+        "S3 2026-09-02 check 3 PASS: three leave requests submitted, all three survive a re-GET; approve/reject state changes survive too. check 6 PASS: zm.south approve on a zone-1 request 403 LEAVE_FORBIDDEN, its list is empty, OH approve 403, SE submit-for-another 403. check 9 FAIL at E4: reject wrote ZERO audit rows; approve wrote ONE, keyed on se_availability not leave_request. See ENG-G1.",
+        "apps/backend/src/engineers/leave-request.service.ts:87 approve -> :96 setAvailability -> :110 availabilityId link (the leave->dispatch carrier)",
+        "leave-request.service.ts:117 reject writes decisionReason/decidedBy with NO auditLog call anywhere in the file",
+        "leave-request.service.ts:61 submit — no overlap/duplicate window guard; prisma schema.prisma:1514-1515 only @@index, no @@unique on (seId, window)",
+        "apps/backend/src/engineers/leave-request.controller.ts:49-60 field + IST window validation",
+        "apps/admin/src/pages/engineers/LeaveRequestsPage.tsx:3 apiApproveLeave/apiRejectLeave wired",
+        "9=x: the leave DECISION is unaudited; approve only borrows se_availability's audit row (entityType se_availability), reject leaves no trace"
+      ]
+    },
+    {
+      "id": "C4",
+      "name": "SE Planner multi-day plant-visit grid, drag-to-assign intent",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "v", "4": "?", "5": "v", "6": "v", "7": "NA", "8": "v", "9": "x" },
+      "pointers": [
+        "S3 2026-09-02 check 3 PASS: POST /planner -> 201 id 6, row present in se_planner with created_by; DELETE -> row gone. check 6 PASS: zm.south DELETE of a zone-1 planner row = 403 ZONE_SCOPE_VIOLATION. check 9 FAIL at E4: audit_logs delta ZERO on both create and hard-delete. check 8 stays v on the code-named consumer only — the plannerBias EFFECT at run time was NOT walked (would need a dispatch run); the date-key alternative is refuted at E2 (both sides use istDate/@db.Date).",
+        "apps/backend/src/planner/se-planner.service.ts:44 upsert, :90 remove — no audit in either",
+        "check 8 CONSUMER NAMED: apps/backend/src/recommender/recommender.service.ts:529 plannerForDate -> :646 ADR-0022 soft bias -> :862 plannerBias on the decision trace",
+        "apps/admin/src/pages/planner/PlannerPage.tsx:26 writes POST/DELETE /api/planner then refetches",
+        "apps/admin/src/api/planner.ts:49,59",
+        "prisma schema.prisma:773 @@unique([seId, plantId, plannedDate]) — upsert idempotent",
+        "7=NA: planner rows are intent, not a state machine"
+      ]
+    },
+    {
+      "id": "C5",
+      "name": "Van Stock / Common Kit completeness view per SE",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "v", "4": "NA", "5": "v", "6": "v", "7": "NA", "8": "NA", "9": "NA" },
+      "pointers": [
+        "S3 2026-09-02 ENG-H5 FALSIFIED (the alternative, not the claim): apps/admin/src/pages/engineers/SeManagementPage.tsx:270-272 DOES render detail.vanStock (empty-state + .map). No C4 asymmetry here, no drawer to build. Residual: pixel-level rendering unconfirmed, NO BROWSER. check 6 PASS: cross-zone GET /engineers/:seId = 404, WM = 403, SE = 403. check 3 PASS: GET /engineers/:seId returns vanStock[] (empty for 459b5409, kit.complete true).",
+        "apps/backend/src/engineers/engineers-query.service.ts:112 commonKitStatus per SE, :132 kitComplete, :157-158 vanStockFor + kit, :182 vanStock on detail",
+        "apps/admin/src/pages/engineers/SeManagementPage.tsx:150 kitComplete badge on the roster",
+        "vanStock[] detail rendering NOT confirmed in admin — read-only surface, no write path, so 4/7/9 NA"
+      ]
+    },
+    {
+      "id": "C6",
+      "name": "Coverage-type & Territory visibility on the roster",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "?", "4": "v", "5": "v", "6": "v", "7": "NA", "8": "?", "9": "v" },
+      "pointers": [
+        "S3 2026-09-02 check 6 PASS: PATCH /engineers/:seId and POST /engineers/:seId/status on an out-of-zone engineer both 404 SE_NOT_FOUND as zm.north AND zm.south. Coverage add/remove not walked (would write a mapping row) — check 3/8 stay ?.",
+        "apps/backend/src/engineers/engineer-admin.service.ts:256 addCoverage (audited per static.md:11), :265 FLOATING_USES_TERRITORY rejection",
+        "apps/admin/src/pages/engineers/SeManagementDirectoryPage.tsx:54 COVERAGE_TYPES=['DEDICATED','MULTI_PLANT'] — FLOATING absent BY DESIGN, prisma schema.prisma:290 says FLOATING never appears in the coverage table",
+        "TERMINOLOGY CHECK PASSED: FLOATING territory lens lives in the territory module (apps/admin/src/api/territory.ts) — not a gap in this module"
+      ]
+    },
+    {
+      "id": "C7",
+      "name": "Availability audit trail (set_by, set_by_role, reason_code)",
+      "crit": 3,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "?", "4": "v", "5": "v", "6": "?", "7": "NA", "8": "?", "9": "v" },
+      "pointers": [
+        "apps/backend/src/engineers/se-availability.service.ts:144 setBy, :145 setByRole, :148-157 auditLog SE_AVAILABILITY_SET with actedAsRole",
+        "se-availability.service.ts:82 setByRole surfaced on AvailabilityRow; :71 listWindows 10-row bound",
+        "reason is FREE TEXT (:146 reason), no enumerated reason_code — s1 C7 asks for reason_code"
+      ]
+    },
+    {
+      "id": "C8",
+      "name": "Mobile: SE self-flags SOFT_UNAVAILABLE + submits Leave Request",
+      "crit": 4,
+      "state": "PARTIAL",
+      "checks": { "1": "v", "2": "v", "3": "?", "4": "v", "5": "v", "6": "?", "7": "v", "8": "v", "9": "v" },
+      "pointers": [
+        "apps/mobile/src/navigation/screens/AvailabilityScreen.tsx:28 (skeleton.md MISSED this file — it lists only availabilityDisplay.ts)",
+        "apps/mobile/src/navigation/screens/LeaveRequestScreen.tsx:53 -> apps/mobile/src/leave/LeaveRequestFormScreen.tsx:25",
+        "REACHABILITY: apps/mobile/src/navigation/screens/ProfileScreen.tsx:21 leave panel, :24 availability panel",
+        "apps/mobile/src/api/client.ts:488 GET /me/availability, :504 POST /engineers/:seId/availability, :459 GET /me/leave-requests, :471 POST /leave-requests"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,442 @@
+{
+  "module": "scheduling",
+  "label": "Batch Scheduling & Dispatch",
+  "generated": "2026-09-02",
+  "calibrationBasis": "borrowed",
+  "calibrationNote": "reference/estimation.md §5.2 — measured over 272 agent runs on a TypeScript/Next/Prisma ERP, NOT on fsm-platform. Flagged borrowed in every report until re-measured here. n<10 cohorts carry a weak-anchor warning.",
+  "completeness": {
+    "now": 57,
+    "afterBacklog": 72,
+    "capsScored": 10
+  },
+  "gaps": {
+    "total": 10,
+    "priced": 6,
+    "folded": [
+      {
+        "id": "SCH-05",
+        "into": "SCH-01"
+      },
+      {
+        "id": "SCH-09",
+        "into": "SCH-01"
+      }
+    ],
+    "falsified": [
+      "SCH-01"
+    ],
+    "needsVerification": [],
+    "notPriced": [
+      {
+        "id": "SCH-G1",
+        "what": "GREEN — every scheduling write refuses the wrong role",
+        "reason": "no files[]/lanes[] => NEEDS-SCOPING"
+      }
+    ],
+    "needsYourCall": [],
+    "referencedNotPriced": []
+  },
+  "severity": {
+    "S4": 1,
+    "S3": 0,
+    "S2": 3,
+    "S1": 2,
+    "S0": 1
+  },
+  "dangerous": [
+    "SCH-02"
+  ],
+  "priced": [
+    {
+      "id": "SCH-02",
+      "code": "C2",
+      "sev": "S4",
+      "dangerous": true,
+      "what": "Plant deactivation silently strips SE stops, no notice",
+      "type": "INTEGRATION",
+      "caps": [
+        "C9",
+        "C8"
+      ],
+      "files": [
+        "apps/backend/src/plant-deactivation/plant-deactivation.service.ts:222",
+        "apps/backend/src/plant-deactivation/plant-deactivation.service.ts:229",
+        "apps/backend/src/scheduling/day-plan-notification-outbox.ts:22"
+      ],
+      "lanes": [
+        "integration",
+        "domain",
+        "api"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "integration",
+          "anchorN": 6,
+          "weakAnchor": true,
+          "t50": 1280333,
+          "t80": 2361333
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        }
+      ],
+      "score": 14,
+      "multiplier": 1.533,
+      "bundleFactor": 1.16,
+      "typeModifier": 1.25,
+      "size": "L",
+      "conf": "HIGH",
+      "p50": 5000277,
+      "p80": 7959533,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 5,
+      "hypothesisId": "H2"
+    },
+    {
+      "id": "SCH-03",
+      "code": "C5",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Day Plan has no Zone Warehouse pickup stop",
+      "type": "COMPLETE",
+      "caps": [
+        "C9"
+      ],
+      "files": [
+        "apps/backend/src/scheduling/day-plan-query.service.ts:15",
+        "apps/backend/src/scheduling/day-plan-query.service.ts:26",
+        "apps/mobile/src/navigation/screens/StockScreen.tsx:20"
+      ],
+      "lanes": [
+        "domain",
+        "data",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 714533,
+          "t80": 785067
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 1084067,
+          "t80": 1564000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 1054933,
+          "t80": 1947333
+        }
+      ],
+      "score": 14,
+      "multiplier": 1.533,
+      "bundleFactor": 1.24,
+      "typeModifier": 1.35,
+      "size": "L",
+      "conf": "MED",
+      "p50": 6591542,
+      "p80": 9810310,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 5,
+      "crit": 5
+    },
+    {
+      "id": "SCH-04",
+      "code": "C1",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "No Schedule Cadence review reminder for ZM",
+      "type": "NEW",
+      "caps": [
+        "C5"
+      ],
+      "files": [
+        "apps/admin/src/AppRoutes.tsx:105",
+        "apps/backend/src/scheduling/schedules.controller.ts:176",
+        "apps/backend/prisma/schema.prisma"
+      ],
+      "lanes": [
+        "analysis",
+        "domain",
+        "data",
+        "api",
+        "ui"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "analysis",
+          "anchorN": 32,
+          "weakAnchor": false,
+          "t50": 191533,
+          "t80": 233467
+        },
+        {
+          "lane": "domain",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 528133,
+          "t80": 580267
+        },
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "ui",
+          "anchorN": 71,
+          "weakAnchor": false,
+          "t50": 779733,
+          "t80": 1439333
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.32,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "MED",
+      "p50": 4094552,
+      "p80": 6025888,
+      "over3m": true,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 2,
+      "crit": 3
+    },
+    {
+      "id": "SCH-06",
+      "code": "O1",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Intra-day queue seq-scans the whole audit table",
+      "type": "PERF",
+      "caps": [
+        "C7"
+      ],
+      "files": [
+        "apps/backend/src/scheduling/same-day-update.service.ts:103",
+        "apps/backend/src/scheduling/intraday-updates.controller.ts:34"
+      ],
+      "lanes": [
+        "api",
+        "data"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "api",
+          "anchorN": 17,
+          "weakAnchor": false,
+          "t50": 801267,
+          "t80": 1156000
+        },
+        {
+          "lane": "data",
+          "anchorN": 4,
+          "weakAnchor": true,
+          "t50": 528133,
+          "t80": 580267
+        }
+      ],
+      "score": 8,
+      "multiplier": 1.133,
+      "bundleFactor": 1.08,
+      "typeModifier": 1,
+      "size": "M",
+      "conf": "HIGH",
+      "p50": 1435752,
+      "p80": 1875168,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 3,
+      "crit": 4,
+      "hypothesisId": "H5"
+    },
+    {
+      "id": "SCH-07",
+      "code": "O4",
+      "sev": "S1",
+      "dangerous": false,
+      "what": "Static scanner misreports guards and audit coverage",
+      "type": "FIX",
+      "caps": [],
+      "files": [
+        "apps/backend/src/scheduling/schedules.controller.ts:424",
+        "apps/backend/src/scheduling/same-day-update.service.ts:45",
+        "docs/module-gaps/.work/scheduling/static.md:43"
+      ],
+      "lanes": [
+        "docs"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "docs",
+          "anchorN": 999,
+          "weakAnchor": false,
+          "t50": 78000,
+          "t80": 78000
+        }
+      ],
+      "score": 4,
+      "multiplier": 0.867,
+      "bundleFactor": 1,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 54600,
+      "p80": 54600,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E2",
+      "reach": 1,
+      "crit": 1
+    },
+    {
+      "id": "SCH-08",
+      "code": "O4",
+      "sev": "S2",
+      "dangerous": false,
+      "what": "Running backend is a partial build of a dirty tree",
+      "type": "FIX",
+      "caps": [],
+      "files": [
+        "apps/backend/src/scheduling/dto/override-command.dto.ts",
+        "apps/backend/src/scheduling/batches.controller.ts:116",
+        "docs/module-gaps/.work/_shared-primer.md:4"
+      ],
+      "lanes": [
+        "docs"
+      ],
+      "droppedLanes": [
+        "tests"
+      ],
+      "laneRows": [
+        {
+          "lane": "docs",
+          "anchorN": 999,
+          "weakAnchor": false,
+          "t50": 78000,
+          "t80": 78000
+        }
+      ],
+      "score": 4,
+      "multiplier": 0.867,
+      "bundleFactor": 1,
+      "typeModifier": 0.7,
+      "size": "S",
+      "conf": "HIGH",
+      "p50": 54600,
+      "p80": 54600,
+      "over3m": false,
+      "needsCall": false,
+      "uxOnly": false,
+      "ev": "E4",
+      "reach": 1,
+      "crit": 1,
+      "hypothesisId": "H3"
+    }
+  ],
+  "rollup": {
+    "sumGapP50": 17231323,
+    "sumGapP80": 25780099,
+    "packets": 6,
+    "waves": 1,
+    "collisions": 0,
+    "screensTouched": 1,
+    "overheadTeq": 1706000,
+    "tModule50": 18937323,
+    "p50": 24239773,
+    "p80": 48479546,
+    "size": "XL",
+    "risk": "HIGH",
+    "confidence": "LOW",
+    "weakAnchorExposureTeq": 3051133,
+    "primaryDriver": "SCH-03",
+    "largestUnknown": "SCH-G1",
+    "historicalAnalogue": "none — modelled from borrowed cohort anchors",
+    "cheapestBigFix": {
+      "id": "SCH-02",
+      "p80": 7959533,
+      "what": "Plant deactivation silently strips SE stops, no notice"
+    },
+    "over3m": [
+      "SCH-02",
+      "SCH-03",
+      "SCH-04"
+    ]
+  },
+  "crossCheckA": {
+    "topDownTeq": 1800000,
+    "screensNeedingWork": 2,
+    "bottomUpP50": 24239773,
+    "ratio": 13.47,
+    "split": true
+  },
+  "notEstimated": [
+    "review time",
+    "product decisions (the one-way door is priced, the deciding is not)",
+    "requirement churn",
+    "this survey itself"
+  ]
+}

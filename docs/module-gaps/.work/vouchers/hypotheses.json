@@ -1,0 +1,62 @@
+{
+  "hypotheses": [
+    {
+      "id": "H1",
+      "claim": "NEEDS_CLARIFICATION is a terminal dead-end in the shipped app: no client anywhere calls POST /api/vouchers/:id/resubmit, so an SE whose claim is sent back can never move it forward.",
+      "predictedCode": "C7",
+      "files": [
+        "apps/backend/src/vouchers/vouchers.controller.ts:161",
+        "apps/mobile/src/navigation/screens/VouchersScreen.tsx:102",
+        "apps/mobile/src/api/client.ts:326"
+      ],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "The SE simply files a fresh voucher instead, so the stranded row is cosmetic clutter rather than lost money.",
+      "altCheck": "grep -rn 'resubmit' apps/mobile/src apps/admin/src packages — only prose comments, a LeaveRequest note and an unrelated troubleshoot test; no apiResubmitVoucher wrapper exists in apps/mobile/src/api/client.ts. A refile also re-triggers VCH-01, so the alternative is worse, not benign."
+    },
+    {
+      "id": "H2",
+      "claim": "A single Operations Head account can approve a voucher and then mark it PAID, because OPERATIONS_HEAD sits in REVIEW_ROLES and markPaid never reads voucher.reviewedBy.",
+      "predictedCode": "P4",
+      "files": [
+        "apps/backend/src/vouchers/vouchers.controller.ts:26",
+        "apps/backend/src/vouchers/vouchers.controller.ts:123",
+        "apps/backend/src/vouchers/vouchers.service.ts:312"
+      ],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "A guard, interceptor or seeded role policy outside this module blocks an OH from the review route in practice.",
+      "altCheck": "read apps/backend/src/vouchers/vouchers.controller.ts:57-136 — only AuthGuard + RoleGuard, no extra @UseGuards on review; and vouchers.service.ts:252 shows the module's one self-dealing guard is SE-only (actor.userId === voucher.seId), which would be redundant if a broader SoD policy existed."
+    },
+    {
+      "id": "H3",
+      "claim": "A real double-tap or retry after a network drop creates two vouchers and two reimbursements, because the mobile form mints a fresh clientSubmissionId on every submit attempt.",
+      "predictedCode": "P1",
+      "files": [
+        "apps/mobile/src/vouchers/VoucherFormScreen.tsx:81",
+        "apps/backend/src/vouchers/vouchers.service.ts:157"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "The submitting flag disables the button, so a second submit is impossible in practice and the id's lifetime does not matter.",
+      "altCheck": "read VoucherFormScreen.tsx:39,43,89 — `submitting` is cleared in the finally block, so the button re-enables the moment the request errors or times out, which is exactly the retry case; and the sibling convention at TroubleshootFormScreen.test.tsx:101 asserts a NEW id on a second submit, so the behaviour is intended repo-wide."
+    },
+    {
+      "id": "H4",
+      "claim": "Every voucher reaches the ZM queue carrying warning NO_ACTIVITY_LINK, because the mobile form posts no ticketId, plantId or vehicleId, making the fraud control unusable noise.",
+      "predictedCode": "P1",
+      "files": [
+        "apps/mobile/src/vouchers/VoucherFormScreen.tsx:80",
+        "apps/backend/src/vouchers/vouchers.service.ts:469",
+        "apps/admin/src/pages/vouchers/VoucherReviewPage.tsx:150"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "Vouchers are created from a ticket context elsewhere (a TicketDetailScreen entry point) that does pass the anchor.",
+      "altCheck": "SPINE E-15 in static.md:22 already records the carrier as 'a human remembers — SE opens the Vouchers tab and re-keys the trip', with no ticket carrier from TicketDetailScreen; VoucherFormScreenProps at :16-19 takes only onSubmitted/onCancel, so the screen cannot receive a ticket."
+    }
+  ],
+  "retired": [
+    {
+      "id": "H5",
+      "claim": "The SE receives no notification on reject, clarification or payment — the notifier only writes a server log — while the ZM's screen states the SE is notified.",
+      "retiredBecause": "settled by code after the conductor's correction prompted a module-binding read. vouchers.module.ts:18 binds VOUCHER_NOTIFIER useClass LoggingVoucherNotifier unconditionally — no env switch, no second VoucherNotifier implementation in the module. The strongest alternative (a real notifier swapped in for production) is dead, so this is no longer a claim code cannot settle. Carried as gap VCH-07 at E2/HIGH instead."
+    }
+  ]
+}

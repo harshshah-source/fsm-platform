@@ -1,0 +1,68 @@
+{
+  "hypotheses": [
+    {
+      "id": "H-CZ-1",
+      "claim": "An approved cross-zone escalation reaches the receiving SE only as a generic 'Day Plan updated' in-app notice with no cross-zone framing, and no human in the TARGET zone (its ZM) is told at all — so the receiving side learns of the hand-off by noticing a new stop, which is a MANUAL hand-off under the standing spine rule.",
+      "predictedCode": "C2",
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:180",
+        "apps/backend/src/scheduling/override.service.ts:655",
+        "apps/backend/src/scheduling/day-plan-notifier.ts"
+      ],
+      "unsettleableBy": "downstream",
+      "strongestAlternative": "SpineDayPlanNotifier is a real NotificationService writer, so the SE genuinely is pushed and the hand-off is automatic; the target ZM simply is not a required recipient.",
+      "altCheck": "grep -rn 'DAY_PLAN_NOTIFIER' apps/backend/src --include=*.module.ts — SpineDayPlanNotifier is bound, not the Logging stub; but grep for notify targeting targetZoneId in cross-zone-escalation.service.ts returns nothing (only notifyHomeZm :312 and notifyRole :333, neither of which resolves the target zone)."
+    },
+    {
+      "id": "H-CZ-2",
+      "claim": "The approve two-phase orphan is reachable in practice, not just theoretically: an escalation stranded PENDING on an already-assigned ticket stays in the CSM queue permanently and every retry returns 409 TICKET_ALREADY_ASSIGNED, with no admin path to clear it.",
+      "predictedCode": "P3",
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:162-178",
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:120",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:225"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "deny/defer still work on the stranded row, so the CSM can clear the queue by denying it — cosmetic, not a P3.",
+      "altCheck": "decide() at :262-264 only checks isOpen(status), so DENY on a stranded PENDING row does succeed — but it writes DENIED onto an escalation whose ticket is assigned, and notifyHomeZm :278 then tells the home ZM the request was refused. The escape hatch produces a false record, which is why this needs a persist walk rather than a code read."
+    },
+    {
+      "id": "H-CZ-3",
+      "claim": "The `crossZoneEscalations: { none: {} }` sweep predicate (:83) means a Platinum ticket whose escalation was ever DENIED, DEFERRED-and-lapsed or orphaned can never auto-escalate again, so the Platinum SLA guarantee silently expires after one escalation per ticket for the ticket's whole life.",
+      "predictedCode": "C7",
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:83",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:127-130"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "One escalation per ticket is the intended rule — the docstring at :73 says 'one escalation per Ticket' — and a denied Platinum is meant to travel the reEscalateToOps rung instead of re-sweeping.",
+      "altCheck": "The docstring :73 does say one per ticket, and reEscalateToOps :201 does exist for DENIED AUTO rows — but CZ-05 shows that rung is unreachable from the UI, and flag() :127-130 deliberately uses the narrower status-scoped predicate for the same question, so the two paths disagree. Which is intended cannot be read off the code."
+    },
+    {
+      "id": "H-CZ-4",
+      "claim": "Because cross-zone.controller.ts:113 discards actedAsRole, a CSM acting in an absent ZM's zone can also press the ZM-only re-escalate endpoint (or is wrongly blocked from it), since zmOwnsZone :287 was written to read the acting role that never arrives.",
+      "predictedCode": "P4",
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone.controller.ts:103",
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:286-290",
+        "apps/backend/src/common/request-actor.ts:27"
+      ],
+      "unsettleableBy": "perms",
+      "strongestAlternative": "@Roles('ZONAL_MANAGER') at controller :103 blocks a CSM at the guard before zmOwnsZone is ever consulted, so the dead branch changes no actual permission outcome — it is documentation rot, not a permissions hole.",
+      "altCheck": "controller :103 is @Roles('ZONAL_MANAGER') and the guard is class-level (:37), which supports the alternative for re-escalate specifically; but zmOwnsZone is also the gate for flag() (:124), whose @Roles at :56 DOES include CENTRAL_SERVICE_MANAGER — so a CSM reaches zmOwnsZone with actedAsRole null and takes the :288 branch that returns true for any zone. Whether that is intended CSM breadth or an unintended bypass needs a role walk."
+    },
+    {
+      "id": "H-CZ-5",
+      "claim": "targetZoneId is never validated against the chosen SE's actual zone, so an approved escalation can record a target zone the SE does not belong to — making every per-zone cross-zone metric and the C8 report unreliable at the source.",
+      "predictedCode": "C2",
+      "files": [
+        "apps/backend/src/cross-zone/cross-zone-escalation.service.ts:162-171",
+        "apps/backend/src/scheduling/override.service.ts:666-669",
+        "apps/admin/src/pages/cross-zone/CrossZonePage.tsx:56-60"
+      ],
+      "unsettleableBy": "persist",
+      "strongestAlternative": "The UI will eventually derive seId from a zone-filtered picker, so the pair is consistent by construction and no backend check is needed.",
+      "altCheck": "CrossZonePage.tsx:56-60 takes both values from free-text window.prompt with no picker at all, and override.assignTicket :666 checks only the TICKET's home zone via inScope, :668 looks the engineer up by id alone — no zone comparison on either side. The construction the alternative relies on does not exist today; whether a mismatched pair actually persists needs a save-and-reload."
+    }
+  ]
+}
