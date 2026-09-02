@@ -1,0 +1,14 @@
+{
+  "mode": "manual",
+  "enabled": true,
+  "thresholds": [
+    50,
+    70,
+    85
+  ],
+  "contextLimit": null,
+  "handoffPath": "docs/audits/handoffs/HANDOFF-ACTIVE.md",
+  "_mode": "manual = off until you run /autohandoff on (the arm marker outlives /clear, and expires after 7 days). always = every session in this project. off = never.",
+  "_enabled": "false is a hard kill switch that overrides mode.",
+  "_thresholds": "percentages of the context window at which a handoff is forced; each fires once per session."
+}

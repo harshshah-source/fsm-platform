@@ -69,6 +69,58 @@ After each slice, report:
 
 If RED was skipped, stop and redo the slice test-first.
 
+## Context budget and rolling handoff
+
+A long slice runs out of context before it runs out of work. The failure mode is not the
+`/clear` — it is arriving at the `/clear` with the reasoning still in the conversation and
+nowhere else. So the handoff is **rolling**: written when the slice starts, refreshed as it
+goes, and already correct when the budget runs out.
+
+**The live handoff is `docs/audits/handoffs/HANDOFF-ACTIVE.md`**, written from
+`HANDOFF-TEMPLATE.md` beside it and committed with the work. There is exactly one at a time,
+and it is rewritten in place, never appended to. That folder doubles as the audit trail: a
+finished handoff is renamed `HANDOFF-<issue>-<date>.md` and stays there.
+
+**The loop is opt-in and off by default.** Arm it at the *start* of a long slice with
+`/autohandoff on [note]`, disarm with `/autohandoff off`, inspect with `/autohandoff status`.
+Disarmed, both hooks exit silently and a session behaves exactly as it did before. The arm
+marker is a file (`.claude/state/guard-armed.json`), not session state - it has to survive the
+`/clear` it exists to make safe - and it expires after 7 days so a forgotten marker cannot
+guard unrelated work. Set `"mode": "always"` in `.claude/context-budget.json` to opt the whole
+project in permanently.
+
+**Two hooks drive it** (wired in `.claude/settings.json`, tuned in `.claude/context-budget.json`):
+
+- `.claude/hooks/context_guard.py` — `PostToolUse`. Reads the real context usage (the
+  percentage Claude Code publishes to the statusline, falling back to the token accounting in
+  the session transcript) and at 50% / 70% / 85% injects a stop-and-hand-off instruction. It
+  fires once per threshold per session, and ignores subagents — they have their own windows.
+- `.claude/hooks/session_resume.py` — `SessionStart`. If `HANDOFF-ACTIVE.md` exists and is not
+  marked `Status: consumed`, it injects the whole file into the new session and instructs it to
+  resume immediately. This is what makes `/clear` continuous rather than amnesiac: the user
+  pastes nothing and their first message can be a single word.
+
+**At the 50% mark, stop taking on new work.** Finishing the red-green step in flight is fine;
+starting another is not. Then run `/handoff`, commit, and print the ready line. The user runs
+`/clear` and sends any message; the SessionStart hook does the rest.
+
+Fill in **every** section of the template, and scroll back through the whole session first —
+especially for corrections the user gave you, which belong under "Standing instructions from
+the user", quoted. A user who has to repeat an instruction after every `/clear` is worse off
+than before the loop existed.
+
+**What belongs in the handoff** is what exists nowhere else: decisions and the alternatives
+rejected, dead ends already tried, environment gotchas, the exact next action. Not the issue
+file, the diff, or the commit log — reference those by path. The rule of thumb: everything you
+wrote down survives, everything you did not is gone.
+
+**When the slice completes**, rename the handoff to `HANDOFF-<issue>-<date>.md` in the same
+folder and run `/autohandoff off`. A live handoff for finished work keeps re-seeding sessions.
+
+To change the thresholds, edit `.claude/context-budget.json` (`"thresholds": [50, 70, 85]`,
+`"mode"`: `manual` / `always` / `off`, `"enabled": false` as a hard kill switch,
+`"contextLimit"` to pin the window size). Everything in `.claude/state/` is disposable.
+
 ## Fixtures against a server-evaluated CHECK constraint (#183)
 
 **Fixtures for tables with a `CURRENT_TIMESTAMP` default must set that column explicitly whenever

@@ -46,9 +46,15 @@ the "Session log" table** in INDEX.md (date · what landed · commit hashes).
 **Reading order for a new session:** `CLAUDE.md` → `docs/SYSTEM-STATE-2026-07.md` →
 `.scratch/fsm-platform-v1/INDEX.md` → the issue file being worked.
 
-**Handoff files** are only for genuinely interrupted work (uncommitted state a next session
-must recover). They live beside the issue while live and move to `docs/archive/` (git mv, with
-a 2-line ARCHIVED banner) as soon as they are consumed. `docs/archive/` is write-once history:
+**Handoff files** carry work across a session boundary. The live one is always
+`docs/audits/handoffs/HANDOFF-ACTIVE.md` (there is only ever one), written from
+`HANDOFF-TEMPLATE.md` beside it and refreshed as the slice progresses — not composed at the
+last moment. That folder is also the audit trail: finished handoffs are renamed
+`HANDOFF-<issue>-<date>.md` and stay in place rather than moving to `docs/archive/`. Opt in for a long slice with `/autohandoff on`: a `SessionStart` hook then
+injects the handoff into every new session, so `/clear` mid-slice is safe, and a `PostToolUse`
+hook forces the handoff once context passes 50%. Off by default. Both are described in
+`docs/agents/workflow.md` ("Context budget and rolling handoff") and configured in
+`.claude/context-budget.json`. `docs/archive/` is write-once history:
 nothing in it is current; nothing in it gets updated. Per-issue TDD completion reports remain
 `docs/progress/<issue>.md` — frozen once written; corrections go to INDEX/SYSTEM-STATE, not there.
 

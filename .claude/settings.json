@@ -1,0 +1,29 @@
+{
+  "$comment": "Project hooks. Machine-specific overrides go in settings.local.json (not committed).",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/context_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact|resume|fork",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_resume.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

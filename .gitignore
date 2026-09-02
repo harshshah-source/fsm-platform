@@ -25,7 +25,21 @@ package-lock.json
 # the `.env` rules above (they match at any depth); no credentials live under docs/.
 .scratch/*
 !.scratch/fsm-platform-v1/
-.claude/
+# .claude/ is machine-local by default, EXCEPT the agent machinery the documented process
+# depends on: a fresh clone must be able to run the context-budget / rolling-handoff loop
+# (docs/agents/workflow.md). Same #115 reasoning as docs/. settings.local.json (permissions),
+# state/ (per-session scratch) and worktrees/ stay out.
+.claude/*
+!.claude/settings.json
+!.claude/context-budget.json
+!.claude/hooks/
+.claude/hooks/__pycache__/
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/handoff/
+!.claude/skills/autohandoff/
+!.claude/skills/implement/
+!.claude/skills/tdd/
 # Repo-root artifact dirs only — anchored with a leading `/` so they no longer shadow source
 # paths that happen to be named `data`/`backups` (e.g. apps/admin/src/components/data/, #114).
 /data/
