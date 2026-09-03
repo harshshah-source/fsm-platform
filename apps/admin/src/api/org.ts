@@ -51,6 +51,32 @@ export interface CommonKitView {
   active: boolean;
 }
 
+/**
+ * A failed org-API call. The message keeps the long-standing `REQUEST_FAILED_<status>` shape so the
+ * many call sites that catch-and-show-their-own-copy read exactly as before; `code` and `detail`
+ * carry the server's own explanation for the few that must say *why* (#362 — "this is the only
+ * active Operations Head" is a refusal the operator can act on, and a generic failure banner throws
+ * that away).
+ */
+export class OrgRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+    readonly detail: string | null,
+  ) {
+    super(`REQUEST_FAILED_${status}`);
+    this.name = 'OrgRequestError';
+  }
+}
+
+/** Nest sends `message` as a string, or as an array of strings from the validation pipe. */
+function errorDetail(payload: { message?: unknown } | null): string | null {
+  const message = payload?.message;
+  if (typeof message === 'string') return message;
+  if (Array.isArray(message)) return message.join('; ');
+  return null;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
@@ -61,7 +87,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    throw new Error(`REQUEST_FAILED_${res.status}`);
+    const payload = (await res.json().catch(() => null)) as
+      | { code?: unknown; message?: unknown }
+      | null;
+    throw new OrgRequestError(
+      res.status,
+      typeof payload?.code === 'string' ? payload.code : null,
+      errorDetail(payload),
+    );
   }
   return (await res.json()) as T;
 }
@@ -109,6 +142,16 @@ export const createUser = (body: {
   phone: string;
   zoneId?: number;
 }) => api<UserView>('/org/users', { method: 'POST', body: JSON.stringify(body) });
+/**
+ * #362 — the two Operations-Head edits of an existing account. Both land on the same
+ * `PATCH /org/users/:id`; they are separate functions here because they are separate operator
+ * intents, and the backend revokes the user's live sessions on either one (a role or zone that only
+ * takes effect on the next login is not a privilege change, it is a note in the audit log).
+ */
+export const setUserStatus = (userId: string, status: 'ACTIVE' | 'DISABLED') =>
+  api<UserView>(`/org/users/${userId}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+export const updateUser = (userId: string, body: { role?: string; zoneId?: number | null }) =>
+  api<UserView>(`/org/users/${userId}`, { method: 'PATCH', body: JSON.stringify(body) });
 
 export const listSlaRules = () => api<SlaRuleView[]>('/org/sla-rules');
 export const upsertSlaRule = (body: {

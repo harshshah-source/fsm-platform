@@ -73,4 +73,37 @@ describe('Issue 09 slice 6a — geography read endpoints', () => {
     await request(app.getHttpServer()).get('/api/org/geo/states').expect(401);
     void randomUUID;
   });
+
+  /**
+   * #362 AC4 — the territory hierarchy is reference data, but it is not *public* reference data: it
+   * enumerates every state, region and district the business operates in, and the only screen that
+   * reads it (admin Territory) is a manager screen. Before this slice the controller carried
+   * `AuthGuard` alone, so any authenticated principal — a Service Engineer's phone included — could
+   * page the whole national footprint out of it. The guard is narrowed to the three manager roles
+   * that can actually be handed a territory to manage.
+   */
+  describe('#362 AC4 — manager-only reference read', () => {
+    it.each([
+      ['ops.head@fsm.test'],
+      ['csm@fsm.test'],
+      ['zm.north@fsm.test'],
+    ])('allows %s to read the geography cascade', async (email) => {
+      const token = await login(email);
+      const auth = { Authorization: `Bearer ${token}` };
+      await request(app.getHttpServer()).get('/api/org/geo/states').set(auth).expect(200);
+      await request(app.getHttpServer()).get('/api/org/geo/regions').set(auth).expect(200);
+      await request(app.getHttpServer()).get('/api/org/geo/districts').set(auth).expect(200);
+    });
+
+    it.each([['se.north@fsm.test'], ['wm@fsm.test']])(
+      'refuses %s on every geography read with 403',
+      async (email) => {
+        const token = await login(email);
+        const auth = { Authorization: `Bearer ${token}` };
+        await request(app.getHttpServer()).get('/api/org/geo/states').set(auth).expect(403);
+        await request(app.getHttpServer()).get('/api/org/geo/regions').set(auth).expect(403);
+        await request(app.getHttpServer()).get('/api/org/geo/districts').set(auth).expect(403);
+      },
+    );
+  });
 });

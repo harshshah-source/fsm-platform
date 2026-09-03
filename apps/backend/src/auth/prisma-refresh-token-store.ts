@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createHash, randomBytes } from 'node:crypto';
+import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface IssueTokenParams {
@@ -94,14 +95,39 @@ export class PrismaRefreshTokenStore {
     return { userId: row.userId };
   }
 
-  /** Revokes every currently-active token for a user. Future admin-forced-logout path (no caller yet). */
+  /**
+   * Revokes every currently-active token for a user — the admin-forced-logout path. Callers that
+   * must revoke *as part of* another change (a role or zone edit, #362) call
+   * {@link revokeAllForUserOn} with their own transaction client instead, so the two commit together.
+   */
   async revokeAllForUser(userId: string, reason: string): Promise<number> {
-    const result = await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date(), revokedReason: reason },
-    });
-    return result.count;
+    return revokeAllForUserOn(this.prisma, userId, reason);
   }
+}
+
+/** The narrowest client `revokeAllForUserOn` needs — `PrismaService` and a `$transaction` client both fit. */
+export type RefreshTokenWriter = Pick<Prisma.TransactionClient, 'refreshToken'>;
+
+/**
+ * Revokes every active refresh token for `userId` on the supplied client, returning how many died.
+ *
+ * Taking the client as a parameter is the whole point (#362). A privilege change and the revocation
+ * of the sessions carrying the old privilege must be one atomic fact: if the role update commits and
+ * the revocation does not, the audit log records a demotion that a live session goes on ignoring
+ * until the refresh token expires — the worst of the three possible outcomes, because it looks
+ * finished. Passing the `tx` from `AuditService.withAudit` makes the mutation, its audit row and the
+ * revocation commit or roll back as one.
+ */
+export async function revokeAllForUserOn(
+  client: RefreshTokenWriter,
+  userId: string,
+  reason: string,
+): Promise<number> {
+  const result = await client.refreshToken.updateMany({
+    where: { userId, revokedAt: null },
+    data: { revokedAt: new Date(), revokedReason: reason },
+  });
+  return result.count;
 }
 
 function hashToken(token: string): string {

@@ -1,5 +1,5 @@
 # 362 — User administration completion + reference-read hardening
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/362-user-administration-completion.md
 Type: AFK
 Wave: 4 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -33,10 +33,17 @@ Account creation and passwords are out of scope (#91).
 - Tests: `org-users`, `org-geography` e2e; `settings.test.tsx`.
 
 ## Acceptance criteria
-- [ ] AC1 — OH can disable/enable a user and change their role/zone from Settings.
-- [ ] AC2 — a changed user's sessions are revoked.
-- [ ] AC3 — the last active OH cannot be disabled or demoted.
-- [ ] AC4 — geography reads refuse SE and WM.
+- [x] AC1 — OH can disable/enable a user and change their role/zone from Settings.
+- [x] AC2 — a changed user's sessions are revoked (in the same transaction as the change).
+- [x] AC3 — the last active OH cannot be disabled or demoted (a disabled OH is not a survivor).
+- [x] AC4 — geography reads refuse SE and WM, and still serve ZM/CSM/OH.
+
+## Outcome
+
+Built as specified, with one deliberate deviation: the role/zone editor is **inline in the row**
+rather than a modal, matching the Companies editor already on the same page. The geography finding
+was verified before building — `geography.controller.ts` genuinely had no `RoleGuard`.
+See `docs/progress/362-user-administration-completion.md`.
 
 ## Verification
 

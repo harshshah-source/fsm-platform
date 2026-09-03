@@ -237,6 +237,119 @@ describe('Settings — Operations Head only (AC#1)', () => {
   });
 });
 
+/**
+ * #362 — the Users section was a read-only registry: `PATCH /org/users/:id` existed and nothing on
+ * screen could reach it, and no route changed a role or a zone at all. An OH who needed to move a
+ * manager between zones had to open a database console. These pin the three row controls and, more
+ * importantly, that the one refusal the server can hand back — the last active Operations Head —
+ * lands in front of the operator instead of dying in a rejected promise.
+ */
+describe('Settings — Users administration (#362)', () => {
+  const USERS = [
+    {
+      userId: 'u1',
+      name: 'Vikram Rao',
+      role: 'ZONAL_MANAGER',
+      zoneId: 1,
+      phone: '+911',
+      email: 'vikram@fsm.test',
+      status: 'ACTIVE',
+    },
+  ];
+  const ZONES = [
+    { zoneId: 1, name: 'North', zonalManagerUserId: null },
+    { zoneId: 2, name: 'South', zonalManagerUserId: null },
+  ];
+
+  /** Serves the Users tab's two lists and lets each test decide what the PATCH replies. */
+  function usersApi(patch: (body: unknown) => { status?: number; body: unknown }) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      const json = (body: unknown, status = 200) =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      if (url.includes('/org/users/') && init?.method === 'PATCH') {
+        const { status = 200, body } = patch(JSON.parse(String(init.body)));
+        return json(body, status);
+      }
+      if (url.endsWith('/org/users')) return json(USERS);
+      if (url.endsWith('/org/zones')) return json(ZONES);
+      return json([]);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const patchBody = (mock: ReturnType<typeof usersApi>) => {
+    const call = mock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === 'PATCH');
+    expect(call).toBeTruthy();
+    return { url: String(call![0]), body: JSON.parse(String((call![1] as RequestInit).body)) };
+  };
+
+  async function openUsersTab() {
+    renderAt('/settings', opsHead);
+    await userEvent.click(await screen.findByRole('tab', { name: /users/i }));
+    return (await screen.findByText('Vikram Rao')).closest('tr') as HTMLElement;
+  }
+
+  it('AC1 — disables a user from their row and reflects the new status', async () => {
+    const fetchMock = usersApi(() => ({ body: { ...USERS[0], status: 'DISABLED' } }));
+    const row = await openUsersTab();
+
+    await userEvent.click(within(row).getByRole('button', { name: /disable/i }));
+
+    const { url, body } = patchBody(fetchMock);
+    expect(url).toContain('/org/users/u1');
+    expect(body).toEqual({ status: 'DISABLED' });
+    expect(await within(row).findByText('DISABLED')).toBeInTheDocument();
+    // The control flips to the inverse action — a disabled account must be re-enableable from here.
+    expect(within(row).getByRole('button', { name: /enable/i })).toBeInTheDocument();
+  });
+
+  it('AC1 — changes a role and a zone in one PATCH', async () => {
+    const fetchMock = usersApi((body) => ({
+      body: { ...USERS[0], ...(body as object) },
+    }));
+    const row = await openUsersTab();
+
+    await userEvent.click(within(row).getByRole('button', { name: /^edit$/i }));
+    await userEvent.selectOptions(await within(row).findByLabelText(/role for/i), 'CENTRAL_SERVICE_MANAGER');
+    await userEvent.selectOptions(within(row).getByLabelText(/zone for/i), '2');
+    await userEvent.click(within(row).getByRole('button', { name: /save/i }));
+
+    const { url, body } = patchBody(fetchMock);
+    expect(url).toContain('/org/users/u1');
+    expect(body).toEqual({ role: 'CENTRAL_SERVICE_MANAGER', zoneId: 2 });
+    expect(await within(row).findByText(/central service manager/i)).toBeInTheDocument();
+    expect(within(row).getByText('South')).toBeInTheDocument();
+  });
+
+  it('AC3 — shows the last-Operations-Head refusal rather than failing silently', async () => {
+    usersApi(() => ({
+      status: 409,
+      body: {
+        code: 'LAST_OPERATIONS_HEAD',
+        message: 'This is the only active Operations Head.',
+      },
+    }));
+    const row = await openUsersTab();
+
+    await userEvent.click(within(row).getByRole('button', { name: /^edit$/i }));
+    await userEvent.selectOptions(await within(row).findByLabelText(/role for/i), 'WAREHOUSE_MANAGER');
+    await userEvent.click(within(row).getByRole('button', { name: /save/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/only active Operations Head/i);
+    // A refused save stays open on the operator's edit rather than closing as if it had worked, and
+    // the row still reads what the server still holds.
+    await userEvent.click(within(row).getByRole('button', { name: /cancel/i }));
+    expect(within(row).getByText('Zonal Manager')).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+});
+
 describe('Settings — Scoring Weights component vocabulary (#266)', () => {
   it('offers only the components the recommender reads, fetched rather than hard-coded', async () => {
     // The Component field was free text: any string could be saved, and the resulting weight then sat

@@ -512,16 +512,21 @@ function CompanyRow({
 
 export function UsersSection() {
   const { items, setItems, error, loading } = useList(org.listUsers);
+  const { items: zones } = useList(org.listZones);
   const [name, setName] = useState('');
   const [role, setRole] = useState('ZONAL_MANAGER');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const replace = (updated: org.UserView) =>
+    setItems((xs) => xs.map((x) => (x.userId === updated.userId ? updated : x)));
   return (
     <SettingsSection
       title="Users"
-      description="Console and mobile accounts. The role chosen here is the whole of what an account can see and do — it drives the navigation, the queues, and the approvals a user is offered."
+      description="Console and mobile accounts. The role chosen here is the whole of what an account can see and do — it drives the navigation, the queues, and the approvals a user is offered. Changing a role or zone, or disabling an account, ends that user's live sessions immediately."
       meta={<RecordCount count={items.length} noun="user" loading={loading} />}
     >
+      {writeError && <Notice tone="critical">{writeError}</Notice>}
       {error && <Notice tone="critical">Failed to load users.</Notice>}
 
       <TablePanel
@@ -529,9 +534,11 @@ export function UsersSection() {
         headers={[
           { label: 'Name' },
           { label: 'Role' },
+          { label: 'Zone' },
           { label: 'Email', hideBelow: 'md' },
           { label: 'Phone', hideBelow: 'md' },
           { label: 'Status', align: 'right' },
+          { label: <span className="sr-only">Actions</span>, align: 'right' },
         ]}
         rowCount={items.length}
         loading={loading}
@@ -576,18 +583,181 @@ export function UsersSection() {
         }
       >
         {items.map((u) => (
-          <tr key={u.userId} className={rowClass}>
-            <td className={cn(cellClass, 'font-medium text-ink-strong')}>{u.name}</td>
-            <td className={cellClass}>{roleLabel(u.role)}</td>
-            <td className={cn(cellClass, 'hidden text-ink-muted md:table-cell')}>{u.email || '—'}</td>
-            <td className={cn(cellClass, 'hidden text-ink-muted md:table-cell')}>{u.phone || '—'}</td>
-            <td className={cn(cellClass, 'text-right')}>
-              <Badge tone={u.status === 'ACTIVE' ? 'success' : 'neutral'}>{u.status}</Badge>
-            </td>
-          </tr>
+          <UserRow
+            key={u.userId}
+            user={u}
+            zones={zones}
+            onSaved={(updated) => {
+              setWriteError(null);
+              replace(updated);
+            }}
+            onError={setWriteError}
+          />
         ))}
       </TablePanel>
     </SettingsSection>
+  );
+}
+
+/**
+ * A Users row with the two Operations-Head edits (#362): Disable/Enable, and an inline role/zone
+ * editor.
+ *
+ * Inline rather than a modal, deliberately: the Companies table two sections up already edits in
+ * place, and a second affordance for the same shape of change on the same page is a cost the
+ * operator pays for nothing. The write path is the same either way.
+ *
+ * The refusal the server can return — the last active Operations Head — is surfaced verbatim by the
+ * section above rather than flattened to "failed to update". It is the one error here an operator can
+ * actually do something about (promote someone else first), and the sentence says so.
+ */
+function UserRow({
+  user,
+  zones,
+  onSaved,
+  onError,
+}: {
+  user: org.UserView;
+  zones: org.ZoneView[];
+  onSaved: (u: org.UserView) => void;
+  onError: (message: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [role, setRole] = useState(user.role);
+  const [zoneId, setZoneId] = useState(user.zoneId === null ? '' : String(user.zoneId));
+
+  const zoneName = zones.find((z) => z.zoneId === user.zoneId)?.name;
+  const disabled = user.status !== 'ACTIVE';
+
+  /** Runs an org write, surfacing the server's own refusal when it has one to give. */
+  async function run(work: () => Promise<org.UserView>): Promise<boolean> {
+    setBusy(true);
+    onError(null);
+    try {
+      onSaved(await work());
+      return true;
+    } catch (err) {
+      onError(
+        err instanceof org.OrgRequestError && err.detail
+          ? err.detail
+          : `Could not update ${user.name}.`,
+      );
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <tr className={rowClass}>
+        <td className={cn(cellClass, 'font-medium text-ink-strong')}>{user.name}</td>
+        <td className={cellClass}>{roleLabel(user.role)}</td>
+        <td className={cn(cellClass, 'text-ink-muted')}>
+          {user.zoneId === null ? '—' : (zoneName ?? `Zone ${user.zoneId}`)}
+        </td>
+        <td className={cn(cellClass, 'hidden text-ink-muted md:table-cell')}>{user.email || '—'}</td>
+        <td className={cn(cellClass, 'hidden text-ink-muted md:table-cell')}>{user.phone || '—'}</td>
+        <td className={cn(cellClass, 'text-right')}>
+          <Badge tone={user.status === 'ACTIVE' ? 'success' : 'neutral'}>{user.status}</Badge>
+        </td>
+        <td className={cn(cellClass, 'text-right')}>
+          <div className="flex justify-end gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setRole(user.role);
+                setZoneId(user.zoneId === null ? '' : String(user.zoneId));
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              loading={busy}
+              onClick={() =>
+                run(() => org.setUserStatus(user.userId, disabled ? 'ACTIVE' : 'DISABLED'))
+              }
+            >
+              {disabled ? 'Enable' : 'Disable'}
+            </Button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  const nextZoneId = zoneId === '' ? null : Number(zoneId);
+  return (
+    <tr className={cn(rowClass, 'bg-surface-raised')}>
+      <td className={cn(cellClass, 'font-medium text-ink-strong')}>{user.name}</td>
+      <td className={cellClass}>
+        <Select
+          aria-label={`Role for ${user.name}`}
+          className="h-9 w-48"
+          value={role}
+          onChange={(e) => setRole(e.target.value)}
+        >
+          {ROLE_OPTIONS.map((r) => (
+            <option key={r} value={r}>
+              {roleLabel(r)}
+            </option>
+          ))}
+        </Select>
+      </td>
+      <td className={cellClass}>
+        <Select
+          aria-label={`Zone for ${user.name}`}
+          className="h-9 w-36"
+          value={zoneId}
+          onChange={(e) => setZoneId(e.target.value)}
+        >
+          <option value="">No zone</option>
+          {zones.map((z) => (
+            <option key={z.zoneId} value={z.zoneId}>
+              {z.name}
+            </option>
+          ))}
+        </Select>
+      </td>
+      <td className={cn(cellClass, 'hidden text-ink-muted md:table-cell')}>{user.email || '—'}</td>
+      <td className={cn(cellClass, 'hidden text-ink-muted md:table-cell')}>{user.phone || '—'}</td>
+      <td className={cn(cellClass, 'text-right')}>
+        <Badge tone={user.status === 'ACTIVE' ? 'success' : 'neutral'}>{user.status}</Badge>
+      </td>
+      <td className={cn(cellClass, 'text-right')}>
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            size="sm"
+            loading={busy}
+            onClick={async () => {
+              // Only what actually moved goes in the body: an unchanged field would still be a scope
+              // "change" to the server, and every one of those logs the user out of the field.
+              const body: { role?: string; zoneId?: number | null } = {};
+              if (role !== user.role) body.role = role;
+              if (nextZoneId !== user.zoneId) body.zoneId = nextZoneId;
+              if (Object.keys(body).length === 0) {
+                setEditing(false);
+                return;
+              }
+              if (await run(() => org.updateUser(user.userId, body))) setEditing(false);
+            }}
+          >
+            Save
+          </Button>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(false)}>
+            Cancel
+          </Button>
+        </div>
+      </td>
+    </tr>
   );
 }
 
