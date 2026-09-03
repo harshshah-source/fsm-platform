@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { FleetUptimeAggregationService } from '../src/reports/fleet-uptime-aggregation.service';
 import { ReportsService } from '../src/reports/reports.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -182,5 +184,90 @@ describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
     const report = await service.fleetUptime({ role: 'ZONAL_MANAGER', zoneId: Number(zoneA) }, { month: MONTH_PARAM, groupBy: 'zone' });
     expect(report.rows.map((r) => r.id)).toEqual([String(zoneA)]);
     expect(report.fleet.eligibleDeviceCount).toBe(2);
+  });
+
+  /**
+   * **Audit finding F7** (#365) — `se_repaired_closures` counted every `CLOSED` TROUBLESHOOT ticket,
+   * and three different writers put a ticket into `CLOSED`: the verification service (a real repair,
+   * `closure_type IS NULL`), `DeviceDepartureService` (`DEVICE_UNDEPLOYED_CLOSE` — the vehicle left the
+   * fleet) and `PlantDeactivationService` (`OPERATIONS_HEAD_OVERRIDE_CLOSE`). So an engineer whose
+   * plants happened to lose vehicles read as *more productive* than one who repaired devices, in the
+   * column whose name says the opposite — and that column is the input to the SE productivity report,
+   * i.e. to staffing decisions.
+   *
+   * This runs the aggregation rather than seeding the cube (the rest of the suite seeds), because the
+   * defect is in the attribution, not the read. Its own month and its own devices: the worker is a
+   * global delete+insert per month, so it must not touch March's rows (see {@link MONTH}).
+   */
+  describe('F7 — se_repaired_closures counts repairs only, never departures', () => {
+    const F7_MONTH = new Date(Date.UTC(2027, 7, 1)); // August 2027 — no other spec writes it
+    const F7_MONTH_PARAM = '2027-08';
+    const F7_NOW = new Date(Date.UTC(2027, 8, 15, 12, 0, 0)); // September 2027 — August is complete
+    const f7Cycles: string[] = [];
+    const f7Tickets: string[] = [];
+    let f7Device: string;
+
+    /** A closed TROUBLESHOOT ticket of a given kind. Zero-length cycle so it adds no downtime. */
+    const closedTicket = async (
+      status: 'CLOSED' | 'CLOSED_AUTO_RECOVERY',
+      closureType: 'DEVICE_UNDEPLOYED_CLOSE' | 'OPERATIONS_HEAD_OVERRIDE_CLOSE' | 'AUTO_RECOVERY_CLOSE' | null,
+      closedAt: Date,
+    ): Promise<void> => {
+      const cycleId = randomUUID();
+      f7Cycles.push(cycleId);
+      await prisma.failureCycle.create({ data: { cycleId, deviceId: f7Device, state: 'VERIFIED', openedAt: closedAt, closedAt } });
+      const t = await prisma.ticket.create({
+        data: {
+          workType: 'TROUBLESHOOT', status, closureType, deviceId: f7Device, failureCycleId: cycleId,
+          plantId: plantA, companyId, companyTier: 'GOLD', closedAt, lastStateChangedAt: closedAt,
+        },
+      });
+      f7Tickets.push(t.ticketId);
+    };
+
+    beforeAll(async () => {
+      f7Device = '9391900';
+      await prisma.device.create({ data: { deviceId: f7Device, deviceType: 'GPS-X' } });
+      await prisma.deviceState.create({
+        data: { deviceId: f7Device, eligibleForUptime: true, latestGpsDatetime: F7_NOW, plantId: plantA, companyId, computedAt: F7_NOW },
+      });
+
+      // Two genuine repairs — the verification service leaves `closure_type` NULL.
+      await closedTicket('CLOSED', null, new Date(Date.UTC(2027, 7, 3)));
+      await closedTicket('CLOSED', null, new Date(Date.UTC(2027, 7, 4)));
+      // Three departures. Before F7 these read as three more repairs by whoever held the plants.
+      await closedTicket('CLOSED', 'DEVICE_UNDEPLOYED_CLOSE', new Date(Date.UTC(2027, 7, 5)));
+      await closedTicket('CLOSED', 'DEVICE_UNDEPLOYED_CLOSE', new Date(Date.UTC(2027, 7, 6)));
+      await closedTicket('CLOSED', 'DEVICE_UNDEPLOYED_CLOSE', new Date(Date.UTC(2027, 7, 7)));
+      // A plant deactivation — also nobody's repair, and not a departure either.
+      await closedTicket('CLOSED', 'OPERATIONS_HEAD_OVERRIDE_CLOSE', new Date(Date.UTC(2027, 7, 8)));
+      // The self-healed closure, which has been counted separately since Issue 39.
+      await closedTicket('CLOSED_AUTO_RECOVERY', 'AUTO_RECOVERY_CLOSE', new Date(Date.UTC(2027, 7, 9)));
+
+      await new FleetUptimeAggregationService(prisma).computeMonth(F7_MONTH, F7_NOW);
+    });
+
+    afterAll(async () => {
+      await prisma.deviceDowntimeSummaryMonthly.deleteMany({ where: { month: F7_MONTH } });
+      await prisma.ticket.deleteMany({ where: { ticketId: { in: f7Tickets } } });
+      await prisma.failureCycle.deleteMany({ where: { cycleId: { in: f7Cycles } } });
+      await prisma.deviceState.deleteMany({ where: { deviceId: f7Device } });
+      await prisma.device.deleteMany({ where: { deviceId: f7Device } });
+    });
+
+    it('the summary row counts the two repairs, not the seven closures', async () => {
+      const s = await prisma.deviceDowntimeSummaryMonthly.findUniqueOrThrow({
+        where: { deviceId_month: { deviceId: f7Device, month: F7_MONTH } },
+      });
+      expect(s.seRepairedClosures).toBe(2);
+      expect(s.autoRecoveryClosures).toBe(1);
+    });
+
+    it('the report the dashboard reads carries the split, not the inflated figure', async () => {
+      const report = await service.fleetUptime(ohScope, { month: F7_MONTH_PARAM, groupBy: 'plant' });
+      const row = report.rows.find((r) => r.id === String(plantA));
+      expect(row?.seRepairedClosures).toBe(2);
+      expect(row?.autoRecoveryClosures).toBe(1);
+    });
   });
 });

@@ -1,6 +1,6 @@
 # 365 — SE productivity report
-Status: ready-for-human
-Type: HITL (design stop) then AFK
+Status: done 2026-09-04 — report docs/progress/365-se-productivity-report.md
+Type: HITL (design stop, cleared 2026-09-03 by #368) then AFK
 Wave: 5 · Severity: P3 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
 ## Problem
@@ -35,9 +35,16 @@ per-SE number is trustworthy.
 - Only after the design stop below has produced an approved design.
 
 ## Acceptance criteria
-- [ ] AC1 — per-SE closures by type, first-time-fix rate, failed-verification rate, and average
+- [x] AC1 — per-SE closures by type, first-time-fix rate, failed-verification rate, and average
       on-site → submission time; weekly and monthly; computed from the summary tables; zone
       clamped for ZM.
+      **Met, with one clause deliberately not met: "computed from the summary tables".** No summary
+      table can serve it — `system_efficiency_summary_daily` populates `se_id` on legs 5 and 7 only
+      (auto-assignments, overrides); the closure, verification and stage-time legs all write
+      `se_id = NULL`, and no cube carries a closure-type split. Serving it from a cube needs new
+      columns and `schema.prisma` was owned by #366 this round, so the read is a bounded live query
+      with the honest `dataAsOf` #347 gives the other two non-cube reports. Follow-up 1 in
+      `docs/progress/365-se-productivity-report.md` restores the cube path.
 
 ## Verification
 
@@ -56,8 +63,10 @@ backend half (F7 split, endpoint) may proceed once that design is approved and t
 `ready-for-agent`.
 
 ## Blocked by
-- #346 — fleet-uptime honesty + monthly cube coverage.
-- Design stop — an approved design under `docs/ui/desktop/approved-designs/` (HITL).
+- ~~#346 — fleet-uptime honesty + monthly cube coverage.~~ Closed.
+- ~~Design stop — an approved design under `docs/ui/desktop/approved-designs/` (HITL).~~ Cleared
+  2026-09-03 by the operator: `docs/ui/desktop/approved-designs/se-productivity-report.html`, with
+  the reasoning in `368-decision-se-productivity-report.md`. That file is this page's reference.
 
 ## Absorbs / supersedes
 - survey ids: RPT-05.

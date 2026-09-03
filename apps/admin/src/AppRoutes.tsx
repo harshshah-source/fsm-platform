@@ -49,6 +49,7 @@ import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
 import { FleetDirectoryPage } from './pages/reports/FleetDirectoryPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
 import { RootCauseAnalyticsPage } from './pages/reports/RootCauseAnalyticsPage';
+import { SeProductivityPage } from './pages/reports/SeProductivityPage';
 import { SystemEfficiencyPage } from './pages/reports/SystemEfficiencyPage';
 import { ZmScorecardPage } from './pages/reports/ZmScorecardPage';
 import { TicketDetailDrawer } from './pages/tickets/TicketDetailDrawer';
@@ -235,6 +236,16 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <SystemEfficiencyPage />
+              </RoleRoute>
+            }
+          />
+          {/* SE Productivity (#365) — manager roles; a ZM is clamped to their own zone server-side and
+              the page's scope chip renders the clamped zone the report echoed back. */}
+          <Route
+            path="/reports/se-productivity"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <SeProductivityPage />
               </RoleRoute>
             }
           />

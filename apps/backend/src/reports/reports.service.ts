@@ -358,6 +358,115 @@ export interface VerificationOutcomesReport extends DataAsOf {
   escalations: VerificationEscalationRow[];
 }
 
+// ---- SE productivity (#365, design `docs/ui/desktop/approved-designs/se-productivity-report.html`) ----
+
+export type SeProductivityGranularity = 'weekly' | 'monthly';
+/** `all`, or one member of the `coverage_type` enum. The page's Coverage control. */
+export type SeCoverageFilter = 'all' | 'DEDICATED' | 'MULTI_PLANT' | 'FLOATING';
+export const SE_COVERAGE_FILTERS: SeCoverageFilter[] = ['all', 'DEDICATED', 'MULTI_PLANT', 'FLOATING'];
+export const SE_PRODUCTIVITY_GRANULARITIES: SeProductivityGranularity[] = ['weekly', 'monthly'];
+
+/**
+ * **The small-sample floor: rates are withheld below ten closures.**
+ *
+ * An operator constraint attached to the approved design, and enforced *here* rather than in the page
+ * — a suppressed rate that the payload still carries is one CSV export away from being acted on, and
+ * the number it would show is noise either way. A floating SE with six closures has no meaningful
+ * first-time-fix percentage: one bad job moves it 17 points. Ten is the point at which a single
+ * outcome stops being able to swing the figure by more than ten points, which is the smallest bar
+ * worth defending and is stated on the page footer so nobody has to guess where the dashes come from.
+ *
+ * The **counts are never suppressed.** Six closures is a true fact about six jobs, and hiding it would
+ * conceal the one thing about a low-volume engineer a manager should see.
+ */
+export const SE_PRODUCTIVITY_RATE_MIN_SAMPLE = 10;
+
+export interface SeProductivityRow {
+  seId: string;
+  name: string;
+  coverageType: 'DEDICATED' | 'MULTI_PLANT' | 'FLOATING';
+  zoneId: string;
+  zoneName: string | null;
+  /** `repairClosures + departureClosures` — the sample size the rate floor is judged against. */
+  closures: number;
+  /** Closures the engineer earned: `closure_type IS NULL`, the verification service's own close. */
+  repairClosures: number;
+  /** `DEVICE_UNDEPLOYED_CLOSE` — the vehicle left the fleet. Shown, never credited (audit F7). */
+  departureClosures: number;
+  firstTimeFixes: number;
+  /** `null` = withheld (below {@link SE_PRODUCTIVITY_RATE_MIN_SAMPLE}) or no denominator. Never 0-as-unknown. */
+  firstTimeFixRatePct: number | null;
+  verificationsDecided: number;
+  failedVerifications: number;
+  failedVerificationRatePct: number | null;
+  onsiteToSubmissionCount: number;
+  /** `null` when the engineer logged no on-site → submission pair in the window. */
+  avgOnsiteToSubmissionSeconds: number | null;
+  /** True when the rate columns are `null` **because of the floor** rather than because of no data. */
+  ratesSuppressed: boolean;
+}
+
+export interface SeProductivityReport extends DataAsOf {
+  granularity: SeProductivityGranularity;
+  from: string; // ISO date, inclusive
+  to: string; // ISO date, inclusive
+  rateMinSample: number;
+  /** The **clamped** zone — a ZM's own, whatever they asked for. The page's scope chip reads this. */
+  filters: { zoneId: number | null; coverage: SeCoverageFilter };
+  totals: { engineers: number; closures: number; repairClosures: number; departureClosures: number };
+  rows: SeProductivityRow[];
+}
+
+export interface SeProductivityFilters {
+  granularity?: SeProductivityGranularity;
+  /** `YYYY-MM` — the window when `granularity` is `monthly`. Defaults to the current month. */
+  month?: string;
+  /** `YYYY-MM-DD` — any day in the wanted week when `granularity` is `weekly`. Defaults to today. */
+  weekOf?: string;
+  zoneId?: number | null;
+  coverage?: SeCoverageFilter;
+}
+
+interface RawSeProductivityRow {
+  seId: string;
+  name: string;
+  coverageType: 'DEDICATED' | 'MULTI_PLANT' | 'FLOATING';
+  zoneId: string;
+  zoneName: string | null;
+  repairClosures: number;
+  departureClosures: number;
+  firstTimeFixes: number;
+  verificationsDecided: number;
+  failedVerifications: number;
+  onsiteToSubmissionCount: number;
+  onsiteToSubmissionSecondsSum: bigint;
+}
+
+/**
+ * **Which engineer a ticket's outcome belongs to.**
+ *
+ * One rule, used by every column, because two rules would let the Repair and Departure counts on one
+ * row describe two different people. The engineer who *did the work* if there is a submitted form;
+ * otherwise the engineer the ticket was last assigned to.
+ *
+ * The fallback is not a nicety — it is the only attribution a **departure** closure can have. Nobody
+ * submitted a form: the master sync observed the vehicle leaving and closed the ticket. Without the
+ * assignment leg those closures would vanish from the report entirely, which is the same information
+ * loss as F7 with the opposite sign: the column exists precisely so a manager can see that eleven of
+ * an engineer's forty-two closures were not work.
+ */
+function attributedSe(ticketColumn: string): Prisma.Sql {
+  const col = Prisma.raw(ticketColumn);
+  return Prisma.sql`COALESCE(
+    (SELECT ts.se_id FROM troubleshooting_submissions ts WHERE ts.ticket_id = ${col} ORDER BY ts.submitted_at DESC LIMIT 1),
+    (SELECT pba.se_id
+       FROM batch_assignment_tickets bat
+       JOIN plant_batch_assignments pba ON pba.batch_id = bat.batch_id
+      WHERE bat.ticket_id = ${col}
+      ORDER BY bat.id DESC LIMIT 1)
+  )`;
+}
+
 /**
  * The escalation detail list is a review queue, not an export: a window with hundreds of live
  * escalations is a staffing emergency, not a paging problem, and an uncapped detail array inside an
@@ -813,6 +922,205 @@ export class ReportsService {
       byZone,
     };
   }
+
+  /**
+   * **SE productivity** (#365, PRD story 25) — one row per engineer for a week or a month: closures
+   * split into repairs and departures, first-time-fix rate, failed-verification rate, and average
+   * on-site → submission time. Zone-clamped for a ZM; CSM / Operations Head see every zone.
+   *
+   * Three things about this method are decisions, not detail.
+   *
+   * **1. The roster is the row set, not the activity.** Every active engineer in scope gets a row,
+   * including one who closed nothing. The page answers "which of my engineers needs attention", and an
+   * engineer who did no work in a month is an answer to that question — dropping them would make the
+   * emptiest case invisible.
+   *
+   * **2. Repair and Departure are separate columns, structurally** (audit F7,
+   * {@link FleetUptimeAggregationService}). `closure_type IS NULL` is the verification service's own
+   * close and the only closure an engineer earned; `DEVICE_UNDEPLOYED_CLOSE` is a vehicle leaving the
+   * fleet. Summed together — as `se_repaired_closures` did — an engineer with unlucky plants outranks
+   * one who repaired devices, on the page staffing decisions are made from.
+   *
+   * **3. It reads the source tables, not a cube — and this is a departure from the approved design's
+   * "no live recomputation", made deliberately.** No summary table can serve it: the `se_id` dimension
+   * of `system_efficiency_summary_daily` is populated by legs 5 and 7 alone (auto-assignments and
+   * overrides), every closure / verification / stage-time leg writes `se_id = NULL`, and no cube
+   * anywhere carries a closure-type split. Serving this from a cube needs new columns, and
+   * `schema.prisma` was owned by another slice in this round. So it follows the pattern
+   * `workTypeMix` / `verificationOutcomes` already establish in this service — a bounded live read over
+   * `tickets` with an honest `dataAsOf` of "now" (#347) — rather than a fabricated cube stamp. The
+   * window is one week or one month of one zone's tickets, which is nothing like the multi-year
+   * telemetry scans the cubes exist to prevent. The follow-up that would restore the cube path is
+   * recorded in `docs/progress/365-se-productivity-report.md`.
+   */
+  async seProductivity(scope: ReportScope, opts: SeProductivityFilters = {}, now: Date = new Date()): Promise<SeProductivityReport> {
+    const granularity = opts.granularity ?? 'monthly';
+    const { from, toExclusive } = seProductivityWindow(granularity, opts, now);
+    // The clamp is server-side and unconditional: the page's zone dropdown is a convenience, and a ZM
+    // who picks another zone gets their own back, echoed in `filters.zoneId` so the chip can say so.
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : (opts.zoneId ?? null);
+    const coverage = opts.coverage ?? 'all';
+
+    const rosterFilters = Prisma.join(
+      [
+        restrictZone != null ? Prisma.sql`AND em.zone_id = ${BigInt(restrictZone)}` : Prisma.empty,
+        coverage !== 'all' ? Prisma.sql`AND em.coverage_type = ${coverage}::coverage_type` : Prisma.empty,
+      ],
+      ' ',
+    );
+
+    const raw = await this.prisma.$queryRaw<RawSeProductivityRow[]>(Prisma.sql`
+      WITH roster AS (
+        SELECT em.engineer_id AS se_id, u.name AS name, em.coverage_type::text AS coverage_type,
+               em.zone_id AS zone_id, z.name AS zone_name
+        FROM engineer_master em
+        JOIN users u ON u.user_id = em.engineer_id
+        LEFT JOIN zones z ON z.zone_id = em.zone_id
+        WHERE em.is_active = TRUE ${rosterFilters}
+      ),
+      closures AS (
+        SELECT c.se_id,
+               COUNT(*) FILTER (WHERE c.closure_type IS NULL)::int AS repair,
+               COUNT(*) FILTER (WHERE c.closure_type IS NOT NULL)::int AS departure,
+               COUNT(*) FILTER (WHERE c.closure_type IS NULL AND c.first_time)::int AS ftf
+        FROM (
+          SELECT t.closure_type,
+                 -- The same first-time-fix predicate system_efficiency_summary_daily leg 3 uses, so an
+                 -- SE's rate here and the fleet rate on the System Efficiency page are the same
+                 -- measure at two grains rather than two definitions that disagree by a few points.
+                 (fc.state = 'VERIFIED' AND NOT fc.repeat_failure AND fc.sla_accumulated_pause_seconds = 0) AS first_time,
+                 ${attributedSe('t.ticket_id')} AS se_id
+          FROM tickets t
+          JOIN failure_cycles fc ON fc.cycle_id = t.failure_cycle_id
+          WHERE t.work_type = 'TROUBLESHOOT' AND t.status = 'CLOSED'
+            AND t.closed_at >= ${from} AND t.closed_at < ${toExclusive}
+            AND (t.closure_type IS NULL OR t.closure_type = 'DEVICE_UNDEPLOYED_CLOSE')
+        ) c
+        WHERE c.se_id IS NOT NULL
+        GROUP BY c.se_id
+      ),
+      verifications AS (
+        SELECT v.se_id,
+               COUNT(*)::int AS decided,
+               COUNT(*) FILTER (WHERE v.outcome = 'FAILED_VERIFICATION')::int AS failed
+        FROM (
+          SELECT vr.outcome, ${attributedSe('vr.ticket_id')} AS se_id
+          FROM verification_runs vr
+          WHERE vr.outcome_at >= ${from} AND vr.outcome_at < ${toExclusive}
+            AND vr.outcome IN ('CLOSED', 'FAILED_VERIFICATION')
+        ) v
+        WHERE v.se_id IS NOT NULL
+        GROUP BY v.se_id
+      ),
+      stage AS (
+        SELECT s.se_id, COUNT(*)::int AS cnt, COALESCE(SUM(s.secs), 0)::bigint AS secs
+        FROM (
+          SELECT sub.se_id, EXTRACT(EPOCH FROM (sub.submitted_at - os.onsite_at)) AS secs
+          FROM (
+            SELECT ticket_id, MIN(submitted_at) AS submitted_at,
+                   (ARRAY_AGG(se_id ORDER BY submitted_at))[1] AS se_id
+            FROM troubleshooting_submissions
+            WHERE submitted_at >= ${from} AND submitted_at < ${toExclusive}
+            GROUP BY ticket_id
+          ) sub
+          CROSS JOIN LATERAL (
+            SELECT MIN(ss.set_at) AS onsite_at FROM soft_states ss
+            WHERE ss.ticket_id = sub.ticket_id AND ss.type = 'ON_SITE'
+          ) os
+          WHERE os.onsite_at IS NOT NULL AND os.onsite_at <= sub.submitted_at
+        ) s
+        GROUP BY s.se_id
+      )
+      SELECT r.se_id::text AS "seId", r.name AS "name", r.coverage_type AS "coverageType",
+             r.zone_id::text AS "zoneId", r.zone_name AS "zoneName",
+             COALESCE(c.repair, 0)::int AS "repairClosures",
+             COALESCE(c.departure, 0)::int AS "departureClosures",
+             COALESCE(c.ftf, 0)::int AS "firstTimeFixes",
+             COALESCE(v.decided, 0)::int AS "verificationsDecided",
+             COALESCE(v.failed, 0)::int AS "failedVerifications",
+             COALESCE(st.cnt, 0)::int AS "onsiteToSubmissionCount",
+             COALESCE(st.secs, 0)::bigint AS "onsiteToSubmissionSecondsSum"
+      FROM roster r
+      LEFT JOIN closures c ON c.se_id = r.se_id
+      LEFT JOIN verifications v ON v.se_id = r.se_id
+      LEFT JOIN stage st ON st.se_id = r.se_id
+      -- **By name, ascending.** The design forbids a pre-sorted worst-first order: this is a
+      -- diagnostic surface, not a league table, and the order the page opens in must not itself be a
+      -- ranking. The table is sortable; that is the reader's choice to make, not the server's.
+      ORDER BY r.name ASC`);
+
+    const rows = raw.map(deriveSeProductivity);
+    return {
+      granularity,
+      from: from.toISOString().slice(0, 10),
+      to: new Date(toExclusive.getTime() - 86_400_000).toISOString().slice(0, 10),
+      rateMinSample: SE_PRODUCTIVITY_RATE_MIN_SAMPLE,
+      // Live read, so the stamp is the instant the server answered — the same honest posture #347 gave
+      // the other two non-cube reports. Never a cube's `computed_at`: there is no cube behind this.
+      dataAsOf: now.toISOString(),
+      filters: { zoneId: restrictZone ?? null, coverage },
+      totals: {
+        engineers: rows.length,
+        closures: rows.reduce((n, r) => n + r.closures, 0),
+        repairClosures: rows.reduce((n, r) => n + r.repairClosures, 0),
+        departureClosures: rows.reduce((n, r) => n + r.departureClosures, 0),
+      },
+      rows,
+    };
+  }
+}
+
+/**
+ * The report window. Monthly is the calendar month; weekly is the **Monday-to-Sunday week containing
+ * `weekOf`** — resolved from any day in it, so a caller never has to know which day a week starts on
+ * and a link to "the week of the 17th" is stable whichever day of it was clicked.
+ */
+function seProductivityWindow(
+  granularity: SeProductivityGranularity,
+  opts: SeProductivityFilters,
+  now: Date,
+): { from: Date; toExclusive: Date } {
+  if (granularity === 'weekly') {
+    const day = parseDay(opts.weekOf ?? defaultDay(now));
+    // getUTCDay: 0 = Sunday. Shift so Monday is 0, then step back that many days.
+    const monday = new Date(day.getTime() - ((day.getUTCDay() + 6) % 7) * 86_400_000);
+    return { from: monday, toExclusive: new Date(monday.getTime() + 7 * 86_400_000) };
+  }
+  const start = parseMonth(opts.month ?? defaultMonth(now));
+  return { from: start, toExclusive: new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1)) };
+}
+
+/**
+ * Counts through, rates gated. See {@link SE_PRODUCTIVITY_RATE_MIN_SAMPLE} for why the gate exists and
+ * why it lives on the server. A rate is also `null` when its own denominator is empty — an engineer
+ * with ten departure closures and no repairs has no first-time-fix rate at all, and `0%` would read as
+ * "fixed nothing on the first visit" rather than "never had a first visit to measure".
+ */
+function deriveSeProductivity(r: RawSeProductivityRow): SeProductivityRow {
+  const closures = r.repairClosures + r.departureClosures;
+  const suppressed = closures < SE_PRODUCTIVITY_RATE_MIN_SAMPLE;
+  const rate = (numerator: number, denominator: number): number | null =>
+    suppressed || denominator <= 0 ? null : ratePct(numerator, denominator);
+  return {
+    seId: r.seId,
+    name: r.name,
+    coverageType: r.coverageType,
+    zoneId: r.zoneId,
+    zoneName: r.zoneName,
+    closures,
+    repairClosures: r.repairClosures,
+    departureClosures: r.departureClosures,
+    firstTimeFixes: r.firstTimeFixes,
+    firstTimeFixRatePct: rate(r.firstTimeFixes, r.repairClosures),
+    verificationsDecided: r.verificationsDecided,
+    failedVerifications: r.failedVerifications,
+    failedVerificationRatePct: rate(r.failedVerifications, r.verificationsDecided),
+    onsiteToSubmissionCount: r.onsiteToSubmissionCount,
+    // Not gated by the closure floor: an average of a stated sample size is not a rate, and the count
+    // travels with it so the reader can see what it averages over.
+    avgOnsiteToSubmissionSeconds: avgSeconds(Number(r.onsiteToSubmissionSecondsSum), r.onsiteToSubmissionCount),
+    ratesSuppressed: suppressed,
+  };
 }
 
 /**

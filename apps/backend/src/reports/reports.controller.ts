@@ -14,7 +14,7 @@ import {
 } from './commissioning-aggregation.service';
 import { COHORT_DAYS, GRACE_HOURS, LOOKBACK_DAYS } from './commissioning.config';
 import { FleetUptimeAggregationService, type FleetUptimeAggregationResult } from './fleet-uptime-aggregation.service';
-import { type DistributionFilters, type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SoftInactiveTrend, type SystemEfficiencyReport, type VerificationOutcomesReport, type WorkTypeMixReport, type ZmScorecardReport, ReportsService } from './reports.service';
+import { type DistributionFilters, type FleetUptimeGroupBy, type FleetUptimeReport, type RootCauseReport, type SeCoverageFilter, type SeProductivityGranularity, type SeProductivityReport, type SoftInactiveTrend, type SystemEfficiencyReport, type VerificationOutcomesReport, type WorkTypeMixReport, type ZmScorecardReport, ReportsService, SE_COVERAGE_FILTERS, SE_PRODUCTIVITY_GRANULARITIES } from './reports.service';
 import { type RootCauseAggregationResult, RootCauseAnalyticsAggregationService } from './root-cause-aggregation.service';
 import { type SoftInactiveRecomputeResult, SoftInactiveCountService } from './soft-inactive-count.service';
 import { type SystemEfficiencyAggregationResult, SystemEfficiencyAggregationService } from './system-efficiency-aggregation.service';
@@ -252,6 +252,35 @@ export class ReportsController {
     @Query('plantId') plantId?: string,
   ): Promise<VerificationOutcomesReport> {
     return this.reports.verificationOutcomes(scope, parseDistribution(from, to, zoneId, companyId, plantId));
+  }
+
+  /**
+   * SE Productivity (#365, PRD story 25) — one row per engineer over a week or a month: closures split
+   * into repairs and departures (audit F7), first-time-fix rate, failed-verification rate and average
+   * on-site → submission time.
+   *
+   * Manager roles, and the zone clamp is here rather than in the query string: a ZONAL_MANAGER reads
+   * their own zone whatever `zoneId` says, and the response echoes the clamped value so the page's
+   * scope chip states the zone the numbers are actually from. Rates below the small-sample floor come
+   * back `null` from the service — the suppression is not the page's to apply or to skip.
+   */
+  @Get('se-productivity')
+  @Roles(...MANAGER_ROLES)
+  seProductivity(
+    @CurrentScope() scope: ManagerScope,
+    @Query('granularity') granularity?: string,
+    @Query('month') month?: string,
+    @Query('weekOf') weekOf?: string,
+    @Query('zoneId') zoneId?: string,
+    @Query('coverage') coverage?: string,
+  ): Promise<SeProductivityReport> {
+    return this.reports.seProductivity(scope, {
+      granularity: parseEnum<SeProductivityGranularity>(granularity, 'granularity', SE_PRODUCTIVITY_GRANULARITIES, 'monthly'),
+      month,
+      weekOf,
+      zoneId: parseOptInt(zoneId, 'zoneId'),
+      coverage: parseEnum<SeCoverageFilter>(coverage, 'coverage', SE_COVERAGE_FILTERS, 'all'),
+    });
   }
 
   /** Recompute a day's efficiency summary on demand (Operations Head). Also cron-driven daily by

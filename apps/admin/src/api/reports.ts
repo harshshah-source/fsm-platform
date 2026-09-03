@@ -432,6 +432,138 @@ export interface ZmScorecardReport extends DataAsOf {
 export const apiZmScorecard = (params: ReportFilterParams = {}) =>
   get<ZmScorecardReport>(`/reports/zm-scorecard${reportQuery(params, REPORT_FILTER_FIELDS.zmScorecard)}`);
 
+// ---- SE Productivity (#365) -----------------------------------------------------
+
+export type SeProductivityGranularity = 'weekly' | 'monthly';
+export type SeCoverageFilter = 'all' | 'DEDICATED' | 'MULTI_PLANT' | 'FLOATING';
+
+/** How each coverage type reads on the page. The design's Coverage column says "Dedicated"/"Floating". */
+export const SE_COVERAGE_LABEL: Record<string, string> = {
+  DEDICATED: 'Dedicated',
+  MULTI_PLANT: 'Multi-plant',
+  FLOATING: 'Floating',
+};
+
+/**
+ * One engineer's row.
+ *
+ * **Every rate is `number | null` and the null is load-bearing.** It means one of two things, and
+ * `ratesSuppressed` is what separates them: below {@link SeProductivityReport.rateMinSample} closures
+ * the server withholds the rate deliberately (an operator constraint on the approved design — a
+ * six-closure engineer has no meaningful first-time-fix percentage, and drawing one invites acting on
+ * noise), or the metric simply has no denominator in the window. Both render as an em dash; neither
+ * may ever be formatted as `0%`, which reads as a measured failure.
+ *
+ * `repairClosures` and `departureClosures` are separate for audit finding **F7**: a
+ * `DEVICE_UNDEPLOYED_CLOSE` is a vehicle leaving the fleet, not work anybody did, and summed into the
+ * repair count it made the engineer with the unluckiest plants read as the most productive one.
+ */
+export interface SeProductivityRow {
+  seId: string;
+  name: string;
+  coverageType: 'DEDICATED' | 'MULTI_PLANT' | 'FLOATING';
+  zoneId: string;
+  zoneName: string | null;
+  closures: number;
+  repairClosures: number;
+  departureClosures: number;
+  firstTimeFixes: number;
+  firstTimeFixRatePct: number | null;
+  verificationsDecided: number;
+  failedVerifications: number;
+  failedVerificationRatePct: number | null;
+  onsiteToSubmissionCount: number;
+  avgOnsiteToSubmissionSeconds: number | null;
+  ratesSuppressed: boolean;
+}
+
+export interface SeProductivityReport extends DataAsOf {
+  granularity: SeProductivityGranularity;
+  from: string;
+  to: string;
+  /** The closure count below which the server withholds rates. Rendered in the footer, never guessed. */
+  rateMinSample: number;
+  /** `zoneId` is the CLAMPED zone — what the scope chip must render, never the local pick. */
+  filters: { zoneId: number | null; coverage: SeCoverageFilter };
+  totals: { engineers: number; closures: number; repairClosures: number; departureClosures: number };
+  rows: SeProductivityRow[];
+}
+
+/**
+ * `/reports/se-productivity`. Monthly takes `month` (`YYYY-MM`); weekly takes `weekOf` (any
+ * `YYYY-MM-DD` in the wanted week — the server resolves it to that week's Monday). The zone parameter
+ * is a convenience for CSM / OH: a ZM is clamped server-side whatever is sent.
+ */
+export const apiSeProductivity = (params: {
+  granularity?: SeProductivityGranularity;
+  month?: string | null;
+  weekOf?: string | null;
+  zoneId?: number | string | null;
+  coverage?: SeCoverageFilter | null;
+} = {}) => {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === '' || (k === 'coverage' && v === 'all')) continue;
+    q.set(k, String(v));
+  }
+  const qs = q.toString();
+  return get<SeProductivityReport>(`/reports/se-productivity${qs ? `?${qs}` : ''}`);
+};
+
+/**
+ * **The out-of-band bands** — fixed operational thresholds, not percentiles of the visible cohort.
+ *
+ * The design forbids ranking, so a "worst two rows" rule is exactly what must not be built: it would
+ * always flag somebody, including in a zone where everyone is fine, and it would move a person's
+ * marking when a colleague's month changed. A fixed band flags a *number* against what the operation
+ * expects of it, which is what makes the mark answerable — "why is this one 57%?" has an answer;
+ * "why is this one in the bottom two?" does not.
+ */
+export const SE_PRODUCTIVITY_BANDS = {
+  /** Higher is better — amber below `warn`, crimson below `bad`. */
+  firstTimeFixPct: { warn: 65, bad: 50 },
+  /** Lower is better. */
+  failedVerificationPct: { warn: 8, bad: 12 },
+  /** Lower is better; seconds. 1h 40m / 3h. */
+  onsiteToSubmissionSeconds: { warn: 6_000, bad: 10_800 },
+} as const;
+
+export type SeMetricTone = 'normal' | 'warn' | 'bad';
+
+/** Where one value sits in its band. `null` (withheld or no sample) is never marked. */
+export function seMetricTone(
+  value: number | null,
+  band: { warn: number; bad: number },
+  direction: 'higherIsBetter' | 'lowerIsBetter',
+): SeMetricTone {
+  if (value === null) return 'normal';
+  if (direction === 'higherIsBetter') {
+    if (value < band.bad) return 'bad';
+    return value < band.warn ? 'warn' : 'normal';
+  }
+  if (value > band.bad) return 'bad';
+  return value > band.warn ? 'warn' : 'normal';
+}
+
+/** `1h 12m` — the design's stage-time format. `null` is the em dash, never `0h 00m`. */
+export function formatStageDuration(seconds: number | null): string {
+  if (seconds === null) return '—';
+  const total = Math.max(0, Math.round(seconds / 60));
+  return `${Math.floor(total / 60)}h ${String(total % 60).padStart(2, '0')}m`;
+}
+
+/** A rate cell: the percentage, or an em dash when the server withheld it or had no sample. */
+export function formatRate(pct: number | null): string {
+  return pct === null ? '—' : `${pct}%`;
+}
+
+/** The Monday of the ISO week containing `day` (UTC), as `YYYY-MM-DD`. */
+export function weekStart(day: string | Date = new Date()): string {
+  const d = typeof day === 'string' ? new Date(`${day}T00:00:00Z`) : day;
+  const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  return new Date(utc.getTime() - ((utc.getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10);
+}
+
 // ---- Commissioning cohort & install quality (#232 / #233 / #234) ----------------
 
 /**

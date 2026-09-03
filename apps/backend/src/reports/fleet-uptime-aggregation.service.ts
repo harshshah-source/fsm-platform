@@ -24,9 +24,36 @@ interface CycleRow {
 }
 interface ClosureRow {
   deviceId: string;
-  status: string;
+  kind: ClosureKind;
   count: number;
 }
+
+/**
+ * How a TROUBLESHOOT ticket's closure was *earned* — audit finding **F7**.
+ *
+ * `status` alone cannot answer this. Three different writers put a TROUBLESHOOT ticket into `CLOSED`
+ * and only one of them is an engineer repairing a device:
+ *
+ *  - `SE_REPAIR` — `closure_type IS NULL`. `VerificationService.finalize` is the only path that closes
+ *    a troubleshoot ticket without classifying the closure, because there is nothing to classify: the
+ *    SE submitted a form, the device came back, the cycle verified. This is the **only** closure that
+ *    is SE productivity.
+ *  - `DEPARTURE` — `DEVICE_UNDEPLOYED_CLOSE` (`DeviceDepartureService`). The vehicle left the fleet
+ *    and the master sync closed the ticket; no human went anywhere.
+ *  - `ADMINISTRATIVE` — everything else, today `OPERATIONS_HEAD_OVERRIDE_CLOSE` from a plant
+ *    deactivation. Also not repair work. Named rather than folded into `DEPARTURE` so a future closure
+ *    type joins a bucket that is honestly "not attributed" instead of silently reading as a departure.
+ *  - `AUTO_RECOVERY` — `status = 'CLOSED_AUTO_RECOVERY'`; already counted separately since Issue 39.
+ *
+ * **The defect this closes.** `se_repaired_closures` counted every `CLOSED` row, so an engineer whose
+ * plants happened to have vehicles leave the fleet read as more productive than one who actually
+ * repaired devices — and the column's name asserted the opposite. It is the input to the SE
+ * productivity report (#365), i.e. to staffing decisions, which is what makes a quiet over-count worse
+ * than a missing number. The counting is a `CASE` here rather than a `WHERE` at the read so the other
+ * kinds stay countable: the split is structural, and a later column can surface `DEPARTURE` without
+ * re-deriving it.
+ */
+type ClosureKind = 'SE_REPAIR' | 'DEPARTURE' | 'ADMINISTRATIVE' | 'AUTO_RECOVERY';
 
 /**
  * Fleet Uptime aggregation worker (Issue 39, CONTEXT §Fleet Uptime). `computeMonth` pre-computes one
@@ -34,8 +61,9 @@ interface ClosureRow {
  * downtime in the month is its **failure-cycle overlap** with the month window (clamped to the month;
  * an open cycle runs to the window end = `min(now, month end)` so an incomplete current month isn't
  * penalised for the future). `eligible` snapshots `device_states.eligible_for_uptime` (active PGI ≤15d
- * AND not Non-Op). Auto-recovery (`CLOSED_AUTO_RECOVERY`) and SE-repaired (`CLOSED`) closures are counted
- * separately so SE productivity is not inflated — note this counts closures by `closed_at`, which is
+ * AND not Non-Op). Closures are counted by **{@link ClosureKind}, not by status** (#365 / audit F7):
+ * `se_repaired_closures` holds SE repairs alone, with departures and administrative closes excluded
+ * rather than folded in — note this counts closures by `closed_at`, which is
  * why #229 had to fix `AutoRecoveryService` writing NULL there. **Scheduled** by the
  * `business-fleet-uptime` cron (`BusinessSweepSchedulerService`, gated by `BUSINESS_SWEEPS_ENABLED`)
  * since #108, and still recomputable on demand. Idempotent (per-device upsert). Job names asserted in
@@ -86,12 +114,20 @@ export class FleetUptimeAggregationService {
       WHERE fc.opened_at >= ${monthStart} AND fc.opened_at < ${monthEnd}`);
     const componentCycleIds = new Set(componentCycles.map((c) => c.cycleId));
 
+    // F7 — closures split by how they were EARNED, not by status. See {@link ClosureKind}.
     const closures = await this.prisma.$queryRaw<ClosureRow[]>(Prisma.sql`
-      SELECT device_id AS "deviceId", status::text AS "status", COUNT(*)::int AS "count"
+      SELECT device_id AS "deviceId",
+             CASE
+               WHEN status = 'CLOSED_AUTO_RECOVERY' THEN 'AUTO_RECOVERY'
+               WHEN closure_type IS NULL THEN 'SE_REPAIR'
+               WHEN closure_type = 'DEVICE_UNDEPLOYED_CLOSE' THEN 'DEPARTURE'
+               ELSE 'ADMINISTRATIVE'
+             END AS "kind",
+             COUNT(*)::int AS "count"
       FROM tickets
       WHERE work_type = 'TROUBLESHOOT' AND status IN ('CLOSED', 'CLOSED_AUTO_RECOVERY')
         AND closed_at >= ${monthStart} AND closed_at < ${monthEnd}
-      GROUP BY device_id, status`);
+      GROUP BY 1, 2`);
 
     const cyclesByDevice = groupBy(cycles, (c) => c.deviceId);
     const closuresByDevice = groupBy(closures, (c) => c.deviceId);
@@ -103,8 +139,10 @@ export class FleetUptimeAggregationService {
         0,
       );
       const cls = closuresByDevice.get(d.deviceId) ?? [];
-      const autoRecoveryClosures = cls.find((c) => c.status === 'CLOSED_AUTO_RECOVERY')?.count ?? 0;
-      const seRepairedClosures = cls.find((c) => c.status === 'CLOSED')?.count ?? 0;
+      const autoRecoveryClosures = cls.find((c) => c.kind === 'AUTO_RECOVERY')?.count ?? 0;
+      // F7 — `SE_REPAIR` only. A departure or a plant deactivation is a closure nobody earned, and
+      // adding it here is what made this column overstate the engineers with the unluckiest plants.
+      const seRepairedClosures = cls.find((c) => c.kind === 'SE_REPAIR')?.count ?? 0;
 
       // Cycle-level metrics, attributed to the month the cycle opened in (an open cycle's episode runs
       // to the window end). `recover*` covers closed cycles only (average time-to-recover numerator).

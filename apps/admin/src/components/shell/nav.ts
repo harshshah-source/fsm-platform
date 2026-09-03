@@ -190,6 +190,9 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
       { label: 'Commissioning Cohort', to: '/reports/commissioning', icon: IconActivity },
       { label: 'Root Cause Analytics', to: '/reports/root-cause', icon: IconActivity },
       { label: 'System Efficiency', to: '/reports/system-efficiency', icon: IconActivity },
+      // #365 — the per-engineer grain of the same pipeline System Efficiency reports fleet-wide, so it
+      // sits directly after it. Manager roles: a ZM sees their own zone's roster, clamped server-side.
+      { label: 'SE Productivity', to: '/reports/se-productivity', icon: IconActivity },
     ];
     if (isOpsHead) analytics.push({ label: 'ZM Scorecard', to: '/reports/zm-scorecard', icon: IconShield });
     // #342 — the audit ledger sits with Analytics, not Admin: Admin is Operations-Head-only, and the
