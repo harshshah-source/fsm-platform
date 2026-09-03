@@ -169,7 +169,11 @@ describe('Commissioning Cohort (#232 AC-1)', () => {
   it('shows the median with its sample size, because the sample is far smaller than the count beside it', async () => {
     render(<CommissioningCohortPage />);
     const ttfr = await screen.findByTestId('kpi-ttfr');
-    expect(ttfr).toHaveTextContent('14.59 h');
+    // Wait for the VALUE, not just the tile. The tile mounts immediately showing the same "—" the
+    // next test asserts for a null median, so a synchronous assertion here races the fetch and reads
+    // the placeholder as a failure — which is what it did once under a full-suite run, and never
+    // when this file runs alone.
+    await waitFor(() => expect(ttfr).toHaveTextContent('14.59 h'));
     // 400 measurable against 2,360 online. A reader who cannot see that will over-trust the median.
     expect(ttfr).toHaveTextContent('n = 400');
   });

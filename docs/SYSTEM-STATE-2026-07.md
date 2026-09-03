@@ -290,6 +290,27 @@ dual-confirm, recovery lifecycle, install create+lifecycle | 8 controllers |
   Tickets screen does not render it yet, so a VU-deferred ticket still visibly vanishes for the
   engineer. Plan §4 scoped #360 to the backend; the app shell exists, so this is **#367**
   (`INDEX.md` P12 row 32), not a silent deferral.
+- **2026-09-04 — the module-gaps backlog is COMPLETE. All 31 slices (#336–#366) are built and
+  committed**, across five parallel rounds (1, 10, 6, 4, 3+2). Absorbed and closed with them: #92,
+  #93, #129 (health part), #136 slice 3, #139, #140, #145, #148 slice 3, #157, #224, #239, #244/#335,
+  #318, #331, #333. **Final gate: backend 468 files / 2802 tests — 2792 passed, 5 skipped, ZERO
+  failures; admin 136 files / 1050 tests — 1049 passed.** The one admin failure was a latent
+  race in `commissioning-cohort` (untouched by all 31 slices — it waited for the tile, not its
+  value, and read the loading placeholder under full-suite contention); hardened and green.
+  **Five follow-ups were filed rather than deferred silently:** #367 (mobile poll contract), #370
+  (the ninth PRD notification event), #371 (mobile pickup stop), #372 (SE productivity onto the
+  cube), plus the `REVOKED` enum member #363 derived instead of adding.
+- **Three corrections from the last rounds that change what a reader should trust.** (1)
+  `se_repaired_closures` counted **every** TROUBLESHOOT closure as an engineer's repair, but three
+  writers close a ticket and only one is an engineer — an SE whose plants had vehicles leave the
+  fleet read as more productive than one who repaired devices. Fixed in
+  `fleet-uptime-aggregation.service.ts` (#365, audit finding F7); closures are classified by kind and
+  the red run over-counted 6 against 2. **Historic cube rows computed before #365 still carry the
+  mis-attribution** — the aggregation is idempotent per day, so a replay corrects them, but no replay
+  was run. (2) The push exit is real: `PUSH_PROVIDER=fcm` delivers, the default stays `logging`, and
+  **misconfiguration aborts the boot** rather than degrading to inert (#337). (3) Verification's
+  `escalation_reason` is a **live verdict, not history** — escalate sets it, de-escalate clears it,
+  so NULL means "not under escalation" and never "escalated for an unrecorded reason" (#357).
 
 ---
 
