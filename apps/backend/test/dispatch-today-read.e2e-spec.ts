@@ -162,6 +162,8 @@ describe('#284 — GET /dispatch/today', () => {
     await prisma.deviceState.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.seCoverage.deleteMany({ where: { plantId } });
+    // The availability rows the #363 case writes reference the engineer, so they go first.
+    await prisma.seAvailability.deleteMany({ where: { seId: { in: userIds } } });
     await prisma.engineerMaster.deleteMany({ where: { zoneId } });
     await prisma.plant.deleteMany({ where: { zoneId } });
     await prisma.company.deleteMany({ where: { companyId } });
@@ -222,6 +224,32 @@ describe('#284 — GET /dispatch/today', () => {
 
   it('AC5 — a ZM cannot read another zone', async () => {
     await expect(svc.today(scope(), { zoneId: otherZoneId, now: TODAY })).rejects.toThrow();
+  });
+
+  /**
+   * #363 — the cockpit shows the LATEST availability write for a window, not an arbitrary one.
+   *
+   * The strip keeps its own copy of the availability read, and that copy ordered on `windowStart`
+   * alone. Two windows sharing a start instant — which is exactly what a same-day correction
+   * produces — then resolved arbitrarily under a first-wins loop, so the deck could show the status a
+   * manager had just overwritten while the engineers page showed the correction. #363 fixed the
+   * shared service and this second copy kept the bug; the deck is where a dispatcher looks before
+   * moving work, so it is the worse of the two places to be wrong.
+   */
+  it('#363 — a same-day availability correction wins on the deck, not the row it replaced', async () => {
+    const start = new Date('2026-06-28T00:00:00Z');
+    const end = new Date('2026-06-29T00:00:00Z');
+    // Same window, written twice: ON_LEAVE first, then corrected to AVAILABLE. Only the id separates
+    // them, which is the whole point.
+    await prisma.seAvailability.create({
+      data: { seId: idleSe, status: 'ON_LEAVE', windowStart: start, windowEnd: end, setBy: zmUserId },
+    });
+    await prisma.seAvailability.create({
+      data: { seId: idleSe, status: 'AVAILABLE', windowStart: start, windowEnd: end, setBy: zmUserId },
+    });
+
+    const view = await svc.today(scope(), { zoneId, now: TODAY });
+    expect(view.engineers.find((e) => e.seId === idleSe)?.availability).toBe('AVAILABLE');
   });
 
   /**

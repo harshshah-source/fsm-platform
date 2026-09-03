@@ -724,7 +724,14 @@ export class DispatchTodayQueryService {
     if (seIds.length === 0) return new Map();
     const rows = await this.prisma.seAvailability.findMany({
       where: { seId: { in: seIds }, windowStart: { lte: now }, OR: [{ windowEnd: null }, { windowEnd: { gte: now } }] },
-      orderBy: { windowStart: 'desc' },
+      // #363 — `id desc` after `windowStart desc`, the same tie-break `SeAvailabilityService` now uses.
+      // Without it two windows sharing a start instant resolve arbitrarily and the FIRST-WINS loop
+      // below can keep the row a manager has already corrected: the Cockpit strip would then show a
+      // superseded status while the engineers page showed the correction. This read is a second copy
+      // of `currentStatusMany`; it is not replaced by a call to it here because the two disagree at
+      // the boundary (`gte` vs `gt` on `windowEnd`) and reconciling that is a change to what the
+      // Cockpit shows, not a bug fix. Deduplicating them is filed as a follow-up.
+      orderBy: [{ windowStart: 'desc' }, { id: 'desc' }],
       select: { seId: true, status: true },
     });
     const out = new Map<string, string>();
