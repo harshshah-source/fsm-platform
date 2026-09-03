@@ -72,9 +72,10 @@ export class SePlannerController {
   @Roles(...MANAGER_ROLES)
   async remove(
     @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
   ): Promise<{ deleted: boolean }> {
-    const outcome = await this.planner.remove(id, scope);
+    const outcome = await this.planner.remove(id, scope, actor);
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'PLANNER_ENTRY_NOT_FOUND' });
     if (outcome.result === 'OUT_OF_SCOPE') throw new ForbiddenException({ code: 'ZONE_SCOPE_VIOLATION' });
     return { deleted: true };

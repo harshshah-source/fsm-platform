@@ -1,5 +1,5 @@
 # 343 — Audit writers: leave, planner, ingestion triggers, voucher export, settings from/to, VU pause/resume
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/343-audit-writers-leave-planner-ingestion-voucher-settings-vu.md
 Type: AFK
 Wave: 1 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -52,10 +52,12 @@ the write, with the controller passing `@CurrentActor()`:
 
 ## Acceptance criteria
 
-- [ ] AC1 — one audit row per action, written inside the same transaction as the write, carrying
-      the metadata named above
-- [ ] AC2 — leave reject carries the reason
-- [ ] AC3 — settings rows carry previous and next
+- [x] AC1 — one audit row per action, written inside the same transaction as the write, carrying
+      the metadata named above (`withAudit` for leave / planner / both VU legs; `record` — the same
+      insert without a wrapped mutation — for the three triggers and the voucher export, which have
+      no transaction to enlist in)
+- [x] AC2 — leave reject carries the reason
+- [x] AC3 — settings rows carry previous and next
 
 ## Verification
 

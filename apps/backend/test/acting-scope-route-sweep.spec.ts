@@ -68,14 +68,13 @@ const SCOPE_FACTORIES = new Set(['currentScopeFactory', 'currentActorFactory']);
  * widening this list is the deliberate edit the sweep exists to force. Keyed `CONTROLLER.method`.
  */
 const UNSCOPED: Record<string, string> = {
-  // --- Pan-India jobs. The entity IS the whole fleet, so there is no zone for acting to narrow to,
-  //     and all four are `@Roles('OPERATIONS_HEAD')` — a role that cannot gain reach by acting.
-  'IntegrationSyncController.runPipeline':
-    'the AutoPlant ingestion pipeline runs over every device there is; OH-only',
-  'IntegrationSyncController.syncMasters':
-    'the master-data sync mirrors the whole AutoPlant catalogue; OH-only',
-  'SnapshotsController.run': 'a snapshot is of the entire fleet at an instant; OH-only',
-
+  // --- The three pan-India ingestion jobs (`IntegrationSyncController.runPipeline`/`syncMasters`,
+  //     `SnapshotsController.run`) left this list in #343. They still have no zone to narrow to — the
+  //     entity is the whole fleet — but they now inject `@CurrentActor()` so the manual trigger is
+  //     attributable, and the sweep's own rule is that an allowlist entry which is in fact scoped must
+  //     be deleted rather than left to hide a later un-scoping. Attribution is not scoping: OH-only
+  //     stays OH-only, and neither route reads a zone from the actor.
+  //
   // --- Recomputes. Each rebuilds one report table for every zone at once: a zone-scoped recompute
   //     would leave the table half-current, which is worse than not running it. OH-only.
   'ReportsController.recompute': 'fleet-uptime is recomputed whole or not at all; OH-only',

@@ -79,6 +79,7 @@ export class VehicleUnavailabilityController {
   async file(
     @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Body() body: FileBody,
   ): Promise<Extract<VuFileOutcome, { result: 'OK' }>> {
     if (!body.ticketId || !body.seId) throw new BadRequestException({ code: 'TICKET_AND_SE_REQUIRED' });
@@ -103,7 +104,10 @@ export class VehicleUnavailabilityController {
           gpsLat: body.gpsLat ?? null,
           gpsLng: body.gpsLng ?? null,
         },
-        { ...scope, userId: user.user_id },
+        // Scope decides what the caller may touch (#341, unchanged); the actor decides how the audit
+        // row is attributed (#340). Both are needed and they answer different questions — spreading
+        // the actor's `zoneId` over the scope here would quietly widen a narrowed write door.
+        { ...scope, userId: user.user_id, actedAsRole: actor.actedAsRole, actingZone: actor.actingZone },
       ),
     );
   }
@@ -186,9 +190,17 @@ export class VehicleUnavailabilityController {
   async resume(
     @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
   ): Promise<VuResumeOutcome> {
-    return this.map(await this.vu.resumeSla(id, { ...scope, userId: user.user_id }));
+    return this.map(
+      await this.vu.resumeSla(id, {
+        ...scope,
+        userId: user.user_id,
+        actedAsRole: actor.actedAsRole,
+        actingZone: actor.actingZone,
+      }),
+    );
   }
 
   /**

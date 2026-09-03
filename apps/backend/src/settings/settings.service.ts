@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   AGING_THRESHOLD_OPTIONS,
@@ -210,16 +211,24 @@ export class SettingsService implements OnModuleInit {
     if (validator) {
       const parsed = validator.validate(value);
       if (!parsed.ok) return { result: 'INVALID', key, allowed: validator.allowed };
-      return this.setUnchecked(key, parsed.value, actor);
+      return this.setUnchecked(key, parsed.value, actor, existing?.value ?? null);
     }
-    return this.setUnchecked(key, value, actor);
+    return this.setUnchecked(key, value, actor, existing?.value ?? null);
   }
 
-  /** The plain registry write, once {@link set} has established the key has no specialised owner. */
+  /**
+   * The plain registry write, once {@link set} has established the key has no specialised owner.
+   *
+   * `previous` is threaded in from {@link set}'s existing-row read rather than re-read here: it is the
+   * same row the lock verdict was taken on, so the audit row and the permission decision cannot
+   * disagree about what was there. `null` means the key had no value at all — a first write — which is
+   * deliberately distinct from a previous value that happened to be `0` or `false`.
+   */
   private async setUnchecked(
     key: string,
     value: unknown,
     actor: RequestActor,
+    previous: unknown = null,
   ): Promise<{ key: string; value: unknown }> {
     return this.audit.withAudit(
       {
@@ -227,6 +236,10 @@ export class SettingsService implements OnModuleInit {
         action: 'SETTING_UPDATED',
         entityType: 'system_settings',
         entityId: key,
+        // #343 AC3 — without the pair, a SETTING_UPDATED row said only that someone touched the dial.
+        // The Ops Explorer and the audit ledger both render `metadata` as from/to, so this is the
+        // shape that makes a config change explain itself.
+        metadata: { key, previous, next: value } as Prisma.InputJsonValue,
       },
       async (tx) => {
         const row = await tx.systemSetting.upsert({

@@ -58,6 +58,31 @@ describe('Issue 04 slice 7 — /api/snapshots', () => {
     expect(count).toBe(1);
   });
 
+  /**
+   * #343 AC1 — a manual run is a person deciding to re-read the fleet out of band, and `snapshot_runs`
+   * records only that a run happened, never who asked for it. The row is keyed on the run so the
+   * trigger and its outcome can be joined; `trigger: 'manual'` is what separates it from the cron,
+   * which produces identical run rows and no audit row at all.
+   */
+  it('POST /run writes a SNAPSHOT_RUN_TRIGGERED audit row keyed on the run it started', async () => {
+    const token = await login('ops.head@fsm.test');
+
+    const res = await request(app.getHttpServer())
+      .post('/api/snapshots/run')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const rows = await prisma.auditLog.findMany({
+      where: { entityType: 'snapshot_runs', entityId: String(res.body.runId) },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].action).toBe('SNAPSHOT_RUN_TRIGGERED');
+    expect(rows[0].actorRole).toBe('OPERATIONS_HEAD');
+    expect(rows[0].metadata).toMatchObject({ trigger: 'manual', status: res.body.status });
+
+    await prisma.auditLog.deleteMany({ where: { entityType: 'snapshot_runs', entityId: String(res.body.runId) } });
+  });
+
   it('POST /run returns 409 RUN_IN_PROGRESS while a run is in flight', async () => {
     const token = await login('ops.head@fsm.test');
     await prisma.snapshotRun.create({ data: { status: 'RUNNING' } });

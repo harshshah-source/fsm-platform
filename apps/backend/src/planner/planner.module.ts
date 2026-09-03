@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuditModule } from '../audit/audit.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SePlannerService } from './se-planner.service';
 
@@ -8,7 +9,8 @@ import { SePlannerService } from './se-planner.service';
  * `SePlannerService` is exported so the Recommender can read planner entries as a bias signal.
  */
 @Module({
-  imports: [PrismaModule],
+  // AuditModule: planner writes are audited in-transaction since #343.
+  imports: [PrismaModule, AuditModule],
   providers: [SePlannerService],
   exports: [SePlannerService],
 })

@@ -15,6 +15,8 @@ describe('Issue 38 — VouchersController (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   const created: string[] = [];
+  /** Months this spec pulled the Finance export for — their #343 audit rows are cleaned up below. */
+  const exportMonths: string[] = [];
 
   const monthOf = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 
@@ -46,6 +48,11 @@ describe('Issue 38 — VouchersController (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (exportMonths.length > 0) {
+      await prisma.auditLog.deleteMany({
+        where: { action: 'VOUCHER_EXPORT_DOWNLOADED', entityType: 'expense_vouchers', entityId: { in: exportMonths } },
+      });
+    }
     if (created.length > 0) {
       await prisma.auditLog.deleteMany({ where: { entityType: 'expense_vouchers', entityId: { in: created } } });
       await prisma.expenseVoucherItem.deleteMany({ where: { voucherId: { in: created } } });
@@ -152,6 +159,18 @@ describe('Issue 38 — VouchersController (e2e)', () => {
     expect(exp.headers['content-type']).toContain('text/csv');
     expect(exp.headers['content-disposition']).toContain(`vouchers-finance-${month}.csv`);
     expect(exp.text).toContain(id);
+
+    // #343 AC1 — the Finance export is a copy of a month's reimbursement data leaving the platform.
+    // It changes nothing, which is exactly why it was unaudited and exactly why it must not be: the
+    // pull itself is the event, and the month is the batch it identifies. Refused pulls (the SE's 403
+    // above) leave no row — the guard stopped them before any data was read.
+    const exportRows = await prisma.auditLog.findMany({
+      where: { entityType: 'expense_vouchers', entityId: month, action: 'VOUCHER_EXPORT_DOWNLOADED' },
+    });
+    expect(exportRows.length).toBeGreaterThan(0);
+    expect(exportRows[0].actorRole).toBe('OPERATIONS_HEAD');
+    expect(exportRows[0].metadata).toMatchObject({ month, filename: `vouchers-finance-${month}.csv` });
+    exportMonths.push(month);
 
     // OH marks PAID; ZM cannot
     await request(app.getHttpServer())

@@ -149,79 +149,120 @@ export class VehicleUnavailabilityService {
     if (!(isManager || actor.userId === input.seId)) return { result: 'FORBIDDEN' };
 
     const deferred = deferralDateFor(input.expectedFrom, now);
+    /**
+     * #343 — the pause row's payload. Two of its fields (`reportId`, `slaPaused`) are facts only the
+     * transaction knows, so they are filled in below rather than up front: `withAudit` inserts the
+     * audit row **after** the work function returns, and reads this same object at that moment. That
+     * ordering is the point of `withAudit` (row and change commit together) and is pinned by
+     * `vehicle-unavailability-controller.e2e-spec.ts`, which asserts both fields.
+     *
+     * `slaPaused: false` is not a bookkeeping detail — a cycle already stopped for a component wait
+     * is not re-stamped (see the guard below), so a VU report can be filed without the clock moving
+     * at all. A row that always claimed a pause would be worse than no row.
+     */
+    const metadata: Record<string, unknown> = {
+      seId: input.seId,
+      reasonCode: input.reasonCode,
+      expectedFrom: input.expectedFrom.toISOString(),
+      expectedTo: input.expectedTo ? input.expectedTo.toISOString() : null,
+      deferredUntil: deferred ? deferred.toISOString() : null,
+      reportId: null,
+      slaPaused: false,
+    };
     const write = () =>
-      this.prisma.$transaction(async (tx) => {
-        // A new absence retires the old account of it (#245 AC1). Superseded rows stay readable —
-        // the ticket's history is the reason this is not a delete.
-        await tx.vehicleUnavailabilityReport.updateMany({
-          where: { ticketId: input.ticketId, status: 'OPEN' },
-          data: { status: 'SUPERSEDED' },
-        });
-        const created = await tx.vehicleUnavailabilityReport.create({
-          data: {
-            ticketId: input.ticketId,
-            failureCycleId: ticket.failureCycleId,
-            seId: input.seId,
-            reasonCode: input.reasonCode,
-            transporterContacted: input.transporterContacted,
-            transporterName: input.transporterName ?? null,
-            transporterContact: input.transporterContact ?? null,
-            // Q1(a) — provisional-authoritative on arrival. The two are equal until a manager decides.
-            proposedFrom: input.expectedFrom,
-            expectedFrom: input.expectedFrom,
-            expectedTo: input.expectedTo ?? null,
-            notes: input.notes ?? null,
-            gpsLat: input.gpsLat ?? null,
-            gpsLng: input.gpsLng ?? null,
-          },
-        });
-        // #246 — the filing ends the attempt window. Until this slice the ticket stayed
-        // FORMALLY_ASSIGNED on today's batch and the next run planned it again as if the vehicle were
-        // there; the date the SE typed had no consequence anywhere. Same three-write shape as
-        // `OverrideService.deferTicket`, system-flavoured: the SE is the remover, and the reason is
-        // what makes this countable by #244 as a *reached but unsuccessful* attempt rather than an
-        // administrative withdrawal.
-        //
-        // `updateMany` rather than find-then-update: a ticket has at most one live row, and a ticket
-        // with none — shared-pool work, or already recycled — is an ordinary case, not an error.
-        await tx.batchAssignmentTicket.updateMany({
-          where: { ticketId: input.ticketId, removedAt: null },
-          data: { removedAt: now, removedBy: input.seId, removalReason: REMOVAL_REASONS.VEHICLE_UNAVAILABLE },
-        });
-        await tx.ticket.update({
-          where: { ticketId: input.ticketId },
-          data: {
-            // UNASSIGNED and the deferral are a pair. Without the first nothing can ever re-plan the
-            // ticket (the permanent-stranding bug #146 fixed for ZM defers); without the second it is
-            // re-planned within the hour, which is the opposite of waiting for a vehicle.
-            assignmentState: 'UNASSIGNED',
-            deferredUntil: deferred,
-          },
-        });
+      this.audit.withAudit(
+        {
+          actorId: actor.userId,
+          actorRole: actor.role,
+          actedAsRole: actor.actedAsRole ?? null,
+          actingZone: actor.actingZone ?? null,
+          action: 'VU_SLA_PAUSED',
+          // Keyed on the ticket, not the report: the report does not exist until inside the
+          // transaction, and "when did this ticket's clock stop and start again" is the question the
+          // row is read for — one entity, the whole pause history.
+          entityType: 'tickets',
+          entityId: input.ticketId,
+          metadata: metadata as Prisma.InputJsonValue,
+        },
+        async (tx) => {
+          // A new absence retires the old account of it (#245 AC1). Superseded rows stay readable —
+          // the ticket's history is the reason this is not a delete.
+          await tx.vehicleUnavailabilityReport.updateMany({
+            where: { ticketId: input.ticketId, status: 'OPEN' },
+            data: { status: 'SUPERSEDED' },
+          });
+          const created = await tx.vehicleUnavailabilityReport.create({
+            data: {
+              ticketId: input.ticketId,
+              failureCycleId: ticket.failureCycleId,
+              seId: input.seId,
+              reasonCode: input.reasonCode,
+              transporterContacted: input.transporterContacted,
+              transporterName: input.transporterName ?? null,
+              transporterContact: input.transporterContact ?? null,
+              // Q1(a) — provisional-authoritative on arrival. The two are equal until a manager decides.
+              proposedFrom: input.expectedFrom,
+              expectedFrom: input.expectedFrom,
+              expectedTo: input.expectedTo ?? null,
+              notes: input.notes ?? null,
+              gpsLat: input.gpsLat ?? null,
+              gpsLng: input.gpsLng ?? null,
+            },
+          });
+          metadata.reportId = String(created.id);
+          // #246 — the filing ends the attempt window. Until this slice the ticket stayed
+          // FORMALLY_ASSIGNED on today's batch and the next run planned it again as if the vehicle were
+          // there; the date the SE typed had no consequence anywhere. Same three-write shape as
+          // `OverrideService.deferTicket`, system-flavoured: the SE is the remover, and the reason is
+          // what makes this countable by #244 as a *reached but unsuccessful* attempt rather than an
+          // administrative withdrawal.
+          //
+          // `updateMany` rather than find-then-update: a ticket has at most one live row, and a ticket
+          // with none — shared-pool work, or already recycled — is an ordinary case, not an error.
+          await tx.batchAssignmentTicket.updateMany({
+            where: { ticketId: input.ticketId, removedAt: null },
+            data: { removedAt: now, removedBy: input.seId, removalReason: REMOVAL_REASONS.VEHICLE_UNAVAILABLE },
+          });
+          await tx.ticket.update({
+            where: { ticketId: input.ticketId },
+            data: {
+              // UNASSIGNED and the deferral are a pair. Without the first nothing can ever re-plan the
+              // ticket (the permanent-stranding bug #146 fixed for ZM defers); without the second it is
+              // re-planned within the hour, which is the opposite of waiting for a vehicle.
+              assignmentState: 'UNASSIGNED',
+              deferredUntil: deferred,
+            },
+          });
 
-        // Pause the primary SLA — but only if the cycle is not already paused. #247's other half:
-        // this guard is deliberate and stays. A cycle already waiting on a component is already not
-        // running its primary clock, and re-stamping the reason here would both lose the component
-        // interval's start and mislabel *why* the ticket is stopped. The report is still recorded in
-        // full; the earlier pause reason simply stands, and {@link resumeSla} now mirrors that by
-        // refusing to clear a pause this report did not cause.
-        if (ticket.failureCycleId) {
-          const cycle = await tx.failureCycle.findUnique({ where: { cycleId: ticket.failureCycleId } });
-          if (cycle && !cycle.slaPaused) {
-            await tx.failureCycle.update({
-              where: { cycleId: ticket.failureCycleId },
-              data: {
-                slaPaused: true,
-                slaPauseReason: 'VEHICLE_UNAVAILABLE',
-                slaPausedAt: now,
-                slaPauseSource: 'SE_VEHICLE_UNAVAILABLE',
-              },
-            });
+          // Pause the primary SLA — but only if the cycle is not already paused. #247's other half:
+          // this guard is deliberate and stays. A cycle already waiting on a component is already not
+          // running its primary clock, and re-stamping the reason here would both lose the component
+          // interval's start and mislabel *why* the ticket is stopped. The report is still recorded in
+          // full; the earlier pause reason simply stands, and {@link resumeSla} now mirrors that by
+          // refusing to clear a pause this report did not cause.
+          if (ticket.failureCycleId) {
+            const cycle = await tx.failureCycle.findUnique({ where: { cycleId: ticket.failureCycleId } });
+            if (cycle && !cycle.slaPaused) {
+              await tx.failureCycle.update({
+                where: { cycleId: ticket.failureCycleId },
+                data: {
+                  slaPaused: true,
+                  slaPauseReason: 'VEHICLE_UNAVAILABLE',
+                  slaPausedAt: now,
+                  slaPauseSource: 'SE_VEHICLE_UNAVAILABLE',
+                },
+              });
+              metadata.slaPaused = true;
+            }
+            await tx.ticket.update({ where: { ticketId: input.ticketId }, data: { lastStateChangedAt: now } });
           }
-          await tx.ticket.update({ where: { ticketId: input.ticketId }, data: { lastStateChangedAt: now } });
-        }
-        return { result: 'OK' as const, id: String(created.id), deferredUntil: deferred ? deferred.toISOString() : null };
-      });
+          return {
+            result: 'OK' as const,
+            id: String(created.id),
+            deferredUntil: deferred ? deferred.toISOString() : null,
+          };
+        },
+      );
 
     try {
       return await write();
@@ -447,21 +488,44 @@ export class VehicleUnavailabilityService {
     if (!(await this.isManagerForTicket(report.ticketId, actor))) return { result: 'FORBIDDEN' };
 
     let slaResumed = false;
-    await this.prisma.$transaction(async (tx) => {
-      if (report.failureCycleId) {
-        // #271 — routed through the shared helper; still reason-guarded to VEHICLE_UNAVAILABLE (the
-        // asymmetry this method's own docstring explains), now also race-safe against a concurrent
-        // submission or the nightly sweep resuming the same pause.
-        const fold = await foldAndResumeSlaPause(tx, report.failureCycleId, now, {
-          onlyReason: 'VEHICLE_UNAVAILABLE',
+    // #343 — `slaResumed` is the fact worth recording and it is only known inside the transaction, so
+    // (as in {@link fileReport}) the metadata object is filled in there and read by `withAudit` when
+    // it inserts the row afterwards. A resume that resolved the report without restarting the clock —
+    // because the pause belonged to a component wait, not to this report — must not look in the
+    // ledger like a resume that did.
+    const metadata: Record<string, unknown> = {
+      ticketId: report.ticketId,
+      failureCycleId: report.failureCycleId != null ? String(report.failureCycleId) : null,
+      slaResumed: false,
+    };
+    await this.audit.withAudit(
+      {
+        actorId: actor.userId,
+        actorRole: actor.role,
+        actedAsRole: actor.actedAsRole ?? null,
+        actingZone: actor.actingZone ?? null,
+        action: 'VU_SLA_RESUMED_MANUAL',
+        entityType: 'vehicle_unavailability_reports',
+        entityId: reportId,
+        metadata: metadata as Prisma.InputJsonValue,
+      },
+      async (tx) => {
+        if (report.failureCycleId) {
+          // #271 — routed through the shared helper; still reason-guarded to VEHICLE_UNAVAILABLE (the
+          // asymmetry this method's own docstring explains), now also race-safe against a concurrent
+          // submission or the nightly sweep resuming the same pause.
+          const fold = await foldAndResumeSlaPause(tx, report.failureCycleId, now, {
+            onlyReason: 'VEHICLE_UNAVAILABLE',
+          });
+          slaResumed = fold.resumed;
+          metadata.slaResumed = fold.resumed;
+        }
+        await tx.vehicleUnavailabilityReport.update({
+          where: { id: BigInt(reportId) },
+          data: { status: 'RESOLVED', resolvedBy: asUuid(actor.userId), resolvedByRole: actor.role, resolvedAt: now },
         });
-        slaResumed = fold.resumed;
-      }
-      await tx.vehicleUnavailabilityReport.update({
-        where: { id: BigInt(reportId) },
-        data: { status: 'RESOLVED', resolvedBy: asUuid(actor.userId), resolvedByRole: actor.role, resolvedAt: now },
-      });
-    });
+      },
+    );
     return { result: 'OK', id: reportId, slaResumed };
   }
 

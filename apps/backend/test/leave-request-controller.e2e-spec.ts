@@ -18,6 +18,8 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
   let prisma: PrismaService;
   let se: string;
   const userIds: string[] = [];
+  /** Leave requests whose #343 audit rows this spec is responsible for cleaning up. */
+  const auditedRequestIds: string[] = [];
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -36,6 +38,9 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (auditedRequestIds.length > 0) {
+      await prisma.auditLog.deleteMany({ where: { entityType: 'leave_requests', entityId: { in: auditedRequestIds } } });
+    }
     await prisma.leaveRequest.deleteMany({ where: { seId: { in: userIds } } });
     await prisma.seAvailability.deleteMany({ where: { seId: { in: userIds } } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: userIds } } });
@@ -85,6 +90,49 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ reason: 'coverage gap' })
       .expect(200);
+  });
+
+  /**
+   * #343 AC1/AC2 — a leave decision is the SE's day being taken off the board, and until this slice
+   * an approval left only an `SE_AVAILABILITY_SET` row with no link back to the request, while a
+   * rejection left **nothing at all**: the one decision that comes with a mandatory reason was the one
+   * the ledger could not reproduce. Both rows are keyed on the request id so the two halves of a
+   * request's life — filed, then decided — meet on the same entity.
+   */
+  it('AC1/AC2 — approve and reject each write one audit row keyed on the request, and reject carries the reason', async () => {
+    const token = await login('zm.north@fsm.test');
+
+    const approved = await submit(token, { seId: se, type: 'ON_LEAVE', ...WIN, reason: 'wedding' }).expect(201);
+    auditedRequestIds.push(approved.body.id);
+    await request(app.getHttpServer())
+      .post(`/api/leave-requests/${approved.body.id}/approve`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const rejected = await submit(token, { seId: se, type: 'WEEKLY_OFF', ...WIN }).expect(201);
+    auditedRequestIds.push(rejected.body.id);
+    await request(app.getHttpServer())
+      .post(`/api/leave-requests/${rejected.body.id}/reject`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ reason: 'zone would be uncovered' })
+      .expect(200);
+
+    const rows = await prisma.auditLog.findMany({
+      where: { entityType: 'leave_requests', entityId: { in: auditedRequestIds } },
+    });
+    const approveRow = rows.find((r) => r.entityId === approved.body.id);
+    const rejectRow = rows.find((r) => r.entityId === rejected.body.id);
+
+    expect(rows).toHaveLength(2);
+    expect(approveRow?.action).toBe('LEAVE_APPROVED');
+    expect(approveRow?.actorRole).toBe('ZONAL_MANAGER');
+    expect(approveRow?.metadata).toMatchObject({ seId: se, type: 'ON_LEAVE' });
+    // The approval's consequence — the availability window the Recommender reads — is on the row, so
+    // "why is this SE unbookable" is answerable from the ledger alone.
+    expect((approveRow?.metadata as { availabilityId?: string }).availabilityId).toBeTruthy();
+
+    expect(rejectRow?.action).toBe('LEAVE_REJECTED');
+    expect(rejectRow?.metadata).toMatchObject({ seId: se, type: 'WEEKLY_OFF', reason: 'zone would be uncovered' });
   });
 
   it('rejects an invalid leave type (400)', async () => {

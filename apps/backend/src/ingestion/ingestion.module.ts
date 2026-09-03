@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -69,6 +70,9 @@ const EMPTY_MASTER_SOURCE: MasterSyncSource = {
   // DeviceDepartureModule supplies DeviceDepartureService to MasterSyncService (Issue 128 — the
   // lifecycle pass the widened read feeds). No cycle: it imports only Prisma.
   imports: [
+    // AuditModule: the manual pipeline triggers are attributed since #343. No cycle — AuditModule
+    // imports nothing but Prisma.
+    AuditModule,
     AuthModule,
     DeviceDepartureModule,
     DeviceStateModule,

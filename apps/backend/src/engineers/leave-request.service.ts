@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { AuditService, type AuditActorFields } from '../audit/audit.service';
 import type { Prisma } from '../generated/prisma/client';
 import { type LeaveRequestType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -60,7 +61,25 @@ export class LeaveRequestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly availability: SeAvailabilityService = new SeAvailabilityService(prisma),
+    // Defaulted for the same reason `availability` is: this service is constructed directly by
+    // several specs, and a required third parameter would break callers that have nothing to do with
+    // auditing. Nest injects the module's singleton, so the default is never used at runtime.
+    private readonly audit: AuditService = new AuditService(prisma),
   ) {}
+
+  /**
+   * The who/where of a leave decision as an audit row wants it. {@link LeaveActor} is the older,
+   * looser shape (its acting fields are optional), so the `?? null` normalisation happens here rather
+   * than at each call site — `auditActor` takes a `RequestActor` and this is its equivalent.
+   */
+  private auditFields(actor: LeaveActor): AuditActorFields {
+    return {
+      actorId: actor.userId,
+      actorRole: actor.role,
+      actedAsRole: actor.actedAsRole ?? null,
+      actingZone: actor.actingZone ?? null,
+    };
+  }
 
   /** SE files (or own-zone ZM files on their behalf). */
   async submit(input: SubmitLeaveInput, actor: LeaveActor): Promise<LeaveOutcome> {
@@ -105,16 +124,37 @@ export class LeaveRequestService {
     );
     if (avail.result !== 'OK') return avail.result === 'FORBIDDEN' ? { result: 'FORBIDDEN' } : { result: 'NOT_FOUND' };
 
-    await this.prisma.leaveRequest.update({
-      where: { id: req.id },
-      data: {
-        status: 'APPROVED',
-        decidedBy: actor.userId.length === 36 ? actor.userId : null,
-        decidedByRole: actor.actedAsRole ?? actor.role,
-        decidedAt: new Date(),
-        availabilityId: BigInt(avail.id),
+    // #343 — the decision and its audit row commit together. `decided_by` alone could not answer the
+    // question an operator actually asks ("who took this SE off the board, and under whose duty"):
+    // it holds no acting attribution, and the availability window the approval creates was recorded
+    // under `SE_AVAILABILITY_SET` with no link back to the request that caused it.
+    await this.audit.withAudit(
+      {
+        ...this.auditFields(actor),
+        action: 'LEAVE_APPROVED',
+        entityType: 'leave_requests',
+        entityId: String(req.id),
+        metadata: {
+          seId: req.seId,
+          type: req.type,
+          windowStart: req.windowStart.toISOString(),
+          windowEnd: req.windowEnd.toISOString(),
+          requestReason: req.reason,
+          availabilityId: String(avail.id),
+        },
       },
-    });
+      (tx) =>
+        tx.leaveRequest.update({
+          where: { id: req.id },
+          data: {
+            status: 'APPROVED',
+            decidedBy: actor.userId.length === 36 ? actor.userId : null,
+            decidedByRole: actor.actedAsRole ?? actor.role,
+            decidedAt: new Date(),
+            availabilityId: BigInt(avail.id),
+          },
+        }),
+    );
     return { result: 'OK', id };
   }
 
@@ -128,16 +168,35 @@ export class LeaveRequestService {
     if (!this.isManagerFor(req.engineer.zoneId, actor)) return { result: 'FORBIDDEN' };
     if (req.status !== 'PENDING') return { result: 'INVALID_STATE' };
 
-    await this.prisma.leaveRequest.update({
-      where: { id: req.id },
-      data: {
-        status: 'REJECTED',
-        decisionReason: reason,
-        decidedBy: actor.userId.length === 36 ? actor.userId : null,
-        decidedByRole: actor.actedAsRole ?? actor.role,
-        decidedAt: new Date(),
+    // #343 AC2 — a rejection wrote **no** audit row at all, which made the one decision that carries a
+    // mandatory reason the one the ledger could not reproduce. The reason is on the row as well as in
+    // `decision_reason`: the column is overwritten if the request is ever decided again, the row is not.
+    await this.audit.withAudit(
+      {
+        ...this.auditFields(actor),
+        action: 'LEAVE_REJECTED',
+        entityType: 'leave_requests',
+        entityId: String(req.id),
+        metadata: {
+          seId: req.seId,
+          type: req.type,
+          windowStart: req.windowStart.toISOString(),
+          windowEnd: req.windowEnd.toISOString(),
+          reason,
+        },
       },
-    });
+      (tx) =>
+        tx.leaveRequest.update({
+          where: { id: req.id },
+          data: {
+            status: 'REJECTED',
+            decisionReason: reason,
+            decidedBy: actor.userId.length === 36 ? actor.userId : null,
+            decidedByRole: actor.actedAsRole ?? actor.role,
+            decidedAt: new Date(),
+          },
+        }),
+    );
     return { result: 'OK', id };
   }
 

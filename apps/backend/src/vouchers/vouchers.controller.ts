@@ -13,6 +13,7 @@ import {
   StreamableFile,
   UseGuards,
 } from '@nestjs/common';
+import { AuditService, auditActor } from '../audit/audit.service';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
 import { CurrentScope } from '../common/decorators/current-scope.decorator';
@@ -59,7 +60,10 @@ interface CreateBody {
 @Controller('vouchers')
 @UseGuards(AuthGuard, RoleGuard)
 export class VouchersController {
-  constructor(private readonly vouchers: VouchersService) {}
+  constructor(
+    private readonly vouchers: VouchersService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Post()
   @HttpCode(201)
@@ -107,13 +111,27 @@ export class VouchersController {
     return this.vouchers.reviewQueue(scope, resolved);
   }
 
+  /**
+   * #343 — the Finance export changes nothing, which is why it was unaudited and why it must not be:
+   * a month's reimbursement data leaving the platform *is* the event, and the month is the batch it
+   * identifies. Same shape as `ExportsController`'s `EXPORT_DOWNLOADED` — a standalone `record`,
+   * because there is no mutation for the row to ride along with. Written after the CSV is built, so a
+   * pull that failed to produce anything is not recorded as a pull.
+   */
   @Get('export')
   @Roles('OPERATIONS_HEAD')
-  async export(@Query('month') month: string): Promise<StreamableFile> {
+  async export(@CurrentActor() actor: RequestActor, @Query('month') month: string): Promise<StreamableFile> {
     if (!month || !/^\d{4}-\d{2}$/.test(month)) {
       throw new BadRequestException({ code: 'MONTH_REQUIRED', hint: 'YYYY-MM' });
     }
     const out = await this.vouchers.exportApproved(month);
+    await this.audit.record({
+      ...auditActor(actor),
+      action: 'VOUCHER_EXPORT_DOWNLOADED',
+      entityType: 'expense_vouchers',
+      entityId: month,
+      metadata: { month, filename: out.filename },
+    });
     return new StreamableFile(Buffer.from(out.csv, 'utf-8'), {
       type: 'text/csv; charset=utf-8',
       disposition: `attachment; filename="${out.filename}"`,

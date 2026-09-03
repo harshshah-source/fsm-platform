@@ -1,7 +1,10 @@
 import { Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
+import { AuditService, auditActor } from '../audit/audit.service';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
+import type { RequestActor } from '../common/request-actor';
 import { SnapshotIngestionWorker } from './snapshot-ingestion.worker';
 import {
   SnapshotQueryService,
@@ -23,6 +26,7 @@ export class SnapshotsController {
   constructor(
     private readonly query: SnapshotQueryService,
     private readonly worker: SnapshotIngestionWorker,
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -59,10 +63,21 @@ export class SnapshotsController {
   @Post('run')
   @HttpCode(200)
   @Roles('OPERATIONS_HEAD')
-  async run(): Promise<{ runId: string; status: string }> {
+  async run(@CurrentActor() actor: RequestActor): Promise<{ runId: string; status: string }> {
     // Bound the page size under the AutoPlant DBA cap (< 100 rows/query); overridable via env.
     const chunkSize = Math.max(1, Math.min(99, Number(process.env.AUTOPLANT_SNAPSHOT_CHUNK_SIZE) || 90));
     const result = await this.worker.run({ chunkSize });
+    // #343 — audited **after** the run, unlike the two AutoPlant triggers, because here the run row
+    // exists and is the natural entity: keying the attribution to the run id joins "who asked" to
+    // "what it did" without a timestamp guess. The worker resolves rather than throws on a failed
+    // run (the status is in the result), so a failure is still attributed.
+    await this.audit.record({
+      ...auditActor(actor),
+      action: 'SNAPSHOT_RUN_TRIGGERED',
+      entityType: 'snapshot_runs',
+      entityId: result.runId.toString(),
+      metadata: { trigger: 'manual', chunkSize, status: result.status },
+    });
     return { runId: result.runId.toString(), status: result.status };
   }
 }

@@ -78,6 +78,43 @@ describe('Issue 02 Slice 1 — PUT /api/settings/:key (config write)', () => {
     }
   });
 
+  /**
+   * #343 AC3 — the audit row carries what the value **was** and what it **became**. Without the pair
+   * a `SETTING_UPDATED` row says only that someone touched the dial: it cannot answer "what did this
+   * change" and so cannot be used to undo or to explain a behaviour change that started at 14:02.
+   * `previous` is `null` on a key's first-ever write — an honest "there was nothing here", distinct
+   * from a key whose previous value happened to be zero.
+   */
+  it('AC3 — SETTING_UPDATED carries {key, previous, next}, with previous null on first write', async () => {
+    const token = await login('ops.head@fsm.test');
+    const key = `test_threshold_${randomUUID().slice(0, 8)}`;
+
+    await request(app.getHttpServer())
+      .put(`/api/settings/${key}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ value: 11 })
+      .expect(200);
+    await request(app.getHttpServer())
+      .put(`/api/settings/${key}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ value: 13 })
+      .expect(200);
+
+    const prisma = new PrismaService();
+    await prisma.onModuleInit();
+    try {
+      const rows = await prisma.auditLog.findMany({
+        where: { entityType: 'system_settings', entityId: key },
+        orderBy: { createdAt: 'asc' },
+      });
+      expect(rows).toHaveLength(2);
+      expect(rows[0].metadata).toEqual({ key, previous: null, next: 11 });
+      expect(rows[1].metadata).toEqual({ key, previous: 11, next: 13 });
+    } finally {
+      await prisma.onModuleDestroy();
+    }
+  });
+
   it('rejects a non-Operations-Head writer with 403', async () => {
     const token = await login('zm.north@fsm.test');
     await request(app.getHttpServer())

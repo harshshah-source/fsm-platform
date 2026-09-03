@@ -40,6 +40,10 @@ describe('Issue 28 slice 3 — Vehicle Unavailability HTTP (e2e)', () => {
   });
 
   afterAll(async () => {
+    await prisma.auditLog.deleteMany({ where: { entityType: 'tickets', entityId: ticketId, action: 'VU_SLA_PAUSED' } });
+    if (reportId) {
+      await prisma.auditLog.deleteMany({ where: { entityType: 'vehicle_unavailability_reports', entityId: reportId } });
+    }
     await prisma.vehicleUnavailabilityReport.deleteMany({ where: { ticketId } });
     await prisma.ticket.deleteMany({ where: { ticketId } });
     await prisma.failureCycle.deleteMany({ where: { deviceId } });
@@ -105,6 +109,32 @@ describe('Issue 28 slice 3 — Vehicle Unavailability HTTP (e2e)', () => {
 
     // …and once it is resumed it is no longer the live report, so a further decision is a 409.
     await auth(request(app.getHttpServer()).post(`/api/vehicle-unavailability/${reportId}/approve`)).expect(409);
+  });
+
+  /**
+   * #343 AC1 — the SLA clock stopping and restarting are the two events that decide whether a ticket
+   * breached, and both were invisible: filing paused the primary clock and manual resume restarted it
+   * with nothing in the ledger either way. A breach argued after the fact has to be reconstructible,
+   * so each row carries whether the clock actually moved — `slaPaused` is false when the cycle was
+   * already stopped for another reason (a component wait), and `slaResumed` is false when the pause
+   * this report is resolving was not its own. Both are facts only the transaction knows.
+   *
+   * Runs after the resume leg above, so exactly one pause and one resume have happened on this ticket.
+   */
+  it('AC1 — filing writes VU_SLA_PAUSED on the ticket and manual resume writes VU_SLA_RESUMED_MANUAL on the report', async () => {
+    const paused = await prisma.auditLog.findMany({
+      where: { entityType: 'tickets', entityId: ticketId, action: 'VU_SLA_PAUSED' },
+    });
+    expect(paused).toHaveLength(1);
+    expect(paused[0].actorRole).toBe('ZONAL_MANAGER');
+    expect(paused[0].metadata).toMatchObject({ reasonCode: 'VEHICLE_ON_TRIP', reportId, slaPaused: true });
+
+    const resumed = await prisma.auditLog.findMany({
+      where: { entityType: 'vehicle_unavailability_reports', entityId: reportId, action: 'VU_SLA_RESUMED_MANUAL' },
+    });
+    expect(resumed).toHaveLength(1);
+    expect(resumed[0].actorRole).toBe('ZONAL_MANAGER');
+    expect(resumed[0].metadata).toMatchObject({ ticketId, slaResumed: true });
   });
 
   it('forbids an SE from the manager list (403, secondary clock never reaches SE) and rejects bad reason (400)', async () => {
