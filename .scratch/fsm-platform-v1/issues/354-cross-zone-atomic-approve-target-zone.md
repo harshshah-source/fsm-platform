@@ -1,5 +1,5 @@
 # 354 — Cross-zone approve is atomic and the target zone is told
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/354-cross-zone-atomic-approve-target-zone.md
 Type: AFK
 Wave: 3 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -52,13 +52,20 @@ The #325 `inTransaction` hook on `assignTicket` is the ready-made seam for the a
 
 ## Acceptance criteria
 
-- [ ] AC1 — a crash injected after the assignment tx cannot leave the escalation PENDING (the row
-      flips inside the tx).
-- [ ] AC2 — a retry after `ALREADY_ASSIGNED` for the same SE reconciles the escalation to APPROVED.
-- [ ] AC3 — a notify throw inside the sweep neither aborts the sweep nor orphans the escalation.
-- [ ] AC4 — a missing ZM → all ZMs of the zone by role, or a logged `NO_RECIPIENT` — never a silent
+- [x] AC1 — a crash injected after the assignment tx cannot leave the escalation PENDING (the row
+      flips inside the tx). *Stronger than written: the assignment rolls back with it — both halves
+      are one transaction via #325's `inTransaction` hook.*
+- [x] AC2 — a retry after `ALREADY_ASSIGNED` for the same SE reconciles the escalation to APPROVED.
+- [x] AC3 — a notify throw inside the sweep neither aborts the sweep nor orphans the escalation.
+- [x] AC4 — a missing ZM → all ZMs of the zone by role, or a logged `NO_RECIPIENT` — never a silent
       return.
-- [ ] AC5 — the target ZM receives `CROSS_ZONE_INCOMING` and sees the row in `/cross-zone`.
+- [x] AC5 — the target ZM receives `CROSS_ZONE_INCOMING` and sees the row in `/cross-zone`.
+
+**Premise correction (verified against the working tree):** #338 landed first and already gave the
+sweep and every decision door its own transaction (CZ-02, its report's decision 5), so the `:99-115`
+"no tx" and `:166-178` "outside any tx" readings above are stale and the line numbers no longer match.
+What this slice built is CZ-01 (the cross-service atomicity), the per-ticket catch, the recipients and
+the read.
 
 ## Verification
 

@@ -26,17 +26,23 @@ const minsAgo = (m: number) => new Date(NOW.getTime() - m * 60_000);
 describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', () => {
   let prisma: PrismaService;
   let svc: CrossZoneEscalationService;
+  let override: OverrideService;
 
   let homeZoneId: bigint;
   let targetZoneId: bigint;
   let platinumCompanyId: bigint;
   let goldCompanyId: bigint;
   let plantId: bigint;
+  /** #354 — a plant in the *target* zone, whose zone has no designated ZM (the AC4 fallback case). */
+  let targetPlantId: bigint;
   let targetSe: string;
+  let otherSe: string;
   let zmUserId: string;
   let csmUserId: string;
   let ohUserId: string;
   let otherZmUserId: string;
+  /** #354 — a ZM of the target zone by `users.zone_id` only; that zone names no `zonalManagerUserId`. */
+  let targetZmUserId: string;
 
   const userIds: string[] = [];
   const deviceIds: string[] = [];
@@ -49,8 +55,11 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
     tier: 'PLATINUM' | 'GOLD' | 'SILVER';
     bucket?: 'CRITICAL' | 'RISK' | null;
     ageMin: number;
+    /** #354 — which plant (and therefore which home zone) the ticket belongs to. Defaults to the home zone. */
+    plant?: bigint;
   }): Promise<string> => {
     const companyId = opts.tier === 'PLATINUM' ? platinumCompanyId : goldCompanyId;
+    const plant = opts.plant ?? plantId;
     const deviceId = String(12_800_000_000 + ((NS + deviceIds.length) % 100_000) + deviceIds.length);
     deviceIds.push(deviceId);
     await prisma.device.create({ data: { deviceId } });
@@ -62,7 +71,7 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
         eligibleForUptime: true,
         hasOpenFailureCycle: true,
         latestGpsDatetime: minsAgo(opts.ageMin),
-        plantId,
+        plantId: plant,
         companyId,
         computedAt: NOW,
       },
@@ -74,7 +83,7 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
         status: 'OPEN',
         failureCycleId: cycle.cycleId,
         deviceId,
-        plantId,
+        plantId: plant,
         companyId,
         companyTier: opts.tier,
         lastStateChangedAt: minsAgo(opts.ageMin),
@@ -96,12 +105,8 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
-    svc = new CrossZoneEscalationService(
-      prisma,
-      new OverrideService(prisma, new AuditService(prisma), new LoggingDayPlanNotifier()),
-      new NotificationService(prisma),
-      new AuditService(prisma),
-    );
+    override = new OverrideService(prisma, new AuditService(prisma), new LoggingDayPlanNotifier());
+    svc = new CrossZoneEscalationService(prisma, override, new NotificationService(prisma), new AuditService(prisma));
 
     zmUserId = await mkUser('ZONAL_MANAGER');
     otherZmUserId = await mkUser('ZONAL_MANAGER');
@@ -117,9 +122,15 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
       await prisma.company.create({ data: { name: 'Gold-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })
     ).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-cz-' + NS, zoneId: homeZoneId } })).plantId;
+    targetPlantId = (await prisma.plant.create({ data: { name: 'P-cz-target-' + NS, zoneId: targetZoneId } })).plantId;
 
     targetSe = await mkUser('SERVICE_ENGINEER', targetZoneId);
     await prisma.engineerMaster.create({ data: { engineerId: targetSe, coverageType: 'FLOATING', zoneId: targetZoneId, dailyCapacity: 10 } });
+    otherSe = await mkUser('SERVICE_ENGINEER', targetZoneId);
+    await prisma.engineerMaster.create({ data: { engineerId: otherSe, coverageType: 'FLOATING', zoneId: targetZoneId, dailyCapacity: 10 } });
+    // The target zone deliberately names no `zonalManagerUserId`: its ZM is discoverable only by role
+    // + `users.zone_id`, which is the fallback #354 AC4 requires and the recipient AC5 needs.
+    targetZmUserId = await mkUser('ZONAL_MANAGER', targetZoneId);
 
     ZM = { userId: zmUserId, role: 'ZONAL_MANAGER', zoneId: Number(homeZoneId) };
     CSM = { userId: csmUserId, role: 'CENTRAL_SERVICE_MANAGER', zoneId: null };
@@ -141,11 +152,14 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: userIds } } });
     await prisma.user.deleteMany({ where: { userId: { in: userIds } } });
-    await prisma.plant.deleteMany({ where: { plantId } });
+    await prisma.plant.deleteMany({ where: { plantId: { in: [plantId, targetPlantId] } } });
     await prisma.company.deleteMany({ where: { companyId: { in: [platinumCompanyId, goldCompanyId] } } });
     await prisma.zone.deleteMany({ where: { zoneId: { in: [homeZoneId, targetZoneId] } } });
     await prisma.onModuleDestroy();
-  });
+    // #354 — this teardown is ~20 statements over two zones and now runs against a fixture that also
+    // holds a second plant, a second SE and the assignments the approve tests make. The default 10s
+    // hook budget was the binding constraint, not anything the tests do.
+  }, 30_000);
 
   const escFor = (ticketId: string) =>
     prisma.crossZoneEscalation.findFirstOrThrow({ where: { ticketId }, orderBy: { escalationId: 'desc' } });
@@ -339,9 +353,10 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
     it('AC1 — a failed enqueue rolls the auto-escalation back, audit row included', async () => {
       const t = await makeTicket({ tier: 'PLATINUM', bucket: 'CRITICAL', ageMin: 90 });
 
-      await expect(svcOn(failingNotifyEnqueue(prisma)).sweepAutoEscalations(NOW, homeZoneId)).rejects.toThrow(
-        EnqueueFailed,
-      );
+      // #354 amended the outer behaviour, not the property: the sweep no longer rejects, because its
+      // per-ticket catch keeps the rest of the zone moving (AC3). What #338 asserts here is unchanged
+      // and is the whole point — nothing of the failed ticket survives the failed enqueue.
+      expect((await svcOn(failingNotifyEnqueue(prisma)).sweepAutoEscalations(NOW, homeZoneId)).escalated).toBe(0);
 
       expect(await prisma.crossZoneEscalation.count({ where: { ticketId: t } })).toBe(0);
       expect(await noticesFor(t)).toHaveLength(0);
@@ -370,6 +385,194 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
       const after = await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId: esc.escalationId } });
       expect(after.status).toBe('PENDING');
       expect(after.decidedAt).toBeNull();
+    });
+  });
+
+  /**
+   * #354 — the approval is one transaction, and the zone that has to do the work is told.
+   *
+   * #338 gave every cross-zone door its own transaction (CZ-02). What it deliberately left is CZ-01:
+   * `approve` committed `assignTicket` in *its* transaction and then updated the escalation in another,
+   * so a crash in the gap left an assigned ticket beside a PENDING escalation — and the retry then
+   * short-circuited on `ALREADY_ASSIGNED` and could never repair it (#139). The assertions below are on
+   * the **mutations** (the ticket's assignment state and the escalation row), never on the notice: that
+   * is the only thing that tells one transaction from two.
+   */
+  describe('#354 — approve is atomic, reconcilable, and tells the target zone', () => {
+    const svcOn = (client: PrismaService, notifications = new NotificationService(client)) =>
+      new CrossZoneEscalationService(
+        client,
+        new OverrideService(client, new AuditService(client), inertDayPlanNotifier),
+        notifications,
+        new AuditService(client),
+      );
+
+    /**
+     * An enqueue that fails for the notices matching `hits` only — the rest of the transaction, and
+     * every *other* ticket's notice, is written normally. `failingNotifyEnqueue` fails them all, which
+     * cannot express "one bad ticket in a sweep of several" (AC3).
+     */
+    const failingNotifyEnqueueWhen = (client: PrismaService, hits: (payload: NotifyInput) => boolean): PrismaService => {
+      const wrapDelegate = (delegate: object): object =>
+        new Proxy(delegate, {
+          get(d, dp) {
+            if (dp !== 'create') return Reflect.get(d, dp);
+            return async (args: { data?: { eventType?: string; payload?: unknown } }) => {
+              if (args?.data?.eventType === NOTIFY_EVENT_TYPE && hits((args.data.payload ?? {}) as NotifyInput)) {
+                throw new EnqueueFailed();
+              }
+              const create = Reflect.get(d, 'create') as (a: unknown) => Promise<unknown>;
+              return create.call(d, args);
+            };
+          },
+        });
+      const wrapClient = (c: object): object =>
+        new Proxy(c, {
+          get(target, prop, receiver) {
+            if (prop === 'dayPlanNotificationOutbox') return wrapDelegate(Reflect.get(target, prop, receiver) as object);
+            if (prop === '$transaction') {
+              return (fn: unknown, ...rest: unknown[]) => {
+                const real = (target as unknown as Record<string, (...a: unknown[]) => unknown>).$transaction;
+                if (typeof fn !== 'function') return real.call(target, fn, ...rest);
+                return real.call(target, ((tx: object) => (fn as (t: object) => unknown)(wrapClient(tx))) as never, ...rest);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      return wrapClient(client) as PrismaService;
+    };
+
+    const escalate = async (opts: { ageMin?: number } = {}): Promise<{ ticketId: string; escalationId: bigint }> => {
+      const ticketId = await makeTicket({ tier: 'PLATINUM', bucket: 'CRITICAL', ageMin: opts.ageMin ?? 120 });
+      await svc.sweepAutoEscalations(NOW, homeZoneId);
+      return { ticketId, escalationId: (await escFor(ticketId)).escalationId };
+    };
+
+    const liveBatchRow = (ticketId: string) =>
+      prisma.batchAssignmentTicket.findFirst({ where: { ticketId, removedAt: null } });
+
+    it('AC1 — a crash after the assignment rolls the assignment back too; the escalation cannot be left PENDING beside an assigned ticket', async () => {
+      const { ticketId, escalationId } = await escalate();
+
+      await expect(
+        svcOn(failingNotifyEnqueueWhen(prisma, () => true)).approve(escalationId, Number(targetZoneId), targetSe, CSM, NOW),
+      ).rejects.toThrow(EnqueueFailed);
+
+      // The mutation, not the notice: before #354 the assignment had already committed in its own
+      // transaction and only the escalation update rolled back — exactly the half-done approval.
+      const after = await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId } });
+      expect(after.status).toBe('PENDING');
+      expect(after.targetZoneId).toBeNull();
+      expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).assignmentState).toBe('UNASSIGNED');
+      expect(await liveBatchRow(ticketId)).toBeNull();
+    });
+
+    it('AC2 — a retry after ALREADY_ASSIGNED for the same SE reconciles the escalation to APPROVED', async () => {
+      const { ticketId, escalationId } = await escalate();
+
+      // The #139 state: the assignment committed, the escalation update did not.
+      const assigned = await override.assignTicket(
+        ticketId,
+        targetSe,
+        { role: 'CENTRAL_SERVICE_MANAGER', zoneId: null },
+        CSM,
+        NOW,
+        'CROSS_ZONE_ASSIGN',
+      );
+      expect(assigned.result).toBe('OK');
+
+      const out = await svc.approve(escalationId, Number(targetZoneId), targetSe, CSM, NOW);
+      expect(out.result).toBe('OK');
+
+      const after = await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId } });
+      expect(after.status).toBe('APPROVED');
+      expect(after.assignedSeId).toBe(targetSe);
+      expect(after.targetZoneId).toBe(targetZoneId);
+      // Reconciled from the live assignment, not invented: the ids name the batch the ticket is on.
+      const live = await liveBatchRow(ticketId);
+      expect(after.assignedBatchId).toBe(live?.batchId);
+      expect(after.decidedByUserId).toBe(csmUserId);
+    });
+
+    it('AC2 — an ALREADY_ASSIGNED to a different SE is still a conflict, and leaves the escalation alone', async () => {
+      const { ticketId, escalationId } = await escalate();
+      await override.assignTicket(ticketId, otherSe, { role: 'CENTRAL_SERVICE_MANAGER', zoneId: null }, CSM, NOW, 'CROSS_ZONE_ASSIGN');
+
+      const out = await svc.approve(escalationId, Number(targetZoneId), targetSe, CSM, NOW);
+      expect(out.result).toBe('ALREADY_ASSIGNED');
+      expect(out.result === 'ALREADY_ASSIGNED' ? out.assignedSeId : null).toBe(otherSe);
+      expect((await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId } })).status).toBe('PENDING');
+    });
+
+    it('AC3 — one ticket whose notice cannot be enqueued neither aborts the sweep nor orphans itself', async () => {
+      const good = await makeTicket({ tier: 'PLATINUM', bucket: 'CRITICAL', ageMin: 200 });
+      const bad = await makeTicket({ tier: 'PLATINUM', bucket: 'CRITICAL', ageMin: 200 });
+
+      const client = failingNotifyEnqueueWhen(prisma, (p) => p.entityId === bad);
+      // Before #354 the whole sweep rejected on the first bad ticket, abandoning the zone's remaining
+      // Platinum work — and #140's other half: whatever the failure left behind made the ticket
+      // permanently invisible to `crossZoneEscalations: { none: {} }`.
+      await expect(svcOn(client).sweepAutoEscalations(NOW, homeZoneId)).resolves.toBeDefined();
+
+      expect(await prisma.crossZoneEscalation.count({ where: { ticketId: good } })).toBe(1);
+      expect(await prisma.crossZoneEscalation.count({ where: { ticketId: bad } })).toBe(0);
+
+      // Not orphaned: the next sweep still sees it, because nothing half-written was left behind.
+      await svc.sweepAutoEscalations(NOW, homeZoneId);
+      expect(await prisma.crossZoneEscalation.count({ where: { ticketId: bad } })).toBe(1);
+    });
+
+    it('CZ-13 — a ticket held to a return date is reported as deferred, not as "escalation or SE not found"', async () => {
+      const { ticketId, escalationId } = await escalate();
+      await prisma.ticket.update({ where: { ticketId }, data: { deferredUntil: new Date('2026-07-10T00:00:00Z') } });
+
+      const out = await svc.approve(escalationId, Number(targetZoneId), targetSe, CSM, NOW);
+      expect(out.result).toBe('TICKET_DEFERRED');
+      expect((await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId } })).status).toBe('PENDING');
+      expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).assignmentState).toBe('UNASSIGNED');
+    });
+
+    it('CZ-13 — an SE that does not exist is reported as an SE miss, not as a missing escalation', async () => {
+      const { escalationId } = await escalate();
+      const out = await svc.approve(escalationId, Number(targetZoneId), '00000000-0000-0000-0000-0000000000aa', CSM, NOW);
+      expect(out.result).toBe('SE_NOT_FOUND');
+    });
+
+    it('AC4 — a home zone with no designated ZM notifies its ZMs by role rather than returning silently', async () => {
+      const t = await makeTicket({ tier: 'GOLD', bucket: 'CRITICAL', ageMin: 30, plant: targetPlantId });
+      const targetZm: CrossZoneActor = { userId: targetZmUserId, role: 'ZONAL_MANAGER', zoneId: Number(targetZoneId) };
+      expect((await svc.flag(t, 'no cover', targetZm, NOW)).result).toBe('OK');
+      const esc = await escFor(t);
+
+      expect((await svc.deny(esc.escalationId, 'no capacity anywhere', CSM, NOW)).result).toBe('OK');
+
+      const note = await prisma.notification.findFirst({
+        where: { recipientUserId: targetZmUserId, type: 'CROSS_ZONE_DECISION', entityId: t },
+      });
+      expect(note).not.toBeNull();
+    });
+
+    it('AC5 — the target ZM is told CROSS_ZONE_INCOMING and sees the row as incoming in /cross-zone', async () => {
+      const { ticketId, escalationId } = await escalate();
+
+      expect((await svc.approve(escalationId, Number(targetZoneId), targetSe, CSM, NOW)).result).toBe('OK');
+
+      const incoming = await prisma.notification.findFirst({
+        where: { recipientUserId: targetZmUserId, type: 'CROSS_ZONE_INCOMING', entityId: ticketId },
+      });
+      expect(incoming).not.toBeNull();
+
+      const targetRows = await svc.listForScope({ role: 'ZONAL_MANAGER', zoneId: Number(targetZoneId) });
+      const row = targetRows.find((r) => r.escalationId === String(escalationId));
+      expect(row).toBeDefined();
+      expect(row?.direction).toBe('incoming');
+
+      // The home ZM's own queue is unchanged in shape: its rows are the work it sent out.
+      const homeRows = await svc.listForScope({ role: 'ZONAL_MANAGER', zoneId: Number(homeZoneId) });
+      expect(homeRows.every((r) => r.direction === 'outgoing')).toBe(true);
+      expect(homeRows.some((r) => r.escalationId === String(escalationId))).toBe(false);
     });
   });
 });

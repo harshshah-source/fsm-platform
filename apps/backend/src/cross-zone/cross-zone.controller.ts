@@ -112,11 +112,22 @@ export class CrossZoneController {
     return out;
   }
 
+  /**
+   * #354 (CZ-13) — every non-OK result reaches the operator as the thing that actually happened.
+   *
+   * `NOT_FOUND` used to carry three different situations — a missing escalation, an engineer id that
+   * names nobody, and a ticket held to a return date (#249) — and reported all three as
+   * "escalation or SE not found". Two of those are actionable and neither is a miss, so the service
+   * now distinguishes them and they get their own codes here. `ALREADY_ASSIGNED` names the holder,
+   * which is what tells an operator whether their own retry already won.
+   */
   private async map(p: Promise<DecisionOutcome>): Promise<DecisionOutcome> {
     const out = await p;
-    if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'ESCALATION_OR_SE_NOT_FOUND' });
+    if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'ESCALATION_NOT_FOUND' });
+    if (out.result === 'SE_NOT_FOUND') throw new NotFoundException({ code: 'SE_NOT_FOUND' });
     if (out.result === 'NOT_PENDING') throw new ConflictException({ code: 'ESCALATION_NOT_ACTIONABLE', status: out.status });
-    if (out.result === 'ALREADY_ASSIGNED') throw new ConflictException({ code: 'TICKET_ALREADY_ASSIGNED' });
+    if (out.result === 'TICKET_DEFERRED') throw new ConflictException({ code: 'TICKET_DEFERRED', deferredUntil: out.deferredUntil });
+    if (out.result === 'ALREADY_ASSIGNED') throw new ConflictException({ code: 'TICKET_ALREADY_ASSIGNED', assignedSeId: out.assignedSeId ?? null });
     if (out.result === 'FORBIDDEN_SCOPE') throw new ForbiddenException({ code: 'FORBIDDEN_SCOPE' });
     if (out.result === 'NOT_DENIED_AUTO') throw new ConflictException({ code: 'NOT_A_DENIED_AUTO_ESCALATION' });
     return out;

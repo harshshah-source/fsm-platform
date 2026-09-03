@@ -73,6 +73,41 @@ describe('/api/cross-zone (e2e)', () => {
       .expect(404);
   });
 
+  /**
+   * #354 (CZ-13) — the decision doors' non-OK results reach the caller as their own codes. The one
+   * that was actively misleading is `NOT_FOUND`: an approve whose *SE* is unknown, and an approve of a
+   * ticket held to a return date, both answered "escalation or SE not found".
+   */
+  it('404s an approve on an unknown escalation with the escalation code', async () => {
+    const token = await login('csm@fsm.test');
+    const res = await request(app.getHttpServer())
+      .post('/api/cross-zone/999999999/approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ targetZoneId: 1, seId: '00000000-0000-0000-0000-0000000000aa' })
+      .expect(404);
+    expect(res.body.code ?? res.body.message?.code).toBe('ESCALATION_NOT_FOUND');
+  });
+
+  it('400s an approve with no target zone or SE', async () => {
+    const token = await login('csm@fsm.test');
+    const res = await request(app.getHttpServer())
+      .post('/api/cross-zone/999999999/approve')
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(400);
+    expect(res.body.code ?? res.body.message?.code).toBe('TARGET_ZONE_AND_SE_REQUIRED');
+  });
+
+  it('gives a ZM a direction on every queue row', async () => {
+    const token = await login('zm.north@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get('/api/cross-zone')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const rows = res.body as { direction?: string }[];
+    expect(rows.every((r) => r.direction === 'incoming' || r.direction === 'outgoing')).toBe(true);
+  });
+
   it('rejects an unauthenticated request', async () => {
     await request(app.getHttpServer()).get('/api/cross-zone').expect(401);
   });

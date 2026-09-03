@@ -10,7 +10,17 @@ import {
 } from '../../api/crossZone';
 import { DataTable, MetricCard, PageHeader, type Column } from '../../components/data';
 import { SLABadge, StatusPill, TierBadge } from '../../components/domain';
-import { Button } from '../../components/ui';
+import { Badge, Button } from '../../components/ui';
+
+/**
+ * #354 — which side of the escalation this zone is on, as the backend's `listForScope` reports it:
+ * `incoming` is work another zone's ZM raised that has been assigned to one of *our* engineers,
+ * `outgoing` is work we sent out, `null` for a pan-India reader (CSM / Operations Head).
+ *
+ * Declared here rather than on `CrossZoneRow` because the shared API type is another slice's file
+ * this round; the field is optional so a response from an older backend still renders.
+ */
+type CrossZoneQueueRow = CrossZoneRow & { direction?: 'incoming' | 'outgoing' | null };
 
 /** Whole-days elapsed since an ISO timestamp (for the AgeChip-style age column). */
 function daysSince(iso: string): number {
@@ -26,7 +36,7 @@ function daysSince(iso: string): number {
  */
 export function CrossZonePage() {
   const { session } = useAuth();
-  const [rows, setRows] = useState<CrossZoneRow[]>([]);
+  const [rows, setRows] = useState<CrossZoneQueueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,11 +89,22 @@ export function CrossZonePage() {
   const auto = rows.filter((r) => r.escalationType === 'AUTO_PLATINUM');
   const manual = rows.filter((r) => r.escalationType === 'MANUAL_FLAG');
 
-  const baseColumns: Column<CrossZoneRow>[] = [
+  const baseColumns: Column<CrossZoneQueueRow>[] = [
     {
       key: 'ticket',
       header: 'Ticket',
-      render: (r) => <span className="font-mono text-xs text-ink-muted">{r.ticketId.slice(0, 8)}</span>,
+      render: (r) => (
+        <span className="flex items-center gap-2">
+          <span className="font-mono text-xs text-ink-muted">{r.ticketId.slice(0, 8)}</span>
+          {/* #354 — work assigned INTO this zone. Without it the receiving ZM's queue looked identical
+              to the work they sent out, which is the read that made incoming work invisible. */}
+          {r.direction === 'incoming' && (
+            <Badge tone="info" data-testid={`cz-incoming-${r.escalationId}`}>
+              Incoming
+            </Badge>
+          )}
+        </span>
+      ),
     },
     {
       key: 'company',
@@ -100,23 +121,29 @@ export function CrossZonePage() {
     { key: 'age', header: 'Age', render: (r) => `${daysSince(r.createdAt)}d` },
   ];
 
-  const actionsColumn: Column<CrossZoneRow> = {
+  const actionsColumn: Column<CrossZoneQueueRow> = {
     key: 'actions',
     header: 'Actions',
     exportable: false,
-    render: (r) => (
-      <div className="flex gap-2">
-        <Button type="button" size="sm" variant="primary" data-testid={`cz-approve-${r.escalationId}`} onClick={() => approve(r.escalationId)}>
-          Approve
-        </Button>
-        <Button type="button" size="sm" variant="danger" data-testid={`cz-deny-${r.escalationId}`} onClick={() => deny(r.escalationId)}>
-          Deny
-        </Button>
-        <Button type="button" size="sm" variant="secondary" data-testid={`cz-defer-${r.escalationId}`} onClick={() => defer(r.escalationId)}>
-          Defer
-        </Button>
-      </div>
-    ),
+    // #354 — a decided row has nothing left to decide. It can only reach this table as a target zone's
+    // incoming work (the ZM read now carries APPROVED rows for the zone doing the work), and offering
+    // Approve on it would send a call the backend answers with `ESCALATION_NOT_ACTIONABLE`.
+    render: (r) =>
+      r.status === 'APPROVED' ? (
+        <span className="text-xs text-ink-muted">—</span>
+      ) : (
+        <div className="flex gap-2">
+          <Button type="button" size="sm" variant="primary" data-testid={`cz-approve-${r.escalationId}`} onClick={() => approve(r.escalationId)}>
+            Approve
+          </Button>
+          <Button type="button" size="sm" variant="danger" data-testid={`cz-deny-${r.escalationId}`} onClick={() => deny(r.escalationId)}>
+            Deny
+          </Button>
+          <Button type="button" size="sm" variant="secondary" data-testid={`cz-defer-${r.escalationId}`} onClick={() => defer(r.escalationId)}>
+            Defer
+          </Button>
+        </div>
+      ),
   };
 
   const columns = isDecider ? [...baseColumns, actionsColumn] : baseColumns;

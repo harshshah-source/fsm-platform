@@ -1,4 +1,5 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Prisma } from '../generated/prisma/client';
 import { type NotificationChannel, type Role } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -63,6 +64,19 @@ export interface NotificationList {
 /** The general-notification fallback chain, in order. IN_APP is handled separately (always fires). */
 const GENERAL_CHAIN: NotificationChannel[] = ['PUSH', 'SMS', 'WHATSAPP', 'EMAIL'];
 
+const logger = new Logger('NotificationService');
+
+/**
+ * #354 — who to tell, named by role (and optionally by zone) rather than by a single stored id.
+ *
+ * `zoneId` omitted means "anyone holding the role, in any zone" (the pan-India roles: CSM, Operations
+ * Head). `zoneId` set clamps to that zone's holders.
+ */
+export interface RecipientsInRolesQuery {
+  role: Role | Role[];
+  zoneId?: number | bigint | null;
+}
+
 /**
  * The notification spine (Issue 03). `notify` writes one Notification per recipient — the in-app
  * notification ALWAYS fires (AC#1) — and records each channel's delivery. GENERAL notifications walk the
@@ -84,6 +98,35 @@ export class NotificationService {
       out.push(await this.notifyOne(recipient, input));
     }
     return out;
+  }
+
+  /**
+   * #354 — resolve a notice's recipients from the **role** that owns the decision, not from one stored
+   * user id, and say so out loud when the role is vacant.
+   *
+   * Every producer that had to tell "the ZM of zone X" read `zones.zonal_manager_user_id` and returned
+   * silently when it was null: a zone between managers, or one whose ZM was never linked, simply got
+   * no notice — with nothing in the log to say a notice had been dropped. A vacancy is an operational
+   * fact somebody has to see, so an empty result is logged as `NO_RECIPIENT` here, once, at the single
+   * place that can know it happened.
+   *
+   * Takes a client so it can resolve **inside** the producing transaction (#338's rows record the
+   * recipients they resolved, which is what lets a row answer "who was told" afterwards).
+   */
+  async recipientsInRoles(
+    query: RecipientsInRolesQuery,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<NotifyRecipient[]> {
+    const roles = Array.isArray(query.role) ? query.role : [query.role];
+    const zoneId = query.zoneId == null ? null : BigInt(query.zoneId);
+    const users = await client.user.findMany({
+      where: { role: { in: roles }, status: 'ACTIVE', ...(zoneId !== null ? { zoneId } : {}) },
+      select: { userId: true, role: true },
+    });
+    if (users.length === 0) {
+      logger.warn(`NO_RECIPIENT roles=${roles.join('|')} zone=${zoneId !== null ? String(zoneId) : 'any'}`);
+    }
+    return users.map((u) => ({ userId: u.userId, role: u.role }));
   }
 
   /** The signed-in user's in-app notifications, newest first (AC#1). `unreadOnly` filters to unread. */
