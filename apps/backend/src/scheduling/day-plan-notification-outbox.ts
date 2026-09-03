@@ -12,6 +12,7 @@ import type {
   RecoveryUnableToCollectEvent,
 } from '../ticketing/recovery-notifier';
 import type { PrismaService } from '../prisma/prisma.service';
+import { formatTicketNo } from '../ticketing/ticket-no';
 import type { DayPlanDispatchedEvent, DayPlanNotifier, DayPlanOverriddenEvent } from './day-plan-notifier';
 
 const logger = new Logger('DayPlanNotificationOutbox');
@@ -24,6 +25,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type OutboxWriteClient = Pick<PrismaService, 'dayPlanNotificationOutbox'>;
 type OutboxReadClient = Pick<PrismaService, 'dayPlanNotificationOutbox'>;
+
+/**
+ * What {@link queueDayPlanOverridden} needs beyond the outbox table (#360): the batch, to name the
+ * stop, and the ticket, to label it. Every caller already hands this function a real transaction
+ * client, so widening the parameter costs the seven call sites nothing.
+ */
+type OverriddenWriteClient = OutboxWriteClient & Pick<PrismaService, 'plantBatchAssignment' | 'ticket'>;
 
 /**
  * Write a dispatch's "Day Plan is live" intent INSIDE the caller's own writing transaction (#262's
@@ -67,9 +75,10 @@ export const DAY_PLAN_ACTION_PLANT_DEACTIVATED = 'PLANT_DEACTIVATED';
  * be left on the old post-commit-call mechanism).
  */
 export async function queueDayPlanOverridden(
-  tx: OutboxWriteClient,
+  tx: OverriddenWriteClient,
   event: DayPlanOverriddenEvent,
 ): Promise<bigint> {
+  const { plantName, ticketNoDisplay } = await resolveOverriddenNouns(tx, event);
   const row = await tx.dayPlanNotificationOutbox.create({
     data: {
       eventType: 'DAY_PLAN_OVERRIDDEN',
@@ -79,11 +88,53 @@ export async function queueDayPlanOverridden(
       // `plantName` is stored, not re-derived at delivery: the row has to say what the plant was
       // called *when the plan changed*, and a rename (or a master-sync) between the enqueue and the
       // drain would otherwise silently rewrite history in the notice the SE finally receives.
-      payload: { batchId: event.batchId.toString(), action: event.action, plantName: event.plantName ?? null },
+      // #360 stores `ticketNoDisplay` for the same reason and resolves it in the same breath.
+      payload: { batchId: event.batchId.toString(), action: event.action, plantName, ticketNoDisplay },
     },
     select: { id: true },
   });
   return row.id;
+}
+
+/**
+ * Name the stop this notice is about (#360), inside the caller's own transaction.
+ *
+ * **Here rather than at the seven producers.** Every one of them already computes the `batchId`, and
+ * the plant is one primary-key hop from it — so pushing the lookup outward would have been seven
+ * chances to forget it, on a payload whose entire job is to be complete enough to write a sentence
+ * from. `plant-deactivation.service.ts` supplies its own `plantName` (#345) and keeps winning: it
+ * deactivated the plant, so it is the better authority on what to call it.
+ *
+ * **Enqueue rather than drain**, for the reason #345 established for `plantName` and #360 extends to
+ * the ticket label: the notice must quote what the stop was called *when the plan changed*.
+ *
+ * A missing batch or ticket yields `null`, never a throw. This runs inside a committed-or-not
+ * override transaction, and a notice that cannot be fully worded is never a reason to roll back the
+ * plan change it announces — {@link dayPlanOverriddenBody} has a nameless form for exactly this.
+ */
+async function resolveOverriddenNouns(
+  tx: OverriddenWriteClient,
+  event: DayPlanOverriddenEvent,
+): Promise<{ plantName: string | null; ticketNoDisplay: string | null }> {
+  let plantName = event.plantName ?? null;
+  if (plantName == null) {
+    const batch = await tx.plantBatchAssignment.findUnique({
+      where: { batchId: event.batchId },
+      select: { plant: { select: { name: true } } },
+    });
+    plantName = batch?.plant.name ?? null;
+  }
+
+  let ticketNoDisplay = event.ticketNoDisplay ?? null;
+  if (ticketNoDisplay == null && event.ticketId) {
+    const ticket = await tx.ticket.findUnique({
+      where: { ticketId: event.ticketId },
+      select: { ticketNo: true },
+    });
+    ticketNoDisplay = ticket ? formatTicketNo(ticket.ticketNo) : null;
+  }
+
+  return { plantName, ticketNoDisplay };
 }
 
 /** The discriminator for a general notification row (#338). */
@@ -239,6 +290,8 @@ async function deliver(notifier: DayPlanNotifier, row: OutboxRow, deliverers: Ou
       action: String(payload.action ?? ''),
       // Absent on every row written before #345, and null on every action that names no plant.
       plantName: payload.plantName == null ? null : String(payload.plantName),
+      // Absent on every row written before #360, and null on every action that names no one ticket.
+      ticketNoDisplay: payload.ticketNoDisplay == null ? null : String(payload.ticketNoDisplay),
     });
     return;
   }

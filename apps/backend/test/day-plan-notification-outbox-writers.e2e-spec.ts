@@ -328,9 +328,28 @@ describe('#345 — SpineDayPlanNotifier names the deactivated plant', () => {
     expect(sent[0].body.toLowerCase()).toContain('deactivated');
   });
 
-  it('leaves every other override action copy untouched', async () => {
+  /**
+   * #345 pinned this as "leaves every other override action copy untouched" —
+   * `Your Day Plan was updated (REMOVE_TICKET).` — on the argument that a ZM override reaches an SE
+   * who is already mid-conversation with the manager who made it. #360 retired that argument (the
+   * intra-day queue and the assign-batch lane reach engineers who spoke to nobody) and with it the
+   * enum: every action now names its stop, and the raw action survives only in `metadata`.
+   */
+  it('#360 — every other override action now reads as a sentence naming the stop, not the enum', async () => {
+    const { sent, notifier } = captureNotifier();
+    await notifier.dayPlanOverridden({
+      seId: 'se-1', scheduleId: 1n, batchId: 2n, action: 'REMOVE_TICKET',
+      plantName: 'STAR CEMENT — Guwahati', ticketNoDisplay: 'TCK-00421',
+    });
+    expect(sent[0].body).toBe('Stop removed: STAR CEMENT — Guwahati (TCK-00421). That work is off your Day Plan.');
+    expect(sent[0].metadata).toMatchObject({ action: 'REMOVE_TICKET', ticketNoDisplay: 'TCK-00421' });
+  });
+
+  it('#360 — a pre-#360 row with no nouns still gets a sentence, never the enum', async () => {
     const { sent, notifier } = captureNotifier();
     await notifier.dayPlanOverridden({ seId: 'se-1', scheduleId: 1n, batchId: 2n, action: 'REMOVE_TICKET' });
-    expect(sent[0].body).toBe('Your Day Plan was updated (REMOVE_TICKET).');
+    expect(sent[0].body).not.toContain('REMOVE_TICKET');
+    expect(sent[0].body).not.toContain('undefined');
+    expect(sent[0].body.toLowerCase()).toContain('stop removed');
   });
 });

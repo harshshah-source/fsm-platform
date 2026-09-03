@@ -195,7 +195,7 @@ describe('apiRefresh', () => {
 });
 
 describe('apiGetMyTickets', () => {
-  const view: MeTicketsView = { items: [], cursor: null };
+  const view: MeTicketsView = { items: [], cursor: null, total: 0 };
 
   afterEach(() => {
     jest.restoreAllMocks();
@@ -852,7 +852,7 @@ describe('#86 — leave request endpoints', () => {
   it('apiGetMyLeaveRequests GETs /me/leave-requests with a Bearer token', async () => {
     keychain.getGenericPassword.mockResolvedValue(false);
     const fetchMock = installFetchMock();
-    const view = { items: [], cursor: null };
+    const view = { items: [], cursor: null, total: 0 };
     fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
 
     const result = await apiGetMyLeaveRequests('token');
@@ -912,7 +912,7 @@ describe('#87 — availability endpoints', () => {
   it('apiGetMyAvailability GETs /me/availability with a Bearer token', async () => {
     keychain.getGenericPassword.mockResolvedValue(false);
     const fetchMock = installFetchMock();
-    const view = { items: [], cursor: null };
+    const view = { items: [], cursor: null, total: 0 };
     fetchMock.mockResolvedValue({ ok: true, json: async () => view } as unknown as Response);
 
     const result = await apiGetMyAvailability('token');

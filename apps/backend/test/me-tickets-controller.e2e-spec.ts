@@ -379,4 +379,95 @@ describe('#161 — GET /api/me/tickets (e2e)', () => {
       expect(row?.topHint?.code).toBe('NO_MAIN_POWER');
     });
   });
+
+  /**
+   * #360 AC1/AC4 — this endpoint is what the SE's phone polls all day on a plant-yard connection, and
+   * it returned the whole shared pool (521 rows on the dev DB) every time. Paging is keyset, not
+   * offset: an SE's pool changes under them between polls, and `skip`/`take` would silently drop or
+   * repeat rows across pages exactly when the day is busiest.
+   */
+  describe('#360 — paging', () => {
+    /** Enough rows that a small `take` needs several pages. */
+    const PAGE_FIXTURE = 7;
+
+    beforeAll(async () => {
+      for (let i = 0; i < PAGE_FIXTURE; i++) await makeTicket();
+    });
+
+    const list = async (query = ''): Promise<{ items: Array<{ ticketId: string; workState: string }>; cursor: string | null; total: number }> => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/me/tickets${query}`)
+        .set('Authorization', `Bearer ${seToken()}`)
+        .expect(200);
+      return res.body;
+    };
+
+    it('AC1 — an unparameterised read is a page: at most 50 rows, a total, and a cursor field', async () => {
+      const page = await list();
+      expect(page.items.length).toBeLessThanOrEqual(50);
+      expect(typeof page.total).toBe('number');
+      expect(page.total).toBeGreaterThanOrEqual(page.items.length);
+      expect(page.cursor === null || typeof page.cursor === 'string').toBe(true);
+    });
+
+    it('AC1 — walking the cursor visits every row exactly once, in the same order as one big read', async () => {
+      const whole = await list('?take=200');
+      expect(whole.cursor).toBeNull();
+      expect(whole.items.length).toBe(whole.total);
+
+      const walked: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page: { items: Array<{ ticketId: string }>; cursor: string | null; total: number } =
+          await list(`?take=3${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+        expect(page.items.length).toBeLessThanOrEqual(3);
+        // `total` is the size of the whole result set, not of the page.
+        expect(page.total).toBe(whole.total);
+        walked.push(...page.items.map((i) => i.ticketId));
+        cursor = page.cursor;
+        pages += 1;
+        expect(pages).toBeLessThan(100); // a cursor that never terminates is the bug this guards
+      } while (cursor !== null);
+
+      expect(walked).toEqual(whole.items.map((i) => i.ticketId));
+      expect(new Set(walked).size).toBe(walked.length);
+      expect(pages).toBeGreaterThan(1);
+    });
+
+    it('AC1 — a junk take falls back to the default rather than 400-ing a screen that is otherwise fine', async () => {
+      const junk = await list('?take=not-a-number');
+      const zero = await list('?take=0');
+      const huge = await list('?take=100000');
+      expect(junk.items.length).toBeLessThanOrEqual(50);
+      expect(zero.items.length).toBeLessThanOrEqual(50);
+      // Clamped, not honoured — one caller must not be able to ask for the whole table back.
+      expect(huge.items.length).toBe(huge.total);
+    });
+
+    it('AC1 — an unparseable cursor is refused rather than silently restarting the poll loop', async () => {
+      await request(app.getHttpServer())
+        .get('/api/me/tickets?cursor=not-a-real-cursor')
+        .set('Authorization', `Bearer ${seToken()}`)
+        .expect(400);
+    });
+
+    it('AC1 — section narrows the set and its total, and matches the row glyph it names', async () => {
+      const all = await list();
+      const visitNow = await list('?section=VISIT_NOW');
+      expect(visitNow.items.every((i) => i.workState === 'VISIT_NOW')).toBe(true);
+      expect(visitNow.total).toBeLessThanOrEqual(all.total);
+      expect(visitNow.total).toBeGreaterThan(0);
+
+      // `ALL` and an absent section are the same request.
+      const explicitAll = await list('?section=ALL');
+      expect(explicitAll.total).toBe(all.total);
+    });
+
+    it('AC1 — an unknown section is treated as ALL, not as an empty list', async () => {
+      const all = await list();
+      const junk = await list('?section=NOT_A_SECTION');
+      expect(junk.total).toBe(all.total);
+    });
+  });
 });

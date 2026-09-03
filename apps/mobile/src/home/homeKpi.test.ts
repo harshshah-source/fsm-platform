@@ -25,6 +25,7 @@ function row(overrides: Partial<MeTicketRow>): MeTicketRow {
     removedFromPlanAt: null,
     deferredToDate: null,
     topHint: null,
+    vehicleUnavailability: null,
     ...overrides,
   };
 }

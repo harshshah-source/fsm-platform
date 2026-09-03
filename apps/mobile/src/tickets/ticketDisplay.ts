@@ -42,6 +42,9 @@ const WORK_STATE_LABEL: Record<MeTicketWorkState, string> = {
   PLAN: 'Plan',
   IN_WORK: 'In Work',
   VERIFY: 'Verify',
+  // #360 — the ticket the SE filed vehicle unavailability on. It used to disappear from their list
+  // the moment they filed; it now stays, labelled with why it is waiting.
+  VEHICLE_UNAVAILABLE: 'Vehicle Unavailable',
 };
 
 export function workStateLabel(workState: MeTicketWorkState): string {

@@ -53,6 +53,7 @@ function row(overrides: Partial<MeTicketRow>): MeTicketRow {
     removedFromPlanAt: null,
     deferredToDate: null,
     topHint: { code: 'NO_MAIN_POWER', severity: 8, label: 'No main power — check fuse' },
+    vehicleUnavailability: null,
     ...overrides,
   };
 }
@@ -73,6 +74,7 @@ describe('TicketsScreen', () => {
         row({ ticketId: 'verify-1', workState: 'VERIFY', vehicleNo: 'MH01 XY 9090' }),
       ],
       cursor: null,
+      total: 3,
     };
     mockApiGetMyTickets.mockResolvedValue(view);
 
@@ -91,6 +93,7 @@ describe('TicketsScreen', () => {
     mockApiGetMyTickets.mockResolvedValue({
       items: [row({ ticketId: 'plan-1', workState: 'PLAN' })],
       cursor: null,
+      total: 1,
     });
 
     render(<TicketsScreen />);
@@ -105,6 +108,7 @@ describe('TicketsScreen', () => {
     mockApiGetMyTickets.mockResolvedValue({
       items: [row({ ticketId: 'urgent-1', workState: 'VISIT_NOW' })],
       cursor: null,
+      total: 1,
     });
 
     render(<TicketsScreen />);
@@ -119,6 +123,7 @@ describe('TicketsScreen', () => {
     mockApiGetMyTickets.mockResolvedValue({
       items: [row({ ticketId: 'no-vehicle', vehicleNo: null, ticketNoDisplay: 'TCK-00999' })],
       cursor: null,
+      total: 1,
     });
 
     render(<TicketsScreen />);
@@ -146,7 +151,7 @@ describe('TicketsScreen', () => {
     async function renderReady() {
       mockGetConnectivityState.mockResolvedValue('online');
       mockGetAccessToken.mockResolvedValue('token');
-      mockApiGetMyTickets.mockResolvedValue({ items, cursor: null });
+      mockApiGetMyTickets.mockResolvedValue({ items, cursor: null, total: items.length });
       render(<TicketsScreen />);
       await waitFor(() => expect(screen.getByText('V-VISIT')).toBeTruthy());
     }
@@ -189,6 +194,7 @@ describe('TicketsScreen', () => {
       mockApiGetMyTickets.mockResolvedValue({
         items: [row({ ticketId: 'urgent-42', workState: 'VISIT_NOW', vehicleNo: 'V-TAP' })],
         cursor: null,
+        total: 1,
       });
       render(<TicketsScreen />);
       await waitFor(() => expect(screen.getByText('V-TAP')).toBeTruthy());
@@ -212,6 +218,7 @@ describe('TicketsScreen', () => {
       mockApiGetMyTickets.mockResolvedValue({
         items: [row({ ticketId: 'a', assigned: true, vehicleNo: 'V-A' })],
         cursor: null,
+        total: 1,
       });
 
       render(<TicketsScreen />);
@@ -227,6 +234,7 @@ describe('TicketsScreen', () => {
       mockApiGetMyTickets.mockResolvedValue({
         items: [row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' })],
         cursor: null,
+        total: 1,
       });
       const first = render(<TicketsScreen />);
       await waitFor(() => expect(first.getByText('V-A')).toBeTruthy());
@@ -241,6 +249,7 @@ describe('TicketsScreen', () => {
           row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B', slaBucket: 'WARNING' }),
         ],
         cursor: null,
+        total: 2,
       });
       render(<TicketsScreen />);
 
@@ -257,6 +266,7 @@ describe('TicketsScreen', () => {
           row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B' }),
         ],
         cursor: null,
+        total: 2,
       });
       const first = render(<TicketsScreen />);
       await waitFor(() => expect(first.getByText('V-B')).toBeTruthy());
@@ -265,6 +275,7 @@ describe('TicketsScreen', () => {
       mockApiGetMyTickets.mockResolvedValue({
         items: [row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' })],
         cursor: null,
+        total: 1,
       });
       render(<TicketsScreen />);
 
@@ -280,6 +291,7 @@ describe('TicketsScreen', () => {
       mockApiGetMyTickets.mockResolvedValue({
         items: [row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' })],
         cursor: null,
+        total: 1,
       });
       const first = render(<TicketsScreen />);
       await waitFor(() => expect(first.getByText('V-A')).toBeTruthy());
@@ -293,6 +305,7 @@ describe('TicketsScreen', () => {
           row({ ticketId: 'b', assigned: true, workState: 'PLAN', vehicleNo: 'V-B' }),
         ],
         cursor: null,
+        total: 3,
       });
       render(<TicketsScreen />);
 
@@ -307,6 +320,7 @@ describe('TicketsScreen', () => {
       mockApiGetMyTickets.mockResolvedValue({
         items: [row({ ticketId: 'a', assigned: true, workState: 'PLAN', vehicleNo: 'V-A' })],
         cursor: null,
+        total: 1,
       });
 
       render(<TicketsScreen />);

@@ -1,5 +1,5 @@
 # 360 — SE poll contract: paginated tickets, VU-deferred visibility, readable day-plan notices
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/360-se-poll-contract.md
 Type: AFK
 Wave: 3 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -41,12 +41,12 @@ endpoints are not).
   `day-plan-notification-outbox` e2e.
 
 ## Acceptance criteria
-- [ ] AC1 — `GET /me/tickets` is paged, cursor-stable, default 50, and returns `total`.
-- [ ] AC2 — an SE who filed vehicle unavailability still sees the ticket, with its state and
+- [x] AC1 — `GET /me/tickets` is paged, cursor-stable, default 50, and returns `total`.
+- [x] AC2 — an SE who filed vehicle unavailability still sees the ticket, with its state and
       return date.
-- [ ] AC3 — day-plan notices read "Stop added: <plant> (<ticket ref>)" and similar — no enum
+- [x] AC3 — day-plan notices read "Stop added: <plant> (<ticket ref>)" and similar — no enum
       leaks.
-- [ ] AC4 — unpaginated callers (none in admin; mobile) keep working via the defaults.
+- [x] AC4 — unpaginated callers (none in admin; mobile) keep working via the defaults.
 
 ## Verification
 

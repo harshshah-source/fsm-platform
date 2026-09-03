@@ -71,8 +71,33 @@ export interface LoginResponse {
 /** `GET /api/me/tickets` (#161 item 2, per #172 Decision 3) row shape — the merged SE day-plan +
  *  shared-pool read. The image's row glyph (V/P/W/✓) — naming vocabulary pinned under #169, semantics
  *  fixed by #172 Decision 3. VERIFY/IN_WORK are unambiguous (ticket status / active soft state); PLAN
- *  vs VISIT_NOW splits assigned-but-not-started day-plan work from open shared-pool work. */
-export type MeTicketWorkState = 'VISIT_NOW' | 'PLAN' | 'IN_WORK' | 'VERIFY';
+ *  vs VISIT_NOW splits assigned-but-not-started day-plan work from open shared-pool work.
+ *
+ *  `VEHICLE_UNAVAILABLE` (#360) is the fifth: the SE filed a vehicle-unavailability report on this
+ *  ticket, which defers it out of every "work I can do" branch. Before #360 the row simply vanished
+ *  the moment the engineer filed it — the one case where the platform silently deleted work the SE
+ *  had personally reported on, and the reason they phoned the dispatcher to ask where it went. */
+export type MeTicketWorkState = 'VISIT_NOW' | 'PLAN' | 'IN_WORK' | 'VERIFY' | 'VEHICLE_UNAVAILABLE';
+
+/**
+ * #360 — the SE's own OPEN vehicle-unavailability report on this ticket, carried on the row so the
+ * list can say *why* the ticket is waiting and *until when* without a second fetch.
+ *
+ * Non-null only for the caller's own reports (`VehicleUnavailabilityReport.seId === caller`) that are
+ * still `OPEN`; a decided/resolved report drops the row back to its ordinary work state.
+ */
+export interface MeTicketVehicleUnavailability {
+  /** `VehicleUnavailabilityReport.id`, stringified (bigint). */
+  reportId: string;
+  /** `OPEN` for every row this field is populated on — present so a client never has to infer it. */
+  status: string;
+  /** The authoritative expected return date, `YYYY-MM-DD` in IST (`expected_from`). */
+  expectedFrom: string;
+  /** The optional far end of the window, `YYYY-MM-DD` in IST — `null` when the SE gave none. */
+  expectedTo: string | null;
+  /** `VehicleUnavailReason` as reported by the SE. */
+  reasonCode: string;
+}
 
 export interface MeTicketRow {
   ticketId: string;
@@ -117,6 +142,9 @@ export interface MeTicketRow {
    *  all — the list row has no separate "unavailable" signal, unlike the detail payload's
    *  `technicalHealth.available`. */
   topHint: TechnicalHint | null;
+  /** #360 AC2 — set iff the caller has an OPEN vehicle-unavailability report on this ticket, in which
+   *  case `workState` is `VEHICLE_UNAVAILABLE`. `null` on every ordinary row. */
+  vehicleUnavailability: MeTicketVehicleUnavailability | null;
 }
 
 /** #84 — Technical Hints (derived telemetry signals), PRD §641 Flow 14. Frozen vocabulary (#169 owns
@@ -138,9 +166,35 @@ export interface TechnicalHint {
   label: string;
 }
 
+/**
+ * #360 — the `section` query parameter of `GET /api/me/tickets`, one member per filter chip on the
+ * mobile Tickets screen (`docs/ui/mobile/tickets-priority-view.png`: All / Visit Now / Plan / In Work
+ * / Verify) plus the state #360 makes visible. `ALL` and an absent parameter mean the same thing.
+ *
+ * The vocabulary is deliberately `MeTicketWorkState` + `ALL` rather than a second parallel set: the
+ * chips filter exactly what the row glyph shows, and two vocabularies for one control is how they
+ * drift.
+ */
+export type MeTicketsSection = 'ALL' | MeTicketWorkState;
+
+/**
+ * `GET /api/me/tickets` — a **page** of the SE's work since #360.
+ *
+ * This is the contract a field engineer's phone polls all day on whatever network a plant yard has.
+ * It was unpaginated until #360, so a heavy day re-sent the whole shared pool (521 rows on the dev
+ * DB) on every poll — the largest payload in the system landing on the worst connection in it.
+ */
 export interface MeTicketsView {
   items: MeTicketRow[];
-  cursor: null;
+  /**
+   * Opaque keyset cursor for the NEXT page, or `null` when this page is the last one. Pass it back as
+   * `?cursor=`. Opaque on purpose — it encodes the read's full sort key (plant, created-at, ticket
+   * id), so a client that tries to synthesise one will page incorrectly rather than subtly.
+   */
+  cursor: string | null;
+  /** How many rows match the caller and `section` in total, ignoring `take`/`cursor` — the count the
+   *  screen's "N open tickets" header shows without walking every page. */
+  total: number;
 }
 
 // ---------------------------------------------------------------------------------------------

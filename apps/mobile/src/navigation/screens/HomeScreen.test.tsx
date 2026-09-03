@@ -79,6 +79,7 @@ function row(overrides: Partial<MeTicketRow>): MeTicketRow {
     removedFromPlanAt: null,
     deferredToDate: null,
     topHint: null,
+    vehicleUnavailability: null,
     ...overrides,
   };
 }
@@ -131,7 +132,7 @@ describe('HomeScreen', () => {
     mockGetAccessToken.mockResolvedValue('token');
     mockGetConnectivity.mockResolvedValue('online');
     mockGetDayPlan.mockResolvedValue(dayPlan);
-    mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+    mockGetMyTickets.mockResolvedValue({ items: [], cursor: null, total: 0 });
 
     renderHome();
 
@@ -162,6 +163,7 @@ describe('HomeScreen', () => {
     mockGetMyTickets.mockResolvedValue({
       items: [row({ ticketId: 't-1', workState: 'IN_WORK' }), row({ ticketId: 't-2', status: 'CLOSED' })],
       cursor: null,
+      total: 2,
     });
 
     renderHome();
@@ -181,7 +183,7 @@ describe('HomeScreen', () => {
     mockGetAccessToken.mockResolvedValue('token');
     mockGetConnectivity.mockResolvedValue('online');
     mockGetDayPlan.mockResolvedValue({ dispatched: false, scheduleId: null, dateFrom: null, dateTo: null, stops: [] });
-    mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+    mockGetMyTickets.mockResolvedValue({ items: [], cursor: null, total: 0 });
 
     renderHome();
 
@@ -201,6 +203,7 @@ describe('HomeScreen', () => {
     mockGetMyTickets.mockResolvedValue({
       items: [row({ ticketId: 't-1', status: 'CLOSED' }), row({ ticketId: 't-2', status: 'OPEN' })],
       cursor: null,
+      total: 2,
     });
 
     renderHome();
@@ -234,6 +237,7 @@ describe('HomeScreen', () => {
         row({ ticketId: 't-2', slaBucket: 'RISK' }),
       ],
       cursor: null,
+      total: 2,
     });
 
     renderHome();
@@ -253,7 +257,7 @@ describe('HomeScreen', () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetConnectivity.mockResolvedValue('online');
       mockGetDayPlan.mockResolvedValue(dayPlan);
-      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null, total: 0 });
     };
 
     it('renders one labelled bar per day from GET /api/me/work-history', async () => {
@@ -308,6 +312,7 @@ describe('HomeScreen', () => {
     mockGetMyTickets.mockResolvedValue({
       items: [row({ ticketId: 't-1', assigned: true }), row({ ticketId: 't-2', assigned: false }), row({ ticketId: 't-3', assigned: false })],
       cursor: null,
+      total: 3,
     });
 
     renderHome();
@@ -326,7 +331,7 @@ describe('HomeScreen', () => {
     mockGetAccessToken.mockResolvedValue('token');
     mockGetConnectivity.mockResolvedValue('offline');
     mockGetDayPlan.mockResolvedValue(dayPlan);
-    mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+    mockGetMyTickets.mockResolvedValue({ items: [], cursor: null, total: 0 });
 
     renderHome();
 
@@ -344,7 +349,7 @@ describe('HomeScreen', () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetConnectivity.mockResolvedValue('online');
       mockGetDayPlan.mockResolvedValue(dayPlan);
-      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null, total: 0 });
 
       renderHome();
       await waitFor(() => expect(screen.getByTestId('notifications-button')).toBeTruthy());
@@ -369,7 +374,7 @@ describe('HomeScreen', () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetConnectivity.mockResolvedValue('online');
       mockGetDayPlan.mockResolvedValue(dayPlan);
-      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null, total: 0 });
       mockGetNotifications.mockResolvedValue({ items: [], unreadCount: 4 });
 
       renderHome();
@@ -388,7 +393,7 @@ describe('HomeScreen', () => {
       mockGetAccessToken.mockResolvedValue('token');
       mockGetConnectivity.mockResolvedValue('online');
       mockGetDayPlan.mockResolvedValue(dayPlan);
-      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null });
+      mockGetMyTickets.mockResolvedValue({ items: [], cursor: null, total: 0 });
 
       renderHome();
 

@@ -174,4 +174,112 @@ describe('#264 — day-plan notification outbox', () => {
     expect(await prisma.dayPlanNotificationOutbox.findUnique({ where: { id } })).toBeNull();
     expect(await prisma.dayPlanNotificationOutbox.findUnique({ where: { id: recentId } })).not.toBeNull();
   });
+
+  /**
+   * #360 AC3 — the notice's nouns are resolved at ENQUEUE, inside the producing transaction, not at
+   * drain time and not at the seven call sites.
+   *
+   * Enqueue-time, because #345 already established that the row must say what the plant was called
+   * *when the plan changed* — a rename between the enqueue and the drain would otherwise rewrite
+   * history in the notice the engineer finally reads. Here rather than at the producers, because
+   * every one of them already passes the `batchId`, and the plant is one indexed read away from it:
+   * pushing the lookup into seven `override.service` call sites would have been seven chances to
+   * forget it, on a payload whose whole job is to be complete.
+   */
+  describe('#360 — the override row resolves its own nouns at enqueue', () => {
+    const NS = Date.now();
+    let zoneId: bigint;
+    let companyId: bigint;
+    let plantId: bigint;
+    let scheduleId: bigint;
+    let batchId: bigint;
+    let ticketId: string;
+    let ticketNo: bigint;
+    let engineerId: string;
+    const deviceId = String(9_910_000_000 + (NS % 100_000));
+
+    beforeAll(async () => {
+      zoneId = (await prisma.zone.create({ data: { name: 'Z-dpo-' + NS } })).zoneId;
+      companyId = (await prisma.company.create({ data: { name: 'Co-dpo-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
+      plantId = (await prisma.plant.create({ data: { name: 'Sanand Yard ' + NS, zoneId } })).plantId;
+      await prisma.device.create({ data: { deviceId } });
+      // `tickets_troubleshoot_requires_cycle` — a TROUBLESHOOT ticket has to own a failure cycle.
+      const cycle = await prisma.failureCycle.create({ data: { deviceId, state: 'OPEN', openedAt: NOW } });
+      const ticket = await prisma.ticket.create({
+        data: {
+          workType: 'TROUBLESHOOT', status: 'OPEN', failureCycleId: cycle.cycleId, deviceId, plantId, companyId,
+          companyTier: 'GOLD', lastStateChangedAt: NOW,
+        },
+      });
+      ticketId = ticket.ticketId;
+      ticketNo = ticket.ticketNo;
+      const tag = randomUUID().slice(0, 8);
+      const u = await prisma.user.create({
+        data: { name: 'SE ' + tag, role: 'SERVICE_ENGINEER', phone: 'dpo-' + tag, email: `dpo-${tag}@dpo.test`, zoneId },
+      });
+      engineerId = u.userId;
+      await prisma.engineerMaster.create({ data: { engineerId, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+      const schedule = await prisma.workSchedule.create({
+        data: { seId: engineerId, zoneId, dateFrom: NOW, dateTo: NOW, dispatchedAt: NOW },
+      });
+      scheduleId = schedule.scheduleId;
+      batchId = (
+        await prisma.plantBatchAssignment.create({
+          data: { scheduleId, plantId, seId: engineerId, status: 'AUTO_ASSIGNED', stopSequence: 1 },
+        })
+      ).batchId;
+    });
+
+    afterAll(async () => {
+      await prisma.plantBatchAssignment.deleteMany({ where: { batchId } });
+      await prisma.workSchedule.deleteMany({ where: { scheduleId } });
+      await prisma.ticket.deleteMany({ where: { ticketId } });
+      await prisma.failureCycle.deleteMany({ where: { deviceId } });
+      await prisma.device.deleteMany({ where: { deviceId } });
+      await prisma.engineerMaster.deleteMany({ where: { engineerId } });
+      await prisma.user.deleteMany({ where: { userId: engineerId } });
+      await prisma.plant.deleteMany({ where: { plantId } });
+      await prisma.company.deleteMany({ where: { companyId } });
+      await prisma.zone.deleteMany({ where: { zoneId } });
+    });
+
+    it('resolves plantName from the batch and the ticket label from ticketId, and the drained event carries both', async () => {
+      const seId = randomUUID();
+      const id = await queueDayPlanOverridden(prisma, { seId, scheduleId, batchId, action: 'REMOVE_TICKET', ticketId });
+      rowIds.push(id);
+
+      const row = await prisma.dayPlanNotificationOutbox.findUniqueOrThrow({ where: { id } });
+      const payload = row.payload as { plantName: string | null; ticketNoDisplay: string | null };
+      expect(payload.plantName).toBe('Sanand Yard ' + NS);
+      expect(payload.ticketNoDisplay).toBe(`TCK-${String(ticketNo).padStart(5, '0')}`);
+
+      const seen: Array<{ plantName?: string | null; ticketNoDisplay?: string | null }> = [];
+      const notifier: DayPlanNotifier = {
+        dayPlanDispatched: () => undefined,
+        dayPlanOverridden: (e) => {
+          seen.push({ plantName: e.plantName, ticketNoDisplay: e.ticketNoDisplay });
+        },
+      };
+      await drainRows(prisma, notifier, [id], NOW);
+      expect(seen).toEqual([{ plantName: 'Sanand Yard ' + NS, ticketNoDisplay: `TCK-${String(ticketNo).padStart(5, '0')}` }]);
+    });
+
+    it('an explicit plantName from the producer wins over the batch lookup (#345 PLANT_DEACTIVATED)', async () => {
+      const seId = randomUUID();
+      const id = await queueDayPlanOverridden(prisma, {
+        seId, scheduleId, batchId, action: 'PLANT_DEACTIVATED', plantName: 'Named By Producer',
+      });
+      rowIds.push(id);
+      const row = await prisma.dayPlanNotificationOutbox.findUniqueOrThrow({ where: { id } });
+      expect((row.payload as { plantName: string | null }).plantName).toBe('Named By Producer');
+    });
+
+    it('a batch that no longer exists enqueues a nameless row rather than throwing into the producer transaction', async () => {
+      const seId = randomUUID();
+      const id = await queueDayPlanOverridden(prisma, { seId, scheduleId, batchId: 987_654_321n, action: 'REORDER' });
+      rowIds.push(id);
+      const row = await prisma.dayPlanNotificationOutbox.findUniqueOrThrow({ where: { id } });
+      expect((row.payload as { plantName: string | null }).plantName).toBeNull();
+    });
+  });
 });

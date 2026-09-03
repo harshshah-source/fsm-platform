@@ -226,4 +226,129 @@ describe('#161 — day-plan removal/deferral metadata on GET /api/me/tickets (e2
     const ids = (res.body.items as Array<{ ticketId: string }>).map((i) => i.ticketId);
     expect(ids).not.toContain(ticketId);
   });
+
+  /**
+   * #360 AC2 — the SE files vehicle unavailability, which defers the ticket
+   * (`vehicle-unavailability.service.ts`), and `notDeferredOn` then removed it from the SE's own list
+   * the moment they filed it. The engineer who *personally reported* on that ticket watched it
+   * disappear and phoned the dispatcher to ask where it went.
+   *
+   * The fixture writes the report + the deferral directly rather than driving
+   * `POST /me/tickets/:id/vehicle-unavailability`: the filing path is already pinned end-to-end by
+   * `vu-deferral-wiring.e2e-spec.ts`, and what this file owns is the *read* — that the row comes back
+   * with its state and its return date. It deliberately uses a shared-pool ticket with **no batch
+   * row**, so the PRD:510 removed-today branch above cannot make the test pass for the wrong reason.
+   */
+  describe('#360 — a ticket the caller filed vehicle unavailability on stays visible', () => {
+    const reportIds: bigint[] = [];
+
+    /** A future instant at 06:00 UTC = 11:30 IST, so its UTC calendar date and its IST calendar date
+     *  are the same one — the assertions below can then compare against `toISOString().slice(0,10)`
+     *  without re-implementing the IST day boundary the service applies. */
+    const futureInstant = (daysFromNow: number): Date =>
+      new Date(`${new Date(Date.now() + daysFromNow * 86_400_000).toISOString().slice(0, 10)}T06:00:00Z`);
+
+    afterAll(async () => {
+      await prisma.vehicleUnavailabilityReport.deleteMany({ where: { id: { in: reportIds } } });
+    });
+
+    const fileVu = async (ticketId: string, expectedFrom: Date, expectedTo: Date | null = null): Promise<void> => {
+      const report = await prisma.vehicleUnavailabilityReport.create({
+        data: {
+          ticketId,
+          seId: se,
+          reasonCode: 'VEHICLE_ON_TRIP',
+          proposedFrom: expectedFrom,
+          expectedFrom,
+          expectedTo,
+          status: 'OPEN',
+        },
+      });
+      reportIds.push(report.id);
+      // What the filing does to the ticket (`vehicle-unavailability.service.ts`): back to the pool,
+      // held by a deferral until the vehicle is due back.
+      await prisma.ticket.update({
+        where: { ticketId },
+        data: { assignmentState: 'UNASSIGNED', deferredUntil: expectedFrom },
+      });
+    };
+
+    const listRows = async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/me/tickets?take=200')
+        .set('Authorization', `Bearer ${seToken()}`)
+        .expect(200);
+      return res.body.items as Array<{
+        ticketId: string;
+        workState: string;
+        vehicleUnavailability: { status: string; expectedFrom: string; expectedTo: string | null; reasonCode: string } | null;
+      }>;
+    };
+
+    it('returns the ticket as VEHICLE_UNAVAILABLE with the reported return date', async () => {
+      const ticketId = await makeTicket();
+      const expectedFrom = futureInstant(5);
+      await fileVu(ticketId, expectedFrom);
+
+      const row = (await listRows()).find((i) => i.ticketId === ticketId);
+      expect(row).toBeDefined();
+      expect(row?.workState).toBe('VEHICLE_UNAVAILABLE');
+      expect(row?.vehicleUnavailability?.status).toBe('OPEN');
+      expect(row?.vehicleUnavailability?.reasonCode).toBe('VEHICLE_ON_TRIP');
+      expect(row?.vehicleUnavailability?.expectedFrom).toBe(expectedFrom.toISOString().slice(0, 10));
+      expect(row?.vehicleUnavailability?.expectedTo).toBeNull();
+    });
+
+    it('carries the far end of the window when the SE gave one', async () => {
+      const ticketId = await makeTicket();
+      const expectedFrom = futureInstant(5);
+      const expectedTo = futureInstant(9);
+      await fileVu(ticketId, expectedFrom, expectedTo);
+
+      const row = (await listRows()).find((i) => i.ticketId === ticketId);
+      expect(row?.vehicleUnavailability?.expectedTo).toBe(expectedTo.toISOString().slice(0, 10));
+    });
+
+    it('does not resurrect another SE\'s report — the branch is the caller\'s own filing', async () => {
+      const otherTag = randomUUID().slice(0, 8);
+      const otherSe = await prisma.user.create({
+        data: { name: 'Other SE ' + otherTag, role: 'SERVICE_ENGINEER', phone: 'vu-' + otherTag, email: `vu-${otherTag}@mrm.test`, zoneId },
+      });
+      userIds.push(otherSe.userId);
+      await prisma.engineerMaster.create({ data: { engineerId: otherSe.userId, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
+
+      const ticketId = await makeTicket();
+      const expectedFrom = futureInstant(5);
+      const report = await prisma.vehicleUnavailabilityReport.create({
+        data: {
+          ticketId, seId: otherSe.userId, reasonCode: 'VEHICLE_ON_TRIP',
+          proposedFrom: expectedFrom, expectedFrom, status: 'OPEN',
+        },
+      });
+      reportIds.push(report.id);
+      await prisma.ticket.update({ where: { ticketId }, data: { assignmentState: 'UNASSIGNED', deferredUntil: expectedFrom } });
+
+      const ids = (await listRows()).map((i) => i.ticketId);
+      expect(ids).not.toContain(ticketId);
+    });
+
+    it('a resolved report releases the row back to its ordinary state', async () => {
+      const ticketId = await makeTicket();
+      const expectedFrom = futureInstant(5);
+      await fileVu(ticketId, expectedFrom);
+      await prisma.vehicleUnavailabilityReport.updateMany({ where: { ticketId }, data: { status: 'RESOLVED' } });
+
+      const ids = (await listRows()).map((i) => i.ticketId);
+      // Still deferred, no batch row, no direct assignment — so with the report closed it is simply
+      // not the caller's work today, exactly as before #360.
+      expect(ids).not.toContain(ticketId);
+    });
+
+    it('an ordinary row carries a null vehicleUnavailability', async () => {
+      const ticketId = await makeTicket();
+      const row = (await listRows()).find((i) => i.ticketId === ticketId);
+      expect(row?.vehicleUnavailability).toBeNull();
+      expect(row?.workState).not.toBe('VEHICLE_UNAVAILABLE');
+    });
+  });
 });

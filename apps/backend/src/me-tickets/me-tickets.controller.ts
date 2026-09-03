@@ -31,10 +31,30 @@ export class MeTicketsController {
     private readonly workHistory: MeWorkHistoryService,
   ) {}
 
+  /**
+   * #360 — paged. `take` (default 50, clamped), an opaque keyset `cursor`, and a `section` filter
+   * matching the mobile Tickets screen's chips; the response carries `total`.
+   *
+   * All three are optional and all three are sanitised by the service rather than validated into a
+   * 400 (the `work-history` posture below, for the same reason): a query value arrives as an
+   * unvalidated string, and a junk `take` should render a default screen for an engineer standing in
+   * a yard, not an error. The one exception is `cursor`, which the service refuses outright — a bad
+   * cursor is not a preference the client got wrong, it is a walk that would otherwise loop forever
+   * over page one.
+   */
   @Get('tickets')
   @Roles('SERVICE_ENGINEER')
-  list(@CurrentUser() user: AccessTokenClaims): Promise<MeTicketsView> {
-    return this.tickets.getMyTickets(user.user_id);
+  list(
+    @CurrentUser() user: AccessTokenClaims,
+    @Query('take') take?: string,
+    @Query('cursor') cursor?: string,
+    @Query('section') section?: string,
+  ): Promise<MeTicketsView> {
+    return this.tickets.getMyTickets(user.user_id, new Date(), {
+      take: take == null ? undefined : Number(take),
+      cursor: cursor ?? null,
+      section: section ?? null,
+    });
   }
 
   /** #175 — the Home "Assigned vs Completed" series. `days` is bounded and sanitised by the service

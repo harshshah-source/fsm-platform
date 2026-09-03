@@ -471,7 +471,8 @@ export class OverrideService {
           await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
           // #264 — written inside this same transaction: a withdrawal that rolls back leaves no ghost
           // "Day Plan updated" outbox row.
-          return queueDayPlanOverridden(tx, { seId, scheduleId, batchId, action: cmd.action });
+          // #360 — the ticket rides along so the notice can name the stop instead of the enum.
+          return queueDayPlanOverridden(tx, { seId, scheduleId, batchId, action: cmd.action, ticketId: cmd.ticketId });
         },
       );
     } catch (e: unknown) {
@@ -542,7 +543,8 @@ export class OverrideService {
           data: { assignmentState: 'UNASSIGNED', deferredUntil: new Date(cmd.deferredToDate) },
         });
         await this.flagOverridden(tx, batchId, scheduleId, cmd.reasonCode, actor, now);
-        return queueDayPlanOverridden(tx, { seId, scheduleId, batchId, action: cmd.action });
+        // #360 — the ticket rides along so the notice can name the stop instead of the enum.
+        return queueDayPlanOverridden(tx, { seId, scheduleId, batchId, action: cmd.action, ticketId: cmd.ticketId });
       },
       );
     } catch (e: unknown) {
@@ -856,7 +858,7 @@ export class OverrideService {
           if (insertAtTop) await this.moveBatchToTop(tx, sched.scheduleId, batch.batchId);
           // #264 — written inside this same transaction as everything above: a retried/rolled-back
           // attempt (the P2002 recovery below) never leaves a ghost outbox row.
-          const outboxId = await queueDayPlanOverridden(tx, { seId, scheduleId: sched.scheduleId, batchId: batch.batchId, action: auditAction });
+          const outboxId = await queueDayPlanOverridden(tx, { seId, scheduleId: sched.scheduleId, batchId: batch.batchId, action: auditAction, ticketId });
           // #325 — last, so the caller's ledger row is written against ids that are final, and so a
           // hook that throws takes every write above it with it.
           if (inTransaction) await inTransaction(tx, { scheduleId: sched.scheduleId, batchId: batch.batchId });
@@ -1155,6 +1157,7 @@ export class OverrideService {
           scheduleId: sched.scheduleId,
           batchId: batch.batchId,
           action: auditAction,
+          ticketId,
         });
         outboxIds.push(outboxId);
         assignedTicketIds.push(ticketId);
