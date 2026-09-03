@@ -72,7 +72,68 @@ export type DecisionOutcome =
   | { result: 'SE_NOT_FOUND' }
   | { result: 'TICKET_DEFERRED'; deferredUntil: string }
   /** `assignedSeId` names who holds it — the caller can see whether their own retry already won. */
-  | { result: 'ALREADY_ASSIGNED'; assignedSeId?: string | null };
+  | { result: 'ALREADY_ASSIGNED'; assignedSeId?: string | null }
+  /**
+   * #355 (AC3) — the approver picked a target zone and an engineer who does not work in it. Nothing
+   * checked this before: the escalation recorded whichever zone the operator typed while the ticket
+   * went to an SE in another one, so the row said the work had gone somewhere it had not.
+   * `seZoneId` names the zone the engineer IS in, which is the whole correction the caller needs.
+   */
+  | { result: 'ZONE_SE_MISMATCH'; seZoneId: number };
+
+/**
+ * #355 (AC5) — one audited step in an escalation's life, for the decision-history read.
+ *
+ * Sourced from `audit_logs` rather than from the escalation row, and that is the point: the row holds
+ * only its *latest* decision, and overwrites it (a deferral resurfaced by {@link
+ * CrossZoneEscalationService.sweepDueReviews} clears the decider fields it just used). The audit chain
+ * keeps every step, including the acting role, which the escalation row has never carried at all.
+ */
+export interface CrossZoneHistoryRow {
+  auditId: string;
+  escalationId: string;
+  ticketId: string;
+  homeZoneId: string;
+  targetZoneId: string | null;
+  companyTier: CompanyTier;
+  escalationType: 'AUTO_PLATINUM' | 'MANUAL_FLAG';
+  /** The audited action — `CROSS_ZONE_APPROVE`, `CROSS_ZONE_DENIED`, `CROSS_ZONE_MANUAL_FLAG`, … */
+  action: string;
+  /** Where the escalation stands now, so a decision can be read against its outcome. */
+  currentStatus: string;
+  decidedByUserId: string | null;
+  decidedByName: string | null;
+  decidedByRole: string | null;
+  /** The backup authority the decision was taken under, if any (#340) — null for the actor's own role. */
+  actedAsRole: string | null;
+  actingZone: string | null;
+  reason: string | null;
+  at: string;
+  direction: 'incoming' | 'outgoing' | null;
+}
+
+/** The window a history read covers. Unbounded reads of an append-only log are a page-load hazard. */
+export interface CrossZoneHistoryRange {
+  from?: Date;
+  to?: Date;
+  limit?: number;
+}
+
+/** Every audited step this history reports — the raises as well as the decisions, because the
+ *  receiving zone's first question is what was asked, not only what was answered. */
+const HISTORY_ACTIONS = [
+  'CROSS_ZONE_AUTO_ESCALATION',
+  'CROSS_ZONE_MANUAL_FLAG',
+  'CROSS_ZONE_APPROVE',
+  'CROSS_ZONE_DENIED',
+  'CROSS_ZONE_DEFERRED',
+  'CROSS_ZONE_REVIEW_DUE',
+  'CROSS_ZONE_RE_ESCALATE_OPS',
+] as const;
+
+const HISTORY_DEFAULT_DAYS = 30;
+const HISTORY_DEFAULT_LIMIT = 200;
+const HISTORY_MAX_LIMIT = 500;
 
 /**
  * Cross-zone capacity allocation (CONTEXT cross-zone CSM layer, Issue 32). `sweepAutoEscalations` raises a
@@ -195,7 +256,7 @@ export class CrossZoneEscalationService {
   /** CSM/OH approves — commits a cross-zone Formal Assignment to the chosen target-zone SE. */
   async approve(
     escalationId: bigint,
-    targetZoneId: number,
+    targetZoneId: number | null,
     seId: string,
     actor: CrossZoneActor,
     now: Date = new Date(),
@@ -207,6 +268,15 @@ export class CrossZoneEscalationService {
     // arriving as `assignTicket`'s NOT_FOUND and being told to the operator as a missing escalation.
     const engineer = await this.prisma.engineerMaster.findUnique({ where: { engineerId: seId } });
     if (!engineer) return { result: 'SE_NOT_FOUND' };
+
+    // #355 (AC3) — the engineer's own zone is the target zone. `targetZoneId` used to be a free number
+    // the operator typed beside an SE picked from another list, and nothing ever compared the two: the
+    // escalation could record "sent to zone 3" while the ticket landed on a zone-5 engineer's day plan,
+    // and every later read of that row — including the incoming queue the receiving ZM depends on — was
+    // then addressed to a zone that had nothing to do. Omitted, it is derived; supplied, it must agree.
+    const seZoneId = Number(engineer.zoneId);
+    if (targetZoneId != null && targetZoneId !== seZoneId) return { result: 'ZONE_SE_MISMATCH', seZoneId };
+    const resolvedZoneId = seZoneId;
 
     const scope: ZmScope = { role: actor.role, zoneId: actor.zoneId };
 
@@ -237,7 +307,7 @@ export class CrossZoneEscalationService {
           escalationId,
           homeZoneId: esc.homeZoneId,
           ticketId: esc.ticketId,
-          targetZoneId,
+          targetZoneId: resolvedZoneId,
           seId,
           scheduleId: ids.scheduleId,
           batchId: ids.batchId,
@@ -247,7 +317,7 @@ export class CrossZoneEscalationService {
       },
     );
 
-    if (assigned.result === 'ALREADY_ASSIGNED') return this.reconcileApproved(esc, escalationId, targetZoneId, seId, actor, now);
+    if (assigned.result === 'ALREADY_ASSIGNED') return this.reconcileApproved(esc, escalationId, resolvedZoneId, seId, actor, now);
     if (assigned.result === 'CONFLICT_DEFERRED') return { result: 'TICKET_DEFERRED', deferredUntil: assigned.deferredUntil };
     if (assigned.result !== 'OK') return { result: 'NOT_FOUND' };
 
@@ -305,6 +375,12 @@ export class CrossZoneEscalationService {
    * carries APPROVED rows, because for the receiving zone the approval is not the end of the story —
    * it is the beginning of it. The outgoing arm keeps the actionable statuses it always had: a decided
    * escalation is no longer the home zone's to act on.
+   *
+   * #355 (#93) — with one exception, and it is the exception the re-escalate door exists for. A DENIED
+   * **AUTO** escalation is still the home ZM's to act on: they, and only they, may raise it to the
+   * Operations Head. Excluding it meant the sole route to that door was a row nobody could see, so a
+   * denied Platinum escalation simply stopped being anyone's. A denied MANUAL flag stays out — there is
+   * no door behind it, so surfacing it would only be a queue item that cannot be actioned.
    */
   async listForScope(scope: { role: string; zoneId: number | null }): Promise<CrossZoneEscalationRow[]> {
     const zmZoneId = scope.role === 'ZONAL_MANAGER' && scope.zoneId != null ? BigInt(scope.zoneId) : null;
@@ -314,6 +390,7 @@ export class CrossZoneEscalationService {
         : {
             OR: [
               { homeZoneId: zmZoneId, status: { in: [...ACTIONABLE_STATUSES] } },
+              { homeZoneId: zmZoneId, status: 'DENIED', escalationType: 'AUTO_PLATINUM' },
               { targetZoneId: zmZoneId, status: { in: [...ACTIONABLE_STATUSES, 'APPROVED'] } },
             ],
           };
@@ -341,6 +418,170 @@ export class CrossZoneEscalationService {
       direction:
         zmZoneId === null ? null : r.homeZoneId === zmZoneId ? 'outgoing' : r.targetZoneId === zmZoneId ? 'incoming' : null,
     }));
+  }
+
+  /**
+   * #355 (AC4) — deferring is a *postponement*, and until now it was a disposal.
+   *
+   * `defer` has always persisted a `reviewDate`, and nothing has ever read it. A CSM who parked a
+   * Platinum escalation "until Thursday" left a row in DEFERRED that no queue showed and no sweep
+   * touched: on Thursday nothing happened, and the ticket the escalation was raised for went on sitting
+   * uncovered in its home zone with the record of it filed under a date that had passed.
+   *
+   * Returning the row to PENDING is the whole mechanism. Two details make it safe to run every tick:
+   *
+   * - **The review date is consumed.** Clearing it is what stops the row matching this query again;
+   *   a resurfaced row that kept its date would re-notify the queue on every subsequent tick for ever.
+   * - **The update is guarded on the state it read.** `updateMany` with `status: 'DEFERRED'` and the
+   *   same `reviewDate` means two instances firing the same cron cannot both resurface one row and
+   *   send two notices — the loser updates nothing and, seeing `count === 0`, tells nobody.
+   *
+   * Per-row try/catch for the same reason as {@link sweepAutoEscalations}: one row that cannot be
+   * resurfaced must not abandon the rest of a scheduled run nobody watches.
+   */
+  async sweepDueReviews(now: Date = new Date()): Promise<{ resurfaced: number }> {
+    const due = await this.prisma.crossZoneEscalation.findMany({
+      where: { status: 'DEFERRED', reviewDate: { not: null, lte: now } },
+      orderBy: { escalationId: 'asc' },
+    });
+
+    let resurfaced = 0;
+    for (const esc of due) {
+      try {
+        const outboxIds = await this.prisma.$transaction(async (tx) => {
+          const claimed = await tx.crossZoneEscalation.updateMany({
+            where: { escalationId: esc.escalationId, status: 'DEFERRED', reviewDate: esc.reviewDate },
+            data: {
+              status: 'PENDING',
+              reviewDate: null,
+              // The row is undecided again, so it must not keep naming a decider. `decisionReason`
+              // survives on purpose: it is why the row was parked, and it is the first thing whoever
+              // picks it back up needs to read. The deferral itself stays in the audit chain, which is
+              // what `history` reads — nothing about who deferred it is lost by clearing these.
+              decidedByUserId: null,
+              decidedByRole: null,
+              decidedAt: null,
+            },
+          });
+          if (claimed.count === 0) return null;
+
+          await this.auditEscalation(tx, 'CROSS_ZONE_REVIEW_DUE', esc.escalationId, esc.ticketId, {
+            reason: esc.decisionReason,
+            reviewDate: esc.reviewDate?.toISOString() ?? null,
+          });
+          const queue = await this.notifyReviewDue(tx, esc.ticketId, esc.escalationId, esc.reviewDate, esc.decisionReason);
+          // The home ZM was told their escalation had been parked; they are told it is back in play.
+          const home = await this.notifyHomeZm(
+            tx,
+            esc.homeZoneId,
+            esc.ticketId,
+            esc.escalationId,
+            'RESURFACED',
+            `Review date reached${esc.decisionReason ? ` — deferred because: ${esc.decisionReason}` : ''}.`,
+          );
+          return [queue, home];
+        });
+
+        if (outboxIds === null) continue;
+        await this.deliverAll(outboxIds, now);
+        resurfaced++;
+      } catch (e: unknown) {
+        logger.error(
+          `cross-zone due-review resurfacing failed for escalation ${esc.escalationId}: ${(e as Error)?.message ?? e}`,
+        );
+      }
+    }
+    return { resurfaced };
+  }
+
+  /**
+   * #355 (AC5) — who decided what, when, under whose authority, and why.
+   *
+   * The queue read shows only what is still open, so once an escalation was decided it left the product
+   * entirely: the receiving zone could not see what had been asked of it or when, and a denial could not
+   * be read back against the reason given for it. This is that missing read.
+   *
+   * Sourced from `audit_logs`, not from the escalation rows, because the row keeps only its latest
+   * decision and (since {@link sweepDueReviews}) may clear it. The audit chain also carries the one
+   * field the row has never had: `acted_as_role`, the backup authority a CSM decided under.
+   *
+   * Zone-clamped the same way the queue is — a ZM sees the escalations their zone raised **and** those
+   * assigned into it — and bounded by a window and a row cap, because an append-only log read whole is
+   * a page load that grows without limit.
+   */
+  async history(
+    scope: { role: string; zoneId: number | null },
+    range: CrossZoneHistoryRange = {},
+  ): Promise<CrossZoneHistoryRow[]> {
+    const to = range.to ?? null;
+    const from = range.from ?? new Date(Date.now() - HISTORY_DEFAULT_DAYS * 86_400_000);
+    const take = Math.min(range.limit ?? HISTORY_DEFAULT_LIMIT, HISTORY_MAX_LIMIT);
+
+    const entries = await this.prisma.auditLog.findMany({
+      where: {
+        entityType: 'cross_zone_escalation',
+        action: { in: [...HISTORY_ACTIONS] },
+        createdAt: { gte: from, ...(to ? { lte: to } : {}) },
+      },
+      orderBy: { createdAt: 'desc' },
+      take,
+    });
+    if (entries.length === 0) return [];
+
+    // The clamp is applied over the escalations the entries point at, not over the entries: an audit
+    // row carries no zone of its own, so "is this mine?" is a question only the escalation can answer.
+    const zmZoneId = scope.role === 'ZONAL_MANAGER' && scope.zoneId != null ? BigInt(scope.zoneId) : null;
+    const escalationIds = [...new Set(entries.map((e) => e.entityId))]
+      .map((id) => (/^\d+$/.test(id) ? BigInt(id) : null))
+      .filter((id): id is bigint => id !== null);
+    const escalations = await this.prisma.crossZoneEscalation.findMany({
+      where: {
+        escalationId: { in: escalationIds },
+        ...(zmZoneId === null ? {} : { OR: [{ homeZoneId: zmZoneId }, { targetZoneId: zmZoneId }] }),
+      },
+    });
+    const byId = new Map(escalations.map((e) => [String(e.escalationId), e]));
+
+    const actorIds = [...new Set(entries.map((e) => e.actorId).filter((id): id is string => !!id))];
+    const users = await this.prisma.user.findMany({ where: { userId: { in: actorIds } }, select: { userId: true, name: true } });
+    const nameById = new Map(users.map((u) => [u.userId, u.name]));
+
+    return entries.flatMap((e) => {
+      const esc = byId.get(e.entityId);
+      // Out of scope (or an escalation since removed): a history row with no escalation behind it
+      // cannot be zone-checked, and an unscopeable row is not one to show a zone-clamped reader.
+      if (!esc) return [];
+      const metadata = (e.metadata ?? {}) as Record<string, unknown>;
+      const reason = typeof metadata.reason === 'string' ? metadata.reason : null;
+      return [
+        {
+          auditId: String(e.id),
+          escalationId: String(esc.escalationId),
+          ticketId: esc.ticketId,
+          homeZoneId: String(esc.homeZoneId),
+          targetZoneId: esc.targetZoneId != null ? String(esc.targetZoneId) : null,
+          companyTier: esc.companyTier,
+          escalationType: esc.escalationType,
+          action: e.action,
+          currentStatus: esc.status,
+          decidedByUserId: e.actorId ?? null,
+          decidedByName: e.actorId ? (nameById.get(e.actorId) ?? null) : null,
+          decidedByRole: e.actorRole ?? null,
+          actedAsRole: e.actedAsRole ?? null,
+          actingZone: e.actingZone != null ? String(e.actingZone) : null,
+          reason,
+          at: e.createdAt.toISOString(),
+          direction:
+            zmZoneId === null
+              ? null
+              : esc.homeZoneId === zmZoneId
+                ? 'outgoing'
+                : esc.targetZoneId === zmZoneId
+                  ? 'incoming'
+                  : null,
+        },
+      ];
+    });
   }
 
   // ---- internals ---------------------------------------------------------
@@ -516,6 +757,40 @@ export class CrossZoneEscalationService {
       entityId: ticketId,
       deliveryModel: 'GENERAL',
       metadata: { escalationId: String(escalationId), ticketId, escalationType: type },
+    });
+  }
+
+  /**
+   * #355 (AC4) — the deciders' queue is told a parked escalation is back in it.
+   *
+   * Its own type rather than a second `CROSS_ZONE_AUTO_ESCALATION`: nothing has been newly escalated,
+   * and a reader who sees the raise notice twice cannot tell a new Platinum ticket from one they
+   * already decided to look at later. The deferral's own reason travels with it, because "why did I
+   * park this?" is the first question the person picking it back up has.
+   */
+  private async notifyReviewDue(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    escalationId: bigint,
+    reviewDate: Date | null,
+    deferralReason: string | null,
+  ): Promise<bigint | null> {
+    const recipients = await this.usersInRoles(['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'], tx);
+    if (recipients.length === 0) return null;
+    return queueNotification(tx, {
+      recipients,
+      type: 'CROSS_ZONE_REVIEW_DUE',
+      title: 'Deferred cross-zone escalation is due for review',
+      body: `Ticket ${ticketId} was deferred to ${reviewDate ? reviewDate.toISOString().slice(0, 10) : 'a review date'} and is back in the cross-zone queue.`,
+      entityType: 'ticket',
+      entityId: ticketId,
+      deliveryModel: 'GENERAL',
+      metadata: {
+        escalationId: String(escalationId),
+        ticketId,
+        reviewDate: reviewDate?.toISOString() ?? null,
+        deferralReason,
+      },
     });
   }
 

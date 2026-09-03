@@ -9,6 +9,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
@@ -23,9 +24,10 @@ import { RoleGuard } from '../common/guards/role.guard';
 import {
   CrossZoneEscalationRow,
   CrossZoneEscalationService,
+  CrossZoneHistoryRow,
   DecisionOutcome,
 } from './cross-zone-escalation.service';
-import { ApproveBody, DeferBody, DenyBody, FlagBody, SweepBody } from './cross-zone.dtos';
+import { ApproveBody, DeferBody, DenyBody, FlagBody, HistoryQuery, SweepBody } from './cross-zone.dtos';
 
 const ALL_MANAGERS = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 const CROSS_ZONE_DECIDERS = ['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
@@ -45,6 +47,21 @@ export class CrossZoneController {
   @Roles(...ALL_MANAGERS)
   list(@CurrentScope() scope: ManagerScope): Promise<CrossZoneEscalationRow[]> {
     return this.svc.listForScope(scope);
+  }
+
+  /**
+   * #355 (AC5) — the decision history. Declared before every `:id` route so the literal path is not
+   * captured by a param route, and scoped exactly like the queue: pan-India for CSM / Operations Head,
+   * clamped to their own zone's escalations (raised **and** received) for a ZM.
+   */
+  @Get('history')
+  @Roles(...ALL_MANAGERS)
+  history(@CurrentScope() scope: ManagerScope, @Query() q: HistoryQuery): Promise<CrossZoneHistoryRow[]> {
+    return this.svc.history(scope, {
+      from: q.from ? new Date(q.from) : undefined,
+      to: q.to ? new Date(q.to) : undefined,
+      limit: q.limit != null ? Number(q.limit) : undefined,
+    });
   }
 
   @Post('sweep')
@@ -72,13 +89,18 @@ export class CrossZoneController {
   @Post(':id/approve')
   @HttpCode(200)
   @Roles(...CROSS_ZONE_DECIDERS)
+  /**
+   * #355 (AC3) — `targetZoneId` is now optional, and checked when it is given. The engineer decides
+   * the zone: an approver who names an SE has already named where the work is going, and the pair
+   * disagreeing is an operator error worth reporting rather than a state worth recording.
+   */
   approve(
     @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
     @Body() body: ApproveBody,
   ) {
-    if (body.targetZoneId == null || !body.seId) throw new BadRequestException({ code: 'TARGET_ZONE_AND_SE_REQUIRED' });
-    return this.map(this.svc.approve(BigInt(id), body.targetZoneId, body.seId, actor));
+    if (!body.seId) throw new BadRequestException({ code: 'SE_REQUIRED' });
+    return this.map(this.svc.approve(BigInt(id), body.targetZoneId ?? null, body.seId, actor));
   }
 
   @Post(':id/deny')
@@ -130,6 +152,10 @@ export class CrossZoneController {
     if (out.result === 'ALREADY_ASSIGNED') throw new ConflictException({ code: 'TICKET_ALREADY_ASSIGNED', assignedSeId: out.assignedSeId ?? null });
     if (out.result === 'FORBIDDEN_SCOPE') throw new ForbiddenException({ code: 'FORBIDDEN_SCOPE' });
     if (out.result === 'NOT_DENIED_AUTO') throw new ConflictException({ code: 'NOT_A_DENIED_AUTO_ESCALATION' });
+    // #355 (AC3) — 400, not 409: nothing about the world is in conflict, the request contradicts itself.
+    if (out.result === 'ZONE_SE_MISMATCH') {
+      throw new BadRequestException({ code: 'SE_NOT_IN_TARGET_ZONE', seZoneId: out.seZoneId });
+    }
     return out;
   }
 }

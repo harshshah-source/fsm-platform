@@ -43,7 +43,12 @@ import {
 const makeSweeps = () => ({
   verification: { runVerification: vi.fn(async () => ({ closed: 0, failed: 0, fraud: 0, pending: 0 })) },
   intraday: { assignCriticalForActiveZones: vi.fn(async () => ({ assigned: 0, escalated: 0 })) },
-  crossZone: { sweepAutoEscalations: vi.fn(async () => ({ escalated: 0 })) },
+  // #355 — the cross-zone tick drives two sweeps: the Platinum auto-escalation raise, and the
+  // due-review resurfacing that returns a DEFERRED escalation to the queue on its review date.
+  crossZone: {
+    sweepAutoEscalations: vi.fn(async () => ({ escalated: 0 })),
+    sweepDueReviews: vi.fn(async () => ({ resurfaced: 0 })),
+  },
   installLifecycle: { runInstallVerification: vi.fn(async () => ({ verified: 0, failed: 0, pending: 0 })) },
   repeatEscalation: { runEscalationScan: vi.fn(async () => ({ escalated: 0 })) },
   tierOverrideExpiry: { sweepExpiredOverrides: vi.fn(async () => ({ expired: 0 })) },
@@ -217,6 +222,9 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
 
       expect(sweeps.installLifecycle.runInstallVerification).toHaveBeenCalledWith(now);
       expect(sweeps.crossZone.sweepAutoEscalations).toHaveBeenCalledWith(now);
+      // #355 — on the same clock, in the same tick: a deferred escalation whose review date has
+      // arrived is only resurfaced if something reads the date, and nothing did.
+      expect(sweeps.crossZone.sweepDueReviews).toHaveBeenCalledWith(now);
       expect(sweeps.repeatEscalation.runEscalationScan).toHaveBeenCalledWith(now);
       expect(sweeps.softInactive.recompute).toHaveBeenCalledWith(now);
     });

@@ -1,5 +1,5 @@
 # 355 — Cross-zone page completion: flag from ticket, re-escalate, modal, deferred resurfacing, history
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/355-cross-zone-page-completion.md
 Type: AFK
 Wave: 3 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -38,11 +38,20 @@ them. There is no read of who approved what — `listForScope` excludes APPROVED
 
 ## Acceptance criteria
 
-- [ ] AC1 — a ZM can flag a Gold/Silver ticket cross-zone from its drawer.
-- [ ] AC2 — the home ZM sees DENIED AUTO rows and can re-escalate.
-- [ ] AC3 — approve uses a modal; the SE picker constrains the zone; a mismatch → 400.
-- [ ] AC4 — a deferred row returns to PENDING on its review date, with a notice.
-- [ ] AC5 — history lists decisions with decider, acting role, reason, date; zone-clamped for ZM.
+- [x] AC1 — a ZM can flag a Gold/Silver ticket cross-zone from its drawer.
+- [x] AC2 — the home ZM sees DENIED AUTO rows and can re-escalate.
+- [x] AC3 — approve uses a modal; the SE picker constrains the zone; a mismatch → 400.
+- [x] AC4 — a deferred row returns to PENDING on its review date, with a notice.
+- [x] AC5 — history lists decisions with decider, acting role, reason, date; zone-clamped for ZM.
+
+Also landed here: **#335** (the `TicketDetailDrawer` Assignment-History crash on an attempts payload
+with no `attempts` array) — this slice owns the file, and the guard plus its regression test are in
+`apps/admin/test/ticket-drawer-cross-zone-flag.test.tsx`.
+
+Two premise corrections, detailed in the report: the service is `cross-zone-escalation.service.ts`
+(there is no `cross-zone.service.ts`), and the plan's "derive/validate `targetZoneId` in
+`cross-zone.dtos.ts`" is not implementable in a DTO — the engineer's zone is a database read, so the
+agreement check lives in `approve`.
 
 ## Verification
 

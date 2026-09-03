@@ -97,17 +97,42 @@ describe('Cross-Zone page (Issue 78)', () => {
     expect(manual.getByTestId('cz-row-11')).toHaveTextContent(/GOLD/i);
   });
 
+  /**
+   * #355 — the three decisions are Modals now, not `window.prompt` chains. The assertions are the same
+   * assertions: what reaches the wire is what the operator chose. Only the handles moved, so this
+   * reads as a retarget rather than a rewrite.
+   */
   it('lets a decider approve a pending escalation with a target zone + SE', async () => {
     stub((u, opts) => {
       if (u.endsWith('/cross-zone/10/approve') && opts?.method === 'POST') {
         return json({ result: 'OK', escalationId: '10', status: 'APPROVED' });
       }
+      if (u.includes('/org/zones')) return json([{ zoneId: 3, name: 'West', zonalManagerUserId: null }]);
+      if (u.includes('/engineers')) {
+        return json([
+          {
+            seId: 'se-9',
+            name: 'Deepak Verma',
+            zoneId: '3',
+            coverageType: 'FLOATING',
+            activityStatus: 'AVAILABLE',
+            availabilityStatus: 'AVAILABLE',
+            activeTicketCount: 0,
+            kitComplete: true,
+            missingKit: [],
+            dailyCapacity: 8,
+            isActive: true,
+          },
+        ]);
+      }
       return undefined;
     });
-    vi.stubGlobal('prompt', vi.fn().mockReturnValueOnce('3').mockReturnValueOnce('se-9'));
     renderPage(OH);
     await screen.findByTestId('cz-row-10');
     fireEvent.click(screen.getByTestId('cz-approve-10'));
+    fireEvent.change(await screen.findByTestId('cz-approve-zone'), { target: { value: '3' } });
+    fireEvent.change(screen.getByTestId('cz-approve-se'), { target: { value: 'se-9' } });
+    fireEvent.click(screen.getByTestId('cz-approve-confirm'));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining('/cross-zone/10/approve'),
@@ -124,16 +149,32 @@ describe('Cross-Zone page (Issue 78)', () => {
       if (u.endsWith('/cross-zone/11/deny') && opts?.method === 'POST') return json({ result: 'OK', status: 'DENIED' });
       return undefined;
     });
-    vi.stubGlobal('prompt', () => 'not our capacity');
     renderPage(OH);
     await screen.findByTestId('cz-row-11');
     fireEvent.click(screen.getByTestId('cz-deny-11'));
+    fireEvent.change(await screen.findByTestId('cz-deny-reason'), { target: { value: 'not our capacity' } });
+    fireEvent.click(screen.getByTestId('cz-deny-confirm'));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining('/cross-zone/11/deny'),
         expect.objectContaining({ method: 'POST' }),
       ),
     );
+    expect(
+      String(
+        (fetchMock.mock.calls.find(([url]) => String(url).endsWith('/cross-zone/11/deny'))![1] as RequestInit).body,
+      ),
+    ).toContain('"reason":"not our capacity"');
+  });
+
+  it('will not deny without a reason — it is mandatory on the backend, so the button waits for one', async () => {
+    stub();
+    renderPage(OH);
+    await screen.findByTestId('cz-row-11');
+    fireEvent.click(screen.getByTestId('cz-deny-11'));
+    await screen.findByTestId('cz-deny-reason');
+    fireEvent.click(screen.getByTestId('cz-deny-confirm'));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/deny'))).toBe(false);
   });
 
   it('lets a decider defer a pending escalation with a review date + reason', async () => {
@@ -141,10 +182,12 @@ describe('Cross-Zone page (Issue 78)', () => {
       if (u.endsWith('/cross-zone/10/defer') && opts?.method === 'POST') return json({ result: 'OK', status: 'DEFERRED' });
       return undefined;
     });
-    vi.stubGlobal('prompt', vi.fn().mockReturnValueOnce('2026-07-05').mockReturnValueOnce('revisit next week'));
     renderPage(OH);
     await screen.findByTestId('cz-row-10');
     fireEvent.click(screen.getByTestId('cz-defer-10'));
+    fireEvent.change(await screen.findByTestId('cz-defer-date'), { target: { value: '2026-07-05' } });
+    fireEvent.change(screen.getByTestId('cz-defer-reason'), { target: { value: 'revisit next week' } });
+    fireEvent.click(screen.getByTestId('cz-defer-confirm'));
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining('/cross-zone/10/defer'),

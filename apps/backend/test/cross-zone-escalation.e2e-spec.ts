@@ -575,4 +575,159 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
       expect(homeRows.some((r) => r.escalationId === String(escalationId))).toBe(false);
     });
   });
+
+  /**
+   * #355 — the four reads and one sweep that turn cross-zone from a set of write doors into a workflow.
+   *
+   * Each of these is a place work could stop being anyone's: a DENIED AUTO row that vanished from the
+   * only queue whose ZM may re-escalate it, an approval whose target zone was never checked against the
+   * engineer being assigned, a deferral with a review date nothing ever read, and a decision record
+   * with no reader at all.
+   */
+  describe('#355 — denied-AUTO visibility, SE/zone agreement, due-review resurfacing, history', () => {
+    const escalate = async (): Promise<{ ticketId: string; escalationId: bigint }> => {
+      const ticketId = await makeTicket({ tier: 'PLATINUM', bucket: 'CRITICAL', ageMin: 120 });
+      await svc.sweepAutoEscalations(NOW, homeZoneId);
+      return { ticketId, escalationId: (await escFor(ticketId)).escalationId };
+    };
+
+    it('AC2 — a denied AUTO escalation stays visible to its home ZM (and only to them) so it can be re-escalated', async () => {
+      const { escalationId } = await escalate();
+      expect((await svc.deny(escalationId, 'no capacity', CSM, NOW)).result).toBe('OK');
+
+      const homeRows = await svc.listForScope({ role: 'ZONAL_MANAGER', zoneId: Number(homeZoneId) });
+      const row = homeRows.find((r) => r.escalationId === String(escalationId));
+      expect(row).toBeDefined();
+      expect(row?.status).toBe('DENIED');
+      expect(row?.direction).toBe('outgoing');
+      expect(row?.decisionReason).toBe('no capacity');
+
+      // The CSM/OH queue is what is left to decide; a denied row is not theirs to act on any more.
+      const csmRows = await svc.listForScope({ role: 'CENTRAL_SERVICE_MANAGER', zoneId: null });
+      expect(csmRows.some((r) => r.escalationId === String(escalationId))).toBe(false);
+    });
+
+    it('AC2 — a denied MANUAL flag does not come back: only an AUTO escalation is re-escalatable', async () => {
+      const t = await makeTicket({ tier: 'GOLD', bucket: 'CRITICAL', ageMin: 30 });
+      await svc.flag(t, 'manual', ZM, NOW);
+      const esc = await escFor(t);
+      expect((await svc.deny(esc.escalationId, 'no capacity', CSM, NOW)).result).toBe('OK');
+
+      const homeRows = await svc.listForScope({ role: 'ZONAL_MANAGER', zoneId: Number(homeZoneId) });
+      expect(homeRows.some((r) => r.escalationId === String(esc.escalationId))).toBe(false);
+    });
+
+    it('AC3 — an SE outside the chosen target zone is refused, and nothing is assigned', async () => {
+      const { ticketId, escalationId } = await escalate();
+
+      const out = await svc.approve(escalationId, Number(homeZoneId), targetSe, CSM, NOW);
+      expect(out.result).toBe('ZONE_SE_MISMATCH');
+      expect(out.result === 'ZONE_SE_MISMATCH' ? out.seZoneId : null).toBe(Number(targetZoneId));
+
+      expect((await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId } })).status).toBe('PENDING');
+      expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).assignmentState).toBe('UNASSIGNED');
+    });
+
+    it("AC3 — an approve with no target zone derives it from the SE's own zone", async () => {
+      const { escalationId } = await escalate();
+
+      const out = await svc.approve(escalationId, null, targetSe, CSM, NOW);
+      expect(out.result).toBe('OK');
+      expect((await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId } })).targetZoneId).toBe(targetZoneId);
+    });
+
+    it('AC4 — a deferred escalation returns to PENDING on its review date, with a notice, exactly once', async () => {
+      const { ticketId, escalationId } = await escalate();
+      const reviewDate = new Date('2026-06-29T06:00:00Z');
+      expect((await svc.defer(escalationId, reviewDate, 'revisit after the morning batch', CSM, NOW)).result).toBe('OK');
+
+      const before = new Date('2026-06-29T05:00:00Z');
+      expect((await svc.sweepDueReviews(before)).resurfaced).toBe(0);
+      expect((await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId } })).status).toBe('DEFERRED');
+
+      const after = new Date('2026-06-29T07:00:00Z');
+      expect((await svc.sweepDueReviews(after)).resurfaced).toBe(1);
+      const row = await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId } });
+      expect(row.status).toBe('PENDING');
+      // The date is consumed, not kept: a review date left behind resurfaces the same row every tick.
+      expect(row.reviewDate).toBeNull();
+      expect(row.decidedAt).toBeNull();
+
+      expect(
+        await prisma.notification.count({
+          where: { recipientUserId: csmUserId, type: 'CROSS_ZONE_REVIEW_DUE', entityId: ticketId },
+        }),
+      ).toBe(1);
+      // The home ZM was told it was parked; they are told it is back.
+      expect(
+        await prisma.notification.count({
+          where: { recipientUserId: zmUserId, type: 'CROSS_ZONE_DECISION', entityId: ticketId },
+        }),
+      ).toBe(2);
+
+      // Idempotent: the row is PENDING and back in the queue, not resurfaced again on the next tick.
+      expect((await svc.sweepDueReviews(after)).resurfaced).toBe(0);
+      expect(
+        await prisma.notification.count({
+          where: { recipientUserId: csmUserId, type: 'CROSS_ZONE_REVIEW_DUE', entityId: ticketId },
+        }),
+      ).toBe(1);
+    });
+
+    it('AC5 — history reads the decision chain: decider, acting role, reason and date', async () => {
+      const t = await makeTicket({ tier: 'GOLD', bucket: 'CRITICAL', ageMin: 30 });
+      const actingCsm: CrossZoneActor = {
+        userId: csmUserId,
+        role: 'CENTRAL_SERVICE_MANAGER',
+        actedAsRole: 'ZONAL_MANAGER',
+        actingZone: Number(homeZoneId),
+        zoneId: null,
+      };
+      expect((await svc.flag(t, 'no local cover', ZM, NOW)).result).toBe('OK');
+      const esc = await escFor(t);
+      expect((await svc.deny(esc.escalationId, 'target zones also full', actingCsm, NOW)).result).toBe('OK');
+
+      const rows = await svc.history({ role: 'CENTRAL_SERVICE_MANAGER', zoneId: null }, {});
+      const mine = rows.filter((r) => r.escalationId === String(esc.escalationId));
+
+      const raised = mine.find((r) => r.action === 'CROSS_ZONE_MANUAL_FLAG');
+      expect(raised?.decidedByUserId).toBe(zmUserId);
+      expect(raised?.reason).toBe('no local cover');
+      expect(raised?.ticketId).toBe(t);
+
+      const denied = mine.find((r) => r.action === 'CROSS_ZONE_DENIED');
+      expect(denied?.decidedByRole).toBe('CENTRAL_SERVICE_MANAGER');
+      // The point of the column: a CSM deciding under a ZM's backup authority is not a ZM's decision.
+      expect(denied?.actedAsRole).toBe('ZONAL_MANAGER');
+      expect(denied?.reason).toBe('target zones also full');
+      expect(denied?.at).toBeTruthy();
+      expect(denied?.homeZoneId).toBe(String(homeZoneId));
+    });
+
+    it('AC5 — history is zone-clamped: a ZM sees their own zone’s escalations and no other zone’s', async () => {
+      const t = await makeTicket({ tier: 'GOLD', bucket: 'CRITICAL', ageMin: 30 });
+      expect((await svc.flag(t, 'home zone only', ZM, NOW)).result).toBe('OK');
+      const esc = await escFor(t);
+
+      const homeRows = await svc.history({ role: 'ZONAL_MANAGER', zoneId: Number(homeZoneId) }, {});
+      expect(homeRows.some((r) => r.escalationId === String(esc.escalationId))).toBe(true);
+      expect(homeRows.every((r) => r.homeZoneId === String(homeZoneId) || r.targetZoneId === String(homeZoneId))).toBe(true);
+
+      const otherRows = await svc.history({ role: 'ZONAL_MANAGER', zoneId: Number(targetZoneId) }, {});
+      expect(otherRows.some((r) => r.escalationId === String(esc.escalationId))).toBe(false);
+    });
+
+    it('AC5 — an approved escalation’s history is visible to the zone that has to do the work', async () => {
+      const { escalationId } = await escalate();
+      expect((await svc.approve(escalationId, Number(targetZoneId), targetSe, CSM, NOW)).result).toBe('OK');
+
+      const targetRows = await svc.history({ role: 'ZONAL_MANAGER', zoneId: Number(targetZoneId) }, {});
+      const approved = targetRows.find(
+        (r) => r.escalationId === String(escalationId) && r.action === 'CROSS_ZONE_APPROVE',
+      );
+      expect(approved).toBeDefined();
+      expect(approved?.direction).toBe('incoming');
+      expect(approved?.decidedByRole).toBe('CENTRAL_SERVICE_MANAGER');
+    });
+  });
 });

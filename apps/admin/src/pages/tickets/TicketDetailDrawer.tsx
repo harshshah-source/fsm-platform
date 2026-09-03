@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthProvider';
 import { apiComponentRequestsByTicket, type ComponentRequestRow } from '../../api/componentRequests';
+import { apiCrossZoneFlag } from '../../api/crossZone';
 import { apiManualCloseRecovery } from '../../api/recovery';
 import {
   apiTicketAttempts,
@@ -136,6 +137,11 @@ export function TicketDetailDrawer() {
     session?.role === 'ZONAL_MANAGER' ||
     session?.role === 'CENTRAL_SERVICE_MANAGER' ||
     session?.role === 'OPERATIONS_HEAD';
+  // #355 — the roles that hold the flag door itself (`@Roles('ZONAL_MANAGER','CENTRAL_SERVICE_MANAGER')`).
+  // The Operations Head is deliberately not one of them: their drawer is the read-only view
+  // (`09-ticket-detail-ops-head-readonly.png`), and this is a write.
+  const canFlagCrossZone =
+    session?.role === 'ZONAL_MANAGER' || session?.role === 'CENTRAL_SERVICE_MANAGER';
   const [searchParams] = useSearchParams();
   const [ticket, setTicket] = useState<TicketDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +155,10 @@ export function TicketDetailDrawer() {
   const [audit, setAudit] = useState<TicketAuditEntry[] | null>(null);
   const [recoveryCloseOpen, setRecoveryCloseOpen] = useState(false);
   const [recoveryReason, setRecoveryReason] = useState('');
+  // #355 (#92) — the cross-zone flag's reason capture. `apiCrossZoneFlag` had zero call sites: the
+  // manual route into the cross-zone queue existed on the wire and nowhere in the product.
+  const [flagOpen, setFlagOpen] = useState(false);
+  const [flagReason, setFlagReason] = useState('');
   // The Verification Review page (Issue 19) deep-links to a specific tab via `?tab=Verification`.
   const initialTab = searchParams.get('tab');
   const [tab, setTab] = useState<TabId>(
@@ -232,6 +242,26 @@ export function TicketDetailDrawer() {
   // Assignment History is derived from the already-loaded lifecycle: the human-actor transitions
   // (reassign / override / manual actions carry an actorRole), distinct from system state changes.
   const assignmentEvents = (ticket?.lifecycle ?? []).filter((e) => e.actorRole !== null);
+
+  /**
+   * #335 (the crash from #244) — the attempts payload, made whole before it is rendered.
+   *
+   * `attempts.attempts.length` was read straight off the response. When the payload arrived without the
+   * array — which it does; the shape is not guaranteed by anything on this path — the read threw during
+   * render, React escalated it to an uncaught exception, and the tab unmounted for the operator. It
+   * also made `vitest` exit 1 on a fully green admin run, which is the failure mode CI cannot interpret.
+   *
+   * Normalising the whole object rather than guarding the one line, because the sibling reads are just
+   * as optional and a half-tolerant tab would print `undefined/undefined` into the verdict the SPECIAL
+   * badge is supposed to be checkable against. Missing = "nothing recorded", which is exactly what the
+   * empty state already says.
+   */
+  const attemptWindows = {
+    attempts: Array.isArray(attempts?.attempts) ? attempts.attempts : [],
+    isSpecial: attempts?.isSpecial === true,
+    countableAttempts: typeof attempts?.countableAttempts === 'number' ? attempts.countableAttempts : 0,
+    threshold: typeof attempts?.threshold === 'number' ? attempts.threshold : 0,
+  };
 
   return (
     <aside
@@ -364,6 +394,27 @@ export function TicketDetailDrawer() {
                   <InlineBadges ticket={ticket} />
                 </dd>
               </dl>
+            )}
+
+            {/* #355 AC1 (#92) — flag this ticket for cross-zone coverage, from the ticket. The zone
+                that cannot cover the work is the only place anyone realises it, and the action lived
+                nowhere: `apiCrossZoneFlag` had no call site in the product.
+
+                Hidden for PLATINUM, because that tier reaches the cross-zone queue by the auto-sweep
+                and the backend answers a manual flag on it with `PLATINUM_USES_AUTO_ESCALATION` — a
+                button whose only outcome is a 400 is worse than no button. */}
+            {tab === 'Overview' && canFlagCrossZone && ticket.companyTier !== 'PLATINUM' && (
+              <button
+                type="button"
+                data-testid="flag-cross-zone"
+                onClick={() => {
+                  setFlagReason('');
+                  setFlagOpen(true);
+                }}
+                className="mt-4 rounded-md border border-line-strong px-2.5 py-1.5 text-xs font-medium text-ink-strong transition-colors hover:bg-surface-sunken"
+              >
+                Flag cross-zone
+              </button>
             )}
 
             {/* Manual close (web-only exception path) for an open Recovery Ticket — ZM / OH / CSM-acting.
@@ -527,18 +578,18 @@ export function TicketDetailDrawer() {
                       <span
                         data-testid="special-verdict"
                         className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                          attempts.isSpecial ? 'bg-violet-100 text-violet-800' : 'bg-neutral-bg text-neutral'
+                          attemptWindows.isSpecial ? 'bg-violet-100 text-violet-800' : 'bg-neutral-bg text-neutral'
                         }`}
                       >
-                        {attempts.isSpecial ? 'SPECIAL' : 'Not special'} · {attempts.countableAttempts}/
-                        {attempts.threshold} reached and unresolved
+                        {attemptWindows.isSpecial ? 'SPECIAL' : 'Not special'} · {attemptWindows.countableAttempts}/
+                        {attemptWindows.threshold} reached and unresolved
                       </span>
                     </div>
-                    {attempts.attempts.length === 0 && (
+                    {attemptWindows.attempts.length === 0 && (
                       <p className="text-ink-muted">This ticket has never been dispatched.</p>
                     )}
                     <ul className="flex flex-col gap-1">
-                      {attempts.attempts.map((a) => (
+                      {attemptWindows.attempts.map((a) => (
                         <li
                           key={a.attemptId}
                           data-testid={`attempt-row-${a.attemptId}`}
@@ -625,6 +676,53 @@ export function TicketDetailDrawer() {
           onChange={(e) => setRecoveryReason(e.target.value)}
           className="min-h-[5rem] w-full rounded-md border border-line bg-surface-card px-3 py-2 text-sm text-ink-strong"
           placeholder="Why is this Recovery Ticket being closed manually?"
+        />
+      </Modal>
+
+      {/* #355 AC1 — the flag's mandatory reason. It is what the CSM / Operations Head read in the
+          cross-zone queue when they decide, so it is the request, not a note. */}
+      <Modal
+        open={flagOpen}
+        onClose={() => setFlagOpen(false)}
+        title="Flag for cross-zone coverage"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setFlagOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              data-testid="flag-cross-zone-confirm"
+              disabled={!flagReason.trim()}
+              onClick={async () => {
+                if (!flagReason.trim() || !ticketId) return;
+                try {
+                  await apiCrossZoneFlag(ticketId, flagReason.trim());
+                  setFlagOpen(false);
+                } catch {
+                  // Named rather than generic: a refused flag is usually `ALREADY_ESCALATED`, and an
+                  // operator who cannot tell that from a network failure raises it again.
+                  setError('Cross-zone flag failed — the escalation was not raised');
+                  setFlagOpen(false);
+                }
+              }}
+            >
+              Flag cross-zone
+            </Button>
+          </>
+        }
+      >
+        <label htmlFor="flag-cross-zone-reason" className="mb-1 block text-xs font-medium text-ink-muted">
+          Reason (mandatory) — the cross-zone queue reads this
+        </label>
+        <textarea
+          id="flag-cross-zone-reason"
+          data-testid="flag-cross-zone-reason"
+          value={flagReason}
+          onChange={(e) => setFlagReason(e.target.value)}
+          className="min-h-[5rem] w-full rounded-md border border-line bg-surface-card px-3 py-2 text-sm text-ink-strong"
+          placeholder="Why can this zone not cover this ticket?"
         />
       </Modal>
     </aside>

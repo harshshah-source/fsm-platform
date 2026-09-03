@@ -268,9 +268,19 @@ export class BusinessSweepSchedulerService {
     return this.runGuarded(BUSINESS_SWEEP_JOBS.criticalAssign, now, () => this.intraday.assignCriticalForActiveZones(now));
   }
 
+  /**
+   * #355 — two sweeps, one tick. The raise (a Platinum ticket its home zone has not covered) and the
+   * return (a DEFERRED escalation whose review date has arrived) are the same loop's two halves: both
+   * put an item into the cross-zone queue on a clock, and a review date nothing reads is a deferral
+   * that quietly becomes a disposal. Sequential, on the tick's own clock, inside the one guard — the
+   * resurfacing sweep swallows its own per-row failures, so it cannot cost the raise its outcome.
+   */
   @Cron(readBusinessSweepSchedulerConfig().crossZoneCron, { name: BUSINESS_SWEEP_JOBS.crossZone })
   crossZoneTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded(BUSINESS_SWEEP_JOBS.crossZone, now, () => this.crossZone.sweepAutoEscalations(now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.crossZone, now, async () => {
+      await this.crossZone.sweepAutoEscalations(now);
+      await this.crossZone.sweepDueReviews(now);
+    });
   }
 
   @Cron(readBusinessSweepSchedulerConfig().repeatEscalationCron, { name: BUSINESS_SWEEP_JOBS.repeatEscalation })
