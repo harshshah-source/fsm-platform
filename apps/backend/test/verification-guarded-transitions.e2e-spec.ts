@@ -259,7 +259,7 @@ describe('#301 — verification writers cannot overwrite a concurrent winner', (
     const eventsBefore = (await eventsFor(ticketId)).length;
 
     const raced = new VerificationService(interferingPrisma(prisma, () => setStatus(ticketId, 'ESCALATED')));
-    const outcome = await raced.markAutoRecovery(ticketId, zmActor, anyZone());
+    const outcome = await raced.markAutoRecovery(ticketId, 'recovered on its own', zmActor, anyZone());
 
     expect(outcome).toBe('NOT_FOUND');
     expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).status).toBe('ESCALATED');
@@ -318,13 +318,63 @@ describe('#301 — verification writers cannot overwrite a concurrent winner', (
       await addPing(deviceId, at(1));
       expect((await verify.runVerification(at(30), { ticketIds: [ticketId] })).pending).toBe(1);
 
-      expect(await verify.markAutoRecovery(ticketId, zmActor, anyZone())).toBe('OK');
+      expect(await verify.markAutoRecovery(ticketId, 'device recovered on its own', zmActor, anyZone())).toBe('OK');
       const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
       expect(ticket.status).toBe('CLOSED_AUTO_RECOVERY');
       expect((await prisma.failureCycle.findUniqueOrThrow({ where: { cycleId } })).state).toBe('VERIFIED');
       expect((await prisma.verificationRun.findFirstOrThrow({ where: { ticketId } })).outcome).toBe(
         'CLOSED_AUTO_RECOVERY',
       );
+    });
+
+    /**
+     * #357 — the run verdict is now stamped for a FAILED row too, so it needs the same guard the
+     * `outcome: null` write always had. Without one, the two ledgers stop contradicting each other in
+     * the common case and start contradicting each other in the raced one instead.
+     */
+    it('markAutoRecovery loses the RUN stamp cleanly when the run concluded under it', async () => {
+      const { ticketId, deviceId } = await makeTicket();
+      await submitForm(ticketId);
+      await addPing(deviceId, at(1));
+      expect((await verify.runVerification(at(30), { ticketIds: [ticketId] })).pending).toBe(1);
+      const run = await prisma.verificationRun.findFirstOrThrow({ where: { ticketId } });
+
+      // The sweep concludes the run between the manager's read and the manager's write.
+      const raced = new VerificationService(
+        interferingPrisma(prisma, async () => {
+          await prisma.verificationRun.update({
+            where: { runId: run.runId },
+            data: { outcome: 'CLOSED', outcomeAt: at(31) },
+          });
+        }),
+      );
+      const outcome = await raced.markAutoRecovery(ticketId, 'recovered on its own', zmActor, anyZone());
+
+      expect(outcome).toBe('NOT_FOUND');
+      // The whole transaction rolled back — no half-closed ticket against a run that says CLOSED.
+      expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).status).toBe('VERIFICATION_PENDING');
+      expect((await prisma.verificationRun.findUniqueOrThrow({ where: { runId: run.runId } })).outcome).toBe('CLOSED');
+    });
+
+    it('#357 — deescalate returns the ticket to its pre-escalation state, and loses cleanly if it moved', async () => {
+      const { ticketId, deviceId } = await makeTicket();
+      await submitForm(ticketId);
+      await addFarPings(deviceId);
+      await verify.runVerification(at(70), { ticketIds: [ticketId] });
+      expect(await verify.escalateFraud(ticketId, 'reviewed', zmActor, anyZone())).toBe('OK');
+
+      // Lost race first: the ticket moves out of ESCALATED between the read and the write.
+      const raced = new VerificationService(
+        interferingPrisma(prisma, () => setStatus(ticketId, 'CLOSED_AUTO_RECOVERY')),
+      );
+      expect(await raced.deescalate(ticketId, 'raised in error', zmActor, anyZone())).toBe('NOT_FOUND');
+      expect(await prisma.auditLog.count({ where: { entityId: ticketId, action: 'VERIFICATION_DEESCALATED' } })).toBe(0);
+
+      // Uncontended, from the state the escalation actually left behind.
+      await setStatus(ticketId, 'ESCALATED');
+      expect(await verify.deescalate(ticketId, 'raised in error', zmActor, anyZone())).toBe('OK');
+      expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).status).toBe('FAILED_VERIFICATION');
+      expect((await prisma.verificationRun.findFirstOrThrow({ where: { ticketId } })).escalationReason).toBeNull();
     });
 
     it('an uncontended sweep still closes, verifies the cycle and deducts the component', async () => {

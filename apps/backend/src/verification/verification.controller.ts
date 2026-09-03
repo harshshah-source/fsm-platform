@@ -90,15 +90,45 @@ export class VerificationController {
     return { result: 'OK' };
   }
 
+  /**
+   * #357 — reverse an escalation raised in error. ESCALATED was a one-way door; this is the way back,
+   * to the state the ticket was escalated FROM. Refused (409) on anything not currently escalated,
+   * which is how a closed ticket is refused.
+   */
+  @Post('verification/:ticketId/deescalate')
+  @Roles(...MANAGER_ROLES)
+  async deescalate(
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
+    @Param('ticketId') ticketId: string,
+    @Body() body: { reason?: string },
+  ): Promise<{ result: 'OK' }> {
+    if (!body.reason || !body.reason.trim()) {
+      throw new BadRequestException({ code: 'DEESCALATION_REASON_REQUIRED' });
+    }
+    const outcome = await this.verification.deescalate(ticketId, body.reason.trim(), actor, scope);
+    if (outcome === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
+    if (outcome === 'NOT_ESCALATED') throw new ConflictException({ code: 'NOT_ESCALATED' });
+    return { result: 'OK' };
+  }
+
   @Post('verification/:ticketId/mark-auto-recovery')
   @Roles(...MANAGER_ROLES)
   async markAutoRecovery(
     @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Param('ticketId') ticketId: string,
+    @Body() body: { reason?: string },
   ): Promise<{ result: 'OK' }> {
+    // #357 — mandatory, exactly as `escalate` above. A manager overruling the platform's verdict on
+    // whether the work happened is the decision an auditor comes back to; it does not get to be the
+    // one closure door in the module that records no why.
+    if (!body.reason || !body.reason.trim()) {
+      throw new BadRequestException({ code: 'AUTO_RECOVERY_REASON_REQUIRED' });
+    }
     const outcome = await this.verification.markAutoRecovery(
       ticketId,
+      body.reason.trim(),
       actor,
       scope,
     );
@@ -118,9 +148,10 @@ export class VerificationController {
     return view;
   }
 
+  /** #357 — zone-scoped, like `review` and `tickets/:id/verification`. It took no scope at all before. */
   @Get('verification/fraud-flags')
   @Roles(...MANAGER_ROLES)
-  fraudFlags(): Promise<FraudFlagView[]> {
-    return this.query.fraudFlags();
+  fraudFlags(@CurrentScope() scope: ManagerScope): Promise<FraudFlagView[]> {
+    return this.query.fraudFlags(scope);
   }
 }

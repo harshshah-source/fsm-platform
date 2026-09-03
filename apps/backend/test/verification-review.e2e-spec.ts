@@ -144,6 +144,7 @@ describe('verification review controller (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/api/verification/${partial.ticketId}/mark-auto-recovery`)
       .set('Authorization', `Bearer ${token}`)
+      .send({ reason: 'device recovered on its own' }) // #357 — the reason is mandatory
       .expect(201);
     const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: partial.ticketId } });
     expect(ticket.status).toBe('CLOSED_AUTO_RECOVERY');

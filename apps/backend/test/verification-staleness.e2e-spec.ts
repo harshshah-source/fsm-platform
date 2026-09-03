@@ -159,6 +159,37 @@ describe('#148 — verification does not expire on stale telemetry', () => {
     expect(ticket.status).toBe('FAILED_VERIFICATION');
   });
 
+  /**
+   * #357 — the expired window is exactly where the two ledgers used to part company. Once the sweep
+   * has written FAILED_VERIFICATION, a ZM who judges the device recovered anyway moves the TICKET to
+   * CLOSED_AUTO_RECOVERY; the run's stamp was skipped (`outcome: null` in the WHERE), so the platform
+   * kept two permanent, contradictory records of the same event — and the outcomes report published
+   * the failure. This case starts from the real FAILED state case (b) produces rather than a seeded
+   * one, because "auto-recovery after an expiry" is the only way that contradiction arises.
+   */
+  it('#357 — auto-recovery after an expired window leaves the run and the ticket agreeing', async () => {
+    const { ticketId } = await makeTicket();
+    await submitForm(ticketId);
+    await setWatermark(HOURS(26));
+    expect((await verify.runVerification(HOURS(25), { ticketIds: [ticketId] })).failed).toBe(1);
+    expect((await prisma.verificationRun.findFirstOrThrow({ where: { ticketId } })).outcome).toBe(
+      'FAILED_VERIFICATION',
+    );
+
+    const outcome = await verify.markAutoRecovery(
+      ticketId,
+      'device came back on its own after the window closed',
+      { userId: randomUUID(), role: 'ZONAL_MANAGER' },
+      { role: 'OPERATIONS_HEAD', zoneId: null },
+    );
+
+    expect(outcome).toBe('OK');
+    expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).status).toBe('CLOSED_AUTO_RECOVERY');
+    expect((await prisma.verificationRun.findFirstOrThrow({ where: { ticketId } })).outcome).toBe(
+      'CLOSED_AUTO_RECOVERY',
+    );
+  });
+
   // (c) PINS EXISTING BEHAVIOUR — the window itself is unchanged.
   it('does not expire before 24 h even with a fresh watermark', async () => {
     const { ticketId } = await makeTicket();

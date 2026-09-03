@@ -83,10 +83,12 @@ export async function apiTicketVerification(ticketId: string): Promise<TicketVer
   return (await res.json()) as TicketVerification;
 }
 
-export async function apiMarkAutoRecovery(ticketId: string): Promise<void> {
+/** `reason` is mandatory since #357 — the door 400s without one, as Escalate's already did. */
+export async function apiMarkAutoRecovery(ticketId: string, reason: string): Promise<void> {
   const res = await fetch(`${BASE_URL}/verification/${encodeURIComponent(ticketId)}/mark-auto-recovery`, {
     method: 'POST',
-    headers: authHeaders(),
+    headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
 }

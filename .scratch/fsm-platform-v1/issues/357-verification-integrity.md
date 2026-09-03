@@ -1,5 +1,5 @@
 # 357 — Verification integrity: zone-scoped fraud flags, run verdict, de-escalate, reasons
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/357-verification-integrity.md
 Type: AFK
 Wave: 3 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -47,13 +47,17 @@ Five integrity gaps in the verification module, all backend.
   `verification-staleness` e2e.
 
 ## Acceptance criteria
-- [ ] AC1 — ZM gets own-zone fraud flags only; CSM/OH get all zones.
-- [ ] AC2 — after mark-auto-recovery the run and the ticket agree, and the outcomes report counts
+- [x] AC1 — ZM gets own-zone fraud flags only; CSM/OH get all zones.
+- [x] AC2 — after mark-auto-recovery the run and the ticket agree, and the outcomes report counts
       it as auto-recovery.
-- [ ] AC3 — de-escalate exists for ZM/CSM/OH, requires a reason, is audited, and is refused on a
+- [x] AC3 — de-escalate exists for ZM/CSM/OH, requires a reason, is audited, and is refused on a
       closed ticket.
-- [ ] AC4 — the escalation reason is persisted on the run and returned by the outcomes report.
-- [ ] AC5 — mark-auto-recovery without a reason → 400.
+- [x] AC4 — the escalation reason is persisted on the run and returned by the outcomes report.
+- [x] AC5 — mark-auto-recovery without a reason → 400.
+
+**One line of the premise had moved.** The reports edit is cited at `reports.service.ts:545-556`;
+#347 landed there earlier the same day and `verificationOutcomes` is now `:600-624`. Everything else
+reproduced as written.
 
 ## Verification
 

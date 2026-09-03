@@ -42,6 +42,9 @@ export function VerificationReviewPage() {
   const [companyId, setCompanyId] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [escalateFor, setEscalateFor] = useState<VerificationReviewRow | null>(null);
+  /** The row awaiting a mark-auto-recovery reason (#357 made it mandatory). Shares `reason` with
+   *  Escalate — only one of the two capture panels is ever open. */
+  const [autoRecoverFor, setAutoRecoverFor] = useState<VerificationReviewRow | null>(null);
   const [reason, setReason] = useState('');
 
   const filters = useMemo(
@@ -102,9 +105,21 @@ export function VerificationReviewPage() {
     }
   }
 
-  async function markAutoRecovery(ticketId: string) {
+  /**
+   * #357 made the reason mandatory on this door, as it already was on Escalate: marking a ticket
+   * CLOSED_AUTO_RECOVERY overrides a verification verdict, and an override with no stated reason is
+   * the thing the audit ledger cannot reconstruct afterwards. So it routes through the same capture
+   * Escalate uses rather than posting an empty body and taking a 400.
+   *
+   * #358 owns this page and will give both actions their finished treatment; this keeps the button
+   * honest in the meantime rather than leaving it broken between the two slices.
+   */
+  async function submitAutoRecovery() {
+    if (!autoRecoverFor || !reason.trim()) return;
     try {
-      await apiMarkAutoRecovery(ticketId);
+      await apiMarkAutoRecovery(autoRecoverFor.ticketId, reason.trim());
+      setAutoRecoverFor(null);
+      setReason('');
       refetch();
     } catch {
       setError('Mark auto-recovery failed');
@@ -225,7 +240,11 @@ export function VerificationReviewPage() {
                 {(row.rowType === 'PARTIAL_RECOVERY' || row.rowType === 'FAILED_NO_PINGS') && (
                   <button
                     type="button"
-                    onClick={() => void markAutoRecovery(row.ticketId)}
+                    onClick={() => {
+                      setAutoRecoverFor(row);
+                      setEscalateFor(null);
+                      setReason('');
+                    }}
                     className="rounded border border-line px-2 py-0.5 text-xs text-ink hover:bg-surface-sunken"
                   >
                     Mark auto-recovery
@@ -259,6 +278,34 @@ export function VerificationReviewPage() {
               Escalate
             </button>
             <button type="button" onClick={() => setEscalateFor(null)} className="rounded border px-3 py-1 text-xs">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {autoRecoverFor && (
+        <div role="dialog" aria-label="Mark auto-recovery" className="mt-4 rounded border bg-surface-sunken p-3 text-sm">
+          <p className="mb-2 font-medium text-ink">
+            Mark {autoRecoverFor.deviceId} CLOSED_AUTO_RECOVERY — reason required
+          </p>
+          <textarea
+            aria-label="Auto-recovery reason"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className="mb-2 w-full rounded border px-2 py-1"
+            rows={2}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={!reason.trim()}
+              onClick={() => void submitAutoRecovery()}
+              className="rounded bg-ink px-3 py-1 text-xs text-white disabled:opacity-40"
+            >
+              Mark auto-recovery
+            </button>
+            <button type="button" onClick={() => setAutoRecoverFor(null)} className="rounded border px-3 py-1 text-xs">
               Cancel
             </button>
           </div>

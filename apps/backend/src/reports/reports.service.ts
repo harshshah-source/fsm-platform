@@ -324,6 +324,23 @@ export interface WorkTypeMixReport extends DataAsOf {
   rows: { workType: WorkTypeKey; count: number; pct: number }[];
 }
 
+/**
+ * #357 — one escalated run, with the reason it was escalated for.
+ *
+ * The distribution rows answer "how much"; this answers "which, and why", which is the question a
+ * reviewer actually opens the outcomes panel with. It could not be answered before because the reason
+ * lived only in `audit_logs.metadata` — a table this aggregation does not join and cannot filter on —
+ * so the report could count escalations and never explain one.
+ */
+export interface VerificationEscalationRow {
+  ticketId: string;
+  deviceId: string;
+  /** The run's own verdict, which is NOT the ticket's status: a run may be escalated after it failed. */
+  outcome: VerifyOutcomeKey;
+  escalationReason: string;
+  startedAt: string;
+}
+
 export interface VerificationOutcomesReport extends DataAsOf {
   from: string;
   to: string;
@@ -332,7 +349,22 @@ export interface VerificationOutcomesReport extends DataAsOf {
   fraudFlagged: number;
   filters: { zoneId: number | null; companyId: number | null; plantId: number | null };
   rows: { outcome: VerifyOutcomeKey; count: number; pct: number }[];
+  /**
+   * #357 — runs in the window whose ticket is escalated RIGHT NOW, newest first, capped at
+   * {@link ESCALATION_DETAIL_LIMIT}. A de-escalated run drops out of this list (the column is the live
+   * verdict, not the history — see `VerificationRun.escalationReason`), which is what makes the list
+   * a work queue rather than a growing archive.
+   */
+  escalations: VerificationEscalationRow[];
 }
+
+/**
+ * The escalation detail list is a review queue, not an export: a window with hundreds of live
+ * escalations is a staffing emergency, not a paging problem, and an uncapped detail array inside an
+ * aggregate payload is how a report becomes the slowest endpoint in the product. The cap is stated
+ * here rather than buried in the SQL so the day it starts truncating is a legible fact.
+ */
+const ESCALATION_DETAIL_LIMIT = 200;
 
 /**
  * Reports read surface (Issue 39). `fleetUptime` serves the Fleet Uptime % report purely from
@@ -610,6 +642,23 @@ export class ReportsService {
       WHERE vr.started_at >= ${fromDay} AND vr.started_at < ${toEnd} ${filters.sql}
       GROUP BY COALESCE(vr.outcome::text, 'PENDING')`);
 
+    // #357 — the reason column, from the run row rather than from `audit_logs`. Same window, same
+    // scope filters, same join shape as the aggregate above, so a ZM's escalation list is clamped by
+    // construction and cannot drift from the counts beside it.
+    const escalated = await this.prisma.$queryRaw<
+      { ticketId: string; deviceId: string; outcome: string; escalationReason: string; startedAt: Date }[]
+    >(Prisma.sql`
+      SELECT vr.ticket_id AS "ticketId", vr.device_id AS "deviceId",
+             COALESCE(vr.outcome::text, 'PENDING') AS outcome,
+             vr.escalation_reason AS "escalationReason", vr.started_at AS "startedAt"
+      FROM verification_runs vr
+      JOIN tickets t ON t.ticket_id = vr.ticket_id
+      JOIN plants p ON p.plant_id = t.plant_id
+      WHERE vr.started_at >= ${fromDay} AND vr.started_at < ${toEnd}
+        AND vr.escalation_reason IS NOT NULL ${filters.sql}
+      ORDER BY vr.started_at DESC
+      LIMIT ${ESCALATION_DETAIL_LIMIT}`);
+
     const counts = new Map(rows.map((r) => [r.outcome, r.count]));
     const total = rows.reduce((s, r) => s + r.count, 0);
     return {
@@ -620,6 +669,13 @@ export class ReportsService {
       dataAsOf: now.toISOString(),
       filters: filters.echo,
       rows: VERIFY_OUTCOME_KEYS.map((outcome) => ({ outcome, count: counts.get(outcome) ?? 0, pct: ratePct(counts.get(outcome) ?? 0, total) })),
+      escalations: escalated.map((e) => ({
+        ticketId: e.ticketId,
+        deviceId: String(e.deviceId),
+        outcome: e.outcome as VerifyOutcomeKey,
+        escalationReason: e.escalationReason,
+        startedAt: e.startedAt.toISOString(),
+      })),
     };
   }
 

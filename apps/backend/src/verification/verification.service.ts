@@ -138,6 +138,15 @@ export class VerificationService {
             metadata: { runId: run.runId, reason },
           },
         });
+        // #357 — the reason on the RUN as well as in the audit metadata. The audit row is the history
+        // and stays authoritative for it; this column is the live verdict, and it is the only one the
+        // outcomes report and the review queue can actually read (both aggregate `verification_runs`;
+        // neither joins `audit_logs` by entity id). Same transaction, so a reason can never exist in
+        // one ledger and not the other.
+        await tx.verificationRun.update({
+          where: { runId: run.runId },
+          data: { escalationReason: reason },
+        });
       });
     } catch (e) {
       // The documented lost-race mapping (`common/lost-race.ts`): the row the caller asked to act on is
@@ -153,10 +162,16 @@ export class VerificationService {
    * Mark a verification-review row as auto-recovered (Issue 19): the ZM judges the device recovered on
    * its own (no SE credit). Closes the ticket CLOSED_AUTO_RECOVERY, cycle VERIFIED, and stamps the run
    * outcome CLOSED_AUTO_RECOVERY. Zone-scoped; distinct from Issue 08's pre-submission auto-recovery.
+   *
+   * #357 — `reason` is mandatory (the controller rejects a missing/blank one with 400). This is a
+   * manager overruling the platform's own verdict on whether work happened, which is precisely the
+   * decision an auditor later asks about; the sibling door `escalateFraud` has demanded a reason since
+   * Issue 19 and there was never a principled reason for this one not to.
    */
   async markAutoRecovery(
     ticketId: string,
-    actor: { userId: string; role: string },
+    reason: string,
+    actor: { userId: string; role: string; actedAsRole?: string | null },
     scope: { role: string; zoneId: number | null },
   ): Promise<'OK' | 'NOT_FOUND'> {
     const ticket = await this.prisma.ticket.findUnique({ where: { ticketId }, include: { plant: true } });
@@ -164,6 +179,29 @@ export class VerificationService {
     if (scope.role === 'ZONAL_MANAGER' && scope.zoneId != null && Number(ticket.plant.zoneId) !== scope.zoneId) {
       return 'NOT_FOUND';
     }
+    /**
+     * #357 — the run this close must agree with, read BEFORE the transaction so its outcome can be
+     * used as a guard rather than as an unchecked assumption.
+     *
+     * The old write was `updateMany({ where: { ticketId, outcome: null } })`, which silently matched
+     * nothing whenever the sweep had already concluded the run. A ticket that expired
+     * FAILED_VERIFICATION and was then judged recovered ended with the run saying FAILED and the
+     * ticket saying CLOSED_AUTO_RECOVERY — two permanent, contradictory records of one event, with
+     * `/reports/verification-outcomes` (which aggregates the runs) publishing the failure.
+     */
+    const run = await this.prisma.verificationRun.findFirst({
+      where: { ticketId },
+      orderBy: { startedAt: 'desc' },
+      select: { runId: true, outcome: true },
+    });
+    /**
+     * Only a run that has NOT reached a positive verdict is restamped. `null` is the in-flight case the
+     * original code handled; `FAILED_VERIFICATION` is the contradiction this slice closes. A `CLOSED`
+     * or already-`CLOSED_AUTO_RECOVERY` run is left exactly as it is — auto-recovery must never
+     * un-verify a run that genuinely passed, and re-stamping a finished auto-recovery would move its
+     * `outcome_at` for no event.
+     */
+    const restampable = run != null && (run.outcome === null || run.outcome === 'FAILED_VERIFICATION');
     const now = new Date();
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -180,20 +218,137 @@ export class VerificationService {
           await tx.failureCycle.update({ where: { cycleId: ticket.failureCycleId }, data: { state: 'VERIFIED', closedAt: now } });
           await tx.deviceState.updateMany({ where: { deviceId: ticket.deviceId }, data: { hasOpenFailureCycle: false } });
         }
-        await tx.verificationRun.updateMany({
-          where: { ticketId, outcome: null },
-          data: { outcome: 'CLOSED_AUTO_RECOVERY', outcomeAt: now },
-        });
+        if (restampable) {
+          // Guarded on the outcome THIS caller read, for the same reason the ticket stamp above is:
+          // the run now moves on a path the sweep also writes, so an unguarded update by primary key
+          // would let this close overwrite a verdict the sweep reached in between. A loss rolls the
+          // whole transaction back — better no close at all than a ticket closed against a run that
+          // says something else, which is the exact failure mode this slice exists to end.
+          await stampOnceOrLose(
+            tx.verificationRun,
+            { runId: run.runId, outcome: run.outcome },
+            { outcome: 'CLOSED_AUTO_RECOVERY', outcomeAt: now },
+            `auto-recovery verdict on verification run ${run.runId}`,
+          );
+        }
         await tx.ticketEvent.create({
-          data: { ticketId, fromState: ticket.status, toState: 'CLOSED_AUTO_RECOVERY', at: now, actorId: actor.userId, actorRole: actor.role as never, reasonCode: 'MANUAL_AUTO_RECOVERY' },
+          data: { ticketId, fromState: ticket.status, toState: 'CLOSED_AUTO_RECOVERY', at: now, actorId: actor.userId, actorRole: actor.role as never, actedAsRole: (actor.actedAsRole as never) ?? null, reasonCode: 'MANUAL_AUTO_RECOVERY' },
         });
         await tx.auditLog.create({
-          data: { actorId: actor.userId, actorRole: actor.role, action: 'MANUAL_AUTO_RECOVERY', entityType: 'tickets', entityId: ticketId },
+          data: {
+            actorId: actor.userId,
+            actorRole: actor.role,
+            actedAsRole: actor.actedAsRole ?? null,
+            action: 'MANUAL_AUTO_RECOVERY',
+            entityType: 'tickets',
+            entityId: ticketId,
+            metadata: { runId: run?.runId ?? null, reason },
+          },
         });
         // #178 — the ticket is terminal, so the assignment is over: retire the live batch row and clear
         // FORMALLY_ASSIGNED in this same transaction, or the SE keeps a stop (and the recommender keeps
         // a spent capacity slot) for a device just declared recovered.
         await retireAssignmentOnClosure(tx, [ticketId], now);
+      });
+    } catch (e) {
+      if (e instanceof LostRaceError) return 'NOT_FOUND';
+      throw e;
+    }
+    return 'OK';
+  }
+
+  /**
+   * #357 — reverse a fraud escalation raised in error. ZM (own zone) / CSM / OpsHead, mandatory reason,
+   * audited, guarded.
+   *
+   * ESCALATED was a one-way door: `escalateFraud` could move a ticket there and nothing could move it
+   * back, so a manager who escalated the wrong ticket — or escalated on an anchor GPS that later turned
+   * out to be the faulty reading — left the ticket permanently parked in a state no sweep and no other
+   * door will ever pick up. That is not a labelling annoyance: the ticket stops being work anyone is
+   * accountable for finishing.
+   *
+   * **Where it goes back to.** The ticket returns to the state it was escalated FROM, read off the
+   * `ticket_events` row the escalation itself wrote — not to a hardcoded VERIFICATION_PENDING. The two
+   * are genuinely different: a fraud escalation is normally raised against a run that has already
+   * concluded FAILED_VERIFICATION, and sending that ticket back to VERIFICATION_PENDING would invent a
+   * window the sweep would then re-expire. VERIFICATION_PENDING is the fallback only when no escalation
+   * event can be found (a row escalated before events were stamped), because that is the review state a
+   * TROUBLESHOOT ticket sits in while it is somebody's to decide.
+   *
+   * **A closed ticket is refused** (`NOT_ESCALATED` → 409). Closure is terminal and reversing INTO it
+   * would have to unwind a cycle close, an inventory leg and a retired assignment; that is a different
+   * operation from undoing an escalation and does not get to hide inside this one.
+   */
+  async deescalate(
+    ticketId: string,
+    reason: string,
+    actor: { userId: string; role: string; actedAsRole?: string | null },
+    scope: { role: string; zoneId: number | null },
+  ): Promise<'OK' | 'NOT_FOUND' | 'NOT_ESCALATED'> {
+    const ticket = await this.prisma.ticket.findUnique({ where: { ticketId }, include: { plant: true } });
+    if (!ticket) return 'NOT_FOUND';
+    if (scope.role === 'ZONAL_MANAGER' && scope.zoneId != null && Number(ticket.plant.zoneId) !== scope.zoneId) {
+      return 'NOT_FOUND';
+    }
+    // Covers the closed ticket too: a CLOSED / CLOSED_AUTO_RECOVERY / FAILED_VERIFICATION ticket is by
+    // definition not currently escalated, so there is one refusal here rather than a status allowlist
+    // that would need editing every time the ladder grows.
+    if (ticket.status !== 'ESCALATED') return 'NOT_ESCALATED';
+
+    const escalation = await this.prisma.ticketEvent.findFirst({
+      where: { ticketId, toState: 'ESCALATED' },
+      orderBy: { at: 'desc' },
+      select: { fromState: true },
+    });
+    const previousStatus = escalation?.fromState ?? 'VERIFICATION_PENDING';
+
+    const run = await this.prisma.verificationRun.findFirst({
+      where: { ticketId },
+      orderBy: { startedAt: 'desc' },
+      select: { runId: true },
+    });
+
+    const now = new Date();
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // #301's guard, applied to the new door on the day it lands rather than retrofitted: the status
+        // is in the WHERE, so a sweep or a concurrent close that moved the ticket out of ESCALATED wins
+        // and this de-escalation loses whole — no write, no event, no audit row.
+        await stampOnceOrLose(
+          tx.ticket,
+          { ticketId, status: 'ESCALATED' },
+          { status: previousStatus as never, lastStateChangedAt: now },
+          `fraud de-escalation for ticket ${ticketId}`,
+        );
+        await tx.ticketEvent.create({
+          data: {
+            ticketId,
+            fromState: 'ESCALATED',
+            toState: previousStatus,
+            at: now,
+            actorId: actor.userId,
+            actorRole: actor.role as never,
+            actedAsRole: (actor.actedAsRole as never) ?? null,
+            reasonCode: 'VERIFICATION_DEESCALATED',
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.userId,
+            actorRole: actor.role,
+            actedAsRole: actor.actedAsRole ?? null,
+            action: 'VERIFICATION_DEESCALATED',
+            entityType: 'tickets',
+            entityId: ticketId,
+            metadata: { runId: run?.runId ?? null, reason, previousStatus },
+          },
+        });
+        if (run) {
+          // `escalation_reason` is the LIVE verdict, not the history — see the column's docblock. The
+          // ticket is no longer escalated, so the run must not keep claiming a reason for it; the audit
+          // log above and the escalation's own audit row keep the full story of both transitions.
+          await tx.verificationRun.update({ where: { runId: run.runId }, data: { escalationReason: null } });
+        }
       });
     } catch (e) {
       if (e instanceof LostRaceError) return 'NOT_FOUND';

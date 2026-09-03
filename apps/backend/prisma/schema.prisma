@@ -1304,6 +1304,12 @@ model VerificationRun {
   pingsReceivedCount      Int            @default(0) @map("pings_received_count")
   outcome                 VerifyOutcome?
   outcomeAt               DateTime?      @map("outcome_at") @db.Timestamptz(6)
+  /// #357 — why THIS run's ticket is escalated right now. Set by `escalateFraud`, cleared by
+  /// `deescalate`; null means "not under escalation", never "escalated for an unrecorded reason".
+  /// The reason was previously only in `audit_logs.metadata`, which the reports and the review
+  /// queue cannot join — the one column a reviewer needs was the one place they could not read.
+  /// The audit log keeps the full history of both transitions; this column is the live verdict.
+  escalationReason        String?        @map("escalation_reason")
   createdAt               DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt               DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 

@@ -211,6 +211,7 @@ describe('#178 — terminal closure clears the assignment', () => {
     await request(app.getHttpServer())
       .post(`/api/verification/${ticketId}/mark-auto-recovery`)
       .set('Authorization', `Bearer ${ohToken}`)
+      .send({ reason: 'device recovered on its own' }) // #357 — the reason is mandatory
       .expect(201);
 
     const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });

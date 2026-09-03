@@ -76,6 +76,15 @@ export interface FraudFlagView {
   firstPingDistanceMeters: number | null;
   outcome: VerifyOutcome | null;
   outcomeAt: Date | null;
+  /**
+   * #357 — the zone the flagged ticket belongs to. Load-bearing now that the list is clamped: a CSM /
+   * Operations Head reading every zone's flags needs to know which zone each row came from, and a ZM
+   * reading their own can be *shown* the clamp rather than asked to trust it.
+   */
+  zoneId: string;
+  zoneName: string;
+  /** #357 — why this run's ticket is escalated right now; null when it is not under escalation. */
+  escalationReason: string | null;
 }
 
 function badgeFor(pings: number, outcome: VerifyOutcome | null): VerificationBadge {
@@ -210,11 +219,25 @@ export class VerificationQueryService {
     }));
   }
 
-  /** Phase-1 location-mismatch fraud flags for the ZM fraud-flags view. */
-  async fraudFlags(): Promise<FraudFlagView[]> {
+  /**
+   * Phase-1 location-mismatch fraud flags for the ZM fraud-flags view.
+   *
+   * #357 — zone-scoped, the same clamp {@link review} and {@link forTicket} already applied. This read
+   * took no scope at all, so a ZONAL_MANAGER opening their own fraud queue was served every zone's
+   * flags: a privacy leak (fraud suspicion against engineers they do not manage) and, just as bad
+   * operationally, a queue nobody owns — rows a ZM cannot act on, because `escalateFraud` and
+   * `markAutoRecovery` both 404 out of zone. The clamp is deliberately expressed exactly as `review`
+   * expresses it, so "which zones may I see" has one definition in this file rather than three.
+   */
+  async fraudFlags(scope: VerificationReviewScope): Promise<FraudFlagView[]> {
+    const restrictZone = scope.role === 'ZONAL_MANAGER' ? scope.zoneId : null;
     const runs = await this.prisma.verificationRun.findMany({
-      where: { fraudFlag: true },
+      where: {
+        fraudFlag: true,
+        ...(restrictZone != null ? { ticket: { plant: { zoneId: BigInt(restrictZone) } } } : {}),
+      },
       orderBy: { outcomeAt: 'desc' },
+      include: { ticket: { include: { plant: { include: { zone: true } } } } },
     });
     return runs.map((r) => ({
       ticketId: r.ticketId,
@@ -222,6 +245,9 @@ export class VerificationQueryService {
       firstPingDistanceMeters: r.firstPingDistanceMeters == null ? null : Number(r.firstPingDistanceMeters),
       outcome: r.outcome,
       outcomeAt: r.outcomeAt,
+      zoneId: String(r.ticket.plant.zoneId),
+      zoneName: r.ticket.plant.zone.name,
+      escalationReason: r.escalationReason,
     }));
   }
 }

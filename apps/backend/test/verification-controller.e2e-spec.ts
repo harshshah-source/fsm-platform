@@ -208,7 +208,27 @@ describe('verification controller (e2e)', () => {
       .expect(404);
   });
 
-  it('ZM fraud-flags lists a far Phase-1 ping with its distance delta', async () => {
+  it('fraud-flags lists a far Phase-1 ping with its distance delta', async () => {
+    const { ticketId, deviceId } = await makeTicket();
+    await submitForm(ticketId);
+    for (const m of [1, 8, 16]) await addPing(deviceId, at(m), FAR);
+    await verify.runVerification(at(70), { ticketIds: [ticketId] });
+
+    // #357 — read as a CSM. This suite's tickets live in a freshly created zone, and the list is now
+    // zone-clamped like its two siblings, so `zm.north` (pinned to the North zone) is deliberately the
+    // wrong caller for a content assertion. The clamp itself is asserted below.
+    const token = await login('csm@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get('/api/verification/fraud-flags')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const flagged = (res.body as Array<{ ticketId: string; firstPingDistanceMeters: number; zoneId: string }>).find((f) => f.ticketId === ticketId);
+    expect(flagged).toBeDefined();
+    expect(flagged!.firstPingDistanceMeters).toBeGreaterThan(500);
+    expect(flagged!.zoneId).toBe(String(zoneId));
+  });
+
+  it('#357 — a ZM outside the ticket zone gets no fraud row (the list is clamped like review/forTicket)', async () => {
     const { ticketId, deviceId } = await makeTicket();
     await submitForm(ticketId);
     for (const m of [1, 8, 16]) await addPing(deviceId, at(m), FAR);
@@ -219,9 +239,10 @@ describe('verification controller (e2e)', () => {
       .get('/api/verification/fraud-flags')
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
-    const flagged = (res.body as Array<{ ticketId: string; firstPingDistanceMeters: number }>).find((f) => f.ticketId === ticketId);
-    expect(flagged).toBeDefined();
-    expect(flagged!.firstPingDistanceMeters).toBeGreaterThan(500);
+    const rows = res.body as Array<{ ticketId: string; zoneId: string }>;
+    expect(rows.some((f) => f.ticketId === ticketId)).toBe(false);
+    // …and not merely "this one row is missing": every row a ZM is handed is their own zone's.
+    expect(rows.every((f) => f.zoneId !== String(zoneId))).toBe(true);
   });
 
   it('forbids an SE from the ZM fraud-flags list', async () => {

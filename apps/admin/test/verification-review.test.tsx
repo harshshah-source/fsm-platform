@@ -90,17 +90,29 @@ describe('Verification Review page (Issue 19)', () => {
     });
   });
 
-  it('marks a partial row as auto-recovery', async () => {
+  /**
+   * #357 made the reason mandatory on this door — marking a ticket CLOSED_AUTO_RECOVERY overrides a
+   * verification verdict, and the backend now 400s an empty body. The button therefore opens the same
+   * reason capture Escalate uses; asserting the reason reaches the wire is what stops the page
+   * regressing to a bare POST that the API rejects.
+   */
+  it('marks a partial row as auto-recovery, with the reason #357 requires', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole('table', { name: /verification review/i });
 
     await user.click(within(screen.getByTestId('vr-row-t-partial')).getByRole('button', { name: /mark auto-recovery/i }));
+
+    const panel = await screen.findByRole('dialog', { name: /mark auto-recovery/i });
+    await user.type(within(panel).getByLabelText(/auto-recovery reason/i), 'device pinged again overnight');
+    await user.click(within(panel).getByRole('button', { name: /mark auto-recovery/i }));
+
     await waitFor(() => {
       const calls = fetchMock.mock.calls.filter(
         ([u, o]) => String(u).includes('/verification/t-partial/mark-auto-recovery') && (o as RequestInit | undefined)?.method === 'POST',
       );
       expect(calls.length).toBe(1);
+      expect(String((calls[0][1] as RequestInit).body)).toContain('device pinged again overnight');
     });
   });
 
