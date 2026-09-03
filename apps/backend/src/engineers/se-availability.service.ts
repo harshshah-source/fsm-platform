@@ -60,11 +60,25 @@ export class SeAvailabilityService {
     private readonly stranded: StrandedWorkEscalationService = new StrandedWorkEscalationService(prisma),
   ) {}
 
+  /**
+   * The order every read of this table takes: **latest window first, and within a window, the last row
+   * written** (#363 AC1).
+   *
+   * `se_availability` is append-only — a manager who got a day wrong does not edit the window, they
+   * write a new one over the same range. Ordered on `windowStart` alone those two rows tie, and which
+   * one Postgres returns first is unspecified: in practice the index hands back the *older* row, so
+   * `currentStatus` (and with it the Recommender's hard filter) kept reading the row that had just been
+   * corrected while {@link listWindows} — the query behind the manager's own screen — showed the
+   * correction on top. The screen and the dispatch decision disagreed, and dispatch won. `id desc` is
+   * the write order, so "the latest write for the day wins" now means one thing across the service.
+   */
+  private static readonly LATEST_FIRST = [{ windowStart: 'desc' }, { id: 'desc' }] as const;
+
   /** The SE's current planning status: the active window's status (else AVAILABLE). */
   async currentStatus(seId: string, now: Date = new Date()): Promise<SeAvailabilityStatus> {
     const row = await this.prisma.seAvailability.findFirst({
       where: { seId, windowStart: { lte: now }, OR: [{ windowEnd: null }, { windowEnd: { gt: now } }] },
-      orderBy: { windowStart: 'desc' },
+      orderBy: [...SeAvailabilityService.LATEST_FIRST],
     });
     return row?.status ?? 'AVAILABLE';
   }
@@ -76,7 +90,7 @@ export class SeAvailabilityService {
   async listWindows(seId: string, limit = 10): Promise<AvailabilityRow[]> {
     const rows = await this.prisma.seAvailability.findMany({
       where: { seId },
-      orderBy: { windowStart: 'desc' },
+      orderBy: [...SeAvailabilityService.LATEST_FIRST],
       take: limit,
     });
     return rows.map((r) => ({
@@ -92,10 +106,10 @@ export class SeAvailabilityService {
   async currentStatusMany(seIds: string[], now: Date = new Date()): Promise<Map<string, SeAvailabilityStatus>> {
     const rows = await this.prisma.seAvailability.findMany({
       where: { seId: { in: seIds }, windowStart: { lte: now }, OR: [{ windowEnd: null }, { windowEnd: { gt: now } }] },
-      orderBy: { windowStart: 'desc' },
+      orderBy: [...SeAvailabilityService.LATEST_FIRST],
     });
     const out = new Map<string, SeAvailabilityStatus>();
-    for (const r of rows) if (!out.has(r.seId)) out.set(r.seId, r.status); // first = latest windowStart
+    for (const r of rows) if (!out.has(r.seId)) out.set(r.seId, r.status); // first = the latest write for the latest window
     return out;
   }
 

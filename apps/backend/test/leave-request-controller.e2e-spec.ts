@@ -8,17 +8,29 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
  * Issue 26 slice 3 — Leave Request HTTP (`/api/leave-requests`). A ZM submits + lists + approves /
- * rejects own-zone leave; reject requires a reason; bad input is 400; unauth is 401. Zone 1 (North)
- * is the seeded ZM's scope. Service-level auth branches are proven in `leave-request-service`.
+ * rejects / revokes own-zone leave; reject and revoke require a reason; bad input is 400; unauth is
+ * 401. Zone 1 (North) is the seeded ZM's scope. Service-level auth branches are proven in
+ * `leave-request-service`.
+ *
+ * #363 — each case files its own window. The spec used to reuse one, which the overlap guard now (
+ * correctly) refuses: an SE cannot hold the same day twice.
  */
 const NS = Date.now();
+
+/** `[day, day+2)` in August 2026 — one case's window, as the wire carries it (full ISO instants). */
+const win = (day: number) => ({
+  windowStart: new Date(Date.UTC(2026, 7, day)).toISOString(),
+  windowEnd: new Date(Date.UTC(2026, 7, day + 2)).toISOString(),
+});
+/** An instant inside `win(day)`. */
+const inside = (day: number) => new Date(Date.UTC(2026, 7, day, 12));
 
 describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let se: string;
   const userIds: string[] = [];
-  /** Leave requests whose #343 audit rows this spec is responsible for cleaning up. */
+  /** Leave requests whose #343 audit rows the audit case asserts over. */
   const auditedRequestIds: string[] = [];
 
   beforeAll(async () => {
@@ -38,9 +50,10 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (auditedRequestIds.length > 0) {
-      await prisma.auditLog.deleteMany({ where: { entityType: 'leave_requests', entityId: { in: auditedRequestIds } } });
-    }
+    const requests = await prisma.leaveRequest.findMany({ where: { seId: { in: userIds } }, select: { id: true } });
+    await prisma.auditLog.deleteMany({
+      where: { entityType: 'leave_requests', entityId: { in: requests.map((r) => String(r.id)) } },
+    });
     await prisma.leaveRequest.deleteMany({ where: { seId: { in: userIds } } });
     await prisma.seAvailability.deleteMany({ where: { seId: { in: userIds } } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: userIds } } });
@@ -52,14 +65,16 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
     const res = await request(app.getHttpServer()).post('/api/auth/login').send({ email, password: 'correct-password' }).expect(200);
     return res.body.accessToken as string;
   };
-  const WIN = { windowStart: '2026-07-10T00:00:00Z', windowEnd: '2026-07-12T00:00:00Z' };
 
   const submit = (token: string, body: Record<string, unknown>) =>
     request(app.getHttpServer()).post('/api/leave-requests').set('Authorization', `Bearer ${token}`).send(body);
 
+  const decide = (token: string, id: string, action: 'approve' | 'reject' | 'revoke', body?: Record<string, unknown>) =>
+    request(app.getHttpServer()).post(`/api/leave-requests/${id}/${action}`).set('Authorization', `Bearer ${token}`).send(body ?? {});
+
   it('a ZM submits an own-zone leave request (201, PENDING)', async () => {
     const token = await login('zm.north@fsm.test');
-    const res = await submit(token, { seId: se, type: 'ON_LEAVE', ...WIN, reason: 'family' }).expect(201);
+    const res = await submit(token, { seId: se, type: 'ON_LEAVE', ...win(1), reason: 'family' }).expect(201);
     expect(res.body.result).toBe('OK');
     const row = await prisma.leaveRequest.findUniqueOrThrow({ where: { id: BigInt(res.body.id) } });
     expect(row.status).toBe('PENDING');
@@ -67,15 +82,12 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
 
   it('lists leave requests for the ZM and approves one', async () => {
     const token = await login('zm.north@fsm.test');
-    const sub = await submit(token, { seId: se, type: 'ON_LEAVE', ...WIN }).expect(201);
+    const sub = await submit(token, { seId: se, type: 'ON_LEAVE', ...win(4) }).expect(201);
 
     const listed = await request(app.getHttpServer()).get('/api/leave-requests').set('Authorization', `Bearer ${token}`).expect(200);
     expect(listed.body.some((r: { id: string }) => r.id === sub.body.id)).toBe(true);
 
-    await request(app.getHttpServer())
-      .post(`/api/leave-requests/${sub.body.id}/approve`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
+    await decide(token, sub.body.id, 'approve').expect(200);
     const row = await prisma.leaveRequest.findUniqueOrThrow({ where: { id: BigInt(sub.body.id) } });
     expect(row.status).toBe('APPROVED');
     expect(row.availabilityId).not.toBeNull();
@@ -83,13 +95,9 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
 
   it('reject requires a reason (400 without, 200 with)', async () => {
     const token = await login('zm.north@fsm.test');
-    const sub = await submit(token, { seId: se, type: 'WEEKLY_OFF', ...WIN }).expect(201);
-    await request(app.getHttpServer()).post(`/api/leave-requests/${sub.body.id}/reject`).set('Authorization', `Bearer ${token}`).send({}).expect(400);
-    await request(app.getHttpServer())
-      .post(`/api/leave-requests/${sub.body.id}/reject`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ reason: 'coverage gap' })
-      .expect(200);
+    const sub = await submit(token, { seId: se, type: 'WEEKLY_OFF', ...win(7) }).expect(201);
+    await decide(token, sub.body.id, 'reject').expect(400);
+    await decide(token, sub.body.id, 'reject', { reason: 'coverage gap' }).expect(200);
   });
 
   /**
@@ -102,20 +110,13 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
   it('AC1/AC2 — approve and reject each write one audit row keyed on the request, and reject carries the reason', async () => {
     const token = await login('zm.north@fsm.test');
 
-    const approved = await submit(token, { seId: se, type: 'ON_LEAVE', ...WIN, reason: 'wedding' }).expect(201);
+    const approved = await submit(token, { seId: se, type: 'ON_LEAVE', ...win(10), reason: 'wedding' }).expect(201);
     auditedRequestIds.push(approved.body.id);
-    await request(app.getHttpServer())
-      .post(`/api/leave-requests/${approved.body.id}/approve`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
+    await decide(token, approved.body.id, 'approve').expect(200);
 
-    const rejected = await submit(token, { seId: se, type: 'WEEKLY_OFF', ...WIN }).expect(201);
+    const rejected = await submit(token, { seId: se, type: 'WEEKLY_OFF', ...win(13) }).expect(201);
     auditedRequestIds.push(rejected.body.id);
-    await request(app.getHttpServer())
-      .post(`/api/leave-requests/${rejected.body.id}/reject`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ reason: 'zone would be uncovered' })
-      .expect(200);
+    await decide(token, rejected.body.id, 'reject', { reason: 'zone would be uncovered' }).expect(200);
 
     const rows = await prisma.auditLog.findMany({
       where: { entityType: 'leave_requests', entityId: { in: auditedRequestIds } },
@@ -135,9 +136,62 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
     expect(rejectRow?.metadata).toMatchObject({ seId: se, type: 'WEEKLY_OFF', reason: 'zone would be uncovered' });
   });
 
+  /**
+   * #363 AC3 — the wire half of the overlap guard. 409 rather than 400: the request is well-formed, it
+   * conflicts with a day the SE has already claimed, and `conflictId` names the row that holds it so
+   * the manager can open it instead of guessing.
+   */
+  it('#363 AC3 — an overlapping submit is 409 OVERLAP and names the conflicting request', async () => {
+    const token = await login('zm.north@fsm.test');
+    const first = await submit(token, { seId: se, type: 'ON_LEAVE', ...win(16) }).expect(201);
+
+    const clash = await submit(token, { seId: se, type: 'ON_LEAVE', ...win(17) }).expect(409);
+    expect(clash.body.code).toBe('OVERLAP');
+    expect(clash.body.conflictId).toBe(first.body.id);
+
+    await submit(token, { seId: se, type: 'ON_LEAVE', ...win(18) }).expect(201); // adjacent, end-exclusive
+  });
+
+  /**
+   * #363 AC2/AC4 — the revoke route. Leave approved by mistake used to be terminal: the availability
+   * window stayed on the board and the engineer was invisible to dispatch for the rest of it. The
+   * reason is mandatory for the same reason a rejection's is — this is the write that puts an engineer
+   * back on a day a manager had already taken them off.
+   */
+  it('#363 AC2/AC4 — revoke needs a reason, returns the day, audits LEAVE_REVOKED and reads back as REVOKED', async () => {
+    const token = await login('zm.north@fsm.test');
+    const sub = await submit(token, { seId: se, type: 'ON_LEAVE', ...win(21), reason: 'family' }).expect(201);
+    await decide(token, sub.body.id, 'approve').expect(200);
+
+    const availability = app.get(SeAvailabilityService);
+    expect(await availability.currentStatus(se, inside(22))).toBe('ON_LEAVE');
+
+    await decide(token, sub.body.id, 'revoke').expect(400); // no reason
+    await decide(token, sub.body.id, 'revoke', { reason: 'SE is working after all' }).expect(200);
+
+    expect(await availability.currentStatus(se, inside(22))).toBe('AVAILABLE');
+
+    const listed = await request(app.getHttpServer()).get('/api/leave-requests').set('Authorization', `Bearer ${token}`).expect(200);
+    expect(listed.body.find((r: { id: string }) => r.id === sub.body.id)).toMatchObject({
+      status: 'REVOKED',
+      decisionReason: 'SE is working after all',
+    });
+
+    const audit = await prisma.auditLog.findMany({
+      where: { entityType: 'leave_requests', entityId: sub.body.id, action: 'LEAVE_REVOKED' },
+    });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.metadata).toMatchObject({ seId: se, type: 'ON_LEAVE', reason: 'SE is working after all' });
+
+    // A request that holds no availability window cannot be revoked.
+    const pending = await submit(token, { seId: se, type: 'ON_LEAVE', ...win(24) }).expect(201);
+    const notApproved = await decide(token, pending.body.id, 'revoke', { reason: 'too early' }).expect(400);
+    expect(notApproved.body.code).toBe('LEAVE_NOT_APPROVED');
+  });
+
   it('rejects an invalid leave type (400)', async () => {
     const token = await login('zm.north@fsm.test');
-    await submit(token, { seId: se, type: 'NOPE', ...WIN }).expect(400);
+    await submit(token, { seId: se, type: 'NOPE', ...win(27) }).expect(400);
   });
 
   /**
@@ -149,10 +203,7 @@ describe('Issue 26 slice 3 — Leave Request HTTP (e2e)', () => {
   it('B8 — a single-day leave covers that whole IST day (00:15 and 23:45 IST), and stops at the next IST midnight', async () => {
     const token = await login('zm.north@fsm.test');
     const sub = await submit(token, { seId: se, type: 'ON_LEAVE', windowStart: '2026-09-14', windowEnd: '2026-09-14' }).expect(201);
-    await request(app.getHttpServer())
-      .post(`/api/leave-requests/${sub.body.id}/approve`)
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
+    await decide(token, sub.body.id, 'approve').expect(200);
 
     const availability = app.get(SeAvailabilityService);
     // 00:15 IST on the 14th — the instant the old UTC-midnight window missed entirely.

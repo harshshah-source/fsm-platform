@@ -1,5 +1,5 @@
 # 363 — Leave integrity: revoke, tie-break, overlap guard
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/363-leave-integrity-revoke-tiebreak-overlap.md
 Type: AFK
 Wave: 4 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -34,10 +34,18 @@ Wave: 4 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified aga
   test.
 
 ## Acceptance criteria
-- [ ] AC1 — the latest write for a day wins, in both the availability reads and the recommender.
-- [ ] AC2 — revoke returns the day to the recommender within one run.
-- [ ] AC3 — an overlapping submit → 409 `OVERLAP`.
-- [ ] AC4 — all of the above are audited.
+- [x] AC1 — the latest write for a day wins, in both the availability reads and the recommender.
+- [x] AC2 — revoke returns the day to the recommender within one run.
+- [x] AC3 — an overlapping submit → 409 `OVERLAP`.
+- [x] AC4 — all of the above are audited.
+
+## Premise corrections (2026-09-03)
+
+- The admin leave client is `apps/admin/src/api/leaveRequests.ts`, **not** `api/engineers.ts`; the
+  revoke client went there and `api/engineers.ts` was not edited.
+- All **three** availability reads lacked the tie-break (`listWindows` too — the one the manager sees).
+- `leave_request_status` has no `REVOKED` member and the schema is #357's this round, so revoked is a
+  derived status (`APPROVED` + `decision_reason`). Follow-up: add the enum member.
 
 ## Verification
 

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { LeaveRequestService } from '../src/engineers/leave-request.service';
 import { SeAvailabilityService } from '../src/engineers/se-availability.service';
 import { CandidateSelectionService } from '../src/recommender/candidate-selection.service';
 import { RecommenderService } from '../src/recommender/recommender.service';
@@ -98,6 +99,13 @@ describe('Issue 25 slice 4 — Recommender excludes unavailable SEs', () => {
     await prisma.ticketEvent.deleteMany({ where: { ticketId } });
     await prisma.ticket.deleteMany({ where: { ticketId } });
     await prisma.failureCycle.deleteMany({ where: { deviceId } });
+    // #363 — the leave request the revoke case files, and the audit rows keyed on it (#343 approve,
+    // this slice's revoke), which have to go before the request they point at.
+    const requests = await prisma.leaveRequest.findMany({ where: { seId: { in: userIds } }, select: { id: true } });
+    await prisma.auditLog.deleteMany({
+      where: { entityType: 'leave_requests', entityId: { in: requests.map((r) => String(r.id)) } },
+    });
+    await prisma.leaveRequest.deleteMany({ where: { seId: { in: userIds } } });
     await prisma.seAvailability.deleteMany({ where: { seId: { in: userIds } } });
     await prisma.seCoverage.deleteMany({ where: { plantId } });
     await prisma.deviceState.deleteMany({ where: { deviceId } });
@@ -118,6 +126,36 @@ describe('Issue 25 slice 4 — Recommender excludes unavailable SEs', () => {
     const r = await recFor();
     expect(r.status).toBe('SUGGESTED');
     expect(r.seId).toBe(dedicated);
+  });
+
+  /**
+   * #363 AC2 — revoke has to reach dispatch, not just the request row.
+   *
+   * Approved-by-mistake leave was terminal: flipping a status would have left the `se_availability`
+   * window standing, and the Recommender reads the window, not the request. So revoke writes an
+   * `AVAILABLE` window over exactly the leave's range and the tie-break (AC1) makes it the one the
+   * hard filter sees — the same day, the same start instant, the later row. Proven through a real
+   * `runForZone`, because "the day is back" only means anything if the very next run books it.
+   */
+  it('#363 AC2 — revoking approved leave returns the SE to the next run', async () => {
+    const leave = new LeaveRequestService(prisma, availability);
+    const zm = { userId: 'zm-ra-' + NS, role: 'ZONAL_MANAGER', zoneId: Number(zoneId) };
+    const window = { windowStart: new Date('2026-06-21T00:00:00Z'), windowEnd: new Date('2026-06-22T00:00:00Z') };
+
+    const sub = await leave.submit({ seId: dedicated, type: 'ON_LEAVE', ...window, reason: 'wedding' }, zm);
+    if (sub.result !== 'OK') throw new Error(`submit failed: ${sub.result}`);
+    expect((await leave.approve(sub.id, zm, NOW)).result).toBe('OK');
+
+    await rec.runForZone(zoneId, { now: NOW });
+    expect((await recFor()).status).toBe('UNASSIGNABLE');
+
+    const revoked = await leave.revoke(sub.id, 'wedding postponed, the SE is working', zm, NOW);
+    expect(revoked.result).toBe('OK');
+
+    await rec.runForZone(zoneId, { now: NOW });
+    const back = await recFor();
+    expect(back.status).toBe('SUGGESTED');
+    expect(back.seId).toBe(dedicated);
   });
 
   it('excludes the SE while an ON_LEAVE window is active → ticket UNASSIGNABLE', async () => {

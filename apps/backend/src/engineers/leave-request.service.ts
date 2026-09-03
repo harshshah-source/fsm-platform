@@ -29,7 +29,9 @@ export type LeaveOutcome =
   | { result: 'OK'; id: string }
   | { result: 'FORBIDDEN' }
   | { result: 'NOT_FOUND' }
-  | { result: 'INVALID_STATE' };
+  | { result: 'INVALID_STATE' }
+  /** #363 — the window collides with one the SE already holds; `conflictId` is the request holding it. */
+  | { result: 'OVERLAP'; conflictId: string };
 
 export interface LeaveRequestRow {
   id: string;
@@ -55,6 +57,11 @@ export interface LeaveScope {
  * excludes the SE, AC Issue 25) and links it via `availability_id` — or rejects with a mandatory
  * reason. A rejected request is terminal; the SE revises + resubmits as a new row. Notifications
  * (ZM-on-submit, SE-on-decision) are the Issue 03 seam.
+ *
+ * #363 closed the three ways this workflow could put an engineer on the board who was not available,
+ * or off it when they were: an approval can now be {@link revoke}d, a window an SE already holds
+ * refuses a second {@link submit}, and every read of the availability it writes takes the same
+ * latest-write-wins order (`SeAvailabilityService`).
  */
 @Injectable()
 export class LeaveRequestService {
@@ -86,6 +93,9 @@ export class LeaveRequestService {
     const engineer = await this.prisma.engineerMaster.findUnique({ where: { engineerId: input.seId } });
     if (!engineer) return { result: 'NOT_FOUND' };
     if (!this.canActFor(engineer.zoneId, input.seId, actor)) return { result: 'FORBIDDEN' };
+
+    const clash = await this.overlapping(input);
+    if (clash) return { result: 'OVERLAP', conflictId: String(clash.id) };
 
     const created = await this.prisma.leaveRequest.create({
       data: {
@@ -200,6 +210,114 @@ export class LeaveRequestService {
     return { result: 'OK', id };
   }
 
+  /**
+   * #363 AC2 — undo an approval that should not have happened.
+   *
+   * The three-line version of the bug: approval was terminal. A ZM who approved the wrong request, or
+   * whose SE cancelled their plans, had no way back — the request stayed APPROVED and, far worse, the
+   * `se_availability` window it wrote stayed on the board, so an engineer standing in the depot was
+   * invisible to the Recommender for the rest of the window and the dispatcher found out when nobody
+   * turned up.
+   *
+   * Revoke **writes an `AVAILABLE` window over exactly the leave's range** rather than deleting the
+   * leave window. Two reasons. Availability is append-only everywhere else in this service, and a
+   * decision that erases its own evidence is the one an operator can never reconstruct; and the write
+   * that gives the day back is then the same kind of row as the write that took it, so it wins by
+   * {@link SeAvailabilityService} tie-break (AC1) — same start instant, later id — and the very next
+   * Recommender run books the engineer again. Nothing here reassigns work: giving the day back is the
+   * decision, redistributing it stays the ZM's (#282 R4).
+   *
+   * **Revoked is a derived status.** `leave_request_status` has no `REVOKED` member and the schema is
+   * owned by another slice this round, so the row stays APPROVED and carries the revocation in
+   * `decision_reason` (the same column a rejection uses, and the same mandatory-reason rule). Every
+   * read maps it to `REVOKED` via {@link isRevoked}, so no caller has to know that — but the enum
+   * member is a follow-up worth taking.
+   *
+   * The parameter order is {@link reject}'s — `(id, reason, actor)`, the plan wrote `(id, actor,
+   * reason)` — because a mandatory-reason decision on this service should read the same way twice.
+   */
+  async revoke(id: string, reason: string, actor: LeaveActor, now: Date = new Date()): Promise<LeaveOutcome> {
+    const req = await this.prisma.leaveRequest.findUnique({
+      where: { id: BigInt(id) },
+      include: { engineer: true },
+    });
+    if (!req) return { result: 'NOT_FOUND' };
+    if (!this.isManagerFor(req.engineer.zoneId, actor)) return { result: 'FORBIDDEN' };
+    // Only an approval holds a day, and only once: a PENDING request has no window to give back and a
+    // second revoke is not a second decision.
+    if (req.status !== 'APPROVED' || this.isRevoked(req)) return { result: 'INVALID_STATE' };
+
+    const avail = await this.availability.setAvailability(
+      { seId: req.seId, status: 'AVAILABLE', windowStart: req.windowStart, windowEnd: req.windowEnd, reason },
+      { userId: actor.userId, role: actor.role, zoneId: actor.zoneId, actedAsRole: actor.actedAsRole ?? null },
+      now,
+    );
+    if (avail.result !== 'OK') return avail.result === 'FORBIDDEN' ? { result: 'FORBIDDEN' } : { result: 'NOT_FOUND' };
+
+    // #343's shape, unchanged: the decision and its audit row commit together. Both availability ids
+    // are on the row because the question this answers is "who put this engineer back on the day, and
+    // which window did that replace" — the revoked window is not deleted, it is superseded.
+    await this.audit.withAudit(
+      {
+        ...this.auditFields(actor),
+        action: 'LEAVE_REVOKED',
+        entityType: 'leave_requests',
+        entityId: String(req.id),
+        metadata: {
+          seId: req.seId,
+          type: req.type,
+          windowStart: req.windowStart.toISOString(),
+          windowEnd: req.windowEnd.toISOString(),
+          reason,
+          revokedAvailabilityId: req.availabilityId != null ? String(req.availabilityId) : null,
+          availabilityId: String(avail.id),
+        },
+      },
+      (tx) =>
+        tx.leaveRequest.update({
+          where: { id: req.id },
+          data: {
+            decisionReason: reason,
+            decidedBy: actor.userId.length === 36 ? actor.userId : null,
+            decidedByRole: actor.actedAsRole ?? actor.role,
+            decidedAt: new Date(),
+          },
+        }),
+    );
+    return { result: 'OK', id };
+  }
+
+  /**
+   * #363 AC3 — does this window collide with a day the SE already holds?
+   *
+   * `submit` accepted overlapping and duplicate PENDING windows, so the same absence could be filed
+   * twice and approved twice: two availability windows and two audit trails for one absence, and a
+   * manager reading the queue with no way to tell which row the SE meant. Half-open intervals, so
+   * `[10,12)` and `[12,14)` touch without colliding — the same end-exclusive convention the active
+   * window predicate and #204's IST day-bounds use.
+   *
+   * Only **live** rows hold a day: PENDING (awaiting a decision) and APPROVED (holding a window). A
+   * REJECTED request holds nothing — blocking on it would refuse the very revision the SE was asked
+   * for — and neither does a revoked one, whose day has already been given back.
+   */
+  private overlapping(input: SubmitLeaveInput) {
+    return this.prisma.leaveRequest.findFirst({
+      where: {
+        seId: input.seId,
+        windowStart: { lt: input.windowEnd },
+        windowEnd: { gt: input.windowStart },
+        OR: [{ status: 'PENDING' }, { status: 'APPROVED', decisionReason: null }],
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+  }
+
+  /** An APPROVED request that carries a decision reason has been revoked (see {@link revoke}). */
+  private isRevoked(r: { status: string; decisionReason: string | null }): boolean {
+    return r.status === 'APPROVED' && r.decisionReason !== null;
+  }
+
   /** Zone-scoped leave requests (ZM own-zone; CSM / Operations Head all), newest first. */
   async listForZone(scope: LeaveScope): Promise<LeaveRequestRow[]> {
     const rows = await this.prisma.leaveRequest.findMany({
@@ -233,7 +351,9 @@ export class LeaveRequestService {
       seId: r.seId,
       seName: r.engineer.user.name,
       type: r.type,
-      status: r.status,
+      // #363 — `REVOKED` is derived, not stored (see {@link revoke}). Every reader of a leave row gets
+      // it, so neither the ZM's queue nor the SE's own list shows approved leave nobody is taking.
+      status: this.isRevoked(r) ? 'REVOKED' : r.status,
       windowStart: r.windowStart.toISOString(),
       windowEnd: r.windowEnd.toISOString(),
       reason: r.reason,
