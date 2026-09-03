@@ -25,7 +25,7 @@ section as a quick reference.
 6. [Red and amber banners: things that need you](#6-red-and-amber-banners-things-that-need-you)
 7. [The left column: your engineers](#7-the-left-column-your-engineers)
 8. [The middle: the plan itself](#8-the-middle-the-plan-itself)
-9. [Reading the little boxes](#9-reading-the-little-boxes)
+9. [Reading the cards](#9-reading-the-cards)
 10. [The right column: work that did not get planned](#10-the-right-column-work-that-did-not-get-planned)
 11. [Clicking something: the detail panel](#11-clicking-something-the-detail-panel)
 12. [Changing the plan](#12-changing-the-plan)
@@ -235,7 +235,7 @@ Scheduler Console  [Zone ▾]  ‹Prev [TODAY] Next›  [Day|Week]  [Find ticket
 | **⚠ 6 need attention** | Things across the zone waiting on a manager. Click to see the list. |
 | **Assign work** | Hand out work the planner could not place. See §[13](#13-handing-out-unassigned-work). |
 | **Run facts ▾** | The full set of counts from today's run, plus a refresh button. |
-| **?** | What the little boxes mean. Same as §[9](#9-reading-the-little-boxes). |
+| **?** | What the cards mean. Same as §[9](#9-reading-the-cards). |
 
 Two useful keyboard shortcuts: **`/`** jumps to the search box, **`Esc`** backs out one step. Nothing
 you can do with the keyboard changes any data — that is deliberate.
@@ -286,18 +286,23 @@ The banner shows six lines and then a count. They all get resolved the same way.
 
 ## 7. The left column: your engineers
 
-Everyone on this zone's roster today, whether or not they have work.
+Everyone on this zone's roster today, whether or not they have work. It is the first column of the
+board itself — there is one list of engineers on this screen, not two.
 
-Each row shows:
+Each row reads top to bottom, in this order:
 
+- **A circle with their initials**
 - **Name** — click it to see their details
-- **A load badge like `3/25`** — three stops today, twenty-five is their limit. **It turns amber when
-  they are at or over their limit.**
-- **Their coverage type** — dedicated, multi-plant or floating
-- **`2 stops · 7 devices`**
+- **`2 stops · 7 devices`** — what they are carrying today
+- **Their coverage type** (dedicated, multi-plant or floating) and **a load badge like `3/25`**, side
+  by side — three stops today, twenty-five is their limit. **The badge turns amber when they are at
+  or over their limit.**
 - **Their availability** — shown in amber if they are on leave or off shift
 
-Two things worth knowing:
+The column is deliberately narrow. Everything above it is stacked rather than spread across a row so
+that the space goes to the plan instead, which is the part you actually work in.
+
+Three things worth knowing:
 
 **That load number is the real one.** It is the same number the planner itself checks before deciding
 whether someone can take more work. It is not a separate estimate that might disagree.
@@ -305,6 +310,10 @@ whether someone can take more work. It is not a separate estimate that might dis
 **An engineer going on leave does not empty their plan.** Their work stays theirs until a human moves
 it. The screen shows both facts: they are unavailable, *and* they are still holding this work. Moving
 it is your call.
+
+**You can drop work straight onto a name.** Dragging a device onto an engineer's row here means the
+same thing as dropping it into their cell for today, and opens the same box asking you to confirm.
+Dropping it on the engineer who already has it does nothing, on purpose.
 
 ---
 
@@ -316,21 +325,41 @@ engineer's work for that day.
 Today's column is the detailed one. A cell looks like this:
 
 ```
-1  Kotputli Works
-   ●a1b2c3d4  CRIT       ●e5f6a7b8
+1  Kotputli Works                          adjusted
+   ┃ 869645080787056
+   ┃ MH-12-AB-3456   Northbound Cement
+   ┃ Sharma Logistics   Inactive 18h
+   ┃ STARTED
+   ┃ 869645080755293
+   ┃ MH-14-ZZ-9999   Northbound Cement
+   ┃ Rao Transport   Inactive 31h
+   ┃ AGED  CRIT
 2  Neem Works
-   ●c9d0e1f2  RET  CHR ×4
+   ┃ 862491078632476
+   ┃ MH-09-PP-1122   Southbound Cement
+   ┃ Bala Carriers   Inactive 9h
+   ┃ UNTOUCHED  RET  CHR ×4
 ```
 
 - **`1` and `2`** are the order of visits.
 - **`Kotputli Works`** is the site — the stop. Click it to act on the whole visit at once.
-- **The little boxes underneath** are the individual devices. Click one to act on just that device.
-- **`adjusted`** next to a site name means a person has already changed it.
+- **The cards underneath** are the individual devices. Click one to act on just that device. Each card
+  names the device, its vehicle, the company, the transporter, and how long the device has been
+  silent.
+- **The coloured bar down the left of a card** says whether anybody is working on it. Section 9.
+- **`adjusted`** next to a site name means a person has already changed **that visit** — a device
+  taken off it, moved, or reassigned. It never means "this device was modified"; the device that left
+  is genuinely gone from the visit, and is drawn wherever it went.
 - **An amber cell** means that engineer is at or over their limit for that day.
 - **`no stops — available`** means exactly that: free, and able to take work.
 
-Only the day you are focused on shows the individual boxes. The days either side collapse to
-`5 devices`, which is enough to see the shape of the week without drowning in it.
+Only the day you are focused on shows the cards. The days either side collapse to `5 devices`, which
+is enough to see the shape of the week without drowning in it.
+
+**Days that are not today show less, on purpose.** A past day shows counts only — the screen will not
+dress yesterday up with today's live facts. A future day you have focused on, where work is already
+committed, shows the device, vehicle, company and transporter, but **no coloured bar**: nobody has
+started work that has not begun yet, and colouring it would be inventing a fact.
 
 At the very bottom there may be a row called **Not on today's roster** — work on other days belonging
 to engineers who are not working in this zone today. It is there so a day does not look emptier than
@@ -338,10 +367,68 @@ it really is.
 
 ---
 
-## 9. Reading the little boxes
+## 9. Reading the cards
 
-**This is the most useful page in this guide.** Each little box is one device. Its appearance tells
-you four separate things at once, and they never interfere with each other.
+**This is the most useful page in this guide.** Each card is one device. Its appearance tells you
+five separate things at once, and they never interfere with each other.
+
+A card names the unit the way you would describe it on the phone — three lines, and whatever else
+matters down the right-hand edge:
+
+```
+● DEVICE  860141073218373
+  VEHICLE NL01AJ2655                    AGED
+  RIMJHIM TRANSPORT COMPANY   Inactive 7455h
+```
+
+The third line is the **transporter**. It has no label because the label would have eaten the name;
+hover it and the tooltip says both.
+
+**Cards sit side by side, not one per row** — two or three across depending on how wide the day
+column is, so a twenty-five device engineer fits on one screen instead of a scroll.
+
+The **plant is not on the card**: it is the heading the cards sit under, and repeating it on every
+card cost the width the names now use. The **company** is not on the card either — click a card and
+the panel underneath names it. A long transporter name is shortened with a `…`. If we could not
+resolve the device number for a ticket you will see an eight-character code in its place — that is
+the ticket's own id, shown only because there was nothing better to show.
+
+### The card's colour: is anybody on it?
+
+**The whole card is tinted**, with a stronger bar down its left edge and the word spelled out:
+
+| Card | Word | Means |
+|---|---|---|
+| **Green** | `STARTED` | An engineer has **started troubleshooting** this device. |
+| **Red** | `UNTOUCHED` | Nobody has started yet, and it has not been waiting long. |
+| **Red** | `AGED` | Nobody has started, and it has been assigned longer than your threshold. |
+
+This is meant to be readable without reading: a cell of cards should tell you at a glance how much of
+that engineer's day is under way and how much is still sitting.
+
+**Two colours, three words.** The colour answers one question — *is anybody on this?* — so it has two
+answers, and aged work is not a third one: it is untouched work with a clock on it. Red tells you
+nobody has started; the word tells you whether that has gone on too long. Scan the colour to see how
+much of the day is untouched, read the word to see which of it is late.
+
+Three things to hold on to:
+
+**Assigned is not started.** A device sitting on somebody's plan is red until that engineer actually
+begins work on site. The green bar means a person is doing something about it right now — not that
+the planner found somebody for it.
+
+**Arriving is not starting either.** An engineer who has reached the site but not begun work still
+shows red. The bar answers "is the repair under way", not "where is my engineer".
+
+**`Inactive 18h` is a different clock, and it is the one people confuse.** That is how long the
+*device* has been silent — the reason the ticket exists at all. The bar is about how long the *job*
+has gone untouched since you assigned it. A device that has been quiet for forty hours but was only
+handed to an engineer ten minutes ago is **red, not amber**: the fleet problem is old, your dispatch
+decision is not, and nobody is late yet.
+
+The threshold that turns red into amber is a setting (`assigned_untouched_aging_hours`). Hover the
+word and the screen tells you what it currently is. **It ships at 4 hours, which is a starting guess
+and nothing more** — it is meant to be moved once you have used the board for a week.
 
 ### The border: who put this here
 
@@ -367,12 +454,34 @@ screen refuses to guess.
 ### The cell colour: capacity
 
 **Amber background** = this engineer is at or over their limit that day. It colours the whole cell,
-not individual boxes, because being overloaded is a fact about the person's day rather than about one
+not individual cards, because being overloaded is a fact about the person's day rather than about one
 device.
+
+> **Known gap (found 2026-09-01):** this amber is not actually painting — the colour it asks for was
+> never defined, so the cell stays white. The load badge in the left column still turns amber, so the
+> fact is on screen; the cell behind the work is not carrying it yet. Filed as #296, which needs one
+> decision from you: now that an *aged* card is itself pale yellow, an amber cell behind it would be
+> hard to tell apart, so capacity may want a different treatment rather than the original amber.
+
+### Why the colours never collide
+
+You will notice amber appears twice on this screen and red appears twice. They are never in the same
+place, and that is the whole design:
+
+| Where | Colour | Means |
+|---|---|---|
+| A **cell's background**, behind the cards | Amber | The engineer is at or over their limit |
+| A **`CRIT` label** on a card | Red | The device's SLA is critical |
+| **A card itself** — its tint and left bar | Red / green | Whether anybody has started this job |
+
+One position, one meaning. If you are looking at a card you are reading progress; if you are looking
+at the cell behind the cards you are reading capacity; if you are reading a label you are reading
+urgency. And every one of them also says its meaning in words, so none of it depends on being able to
+tell the colours apart.
 
 ### Selecting
 
-Clicking a box puts a **ring** around it. The ring is only ever a selection marker — it never changes
+Clicking a card puts a **ring** around it. The ring is only ever a selection marker — it never changes
 the border, because the border is already saying who put the work there.
 
 ---
@@ -489,7 +598,7 @@ works differently is handing out unassigned work — §[13](#13-handing-out-unas
 
 | If the device is… | You can |
 |---|---|
-| On someone's plan | **Reassign** (give it to someone else) · **Defer** (do it another day) · **Remove** (take it off the plan) |
+| On someone's plan | **Reassign** (give it to someone else, today) · **Move to another day** (same work, a different day — and whoever you name) · **Defer** (take it off the plan until a date, owner undecided) · **Remove** (take it off the plan) |
 | On nobody's plan | **Assign** (give it to someone) · **Hold** (park it until a date) |
 | Parked | **Release hold** (put it back in the running) |
 
@@ -560,19 +669,84 @@ you are over something you can pick up.
 > filled in. You still get the preview, you still have to give a reason, and you still have to confirm.
 > The item does not visibly move until the change is actually saved.
 
+The dialogue opens in the details panel underneath the board, and **the page scrolls down to it for
+you** when you let go — otherwise the drop looks like it did nothing. `Esc` or Cancel closes it again
+with nothing changed.
+
+### Moving work to another day, and how that differs from postponing it
+
+**Drag a device onto a later day and it moves there.** It stays that engineer's job — you have simply
+said *when*. Drop it on a **different** engineer's cell on a later day and you have said *when* and
+*who* in one go; that is one decision and it asks you once. The dialogue restates it back to you
+before you confirm:
+
+```
+Day       Fri, 1 Sept  →  Sat, 2 Sept
+Engineer  Ravi Kumar   →  Ravi Kumar (unchanged)
+```
+
+When you confirm, **the board takes you to the day you moved it to**, and the device is there in that
+engineer's box, marked `⇥` so you can see it was your decision rather than the engine's. It is real
+work on a real plan from that moment: the next morning's run will not quietly hand it to somebody
+else, because it already belongs to somebody.
+
+The one thing it will not let you do is move work to a day that has already been. You will be told to
+pick another date — there is no confirming through that one, because the engineer either did that day
+or did not, and nothing you type afterwards changes it.
+
+> **This used to behave differently, and if you remember it doing something odd, this is why.**
+> Dragging onto a later day used to *postpone* the device instead of moving it — which took it off
+> everybody's plan and left the question of who would do it to that day's run. So the device vanished
+> from today, the site visit it left behind was flagged **adjusted**, and nothing appeared on the day
+> you had aimed at. Nothing was lost and nothing was ignored; the gesture simply meant something other
+> than what it looked like. It now means what it looks like.
+
+**Postponing is still there, and it is a different decision.** Use **Defer** — the button in the
+details panel — when you want the work *off* the plan until a date and you are **not** saying who
+should do it. That is a real and useful thing to say, and it is not what dragging onto a day says.
+The short version:
+
+| | **Move to another day** | **Defer** |
+|---|---|---|
+| Who does it | You say. It stays assigned. | Nobody yet — that day's run decides. |
+| Where it shows | In that engineer's box on that day | In the **Returning** row, under the day it comes back |
+| What it is | A plan | A hold |
+
+**Where postponed work goes.** When you defer something, it leaves today's board — and the bottom row
+of the board, **Returning**, shows it on the day it comes back. The count is on every day column; open
+that day to see which devices. Two things it deliberately does *not* say: it does not put the device
+back in that engineer's box, because a postponed device belongs to **nobody** until that day's run
+decides; and where the forecast for that day has loaded, it warns you how many of them **still have no
+engineer** — a postpone that will simply fail again is worth knowing about today, not tomorrow. On the
+forecast itself, a device you deferred is marked `↩` so you can tell your own decision apart from the
+engine's guesses.
+
+**Your name and your reason travel with the decision.** A postponed device in the Held list now reads
+*"deferred by <you> — <the reason you typed>"*, and the same reason appears against the change in the
+Changes tab. That is the point of the reason box: the next person to look at this device should be able
+to read why it is not being done today without asking you. Anything postponed **before 31 August 2026**
+shows your name but no reason — there was nowhere to keep the words back then, and inventing one after
+the fact would be worse than the gap.
+
 **Where you can drop things:**
 
 | Drag | Onto | Opens |
 |---|---|---|
 | a device | **an engineer's name in the left-hand list** | Reassign |
 | a device | that engineer's cell in **today's** column | Reassign (same thing, other door) |
-| a device | the **same** engineer on a **later day** | Defer — "do it then, not today" |
+| a device | **any** engineer on a **later day** | Move to another day — "this person, that day" |
 | a device | the work column on the right | Remove |
 | a whole site visit | another engineer, left list or today's column | Swap engineer |
 | an unassigned row from the right | an engineer | Assign |
 
 The left-hand engineer list is usually the easiest target — it is one column, always visible, and does
 not require finding the right cell in the grid.
+
+**What "adjusted" on a site visit means.** It means a person changed that visit today — took a device
+off it, postponed one, handed one to somebody else, or moved one to another day. It does **not** mean
+the device you moved is still sitting there in some altered form; whatever left has gone wherever you
+sent it. If every device at a site leaves, the visit disappears from the board altogether rather than
+lingering as an empty row.
 
 **Anything else simply will not accept the drop.** As you drag, every place you *can* drop lights up
 with a dashed outline; anywhere else shows the "no" cursor. Nothing bad happens if you let go over the
@@ -739,7 +913,7 @@ to it saying something different.
 1. Open **Today's Dispatch**, pick your zone if asked.
 2. **Read the banners first.** An amber failure notice or a red critical banner beats everything below.
 3. Check **⚠ n need attention** and open it if the number is not zero.
-4. Scan the board for **amber cells** (overloaded people) and **dashed boxes** (changes somebody made
+4. Scan the board for **amber cells** (overloaded people) and **dashed cards** (changes somebody made
    that you may not know about).
 5. Open the right column's **Unassigned** tab to see what could not be placed.
 

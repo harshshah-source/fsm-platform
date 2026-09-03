@@ -1,5 +1,22 @@
 # Scheduler Console — UI Composition Correction
 
+> ### ⚠️ PARTIALLY SUPERSEDED 2026-09-01 by [#295](../../.scratch/fsm-platform-v1/issues/295-scheduler-console-dispatch-board.md)
+>
+> The operator directed the Console be taken further, from an assignment table to a
+> **dispatcher-readable dispatch board**. Three rulings below no longer describe the built product:
+>
+> | This document says | Now |
+> |---|---|
+> | §1.2 / §14 — the **People rail** is one of the three vertical regions | **Deleted.** It rendered the same `engineers[]` array the board's first column renders — one array, one fetch, drawn twice. Its identity, coverage pill, workload line and **drop target** moved into `BoardGrid.EngineerRow`, which is now the single engineer representation. The board is two regions and a contextual Inspector. |
+> | §7.3 / D11 — the ticket unit is a **chip** (`ticketId.slice(0, 8)`) | **A work card.** Device, vehicle, plant, company, transporter and device inactivity. `WorkChip` remains for the Work Pool and compact renderings. |
+> | §7.3 — chip **fill** is reserved pending the day-scoped read (D13) | Still reserved; fill was **not** taken. The new action status uses a channel nothing else occupies — the card's left rail plus its word, in the `--color-action-*` palette. The four existing channels (provenance border, urgency/RET/CHR tokens, capacity cell) are unchanged. |
+>
+> Everything else here stands, including the day axis, the three honest sources per column, the
+> single `dropAction` predicate, drag-as-initiator (D10), and "each column renders at the fidelity
+> its source can honestly answer" (§6.3) — which is the rule #295's per-mood card variants follow.
+>
+> **This document is history from here on.** Current state is `docs/SYSTEM-STATE-2026-07.md`.
+
 **Status:** ✅ **APPROVED AND IMPLEMENTED 2026-08-28.** The operator's "Final Product Direction and
 Implementation" instruction of 2026-08-28 (the Engineer × Day scheduling-grid composition) approved
 this plan, and stages **A–D** were built the same day: the three-region shell + top bar (A), the

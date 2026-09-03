@@ -182,6 +182,16 @@ stats.devices.observed = sourceDeviceIds.size;
 > sets `is_inactive = (NOT departed AND hours >= threshold)` and nulls `sla_bucket` for departed
 > devices. Verified live: 0 rows are both departed and inactive.
 
+> **`is_inactive` is a measurement, and since #238 it is no longer what decides fieldwork.** The
+> threshold in the formula above is `system_settings.inactivity_threshold_hours` (24), and it must stay
+> put: it is the denominator of Fleet Uptime and of the Soft Inactive Count zones are graded on, so
+> moving it restates every historical figure on this page. When an operator wants to change *when an SE
+> is sent*, they move `se_assignment_threshold_hours` instead — a separate, OH+CSM-owned key read by
+> ticket creation, auto-recovery and the recommender, and by nothing on this page. The two ship equal
+> (24), so this KPI is unchanged; if an operator sets the assignment threshold to 48, expect
+> **Inactive Operational Devices to keep counting a device from 24 h while no ticket exists for it
+> until 48 h**. That gap is the configured grace window, not a reconciliation error.
+
 ---
 
 ### Healthy Operational Devices — *operational*
@@ -445,7 +455,14 @@ back-fill nothing; it is not in this rework.
 
 ---
 
-## 8. Commissioning cohort — *install quality* (#232 / #233 / #234)
+## 8. Commissioning cohort — *install quality* (#232 / #233 / #234 / #236)
+
+**Terminology note (#236):** the admin UI labels these "fitting events" rather than "fitments" — a
+reader-facing wording change only. The field/formula names below (`fitmentsInWindow`, `curveFitments`,
+`maturedFitments`, the `commissioningFitments` catalog key, etc.) are unchanged; only the human-facing
+label moved. Chosen over "installs" because "Install" already names a specific, different thing in
+this system — a Ticket work type with its own lifecycle (CONTEXT.md) — and reusing it here would make
+one word mean two things on the same page.
 
 Route `/reports/commissioning`. Served by `apps/backend/src/reports/commissioning-aggregation.service.ts`
 over `device_commissioning ⋈ device_states ⋈ plants`. Manager roles; a ZM is clamped to their own zone
@@ -462,7 +479,7 @@ Three properties are counter-intuitive enough to state before the table:
 - **"Came online" reads `device_states.first_reported_at`, never `device_commissioning.first_reported_at`.**
   The latter is an observation-time snapshot (371 of 25,387 rows), so a reader requiring both to agree
   would report almost nothing as commissioned.
-- **A first-report stamp EARLIER than its own fitment is not evidence of coming online.** The
+- **A first-report stamp EARLIER than its own fitting event is not evidence of coming online.** The
   write-once column captured a pre-existing device's last-seen ping when it shipped; 2,138 rows are in
   that state. Without the comparison, a dead device re-mapped onto a new vehicle reads as a successful
   install.
@@ -478,12 +495,12 @@ is not deactivated, exactly as §2's shared aggregate defines it (`EXCLUDE_DEACT
 Until #233, this section's endpoints had **no such predicate**, and a device returned to a warehouse —
 silent because it is in a box — was counted as a failed install:
 
-| Last 90 days, live `fsm` | Fitments | Failed | Rate |
+| Last 90 days, live `fsm` | Fitting Events | Failed | Rate |
 |---|---:|---:|---:|
 | Before #233 (`population=all`) | 6,810 | 2,655 | **39.0%** |
 | After (`population=operational`) | 2,623 | 138 | **5.2%** |
 
-4,187 of the window's fitments were warehouse. This is the same defect class §6 records for
+4,187 of the window's fitting events were warehouse. This is the same defect class §6 records for
 2026-07-29, in a new surface. `population=all` still reproduces the old figures for reconciliation;
 it is not a second measure.
 
@@ -498,24 +515,24 @@ category appearing at source would show as a negative number rather than an unba
 
 ### KPI reference
 
-#### Fitments in Window — *operational*
+#### Fitting Events in Window — *operational*
 
 | | |
 |---|---|
 | **Definition** | Commissioning events in the window — one per (device, vehicle, install date), **not** one per device. |
-| **Excludes** | Warehouse devices; deactivated plants; fitments whose device has no `device_states` row (#227); fitments with no install date at source (~13%). |
+| **Excludes** | Warehouse devices; deactivated plants; fitting events whose device has no `device_states` row (#227); fitting events with no install date at source (~13%). |
 | **Formula** | `COUNT(device_commissioning WHERE installed_at >= now() - N days AND is_departed = false)` |
-| **Grain warning** | A device re-mapped twice inside the window is **two** fitments. Measured, 6.4% of cohort devices have more than one, so a device-grain count on another page will legitimately differ. |
+| **Grain warning** | A device re-mapped twice inside the window is **two** fitting events. Measured, 6.4% of cohort devices have more than one, so a device-grain count on another page will legitimately differ. |
 | **Live value** | **2,623** (90-day window) |
 
 #### Came Online — *operational*
 
 | | |
 |---|---|
-| **Definition** | Fitments whose device has sent its first GPS fix, at or after the moment it was fitted. |
+| **Definition** | Fitting events whose device has sent its first GPS fix, at or after the moment it was fitted. |
 | **Formula** | `COUNT(WHERE first_reported_at IS NOT NULL AND first_reported_at >= installed_at)` |
-| **Reconciles** | `Came Online + Awaiting First Report + Failed to Report = Fitments in Window` |
-| **Live value** | **2,360** (90.0% of fitments) |
+| **Reconciles** | `Came Online + Awaiting First Report + Failed to Report = Fitting Events in Window` |
+| **Live value** | **2,360** (90.0% of fitting events) |
 
 #### Awaiting First Report / Failed to Report — *operational*
 
@@ -523,7 +540,7 @@ category appearing at source would show as a negative number rather than an unba
 |---|---|
 | **Split on** | The grace window, default 48 h — silent inside it is `pending`, silent past it is `failed`. |
 | **Why 48 h** | Measured, not chosen: of 520 time-to-first-report samples, **97.7% fall inside 48 h and 99.6% inside 72 h**. |
-| **Refresh** | Ages on wall-clock. A fitment crosses from Awaiting to Failed with no write. |
+| **Refresh** | Ages on wall-clock. A fitting event crosses from Awaiting to Failed with no write. |
 | **Live value** | **127** awaiting · **138** failed |
 
 #### Median Time to First Report — *derived*
@@ -531,36 +548,36 @@ category appearing at source would show as a negative number rather than an unba
 | | |
 |---|---|
 | **Formula** | `percentile_cont(0.5) WITHIN GROUP (ORDER BY first_reported_at - installed_at)` |
-| **Excludes** | Fitments from before `COMMISSIONING_TTFR_EPOCH`, and fitments that never came online. |
+| **Excludes** | Fitting events from before `COMMISSIONING_TTFR_EPOCH`, and fitting events that never came online. |
 | **Null case** | `—`, never `0`. Zero claims every device commissioned instantly; `—` says nothing was measured. |
 | **Sample size** | Always shown beside the value. It is far smaller than the online count and honestly so. |
 | **Live value** | **14.59 h** (p95 29.1 h, n = 400) |
 
 The epoch exclusion is not fussiness. The write-once column captured a *last*-seen value for devices
 already reporting when it shipped — 15,345 of 23,086 stamped on the single day it landed — which
-yields a median of **~8,707 h** against **17.26 h** for fitments observed after.
+yields a median of **~8,707 h** against **17.26 h** for fitting events observed after.
 
 #### Online Within 48 h — *derived* (the resolution curve)
 
 | | |
 |---|---|
-| **Definition** | The share of a fitment batch that came online inside 48 h — the shape of a cohort resolving, rather than a point-in-time count. |
-| **Denominator** | `sampleSize + neverOnline`, over **matured, post-epoch** fitments only. |
-| **Excludes** | Fitments younger than 72 h (they have not had the window the curve plots); fitments from before the TTFR epoch, **whatever they did**. |
+| **Definition** | The share of a fitting-event batch that came online inside 48 h — the shape of a cohort resolving, rather than a point-in-time count. |
+| **Denominator** | `sampleSize + neverOnline`, over **matured, post-epoch** fitting events only. |
+| **Excludes** | Fitting events younger than 72 h (they have not had the window the curve plots); fitting events from before the TTFR epoch, **whatever they did**. |
 | **Null case** | Every point is `null` — the chart draws nothing — when the denominator is empty. A 0% curve is a different claim and draws a line along the floor. |
-| **Reconciles** | `sample + neverOnline = curveFitments`; `+ preEpochExcluded = maturedFitments`; `+ immature = Fitments in Window` |
-| **Live value** | **83.1%** by 48 h, flat after (0 fitments in the 48–72 h band), over 65 gradeable fitments |
+| **Reconciles** | `sample + neverOnline = curveFitments`; `+ preEpochExcluded = maturedFitments`; `+ immature = Fitting Events in Window` |
+| **Live value** | **83.1%** by 48 h, flat after (0 fitting events in the 48–72 h band), over 65 gradeable fitting events |
 
 **The epoch gate is applied symmetrically, and that is load-bearing.** The first implementation
-excluded pre-epoch fitments that came *online* while keeping pre-epoch fitments that stayed *silent* in
-the denominator — putting the legacy blank-remark bulk load on one side of the ratio only. It read
-**37.2% online-by-48 h against a true 83.1%**: an inverted conclusion, not a rounding error. A fitment
-either carries comparable timing or it does not, and what it happened to do cannot decide its
-eligibility.
+excluded pre-epoch fitting events that came *online* while keeping pre-epoch fitting events that stayed
+*silent* in the denominator — putting the legacy blank-remark bulk load on one side of the ratio only.
+It read **37.2% online-by-48 h against a true 83.1%**: an inverted conclusion, not a rounding error. A
+fitting event either carries comparable timing or it does not, and what it happened to do cannot
+decide its eligibility.
 
 **This contamination ages out with no backfill.** `COHORT_DAYS.max` is 90 and the epoch is fixed at
 2026-08-09, so once the epoch is more than 90 days old (~2026-11-07) no cohort window can contain a
-pre-epoch fitment and `curveFitments = maturedFitments`.
+pre-epoch fitting event and `curveFitments = maturedFitments`.
 
 ### Installer attribution — shown, labelled, never ranked
 
