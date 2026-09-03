@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { listZones, type ZoneView } from '../../api/org';
 import { useAuth } from '../../auth/AuthProvider';
@@ -8,6 +8,7 @@ import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
 import { IconBell, IconMenu, IconPlus, IconSearch } from '../ui/icons';
 import { resolveBreadcrumb } from './breadcrumb';
+import { NotificationTray, useNotifications } from './NotificationTray';
 import { useSidebar } from './SidebarContext';
 import { ThemeToggle } from './ThemeToggle';
 import { ROLE_LABEL } from './nav';
@@ -26,6 +27,11 @@ export function TopBar() {
   // The zones the acting control offers. `null` = not loaded (or the call failed) — the control then
   // falls back to the free-text zone id rather than becoming a dead end on an older backend.
   const [zones, setZones] = useState<ZoneView[] | null>(null);
+  // #344 — the bell's own state. The list is read here (not inside the tray) because the badge has
+  // to be right while the tray is shut; the panel only renders when it is open.
+  const [trayOpen, setTrayOpen] = useState(false);
+  const bellRef = useRef<HTMLDivElement>(null);
+  const notifications = useNotifications(session != null);
 
   const role = session?.role ?? '';
   const canAct = role === 'CENTRAL_SERVICE_MANAGER' || role === 'OPERATIONS_HEAD';
@@ -41,6 +47,24 @@ export function TopBar() {
       alive = false;
     };
   }, [canAct]);
+
+  // Outside click / Escape shut the tray — the same close contract as `DropdownMenu`, hand-rolled
+  // here because the trigger is the bell button and the panel is not a menu.
+  useEffect(() => {
+    if (!trayOpen) return;
+    const onDoc = (e: MouseEvent): void => {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) setTrayOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setTrayOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [trayOpen]);
 
   if (!session) return null;
 
@@ -212,13 +236,41 @@ export function TopBar() {
 
         <ThemeToggle />
 
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-line text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-strong focus-ring"
-        >
-          <IconBell className="h-[18px] w-[18px]" />
-        </button>
+        {/* #344 — the bell was a decorative button for its whole life: no handler, no state, while
+            the backend held real unread rows for this user (cross-zone decisions, intra-day
+            escalations). The reference draws an unread dot on it; this is that dot made exact. */}
+        <div ref={bellRef} className="relative shrink-0">
+          <button
+            type="button"
+            aria-label={
+              notifications.unreadCount > 0
+                ? `Notifications, ${notifications.unreadCount} unread`
+                : 'Notifications'
+            }
+            aria-haspopup="dialog"
+            aria-expanded={trayOpen}
+            onClick={() => setTrayOpen((o) => !o)}
+            className="relative flex h-10 w-10 items-center justify-center rounded-md border border-line text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink-strong focus-ring"
+          >
+            <IconBell className="h-[18px] w-[18px]" />
+            {notifications.unreadCount > 0 && (
+              <span
+                aria-hidden
+                data-testid="notification-badge"
+                className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-critical px-1 text-[10px] font-bold leading-none text-white ring-2 ring-surface-card"
+              >
+                {notifications.unreadCount > 99 ? '99+' : notifications.unreadCount}
+              </span>
+            )}
+          </button>
+          {trayOpen && (
+            <NotificationTray
+              state={notifications}
+              role={session.role}
+              onClose={() => setTrayOpen(false)}
+            />
+          )}
+        </div>
 
         {/* Profile section — initials avatar (brand-tinted) + identity, grouped as a distinct card. */}
         <div className="flex h-10 shrink-0 items-center gap-2.5 rounded-lg border border-line bg-surface-card py-1 pl-1.5 pr-1.5 shadow-card sm:pr-3">
