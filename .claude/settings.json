@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/context_guard.py\"",
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/context_guard.py\"",
             "timeout": 10
           }
         ]
@@ -15,11 +15,11 @@
     ],
     "SessionStart": [
       {
-        "matcher": "startup|clear|compact|resume|fork",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_resume.py\"",
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session_resume.py\"",
             "timeout": 10
           }
         ]

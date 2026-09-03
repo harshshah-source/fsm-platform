@@ -15,18 +15,6 @@ MAX_CHARS = 60_000
 STATE_TTL_DAYS = 7
 
 
-def is_armed(project_dir):
-    """The loop is opt-in; see .claude/hooks/autohandoff.py for the switch."""
-    sys.dont_write_bytecode = True
-    sys.path.insert(0, os.path.join(project_dir, ".claude", "hooks"))
-    try:
-        from autohandoff import armed_state
-
-        return armed_state(project_dir)[0]
-    except Exception:
-        return False
-
-
 def load_config(project_dir):
     path = os.path.join(project_dir, ".claude", "context-budget.json")
     try:
@@ -48,18 +36,45 @@ def prune_state(project_dir):
         pass
 
 
+def log(project_dir, msg):
+    """Ground truth for 'the handoff did not come back'.
+
+    Whether this hook ran at all is the first thing worth knowing and the one
+    thing that cannot be reconstructed afterwards, so record every invocation.
+    """
+    try:
+        d = os.path.join(project_dir, ".claude", "state")
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, "sessionstart.log")
+        if os.path.exists(p) and os.path.getsize(p) > 100_000:
+            os.remove(p)
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write("%s  %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg))
+    except Exception:
+        pass
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
     except Exception:
         payload = {}
 
+    project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
+    how = payload.get("how") or payload.get("source") or "?"
+    log(project_dir, "fired how=%s session=%s agent=%s keys=%s"
+        % (how, str(payload.get("session_id"))[:8], payload.get("agent_type"),
+           ",".join(sorted(payload.keys()))))
+
     if (payload.get("agent_type") or "main") not in ("main", "root"):
+        log(project_dir, "  -> skipped: subagent")
         return 0
 
-    project_dir = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
-    if not is_armed(project_dir):
-        return 0
+    # Deliberately NOT gated on the arm marker. The handoff file existing IS the
+    # opt-in - a session only writes one on purpose - and gating the injection on
+    # arming meant a session disarmed between the handoff and the /clear silently
+    # lost the work. Arming gates the interrupting half (the PostToolUse guard),
+    # not this one.
     prune_state(project_dir)
 
     cfg = load_config(project_dir)
@@ -69,14 +84,17 @@ def main():
         with open(path, "r", encoding="utf-8") as fh:
             body = fh.read()
     except Exception:
+        log(project_dir, "  -> skipped: no handoff at %s" % rel)
         return 0
 
     if not body.strip():
+        log(project_dir, "  -> skipped: handoff is empty")
         return 0
     # A handoff whose work is finished is archived, not deleted in place; until
     # then an explicit marker keeps it from re-seeding sessions.
     head = body[:400].lower()
     if "status: consumed" in head or "status: archived" in head:
+        log(project_dir, "  -> skipped: handoff marked consumed/archived")
         return 0
 
     age_days = (time.time() - os.path.getmtime(path)) / 86400.0
@@ -140,6 +158,7 @@ def main():
         },
         sys.stdout,
     )
+    log(project_dir, "  -> INJECTED %d chars from %s" % (len(context), rel))
     return 0
 
 
