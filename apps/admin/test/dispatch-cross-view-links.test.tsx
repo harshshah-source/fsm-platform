@@ -84,6 +84,18 @@ const ENGINEERS = [
   { engineerId: SE, name: 'Ramesh Kumar', coverageType: 'DEDICATED', zoneId: '1', committed: 1, dailyCapacity: 6, isActive: true },
 ];
 
+/**
+ * Both intra-day reads are **paged** since #356 — they answer `{ rows, nextCursor, limit }`, not a
+ * bare array. `IntradayQueuePage` reads `.rows`, so a fixture that still returns an array renders
+ * `undefined.map` and takes the whole page down. One page, no continuation: these two tests are about
+ * cross-view framing and links, not about paging.
+ */
+const page = <T,>(rows: T[]): { rows: T[]; nextCursor: null; limit: number } => ({
+  rows,
+  nextCursor: null,
+  limit: 50,
+});
+
 const INTRADAY_UPDATES = [
   {
     auditId: 'a-1',
@@ -152,7 +164,7 @@ describe('#281 AC2 — every dispatch surface states which question it answers',
   });
 
   it("Intra-day carries R9's framing — changes to today's plan, not a fourth tense", async () => {
-    mock((url) => (url.includes('intraday-insertions') ? json([]) : json(INTRADAY_UPDATES)));
+    mock((url) => (url.includes('intraday-insertions') ? json(page([])) : json(page(INTRADAY_UPDATES))));
     render(
       <MemoryRouter>
         <IntradayQueuePage />
@@ -202,7 +214,7 @@ describe('#281 AC8 — contextual, per-record cross-view links', () => {
   it('an intra-day change reaches the day plan it changed', async () => {
     mock((url) => {
       if (url.includes('/schedules/engineers')) return json(ENGINEERS);
-      return url.includes('intraday-insertions') ? json([]) : json(INTRADAY_UPDATES);
+      return url.includes('intraday-insertions') ? json(page([])) : json(page(INTRADAY_UPDATES));
     });
     render(
       <MemoryRouter>
