@@ -6,6 +6,7 @@ import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { drainNotificationRows, queueNotification } from './day-plan-notification-outbox';
 import { dispatchZoneLockKey } from './dispatch-zone-lock';
 import { signPreviewToken, verifyPreviewToken } from './preview-token';
 import { REMOVAL_REASONS } from './removal-reason';
@@ -308,7 +309,26 @@ export class BulkUnassignService {
         },
       });
 
-      return { skipped: false as const, classified };
+      // #338 — the notice commits with the unassign it announces, beside the audit row that already
+      // lived in this transaction. One row per affected engineer, which is exactly what the
+      // post-commit loop wrote; what changes is that a push can no longer be lost by a crash here,
+      // nor take the rest of a Pan-India sweep down with it by throwing.
+      const queuedNotices: bigint[] = [];
+      for (const seId of classified.seIdsAffected) {
+        queuedNotices.push(
+          await queueNotification(tx, {
+            recipients: [{ userId: seId, role: 'SERVICE_ENGINEER' }],
+            type: 'DAY_PLAN_REBALANCED',
+            title: 'Your day plan was rebalanced',
+            body: 'An Operations Head rebalance updated your assignments. Your day plan will refresh on the next dispatch run.',
+            entityType: 'zone',
+            entityId: zoneId.toString(),
+            metadata: { operationId, reasonCode },
+          }),
+        );
+      }
+
+      return { skipped: false as const, classified, queuedNotices };
     });
 
     if (outcome.skipped) {
@@ -316,19 +336,10 @@ export class BulkUnassignService {
       return { zoneId: zoneId.toString(), zoneName, skipped: true, skipReason: 'LOCK_CONTENDED', ticketsUnassigned: 0 };
     }
 
-    // Notifications fire only AFTER commit (same posture as DayPlanNotifier) — a rolled-back
-    // rebalance must never tell an SE their plan changed.
-    for (const seId of outcome.classified.seIdsAffected) {
-      await this.notifications.notify({
-        recipients: [{ userId: seId, role: 'SERVICE_ENGINEER' }],
-        type: 'DAY_PLAN_REBALANCED',
-        title: 'Your day plan was rebalanced',
-        body: 'An Operations Head rebalance updated your assignments. Your day plan will refresh on the next dispatch run.',
-        entityType: 'zone',
-        entityId: zoneId.toString(),
-        metadata: { operationId, reasonCode },
-      });
-    }
+    // Delivery still happens only AFTER commit (same posture as DayPlanNotifier) — a rolled-back
+    // rebalance must never tell an SE their plan changed. The intent is now a committed row (#338),
+    // so a failure here is the sweep's retry rather than a notice nobody will ever send.
+    await drainNotificationRows(this.prisma, this.notifications, outcome.queuedNotices, now);
 
     return {
       zoneId: zoneId.toString(),

@@ -8,6 +8,14 @@ import { BatchAssignmentService } from '../src/scheduling/batch-assignment.servi
 import { BulkUnassignService } from '../src/scheduling/bulk-unassign.service';
 import { PrismaSoftStateConflictPort } from '../src/soft-state/soft-state-conflict.adapter';
 import { REMOVAL_REASONS } from '../src/scheduling/removal-reason';
+import { NOTIFY_EVENT_TYPE, drainRows } from '../src/scheduling/day-plan-notification-outbox';
+import type { NotifyInput } from '../src/notifications/notification.service';
+import {
+  EnqueueFailed,
+  failingNotifyEnqueue,
+  inertDayPlanNotifier,
+  throwingNotifications,
+} from './fixtures/outbox-crash-injection';
 
 /**
  * #179 Slice 1 — execute(). Design settled in
@@ -589,5 +597,100 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
     } finally {
       await f.teardown();
     }
+  });
+
+  /**
+   * #338 — the rebalance's own notice is durable.
+   *
+   * `DAY_PLAN_REBALANCED` fired post-commit under a comment that got the posture exactly right and
+   * the mechanism half right: the push must not happen for a rolled-back rebalance, which is true —
+   * but with nothing durable behind it, a crash between the commit and the push left engineers whose
+   * day was emptied with no idea it had been, and a *throw* aborted the Pan-India loop partway
+   * through, leaving the remaining zones unrebalanced for a reason that has nothing to do with them.
+   *
+   * The notice now commits inside the same transaction as the unassign, beside the audit row that
+   * already lived there. One row per affected engineer, which is what the loop always wrote.
+   */
+  describe('#338 — the rebalance notice is written in the unassign transaction', () => {
+    const svcOn = (client: PrismaService, notifications: NotificationService = new NotificationService(client)) =>
+      new BulkUnassignService(
+        client,
+        new AuditService(client),
+        notifications,
+        new PrismaSoftStateConflictPort(client),
+      );
+
+    const payloadOf = (row: { payload: unknown }): NotifyInput => (row.payload ?? {}) as unknown as NotifyInput;
+
+    const noticesForZone = async (zoneId: bigint) => {
+      const rows = await prisma.dayPlanNotificationOutbox.findMany({
+        where: { eventType: NOTIFY_EVENT_TYPE },
+        orderBy: { id: 'asc' },
+      });
+      return rows.filter((r) => payloadOf(r).entityId === zoneId.toString());
+    };
+
+    it('a notifier that throws leaves the rebalance committed and the notice retryable', async () => {
+      const f = await makeFixture('outbox-durability');
+      try {
+        const eligible = await f.makeTicket({});
+        await f.placeOnLiveBatch(eligible);
+
+        // This used to reject: one failed push aborted the operation with the zone already unassigned.
+        const outcome = await svcOn(prisma, throwingNotifications()).execute(
+          { scope: 'ZONE', zoneId: f.zoneId, reasonCode: 'ROUTINE_REBALANCE' },
+          OH_ACTOR,
+          NOW,
+        );
+        if (outcome.result !== 'OK') throw new Error(`expected OK, got ${outcome.result}`);
+        expect(outcome.zones.find((z) => z.zoneId === f.zoneId.toString())?.ticketsUnassigned).toBe(1);
+
+        const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: eligible } });
+        expect(ticket.assignmentState).toBe('UNASSIGNED');
+
+        const rows = await noticesForZone(f.zoneId);
+        expect(rows).toHaveLength(1);
+        const row = rows[0]!;
+        expect(payloadOf(row).type).toBe('DAY_PLAN_REBALANCED');
+        expect(payloadOf(row).recipients[0]!.userId).toBe(f.seId);
+        expect(row.sentAt).toBeNull();
+        expect(await prisma.notification.count({ where: { recipientUserId: f.seId, type: 'DAY_PLAN_REBALANCED' } })).toBe(0);
+
+        await drainRows(prisma, inertDayPlanNotifier, [row.id], NOW, new NotificationService(prisma));
+        expect(await prisma.notification.count({ where: { recipientUserId: f.seId, type: 'DAY_PLAN_REBALANCED' } })).toBe(1);
+        await drainRows(prisma, inertDayPlanNotifier, [row.id], NOW, new NotificationService(prisma));
+        expect(await prisma.notification.count({ where: { recipientUserId: f.seId, type: 'DAY_PLAN_REBALANCED' } })).toBe(1);
+
+        await prisma.dayPlanNotificationOutbox.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+      } finally {
+        await f.teardown();
+      }
+    });
+
+    it('a failed enqueue rolls the zone back — no silent rebalance nobody was told about', async () => {
+      const f = await makeFixture('outbox-atomicity');
+      try {
+        const eligible = await f.makeTicket({});
+        const { batchId } = await f.placeOnLiveBatch(eligible);
+
+        await expect(
+          svcOn(failingNotifyEnqueue(prisma)).execute(
+            { scope: 'ZONE', zoneId: f.zoneId, reasonCode: 'ROUTINE_REBALANCE' },
+            OH_ACTOR,
+            NOW,
+          ),
+        ).rejects.toThrow(EnqueueFailed);
+
+        const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: eligible } });
+        expect(ticket.assignmentState).toBe('FORMALLY_ASSIGNED');
+        const bat = await prisma.batchAssignmentTicket.findFirstOrThrow({ where: { batchId, ticketId: eligible } });
+        expect(bat.removedAt).toBeNull();
+        // The audit row lives in the same transaction, so it goes too — the operation did not happen.
+        expect(await prisma.auditLog.count({ where: { actingZone: f.zoneId, action: 'BULK_UNASSIGN_ZONE' } })).toBe(0);
+        expect(await noticesForZone(f.zoneId)).toHaveLength(0);
+      } finally {
+        await f.teardown();
+      }
+    });
   });
 });
