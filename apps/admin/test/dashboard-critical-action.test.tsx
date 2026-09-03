@@ -1,7 +1,9 @@
+import type { SessionView } from '@fsm/shared';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import type { ActionRequiredCard } from '../src/api/dashboard';
+import { AuthProvider } from '../src/auth/AuthProvider';
 import { ACTION_REQUIRED_DESTINATIONS } from '../src/lib/actionRequiredDestinations';
 import { ActionRequiredPanel } from '../src/pages/dashboard/ActionRequiredPanel';
 import { CentralDashboard } from '../src/pages/dashboard/CentralDashboard';
@@ -100,21 +102,35 @@ describe('Action Required panel (Issue 06 AC#1 · #350)', () => {
   });
 });
 
+const csmSession: SessionView = {
+  user_id: 'csm1',
+  role: 'CENTRAL_SERVICE_MANAGER',
+  zone_id: null,
+  acted_as_role: null,
+};
+const ohSession: SessionView = { user_id: 'oh1', role: 'OPERATIONS_HEAD', zone_id: null, acted_as_role: null };
+
 describe('#350 AC3 — the CSM and Ops-Head dashboards mount the panel', () => {
+  // #351 mounted the cross-zone operating-mode table on both bodies, and it reads `useAuth` to decide
+  // whether the viewer may see it — so these two bare renders now need the provider around them.
   it('CentralDashboard renders the Action Required cards', () => {
     render(
-      <MemoryRouter>
-        <CentralDashboard {...dashboardData} />
-      </MemoryRouter>,
+      <AuthProvider initialSession={csmSession}>
+        <MemoryRouter>
+          <CentralDashboard {...dashboardData} />
+        </MemoryRouter>
+      </AuthProvider>,
     );
     expect(screen.getAllByTestId('action-card')).toHaveLength(3);
   });
 
   it('OpsHeadDashboard renders the Action Required cards', () => {
     render(
-      <MemoryRouter>
-        <OpsHeadDashboard {...dashboardData} />
-      </MemoryRouter>,
+      <AuthProvider initialSession={ohSession}>
+        <MemoryRouter>
+          <OpsHeadDashboard {...dashboardData} />
+        </MemoryRouter>
+      </AuthProvider>,
     );
     expect(screen.getAllByTestId('action-card')).toHaveLength(3);
   });

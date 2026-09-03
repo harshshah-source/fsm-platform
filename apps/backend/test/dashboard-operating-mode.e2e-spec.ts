@@ -121,6 +121,25 @@ describe('Issue 136 slice 1 — /api/dashboard/operating-mode', () => {
     expect(prev!.eligibleCount).toBe(3);
   });
 
+  /**
+   * #351 AC3 — the cross-zone operating-mode table is mounted on the CSM dashboard as well as the
+   * Ops Head's. The role was written into the controller's guard from the start but only the Ops
+   * Head was ever exercised here, so "CSM sees all zones" was an assumption the suite did not hold.
+   */
+  it('gives a Central Service Manager every zone, not just one', async () => {
+    const token = await login('csm@fsm.test');
+    const res = await request(app.getHttpServer())
+      .get('/api/dashboard/operating-mode')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const rows = res.body as ModeRow[];
+
+    for (const zoneId of [deficitZoneId, preventiveZoneId, emptyZoneId]) {
+      expect(rows.some((r) => r.zoneId === zoneId.toString())).toBe(true);
+    }
+    expect(rows.find((r) => r.zoneId === deficitZoneId.toString())!.mode).toBe('DEFICIT');
+  });
+
   it('resolves a zone with 0 eligible devices to PREVENTIVE without dividing by zero', async () => {
     const token = await login('ops.head@fsm.test');
     const res = await request(app.getHttpServer())

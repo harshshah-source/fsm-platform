@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RollingNumber, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
+import { ZoneOperatingModeTable } from '../../components/dashboard/ZoneOperatingModeTable';
 import { formatStamp } from '../../lib/fleetFormat';
 import { sumCriticalDevices } from '../../lib/slaBucket';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
@@ -178,6 +179,13 @@ export function OpsHeadDashboard({ zones, companyPlants, actions, fleet, fleetUp
           <SlaBucketBarChart zones={zones} />
         </div>
       </section>
+
+      {/* #136 slice 3, mounted at last (#351 AC3). Same component and same placement as the CSM's
+          (see CentralDashboard) — the difference between these two pages is emphasis, not what a
+          cross-zone role is allowed to know about how the recommender is behaving. */}
+      <div className="mb-6">
+        <ZoneOperatingModeTable />
+      </div>
 
       <ScorecardTable rows={zones} zoneUptime={zoneUptime} />
       <CompanyPlantTable rows={companyPlants} plantUptime={plantUptime} />

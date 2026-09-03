@@ -88,7 +88,7 @@ describe('Issue 06 slice 3 — /api/dashboard/critical-queue', () => {
     await app.close();
   });
 
-  it('groups CRITICAL+ tickets by company/plant with a cluster size and stub SE suggestions', async () => {
+  it('groups CRITICAL+ tickets by company/plant with a cluster size, and no dead SE-suggestion field', async () => {
     const token = await login('zm.north@fsm.test');
     const res = await request(app.getHttpServer())
       .get('/api/dashboard/critical-queue')
@@ -100,7 +100,6 @@ describe('Issue 06 slice 3 — /api/dashboard/critical-queue', () => {
       plantId: string;
       zoneId: string;
       clusterSize: number;
-      suggestedSes: unknown[];
       tickets: Array<{ deviceId: string; slaBucket: string }>;
     }>;
     const group = groups.find(
@@ -113,8 +112,10 @@ describe('Issue 06 slice 3 — /api/dashboard/critical-queue', () => {
     expect(group!.tickets[0].deviceId).toBe(deviceIds[0].toString());
     expect(group!.tickets[0].slaBucket).toBe('HIGH_CRITICAL');
     expect(group!.clusterSize).toBe(1);
-    expect(Array.isArray(group!.suggestedSes)).toBe(true);
-    expect(group!.suggestedSes).toHaveLength(0); // Recommender stub (Issue 10)
+    // #351 AC7 — `suggestedSes` was an always-empty array standing in for a one-click assign the
+    // dashboard is no longer allowed to offer (#272 R1 makes `/assign` the single manual surface).
+    // An empty field that will never fill is a promise on the wire, so it is gone rather than stubbed.
+    expect(group).not.toHaveProperty('suggestedSes');
   });
 
   it('forbids a Service Engineer', async () => {

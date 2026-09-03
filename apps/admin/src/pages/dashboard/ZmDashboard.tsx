@@ -8,11 +8,13 @@ import type {
   ZoneOverviewRow,
 } from '../../api/dashboard';
 import type { ZoneEngineer } from '../../api/schedules';
-import { DateRangeChips, type Metric } from '../../components/data';
+import { DateRangeChips, MetricCard, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
-import { Badge } from '../../components/ui';
+import { SnapshotHealthBadge } from '../../components/dashboard/SnapshotHealthBadge';
+import { ZoneOperatingModeCard } from '../../components/dashboard/ZoneOperatingModeCard';
 import { formatCount } from '../../lib/fleetFormat';
 import { sumCriticalDevices } from '../../lib/slaBucket';
+import { ASSIGN_CRITICAL_PLUS_PRESET_PATH } from '../assign/useAssignDraft';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
@@ -48,6 +50,7 @@ export interface DashboardData {
 export function ZmDashboard({
   zones,
   companyPlants,
+  critical,
   actions,
   fleet,
   fleetUptime,
@@ -55,6 +58,20 @@ export function ZmDashboard({
   error,
 }: DashboardData) {
   const navigate = useNavigate();
+  /**
+   * #351 AC6 — the pointer back to the work #277 moved.
+   *
+   * `CriticalQueue.tsx` was removed from this page on purpose (#277): `/assign` is the single manual
+   * assignment surface (#272 R1), and rebuilding a queue here would re-create the second one. What
+   * #277 did not leave behind was any way to know there *was* critical work — the page simply stopped
+   * mentioning it. So this is a **summary and a link**, not a queue: the count of open CRITICAL+
+   * troubleshoot tickets in the manager's zone (the same `critical-queue` aggregation the CSM's
+   * Escalation Queue renders), opening the console already filtered to that work.
+   */
+  const criticalPlusOpen = useMemo(
+    () => critical.reduce((sum, g) => sum + g.tickets.length, 0),
+    [critical],
+  );
   // KPI strip derived from already-loaded data. Uptime comes from the Fleet Uptime report (BE-39); the
   // Action-Required queue lives on in the panel below.
   const metrics: Metric[] = useMemo(() => {
@@ -103,14 +120,26 @@ export function ZmDashboard({
         title="Zone Operations Dashboard"
         actions={
           <>
-            <Badge tone="success" dot>
-              Snapshot Healthy
-            </Badge>
+            <SnapshotHealthBadge />
             <DateRangeChips />
           </>
         }
         left={metrics.slice(0, 3)}
         right={metrics.slice(3, 6)}
+        centerBelow={
+          // The hero's centre slot, which this variant does not otherwise use (the Ops Head puts its
+          // compact trend here). Constrained rather than full-bleed: it is one tile, not a band.
+          <div className="mx-auto max-w-xs">
+            <MetricCard
+              label="Critical+"
+              value={formatCount(criticalPlusOpen)}
+              hint="open troubleshoot · manager attention"
+              tone="critical"
+              testId="kpi-critical-plus-queue"
+              onClick={() => navigate(ASSIGN_CRITICAL_PLUS_PRESET_PATH)}
+            />
+          </div>
+        }
       />
       {error && (
         <p role="alert" className="mb-4 text-sm text-critical">
@@ -125,6 +154,15 @@ export function ZmDashboard({
       {/* Inactive vs Troubleshoot vs Installation over time (Issue 134), scoped to the ZM's own zone
           (the backend clamps) — between the KPI hero and the SLA Bucket Distribution. */}
       <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone={false} />
+
+      {/* #136 slice 2, mounted at last (#351 AC3). Built in August and rendered nowhere since, so the
+          one place that explains WHY the recommender is behaving as it is has been invisible. It
+          self-gates on the ZM role and on having data, so it costs the other variants nothing.
+          Placed immediately above Action Required: "which mode is my zone in" is the context for
+          "what is it asking me to do". */}
+      <div className="mb-6">
+        <ZoneOperatingModeCard />
+      </div>
 
       <ActionRequiredPanel cards={actions} />
 

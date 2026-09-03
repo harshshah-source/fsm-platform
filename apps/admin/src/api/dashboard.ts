@@ -54,6 +54,13 @@ export interface ZoneOverviewRow extends FleetCounts {
   /** The zone's Zonal Manager display name (Issue 122 scorecard column); null when unset. */
   zonalManagerName?: string | null;
   byBucket: Record<string, number>;
+  /**
+   * #351 — signed % change in the zone's Soft Inactive Count between its two most recent
+   * `soft_inactive_count_history` captures, 1dp. Null when the zone has fewer than two captures, or
+   * when the earlier one was zero (no percentage exists from a zero baseline) — the two cases the
+   * table must not render as "0%". Captures are twice daily, so the comparison is against the
+   * previous *period*; the field name predates that cadence and is kept for wire stability.
+   */
   trendPctVsPrevDay: number | null;
 }
 
@@ -83,8 +90,8 @@ export interface CriticalQueueGroup {
   zoneId: string;
   plantId: string;
   plantName: string;
+  /** How many CRITICAL+ tickets sit at this plant — one site visit's worth of work. */
   clusterSize: number;
-  suggestedSes: unknown[];
   tickets: CriticalQueueTicket[];
 }
 

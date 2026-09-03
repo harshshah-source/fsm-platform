@@ -1,5 +1,5 @@
 # 351 — Dashboard fidelity: freshness badge, trend, operating mode, grouping, CSV, console link
-Status: ready-for-agent
+Status: done 2026-09-04 — report docs/progress/351-dashboard-fidelity.md
 Type: AFK
 Wave: 2 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -44,13 +44,14 @@ lost its critical queue to `/assign` (#277) with no pointer back. `suggestedSes:
 
 ## Acceptance criteria
 
-- [ ] AC1 — the badge reflects the latest snapshot status and age.
-- [ ] AC2 — the trend column shows a signed % when two history rows exist.
-- [ ] AC3 — operating mode is visible to ZM (own zone) and CSM/OH (all zones).
-- [ ] AC4 — the escalation list is grouped with cluster counts.
-- [ ] AC5 — CSV export downloads the visible rows.
-- [ ] AC6 — ZM sees a Critical+ count that opens the console preset.
-- [ ] AC7 — `suggestedSes` is gone from the API type and the service.
+- [x] AC1 — the badge reflects the latest snapshot status and age.
+- [x] AC2 — the trend column shows a signed % when two history rows exist.
+- [x] AC3 — operating mode is visible to ZM (own zone) and CSM/OH (all zones).
+- [x] AC4 — the escalation list is grouped with cluster counts.
+- [x] AC5 — CSV export downloads the visible rows. **Premise was wrong** — `DataTable`'s shared
+      download control already provided it (Issue 160 d3); the defect was a stale docstring. Now pinned.
+- [x] AC6 — ZM sees a Critical+ count that opens the console preset.
+- [x] AC7 — `suggestedSes` is gone from the API type and the service.
 
 ## Verification
 
@@ -86,3 +87,25 @@ dashboard (modified — badge only).
   console preset — a summary + link, not a queue rebuild.
 - **DASH-G11 (`suggestedSes` hardcoded empty)** — true, but populating it would re-add one-click
   assign on the dashboard, contradicting #272 R1. The field is removed, not populated.
+
+## Outcome (2026-09-04)
+
+Done — `docs/progress/351-dashboard-fidelity.md`.
+
+**#136 slice 3 is closed by this slice**, together with slice 2's outstanding mount: the operating-mode
+card is on `ZmDashboard` and the cross-zone table on `CentralDashboard` / `OpsHeadDashboard`. Both had
+been built and rendered nowhere since August, behind a deferred-wiring note about a file conflict that
+had long since cleared.
+
+Two premises in this issue were wrong and are recorded in the report:
+
+- **AC5** — the CSV export was never absent. `ZoneOverviewTable` renders through `DataTable`, whose
+  shared `TableDownloadButton` (CSV/Excel/PDF/PNG, DOM-read so it equals the post-filter view) has
+  existed since Issue 160 decision 3, and `dashboard-home.test.tsx:87` already asserted it. The real
+  defect at `ZoneOverviewTable.tsx:13` was a stale docstring calling the trend cell a placeholder.
+- **`api/snapshots.ts` needed no change at all.** #349 shaped it so the badge is a read, not a rewrite.
+
+`dashboard-operating-mode.e2e-spec.ts` had never exercised the CSM role that AC3 requires; that case is
+added and passed on arrival.
+
+Cited line refs had drifted: `dashboard.service.ts:454` → `:465`, `:192,851` → `:194,862`.

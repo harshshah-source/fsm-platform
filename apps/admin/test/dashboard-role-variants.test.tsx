@@ -36,7 +36,7 @@ function stubFetch() {
         body = [
           {
             companyId: '10', companyName: 'Acme Logistics', companyTier: 'PLATINUM', zoneId: '1',
-            plantId: '7', plantName: 'Yard-1', clusterSize: 1, suggestedSes: [],
+            plantId: '7', plantName: 'Yard-1', clusterSize: 1,
             tickets: [{ ticketId: 't1', deviceId: '900', slaBucket: 'CRITICAL', status: 'OPEN' }],
           },
         ];

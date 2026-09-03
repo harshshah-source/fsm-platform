@@ -12,8 +12,11 @@ import { IconHelp } from '../ui/icons';
  *
  * All copy comes from `operatingModeCopy` — this component never renders the raw mode enum.
  *
- * NOTE (deferred wiring): mounting this on the ZM dashboard body touches `ZmDashboard`/`ManagerDashboard`,
- * which are mid-flight in a concurrent session; the ~1-line placement lands once those files are free.
+ * **Mounted on `ZmDashboard` by #351**, between the activity trend and the Action Required panel. It
+ * was built in August 2026 and rendered nowhere for a month — the wiring was deferred because
+ * `ZmDashboard` was mid-flight in a concurrent session, and the note outlived the conflict. A
+ * legibility surface nobody can reach explains nothing, so the mount is now part of the component's
+ * contract: do not remove it without re-opening #136 slice 2.
  */
 const TONE_TO_BADGE: Record<OperatingModeTone, BadgeTone> = {
   attention: 'warning',

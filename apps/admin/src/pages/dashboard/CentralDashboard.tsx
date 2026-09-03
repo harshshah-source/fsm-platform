@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
-import { Badge } from '../../components/ui';
+import { SnapshotHealthBadge } from '../../components/dashboard/SnapshotHealthBadge';
+import { ZoneOperatingModeTable } from '../../components/dashboard/ZoneOperatingModeTable';
 import { formatCount } from '../../lib/fleetFormat';
 import { ActionRequiredPanel } from './ActionRequiredPanel';
 import { ActivityTrendSection } from './ActivityTrendSection';
@@ -54,9 +55,7 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
         title="Cross-Zone Central Tower"
         actions={
           <>
-            <Badge tone="success" dot>
-              Snapshot Healthy
-            </Badge>
+            <SnapshotHealthBadge />
             <DateRangeChips />
           </>
         }
@@ -99,6 +98,14 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
       </section>
 
       <EscalationQueueList groups={critical} />
+
+      {/* #136 slice 3, mounted at last (#351 AC3) — every zone's recommender mode, worst-first.
+          Directly above the Zone Performance Scorecard, because the two answer adjacent questions
+          about the same five rows: what mode each zone is running in, and how each is performing. */}
+      <div className="mb-6">
+        <ZoneOperatingModeTable />
+      </div>
+
       <ScorecardTable rows={zones} zoneUptime={zoneUptime} />
       <CompanyPlantTable rows={companyPlants} plantUptime={plantUptime} />
     </div>

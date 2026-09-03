@@ -14,8 +14,10 @@ import { Badge, SectionCard, type BadgeTone } from '../ui';
  * (growth headroom), and a sortable header lets an OH pull the zones needing attention to the top.
  * All copy comes from `operatingModeCopy` (third-person voice); the raw enum is never rendered.
  *
- * NOTE (deferred wiring): mounting on the OH/CSM dashboard body touches `OpsHeadDashboard`/`ManagerDashboard`,
- * mid-flight in a concurrent session; the ~1-line placement lands once those files are free.
+ * **Mounted on `CentralDashboard` and `OpsHeadDashboard` by #351**, directly above the Zone
+ * Performance Scorecard on both — the two answer adjacent questions about the same five rows. Like
+ * the ZM card, it sat built-but-unmounted for a month behind a note about a file conflict that had
+ * long since cleared; the mount is now part of its contract (#136 slice 3).
  */
 const TONE_TO_BADGE: Record<OperatingModeTone, BadgeTone> = {
   attention: 'warning',

@@ -158,7 +158,27 @@ export interface ZoneOverviewRow extends FleetCounts {
   zonalManagerName: string | null;
   /** Count of inactive devices per SLA bucket. Sums to `inactiveOperational`; healthy devices never appear. */
   byBucket: Record<string, number>;
-  /** Trend % vs previous day — null until the daily-history table lands (Issue 40). */
+  /**
+   * Signed % change in the zone's Soft Inactive Count between its two most recent
+   * `soft_inactive_count_history` captures, 1dp. `+30` = 30% more silent devices than last capture.
+   *
+   * **What it is measured over (#351).** The only per-zone history this platform keeps is
+   * `soft_inactive_count_history` — the twice-daily capture `SoftInactiveCountService.recompute`
+   * writes, counting `is_inactive AND eligible_for_uptime`. That population is close to, but not
+   * identical with, this row's {@link FleetCounts.inactiveOperational} (which additionally requires a
+   * GPS fix on record and excludes deactivated plants). A *rate of change* over the one series that
+   * exists is a true statement; inventing a second history to match the level exactly would need a
+   * schema change this slice does not own. The UI labels the column accordingly.
+   *
+   * **Why "PrevDay" is the wrong half of the name and is kept anyway.** Captures are twice daily, so
+   * the comparison is against the previous *capture period*, which is what the v2 reference calls it
+   * ("vs prev. period"). The field name predates the cadence; renaming it on the wire would touch
+   * every dashboard fixture in both apps for no operator-visible gain.
+   *
+   * Null in exactly two cases, and they are deliberately not collapsed into `0`: the zone has fewer
+   * than two captures on record, or the earlier capture was `0` (no percentage exists from a zero
+   * baseline). "We have no reading" and "nothing changed" must not render the same way.
+   */
   trendPctVsPrevDay: number | null;
 }
 
@@ -190,8 +210,6 @@ export interface CriticalQueueGroup {
   plantName: string;
   /** Plant-cluster signal: how many CRITICAL+ tickets sit at this plant (clearable in one visit). */
   clusterSize: number;
-  /** Suggested SE options — empty until the Recommender lands (Issue 10). */
-  suggestedSes: unknown[];
   tickets: CriticalQueueTicket[];
 }
 
@@ -454,6 +472,8 @@ export class DashboardService {
       FROM zones z LEFT JOIN users u ON u.user_id = z.zonal_manager_user_id`);
     const zmByZone = new Map(zms.map((z) => [z.zoneId, z.zmName]));
 
+    const trendByZone = await this.softInactiveTrend(restrictZone);
+
     const byZone = new Map<string, ZoneOverviewRow>();
     for (const { zoneId, zoneName, ...raw } of counts) {
       byZone.set(zoneId, {
@@ -462,7 +482,7 @@ export class DashboardService {
         zonalManagerName: zmByZone.get(zoneId) ?? null,
         ...withRates(raw),
         byBucket: {},
-        trendPctVsPrevDay: null,
+        trendPctVsPrevDay: trendByZone.get(zoneId) ?? null,
       });
     }
     for (const r of grouped) {
@@ -470,6 +490,47 @@ export class DashboardService {
       if (row) row.byBucket[r.slaBucket] = r.count;
     }
     return [...byZone.values()];
+  }
+
+  /**
+   * #351 — {@link ZoneOverviewRow.trendPctVsPrevDay} per zone, from the two most recent
+   * `soft_inactive_count_history` captures.
+   *
+   * The table has been written twice a day since Issue 40 and, until now, was read only by the
+   * activity-trend chart: the scorecard's Trend column returned a hardcoded `null` beside a history
+   * that already held the answer. One statement, `ROW_NUMBER()` over the zone partition, so the cost
+   * is one index scan on `(zone_id, captured_at DESC)` rather than a query per zone.
+   *
+   * Zones absent from the result (no captures, or only one) simply do not appear in the map, and the
+   * caller renders `null` — the same reading as "we have no comparison", which is the honest one.
+   */
+  private async softInactiveTrend(restrictZone: number | null): Promise<Map<string, number>> {
+    const zoneFilter =
+      restrictZone !== null ? Prisma.sql`WHERE h.zone_id = ${BigInt(restrictZone)}` : Prisma.empty;
+
+    const rows = await this.prisma.$queryRaw<{ zoneId: string; latest: number; previous: number }[]>(Prisma.sql`
+      WITH ranked AS (
+        SELECT h.zone_id, h.soft_inactive_count,
+               ROW_NUMBER() OVER (PARTITION BY h.zone_id ORDER BY h.captured_at DESC, h.id DESC) AS rn
+        FROM soft_inactive_count_history h
+        ${zoneFilter}
+      )
+      SELECT zone_id::text AS "zoneId",
+             MAX(soft_inactive_count) FILTER (WHERE rn = 1)::int AS "latest",
+             MAX(soft_inactive_count) FILTER (WHERE rn = 2)::int AS "previous"
+      FROM ranked
+      WHERE rn <= 2
+      GROUP BY zone_id
+      HAVING COUNT(*) = 2`);
+
+    const out = new Map<string, number>();
+    for (const r of rows) {
+      // A zero baseline has no percentage — see the field's doc comment. Not folded to 0: a zone that
+      // went from silent-free to five silent devices has not "held steady".
+      if (r.previous === 0) continue;
+      out.set(r.zoneId, Math.round(((r.latest - r.previous) / r.previous) * 1000) / 10);
+    }
+    return out;
   }
 
   /**
@@ -859,7 +920,6 @@ export class DashboardService {
           plantId: r.plantId,
           plantName: r.plantName,
           clusterSize: 0,
-          suggestedSes: [],
           tickets: [],
         };
         byKey.set(key, group);

@@ -20,6 +20,7 @@ import {
   type Metric,
 } from '../../components/data';
 import { DashboardHero } from './DashboardHero';
+import { SnapshotHealthBadge } from '../../components/dashboard/SnapshotHealthBadge';
 import { AgeChip, StatusPill } from '../../components/domain';
 import { Badge, Button, Field, Input, SectionCard } from '../../components/ui';
 import { Modal } from '../../components/overlay/Modal';
@@ -167,9 +168,10 @@ export function WarehouseDashboard() {
         title="Zone Warehouse Fulfillment"
         actions={
           <>
-            <Badge tone="success" dot>
-              Snapshot Healthy
-            </Badge>
+            {/* #351 — was a literal green "Snapshot Healthy". `GET /snapshots/latest` is deliberately
+                open to every authenticated role (#348), so the Warehouse Manager gets the real
+                verdict like everyone else. */}
+            <SnapshotHealthBadge />
             <DateRangeChips />
           </>
         }

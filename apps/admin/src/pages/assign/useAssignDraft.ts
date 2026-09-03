@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { apiAssignableWork, type AssignableWorkView } from '../../api/assignWork';
 import { apiCandidates, type CandidatesView, type PlantCandidates } from '../../api/candidates';
 import {
@@ -48,6 +49,19 @@ import type { ReviewLane } from './ReviewCommitScreen';
 
 /** The unit of selection. A plant serves several companies, so neither id alone identifies a row. */
 export const rowKey = (companyId: string, plantId: string) => `${companyId}:${plantId}`;
+
+/**
+ * #351 AC6 — the one spelling of the Critical+ console preset, exported so the surface that links to
+ * it and the hook that reads it cannot drift apart.
+ *
+ * #277 removed the ZM dashboard's own critical queue on purpose — `/assign` is the single manual
+ * assignment surface (#272 R1) — but left no way back: the dashboard simply stopped mentioning that
+ * critical work existed. The Critical+ summary tile links here, and the draft opens with its pool
+ * already narrowed to plants carrying CRITICAL+ work, which is the filter `criticalOnly` has applied
+ * since #277 absorbed the queue's grouping into it.
+ */
+const CRITICAL_PLUS_FILTER = 'critical-plus';
+export const ASSIGN_CRITICAL_PLUS_PRESET_PATH = `/assign?filter=${CRITICAL_PLUS_FILTER}`;
 
 export interface Lane {
   id: number;
@@ -154,6 +168,7 @@ export interface UseAssignDraftOptions {
 export type AssignDraft = ReturnType<typeof useAssignDraft>;
 
 export function useAssignDraft({ zoneId = null, engineers: engineersProp, onCommitted }: UseAssignDraftOptions = {}) {
+  const [searchParams] = useSearchParams();
   const [view, setView] = useState<AssignableWorkView | null>(null);
   const [fetchedEngineers, setFetchedEngineers] = useState<ZoneEngineer[]>([]);
   const ownsRoster = engineersProp === undefined;
@@ -161,8 +176,14 @@ export function useAssignDraft({ zoneId = null, engineers: engineersProp, onComm
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   /** #277 — absorbs `CriticalQueue`'s grouping into a pool filter; the `criticalCount` badge already
-   *  on every row is the same cluster-size signal that component uniquely carried. */
-  const [criticalOnly, setCriticalOnly] = useState(false);
+   *  on every row is the same cluster-size signal that component uniquely carried.
+   *
+   *  #351 — `?filter=critical-plus` **seeds** it. Read once, in a lazy initialiser, rather than
+   *  synced to the URL on every render: the preset is where the operator arrives, not a cage. A ZM
+   *  who follows the dashboard's Critical+ tile and then unticks the filter must stay unticked. */
+  const [criticalOnly, setCriticalOnly] = useState(
+    () => searchParams.get('filter') === CRITICAL_PLUS_FILTER,
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // One empty lane from the start. A console that opens with no lane offers a pool you can tick and
   // nowhere to put it — a dead end on the first screen, and the dispatcher always needs at least one.
@@ -351,7 +372,9 @@ export function useAssignDraft({ zoneId = null, engineers: engineersProp, onComm
     return [...groups.values()].sort((a, b) => b.count - a.count || a.plantId.localeCompare(b.plantId));
   }, [unplacedVisible]);
 
-  const openTotal = view?.totals.openUnassigned ?? 0;
+  // `totals` optional-chained as well as `view`: an unexpected body on the pool read must cost the
+  // ledger its figure, not take the whole console down on the first render.
+  const openTotal = view?.totals?.openUnassigned ?? 0;
 
   const matches = useCallback(
     (company: string, plantName: string, criticalCount: number) => {
