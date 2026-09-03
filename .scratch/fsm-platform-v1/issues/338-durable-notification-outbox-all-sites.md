@@ -1,5 +1,5 @@
 # 338 — One durable outbox for every post-commit notify site
-Status: ready-for-agent
+Status: in-progress (infrastructure landed 2026-09-03 `1f20620`; 12 producers unconverted)
 Type: AFK
 Wave: 1 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -47,9 +47,9 @@ Existing outbox machinery:
 - [ ] AC1 — each of the 12 sites enqueues inside its mutation tx (intraday via the #325
       `inTransaction` hook)
 - [ ] AC2 — a notify that throws no longer aborts or half-commits the mutation
-- [ ] AC3 — drain delivers, marks `sent_at`, retries to `MAX_OUTBOX_ATTEMPTS`, prunes at 30 d —
+- [x] AC3 — drain delivers, marks `sent_at`, retries to `MAX_OUTBOX_ATTEMPTS`, prunes at 30 d —
       unchanged policy
-- [ ] AC4 — day-plan events keep their exact payload and tests
+- [x] AC4 — day-plan events keep their exact payload and tests
 - [ ] AC5 — the at-most-once claim-then-deliver semantics of #264 are kept and documented
 
 ## Verification
