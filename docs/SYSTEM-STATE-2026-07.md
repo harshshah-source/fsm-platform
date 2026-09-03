@@ -255,6 +255,17 @@ dual-confirm, recovery lifecycle, install create+lifecycle | 8 controllers |
 - ✅ **Standing trap resolved**: `.gitignore`'s `data/` rule no longer shadows
   `apps/admin/src/components/data/` (anchored to `/data/`); the dir is tracked and the branch tip
   builds from a fresh clone (issue #114, **done**).
+- **2026-09-03 — the module-gaps backlog (#336–#366) is part-built.** Landed: **#336, #338, #339,
+  #340, #341** (the acting chain, §3j) and then **ten slices in one parallel round** — #342 audit
+  ledger search + viewer, #344 admin notification bell, #345 plant-deactivation day-plan notice,
+  #346 fleet-uptime honesty, #348 ingestion silence detection, #350 Action Required, #352 field
+  component wire contract, #354 cross-zone atomic approve, #359 voucher controls, #362 user
+  administration. Each has a report under `docs/progress/`; `INDEX.md` §P12 carries the row and the
+  hash. **One hard constraint on this box, recorded because it shapes any future parallel round:**
+  the `fsm` Postgres role is not superuser and cannot `CREATE DATABASE`, so there is exactly one
+  `fsm_test` and backend e2e runs cannot be parallelised — two suites truncate and re-seed each other
+  and fail with a phantom `401 Unauthorized` at login that is indistinguishable from a real
+  regression.
 
 ---
 
