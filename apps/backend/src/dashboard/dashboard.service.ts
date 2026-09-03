@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { istDayStartInstant } from '../common/ist-day';
 import { CRITICAL_PLUS_BUCKETS } from '../device-state/sla-bucket';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { assignableTickets } from '../ticketing/assignable-work';
 import { RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 
 /** Devices on a deactivated plant (Issue 119) drop out of every dashboard count + SLA bucket; they are
@@ -279,15 +281,19 @@ export interface ActionRequiredCard {
   /** 1 = most urgent. Cards render in ascending urgency. */
   urgency: number;
   count: number;
-  /** False until the owning issue wires the real source; the UI renders it as a "coming soon" stub. */
+  /**
+   * True once a real source counts this card. **Every card is `true` since #350** — the flag stays on
+   * the wire because `available:false` ("nobody counts this yet") and `count:0` ("there is no work")
+   * are opposite statements, and the day a tenth card is added ahead of its source the distinction has
+   * to already exist. Readers render the two differently (`ActionRequiredPanel`, `AttentionBand`).
+   */
   available: boolean;
   /** The issue that lights this card up — documentation only. */
   source: string;
 }
 
 /**
- * The Action Required cards in urgency order (Issue 06 "What to build"). Every source is a later
- * issue, so all are stubs (`available:false`, `count:0`) today; each owning issue flips its card on.
+ * The Action Required cards in urgency order (Issue 06 "What to build"), all nine wired by #350.
  */
 const ACTION_REQUIRED_CARDS: ReadonlyArray<Omit<ActionRequiredCard, 'count' | 'available'>> = [
   // Label corrected 2026-08-28 (field-ops P0-3): the batch-review gate was removed by Decisions §7,
@@ -296,7 +302,12 @@ const ACTION_REQUIRED_CARDS: ReadonlyArray<Omit<ActionRequiredCard, 'count' | 'a
   // a step somebody could be late on. Keys are wire contract and stay; labels are display.
   { key: 'unreviewed_batches', label: 'Auto-dispatched batches today', urgency: 1, source: 'Issue 11' },
   { key: 'vehicle_unavailability', label: 'Vehicle Unavailability & readiness conflicts', urgency: 2, source: 'Issue 28' },
-  { key: 'critical_insertions_awaiting_accept', label: 'CRITICAL insertions (direct-assigned)', urgency: 3, source: 'Issue 29' },
+  // #350 — key renamed from `critical_insertions_awaiting_accept`. CONTEXT §21 retired SE Acceptance
+  // (#268/#279), so nothing was ever "awaiting accept": a card whose NAME describes a workflow the
+  // system does not have is worse than a missing card, because it teaches the operator a step that
+  // does not exist. The key is wire contract and was changed deliberately, with both readers
+  // (`AttentionBand`'s destination map, the dashboard panel) moved in the same slice.
+  { key: 'critical_escalations_pending', label: 'CRITICAL escalations pending manual assignment', urgency: 3, source: 'Issue 29' },
   { key: 'failed_verification', label: 'Failed Verification items', urgency: 4, source: 'Issue 18/19' },
   { key: 'component_blocked', label: 'Component-Blocked Tickets', urgency: 5, source: 'Issue 21' },
   { key: 'waiting_component_overdue', label: 'WAITING_COMPONENT over 7 days', urgency: 6, source: 'Issue 22/23' },
@@ -866,19 +877,23 @@ export class DashboardService {
   }
 
   /**
-   * The Action Required panel cards in urgency order.
+   * The Action Required panel cards in urgency order — **all nine counted from a real source** since
+   * #350.
    *
-   * Four are wired; the rest stay graceful stubs (`available:false`, `count:0`) that the UI renders as
-   * "coming soon" rather than as zero work. **A stub must never be drawn as a real zero** — "0 failed
-   * verifications" and "we do not count failed verifications yet" are opposite statements, and the
-   * `available` flag is the whole reason this shape carries a boolean beside a number.
+   * Five of them had been stubs (`available:false`, `count:0`) since Issue 06 shipped, and the panel
+   * painted "coming soon" over more than half the manager's front door. The stub *shape* survives on
+   * the wire because "we do not count this yet" and "there is no work" must stay distinguishable, but
+   * no card is in that state today.
    *
-   * **B6 — two of the seven stubs cost one `COUNT(*)` each** over data that already ships and already
-   * renders on its own page (`/readiness/vehicle-unavailability`, `/verification`). Lighting them fixes
-   * the **dashboard** from the same definition the Console's attention band reads, which is why they
-   * were done here rather than as Console-local queries.
+   * **Each count is the definition its destination page already uses**, not a second spelling of it —
+   * `manual_assignment_required` goes through the shared {@link assignableTickets} predicate the Assign
+   * Console commits with (#272 R3), so the number on the card is one the button on `/assign` can move.
+   * Two numbers derived independently is exactly how the count beside an action stops matching it.
    *
    * **B5 — `filters.zoneId` narrows a CSM/OH.** A ZM is clamped by scope regardless and cannot widen.
+   *
+   * Counted sequentially rather than in `Promise.all`: this is one panel render on a page that already
+   * issues four calls, and the pool is shared with every other request on the box.
    */
   async actionRequired(
     scope: ZoneScope,
@@ -886,19 +901,131 @@ export class DashboardService {
     now: Date = new Date(),
   ): Promise<ActionRequiredCard[]> {
     const zone = this.actionRequiredZone(scope, filters.zoneId);
-    const waitingComponentOverdue = await this.waitingComponentOverdueCount(scope, now, zone);
-    const recoveryStalled = await this.recoveryStalledCount(scope, now, zone);
-    const vehicleUnavailability = await this.openVehicleUnavailabilityCount(zone);
-    const failedVerification = await this.failedVerificationCount(zone);
-    const wired: Record<string, number> = {
-      waiting_component_overdue: waitingComponentOverdue,
-      recovery_stalled: recoveryStalled,
-      vehicle_unavailability: vehicleUnavailability,
-      failed_verification: failedVerification,
+    const counts: Record<string, number> = {
+      unreviewed_batches: await this.batchesDispatchedTodayCount(zone, now),
+      vehicle_unavailability: await this.openVehicleUnavailabilityCount(zone),
+      critical_escalations_pending: await this.criticalEscalationsPendingCount(zone),
+      failed_verification: await this.failedVerificationCount(zone),
+      component_blocked: await this.componentBlockedOpenCount(zone),
+      waiting_component_overdue: await this.waitingComponentOverdueCount(scope, now, zone),
+      non_op_awaiting_manager: await this.nonOpAwaitingManagerCount(zone),
+      manual_assignment_required: await this.manualAssignmentRequiredCount(zone, now),
+      recovery_stalled: await this.recoveryStalledCount(scope, now, zone),
     };
-    return ACTION_REQUIRED_CARDS.map((c) =>
-      c.key in wired ? { ...c, count: wired[c.key], available: true } : { ...c, count: 0, available: false },
-    );
+    return ACTION_REQUIRED_CARDS.map((c) => ({ ...c, count: counts[c.key] ?? 0, available: c.key in counts }));
+  }
+
+  /**
+   * #350 — Plant-wise Batch Assignments the engine placed **today**, still exactly as it placed them.
+   *
+   * The card was specified as "unreviewed batches", which described the batch-review gate Decisions §7
+   * removed: there has been no review step, and therefore no "reviewed" flag, since. Rather than invent
+   * a viewed-marker to keep a dead word alive, the count is the closest true statement — what auto-
+   * dispatch did to this zone's day, which is the thing a manager opens the board to look at.
+   *
+   * `status = 'AUTO_ASSIGNED'` is the surviving half of the original intent: a batch a manager has
+   * already overridden is one they have demonstrably looked at, and a COMPLETED one is finished work,
+   * so neither is still asking for attention.
+   *
+   * Zone comes off the **schedule**, which is the zone the batch was dispatched into; the plant's zone
+   * can differ for cross-zone work and is not the question this card asks.
+   */
+  private async batchesDispatchedTodayCount(zone: bigint | null, now: Date): Promise<number> {
+    return this.prisma.plantBatchAssignment.count({
+      where: {
+        status: 'AUTO_ASSIGNED',
+        createdAt: { gte: istDayStartInstant(now) },
+        ...(zone !== null ? { schedule: { zoneId: zone } } : {}),
+      },
+    });
+  }
+
+  /**
+   * #350 — Intraday insertions parked in `ESCALATION_REQUIRED`: the system's own way of saying *a
+   * manager has to place this ticket by hand*.
+   *
+   * That status is the whole open set — the door out of it is a manual assign, which moves the row to
+   * `ACCEPTED` in the same transaction (`intraday-insertion.service.ts`) — so no `respondedAt IS NULL`
+   * clause is needed and adding one would only invite the two predicates to disagree later.
+   *
+   * The zone is on the insertion row itself (the zone the work was inserted into), not derived through
+   * the ticket's plant: a cross-zone insertion is the target zone's problem, and its ticket's plant
+   * still names the home zone.
+   */
+  private async criticalEscalationsPendingCount(zone: bigint | null): Promise<number> {
+    return this.prisma.intradayInsertion.count({
+      where: { status: 'ESCALATION_REQUIRED', ...(zone !== null ? { zoneId: zone } : {}) },
+    });
+  }
+
+  /**
+   * #350 — open Component-Blocked Queue rows: tickets dropped from a Day Plan because the SE's Common
+   * Kit was short. `resolvedAt IS NULL` is the queue's own open predicate (the page renders the same
+   * set); `wmActionStatus` is deliberately not filtered, because a row the Warehouse Manager has
+   * actioned but not resolved is still a blocked ticket the manager is waiting on.
+   */
+  private async componentBlockedOpenCount(zone: bigint | null): Promise<number> {
+    return this.prisma.componentBlockedQueue.count({
+      where: {
+        resolvedAt: null,
+        ...(zone !== null ? { ticket: { plant: { zoneId: zone } } } : {}),
+      },
+    });
+  }
+
+  /**
+   * #350 — Non-Operational markings sitting on the manager's half of the dual confirmation.
+   *
+   * Strictly `AWAITING_ZM_CONFIRMATION`. `AWAITING_CUSTOMER_CONFIRMATION` is the queue's other open
+   * state and is deliberately excluded: it is waiting on the customer, and a card labelled "awaiting
+   * manager confirmation" that counted it would tell a manager to act on work they cannot advance.
+   *
+   * Scoped through `device_states.plant_id` — a marking is on a device, and a device's site is the only
+   * zone attribution it has. Raw SQL (and `LEFT JOIN`) because `device_states.plant_id` carries no
+   * Prisma relation: the pan-India count must include a marking whose device has no state row yet,
+   * which an inner join would silently drop, and a ZM's must not.
+   */
+  private async nonOpAwaitingManagerCount(zone: bigint | null): Promise<number> {
+    const zoneFilter = zone !== null ? Prisma.sql`AND p.zone_id = ${zone}` : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<{ n: number }[]>(Prisma.sql`
+      SELECT COUNT(*)::int AS n
+      FROM non_operational_markings m
+      LEFT JOIN device_states ds ON ds.device_id = m.device_id
+      LEFT JOIN plants p ON p.plant_id = ds.plant_id
+      WHERE m.state = 'AWAITING_ZM_CONFIRMATION'::"nonop_state" ${zoneFilter}`);
+    return rows[0]?.n ?? 0;
+  }
+
+  /**
+   * #350 — work today's automatic dispatch pass already declined to place, and that therefore needs a
+   * human: open, unassigned, not held to a future date, and older than the day's last dispatch run.
+   *
+   * **The predicate is {@link assignableTickets}, not a copy of it.** That is the one definition of
+   * "a ticket a manual assign will actually move" (#272 R3) and it is what `/assign` — this card's
+   * destination — both counts and commits. Spelling it a second time here is how the number beside a
+   * button stops being a number that button can move.
+   *
+   * **"Past the dispatch window" is the last run that actually started today**, not a clock time. The
+   * dispatch cron is operator-editable (`dispatch-schedule.service.ts`), so a hardcoded hour would go
+   * wrong the first time someone changed it; the run ledger records what happened rather than what was
+   * configured. **No run today ⇒ 0**: before the engine has had its turn, nothing is required of a
+   * manager, and counting the whole open backlog at 6am would demand manual work the system is about
+   * to do by itself.
+   */
+  private async manualAssignmentRequiredCount(zone: bigint | null, now: Date): Promise<number> {
+    const window = await this.prisma.dispatchRun.aggregate({
+      _max: { startedAt: true },
+      where: { startedAt: { gte: istDayStartInstant(now) } },
+    });
+    const dispatchedAt = window._max.startedAt;
+    if (!dispatchedAt) return 0;
+    return this.prisma.ticket.count({
+      where: {
+        ...assignableTickets(now),
+        createdAt: { lt: dispatchedAt },
+        ...(zone !== null ? { plant: { zoneId: zone } } : {}),
+      },
+    });
   }
 
   /**

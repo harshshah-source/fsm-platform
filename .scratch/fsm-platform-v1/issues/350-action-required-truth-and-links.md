@@ -1,5 +1,5 @@
 # 350 — Action Required tells the truth and goes somewhere
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/350-action-required-truth-and-links.md
 Type: AFK
 Wave: 2 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -39,11 +39,11 @@ map for exactly these categories. CSM and OH dashboards render no panel at all
 
 ## Acceptance criteria
 
-- [ ] AC1 — all nine cards return real counts, zone-scoped for ZM.
-- [ ] AC2 — each card links to the surface that lists its rows, with the matching filter applied.
-- [ ] AC3 — CSM and OH see the panel pan-India.
-- [ ] AC4 — no "coming soon" remains.
-- [ ] AC5 — the dead engineers fetch is gone.
+- [x] AC1 — all nine cards return real counts, zone-scoped for ZM.
+- [x] AC2 — each card links to the surface that lists its rows, with the matching filter applied.
+- [x] AC3 — CSM and OH see the panel pan-India.
+- [x] AC4 — no "coming soon" remains.
+- [x] AC5 — the dead engineers fetch is gone.
 
 ## Verification
 

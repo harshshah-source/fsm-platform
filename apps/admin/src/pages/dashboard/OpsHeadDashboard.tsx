@@ -4,6 +4,7 @@ import { RollingNumber, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { formatStamp } from '../../lib/fleetFormat';
 import { sumCriticalDevices } from '../../lib/slaBucket';
+import { ActionRequiredPanel } from './ActionRequiredPanel';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
@@ -39,7 +40,7 @@ function CompanyPlantCard({ companies, plants, onCompaniesClick, onPlantsClick }
  * Avg Resolution) is removed pending a real backend source (System Efficiency report, BE-42) — no
  * placeholder chrome in the meantime.
  */
-export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zoneUptime, plantUptime, error, onDataRefetch }: DashboardData) {
+export function OpsHeadDashboard({ zones, companyPlants, actions, fleet, fleetUptime, zoneUptime, plantUptime, error, onDataRefetch }: DashboardData) {
   const navigate = useNavigate();
   // Bumped when a manual ingestion run completes AND its data refetch has resolved — the roll trigger
   // for the KPI odometers (keyed on completion, not on a value diff).
@@ -157,6 +158,12 @@ export function OpsHeadDashboard({ zones, companyPlants, fleet, fleetUptime, zon
       {/* The one strip where every card is the same kind of number, and the column totals of the
           Scorecard and Company/Plant tables further down. */}
       <OperationalFleetSection fleet={fleet} />
+
+      {/* #350 — the panel the Ops Head never had. Same placement and same pan-India scope as the CSM's
+          (see CentralDashboard); the difference between the two pages is emphasis, not what a manager
+          is allowed to know needs doing. Every destination it links to is ZM/CSM/OH-gated, so no card
+          here opens a door this role cannot walk through. */}
+      <ActionRequiredPanel cards={actions} />
 
       <section aria-labelledby="sla-distribution-heading" className="mb-8">
         <h3

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiActionRequired, type ActionRequiredCard } from '../../../api/dashboard';
 import { Badge } from '../../../components/ui';
+import { ACTION_REQUIRED_DESTINATIONS } from '../../../lib/actionRequiredDestinations';
 import { cn } from '../../../lib/cn';
 
 /**
@@ -23,19 +24,11 @@ import { cn } from '../../../lib/cn';
  */
 
 /**
- * Where the work for each card actually lives. Absent = no destination exists yet; the row says so.
- * Every path here was checked against `AppRoutes.tsx` (see Phase 3.2's notes on `recovery_stalled`
- * linking to the unfiltered ticket list on purpose).
+ * Where the work for each card actually lives — moved to `lib/actionRequiredDestinations` by **#350**,
+ * which needed the same answer on the dashboard's Action Required panel. Behaviour here is unchanged:
+ * absent still means no destination exists yet, and the row still says so.
  */
-const CARD_DESTINATION: Record<string, { to: string; verb: string }> = {
-  vehicle_unavailability: { to: '/readiness/vehicle-unavailability', verb: 'Review reports' },
-  failed_verification: { to: '/verification', verb: 'Review verifications' },
-  waiting_component_overdue: { to: '/component-requests', verb: 'Chase components' },
-  recovery_stalled: { to: '/tickets', verb: 'Open tickets' },
-  component_blocked: { to: '/component-blocked', verb: 'Open the queue' },
-  non_op_awaiting_manager: { to: '/readiness/non-operational', verb: 'Confirm requests' },
-  critical_insertions_awaiting_accept: { to: '/intraday', verb: 'Open the intraday queue' },
-};
+const CARD_DESTINATION = ACTION_REQUIRED_DESTINATIONS;
 
 export interface AttentionState {
   cards: ActionRequiredCard[] | null;

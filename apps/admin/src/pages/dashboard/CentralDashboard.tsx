@@ -3,6 +3,7 @@ import { DateRangeChips, type Metric } from '../../components/data';
 import { SlaBucketBarChart } from '../../components/charts/SlaBucketBarChart';
 import { Badge } from '../../components/ui';
 import { formatCount } from '../../lib/fleetFormat';
+import { ActionRequiredPanel } from './ActionRequiredPanel';
 import { ActivityTrendSection } from './ActivityTrendSection';
 import { CompanyPlantTable } from './CompanyPlantTable';
 import { DashboardHero } from './DashboardHero';
@@ -72,6 +73,15 @@ export function CentralDashboard({ zones, companyPlants, critical, actions, flee
 
       {/* Inactive vs Troubleshoot vs Installation over time (Issue 134) — Pan-India / Zone-wise. */}
       <ActivityTrendSection zones={zones.map((z) => ({ zoneId: z.zoneId, zoneName: z.zoneName }))} canSelectZone />
+
+      {/* #350 — the panel the CSM never had. The KPI strip above already totals these cards into
+          "N action items", so the page named a number it then refused to itemise, and the one role
+          that covers every zone could not see what any of them was waiting on. Pan-India: the CSM's
+          scope is every zone and the endpoint answers unscoped unless a zone is named (B5), which is
+          the same posture as the Escalation Queue and Scorecard below. Placed exactly where the ZM
+          dashboard places it — after the trend, above the SLA distribution — so the two pages read
+          the same way to a CSM who moves between them by acting as ZM. */}
+      <ActionRequiredPanel cards={actions} />
 
       {/* Same reference bar graph as the Ops-Head dashboard (uiDashboardSLA Bucket Distribution.jpg),
           over the cross-zone rows the CSM already receives. Rendered above the Escalation Queue —

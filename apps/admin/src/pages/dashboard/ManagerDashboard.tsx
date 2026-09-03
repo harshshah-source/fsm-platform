@@ -11,8 +11,7 @@ import {
   type FleetSummary,
   type ZoneOverviewRow,
 } from '../../api/dashboard';
-import { apiFleetUptime } from '../../api/reports';
-import { apiZoneEngineers, type ZoneEngineer } from '../../api/schedules';
+import { apiFleetUptime, fleetUptimeOrGap, type FleetUptimeRow } from '../../api/reports';
 import { useAuth } from '../../auth/AuthProvider';
 import { CentralDashboard } from './CentralDashboard';
 import { OpsHeadDashboard } from './OpsHeadDashboard';
@@ -30,6 +29,22 @@ import { ZmDashboard, type DashboardData } from './ZmDashboard';
  * The Warehouse-Manager persona has its own dashboard + data sources (FE-17) and never reaches here —
  * `DashboardHome` selects it before this loads (so the manager-scoped endpoints are never called for a WM).
  */
+/**
+ * #346 — the per-zone / per-plant uptime lookups carry only the groups that actually have a
+ * measurement. A group with no eligible device-time (`uptimePct === null`) is **left out of the map**
+ * rather than entered as a number, because both consumers — `ScorecardTable`'s Fleet Uptime column and
+ * `CompanyPlantTable`'s `fmtUptime` — already render a missing entry as an em dash and sort it to the
+ * bottom. Absence is the shape they were built to read; a `null` value would be a second way to say
+ * the same thing, and one of the two would eventually be forgotten.
+ */
+function measuredUptime(rows: FleetUptimeRow[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    if (row.uptimePct !== null && row.eligibleDeviceCount > 0) out.set(row.id, row.uptimePct);
+  }
+  return out;
+}
+
 export function ManagerDashboard() {
   const { session, actingZone } = useAuth();
   const [zones, setZones] = useState<ZoneOverviewRow[]>([]);
@@ -42,7 +57,6 @@ export function ManagerDashboard() {
   const [zoneUptime, setZoneUptime] = useState<Map<string, number>>(new Map());
   // Per-plant current-month uptime %, keyed by plantId — Company/Plant Overview Fleet Uptime % (Issue 135).
   const [plantUptime, setPlantUptime] = useState<Map<string, number>>(new Map());
-  const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -82,18 +96,14 @@ export function ManagerDashboard() {
     apiFleetUptime({ groupBy: 'zone' })
       .then((r) => {
         if (!alive || !r) return;
-        if (r.fleet?.eligibleDeviceCount > 0) setFleetUptime(r.fleet.uptimePct);
-        if (r.rows) setZoneUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct])));
+        if (r.fleet?.eligibleDeviceCount > 0) setFleetUptime(fleetUptimeOrGap(r));
+        if (r.rows) setZoneUptime(measuredUptime(r.rows));
       })
       .catch(() => undefined);
     // Per-plant uptime for the Company/Plant Overview Fleet Uptime % column (Issue 135); empty until
     // the monthly summary is computed, or on a backend without the endpoint (column stays "—").
     apiFleetUptime({ groupBy: 'plant' })
-      .then((r) => alive && r?.rows && setPlantUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct]))))
-      .catch(() => undefined);
-    // Zone-SE list feeds the Critical Queue assign picker; failure just leaves it empty.
-    apiZoneEngineers()
-      .then((e) => alive && setEngineers(e))
+      .then((r) => alive && r?.rows && setPlantUptime(measuredUptime(r.rows)))
       .catch(() => undefined);
     return () => {
       alive = false;
@@ -129,12 +139,12 @@ export function ManagerDashboard() {
     apiFleetUptime({ groupBy: 'zone' })
       .then((r) => {
         if (!r) return;
-        if (r.fleet?.eligibleDeviceCount > 0) setFleetUptime(r.fleet.uptimePct);
-        if (r.rows) setZoneUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct])));
+        if (r.fleet?.eligibleDeviceCount > 0) setFleetUptime(fleetUptimeOrGap(r));
+        if (r.rows) setZoneUptime(measuredUptime(r.rows));
       })
       .catch(() => undefined);
     apiFleetUptime({ groupBy: 'plant' })
-      .then((r) => r?.rows && setPlantUptime(new Map(r.rows.map((row) => [row.id, row.uptimePct]))))
+      .then((r) => r?.rows && setPlantUptime(measuredUptime(r.rows)))
       .catch(() => undefined);
   }, []);
 
@@ -147,7 +157,12 @@ export function ManagerDashboard() {
     fleetUptime,
     zoneUptime,
     plantUptime,
-    engineers,
+    // #350 — the zone-SE list this page used to fetch fed the Critical Queue's assign picker, which
+    // #277 removed: `apiZoneEngineers()` ran on every dashboard load (and again on every acting-mode
+    // change) for a consumer that no longer exists. The field itself is still on `DashboardData`,
+    // declared in `ZmDashboard.tsx` and destructured by nobody — its removal belongs to whoever owns
+    // that file next (#351); passing empty is what stops the request.
+    engineers: [],
     error,
     onAssigned: refreshCritical,
     onDataRefetch: reload,
