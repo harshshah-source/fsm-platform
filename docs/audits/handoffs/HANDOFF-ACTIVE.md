@@ -28,14 +28,17 @@ unstarted and is the next slice.
 **Start #341 — acting scope narrows every manager write door.** Its two blockers (#339, #340) are
 both closed, and `request.acting` is now the proven source both decorators read.
 
-1. **Re-verify the finding before building it** (standing instruction). The issue claims ~60
-   hand-built `{ role: user.role, zoneId: user.zone_id }` sites across 20 controllers, with
-   `schedules.controller.ts:81-85 scopeFor` and `batches.controller.ts:113` the only writes that
-   honour acting. #340 left a `// The scope stays the caller's own — #341 owns whether acting narrows
-   a write door.` comment at each site it passed through — those are a starting index, not the whole
-   set. Count them yourself; the survey has been wrong before in both directions.
-2. **AC1 is a route-enumeration contract test**, not per-door cases: it must fail when someone adds a
-   new unscoped manager write route. That is the hard part of the slice and is worth writing first.
+1. **The finding is already re-verified** — done 2026-09-03, written into the issue file under
+   "Finding re-verified". The survey's "~60 across 20" is exact: **57 sites, 20 controllers**, worst
+   first `tickets` 6 / `reports` 6 / `verification` 4 / `vehicle-unavailability` 4 / `install` 4 /
+   `schedules` 4 / `intraday-updates` 4 / `se-planner` 4 / `devices` 4. Do not redo the count.
+2. **AC1's contract test is designed and the design is in the issue file** — read "AC1's contract
+   test — design decision" before writing anything. Short version: **do not drive 57 routes with a
+   real zone-1 entity each**; enumerate the route map at runtime the way
+   `global-guard-validation.e2e-spec.ts` already does, filter to manager write routes, and assert each
+   handler injects `@CurrentScope()`/`@CurrentActor()` via Nest's `ROUTE_ARGS_METADATA`. That is what
+   delivers "fails on any new unscoped route". Then prove the behaviour on a representative e2e set
+   including the reproduced case. Write the sweep first — it is the slice's real risk.
 3. **The narrowing rule already recorded on #239:** narrowing a write can only *reduce* reach. AC4
    (no behaviour change for ZM/WM/SE) is the other half of the same statement and is what stops the
    conversion from becoming a permissions change.

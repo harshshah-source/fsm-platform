@@ -45,6 +45,44 @@ so the acting header never reaches those routes.
 
 Route-enumeration e2e (fails on any new unscoped route); admin header test.
 
+### Finding re-verified 2026-09-03 (before building — standing instruction)
+
+**Confirmed, and the count is exact: 57 `{ role: user.role, zoneId: user.zone_id }` sites across
+exactly 20 controllers.** Worst first: `tickets` 6, `reports` 6, `verification` 4,
+`vehicle-unavailability` 4, `install` 4, `schedules` 4, `intraday-updates` 4, `se-planner` 4,
+`devices` 4, `intraday-insertion` 3, `engineers` 3, then `vouchers`, `component-request`,
+`dispatch-runs`, `role-backup`, `warehouse-stock`, `inventory`, `leave-request`, `cross-zone`,
+`audit-trail`. #340 left a `// The scope stays the caller's own — #341 owns whether acting narrows a
+write door.` comment at each site it passed through; those are an index into the set, not the set.
+
+### AC1's contract test — design decision (recorded so it is not re-derived)
+
+**Do not try to drive 57 routes with a real zone-1 entity each.** AC1 as written ("enumerates every
+manager write route and asserts a CSM acting in zone 2 gets 403/404 for a zone-1 entity") needs a
+valid, correctly-zoned fixture per route; the fixture set would be larger than the slice, would rot,
+and a route whose fixture was wrong would pass by accident.
+
+Build it as the repo's existing route-sweep idiom instead — `global-guard-validation.e2e-spec.ts`'s
+"sweeps the full route map" test is the precedent, including its rule that widening the allowlist must
+be a *deliberate edit*:
+
+1. **Enumerate at runtime** from the Express route stack
+   (`app.getHttpAdapter().getInstance()._router.stack`), so a newly added route appears in the sweep
+   without anyone remembering to list it. Normalise the `/api/v1/` dual-serve prefix away exactly as
+   that test does, or a future version prefix will smuggle a route past the sweep.
+2. **Filter to manager write routes** — `POST`/`PATCH`/`PUT`/`DELETE` whose `@Roles` includes CSM or
+   OH (the only roles that can act).
+3. **Assert each takes its scope from the proven context**, by reading Nest's `ROUTE_ARGS_METADATA`
+   on the handler and checking the custom param factory is `CurrentScope`'s or `CurrentActor`'s. This
+   is what actually delivers the Verification line — *fails on any new unscoped route* — and it cannot
+   pass by accident the way a fixture-driven case can.
+4. **Then prove the behaviour on a representative set**, including the reproduced case
+   (`tickets.controller.ts:142`, a CSM acting in zone 2 closing a zone-1 ticket) and one door per
+   scope shape. That is where 403/404 is asserted for real.
+
+The static sweep is the regression barrier; the e2e set is the proof the barrier guards something
+true. Either alone is weaker than both.
+
 ## UI surfaces
 
 n/a (admin API clients only; no page layout changes)
