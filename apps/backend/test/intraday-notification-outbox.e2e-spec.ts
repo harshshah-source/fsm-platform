@@ -357,7 +357,10 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
 
   describe("the ZM's 'manual assignment needed' escalation", () => {
     it('AC2/AC5 — a notifier that throws leaves the escalation row committed and the notice retryable', async () => {
-      const { intraday } = servicesOn(prisma, throwingNotifications());
+      // #356 — the escalation path resolves its recipients through the notification service (the
+      // designated ZM, else the zone's role holders) before it delivers through it, so the crash
+      // stub needs the real client for everything except `notify`.
+      const { intraday } = servicesOn(prisma, throwingNotifications(prisma));
       await fillTheZone();
       const ticketId = await makeCriticalTicket();
 
@@ -400,7 +403,8 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
 
   describe("the unavailable engineer's stranded work (#288)", () => {
     it('AC2/AC5 — a notifier that throws leaves every escalation committed and the one alert retryable', async () => {
-      const stranded = new StrandedWorkEscalationService(prisma, throwingNotifications());
+      // #356 — see the sibling escalation test above: recipients resolve through the service too.
+      const stranded = new StrandedWorkEscalationService(prisma, throwingNotifications(prisma));
       const seId = await makeSe();
       const t1 = await makeCriticalTicket();
       const t2 = await makeCriticalTicket();

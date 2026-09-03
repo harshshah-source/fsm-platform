@@ -1,5 +1,5 @@
 # 356 — Intra-day queue hygiene: bounded reads, refresh, labels, dead routes, dead branch
-Status: ready-for-agent
+Status: done 2026-09-03 - report docs/progress/356-intraday-queue-hygiene.md
 Type: AFK
 Wave: 3 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -49,13 +49,13 @@ The intra-day queue works but is unbounded, stale and carries dead weight.
 
 ## Acceptance criteria
 
-- [ ] AC1 — the default page is ≤ 50 rows, newest first, filterable by status and date, with cursor
+- [x] AC1 — the default page is ≤ 50 rows, newest first, filterable by status and date, with cursor
       paging.
-- [ ] AC2 — the queue refreshes without a page reload.
-- [ ] AC3 — no raw enum label is shown.
-- [ ] AC4 — a missing ZM → role fallback or a logged miss, never a silent return.
-- [ ] AC5 — the three same-day write routes return 404 and no client references remain.
-- [ ] AC6 — the dead acceptance branch is removed and its test rewritten.
+- [x] AC2 — the queue refreshes without a page reload.
+- [x] AC3 — no raw enum label is shown.
+- [x] AC4 — a missing ZM → role fallback or a logged miss, never a silent return.
+- [x] AC5 — the three same-day write routes return 404 and no client references remain.
+- [x] AC6 — the dead acceptance branch is removed and its test rewritten.
 
 ## Verification
 

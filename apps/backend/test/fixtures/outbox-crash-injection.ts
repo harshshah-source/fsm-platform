@@ -1,4 +1,4 @@
-import type { NotificationService } from '../../src/notifications/notification.service';
+import { NotificationService } from '../../src/notifications/notification.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
 /** The two event types that predate #338. Everything else is a producer's own converted notice. */
 const DAY_PLAN_EVENT_TYPES = ['DAY_PLAN_DISPATCHED', 'DAY_PLAN_OVERRIDDEN'];
@@ -31,13 +31,26 @@ export class EnqueueFailed extends Error {
   }
 }
 
-/** A notification service that cannot deliver — the crash, injected where a push would happen. */
-export function throwingNotifications(): NotificationService {
-  return {
-    notify: async () => {
-      throw new NotifyFailed();
-    },
-  } as unknown as NotificationService;
+/**
+ * A notification service that cannot deliver — the crash, injected where a push would happen.
+ *
+ * #356 — pass `prisma` when the producer under test **resolves recipients** through the service as
+ * well as delivering through it (`recipientsInRoles`, `zoneManagerRecipients`). The escalation
+ * producers do: they ask who to tell inside their own transaction and then deliver post-commit, so a
+ * stub that only answers `notify` makes them fail at resolution — before the row this fixture exists
+ * to prove durable is ever written. With a client, everything but `notify` is the real service and the
+ * crash stays where it belongs: at delivery. The no-argument form is unchanged for the producers that
+ * only deliver.
+ */
+export function throwingNotifications(prisma?: PrismaService): NotificationService {
+  const notify = async (): Promise<never> => {
+    throw new NotifyFailed();
+  };
+  if (!prisma) return { notify } as unknown as NotificationService;
+  const real = new NotificationService(prisma);
+  return new Proxy(real, {
+    get: (target, prop, receiver) => (prop === 'notify' ? notify : Reflect.get(target, prop, receiver)),
+  });
 }
 
 /**

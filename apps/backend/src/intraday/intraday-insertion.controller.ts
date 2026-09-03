@@ -8,6 +8,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
@@ -19,13 +20,53 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import type { CandidateRow } from '../scheduling/candidate-query.service';
+import { IntradayInsertionStatus } from '../generated/prisma/enums';
 import {
   type CriticalAssignOutcome,
-  IntradayInsertionRow,
+  type IntradayInsertionPage,
   IntradayInsertionService,
 } from './intraday-insertion.service';
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
+
+const INSERTION_STATUSES = Object.values(IntradayInsertionStatus) as string[];
+
+/** #356 — the queue's query DTO, hand-parsed for the reason each thrower gives. */
+function parseTake(raw: string | undefined): number | undefined {
+  if (raw == null || raw === '') return undefined;
+  const n = Number(raw);
+  // Clamping is the service's job (a caller who asks for 10 000 gets 200 and is told so by `limit`);
+  // a `take` that is not a number at all is a malformed request, not an ambitious one.
+  if (!Number.isFinite(n)) throw new BadRequestException({ code: 'INVALID_TAKE' });
+  return n;
+}
+
+function parseStatuses(raw: string | undefined): IntradayInsertionStatus[] | undefined {
+  if (raw == null || raw === '') return undefined;
+  const values = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  if (values.length === 0) return undefined;
+  // An unknown status silently matching nothing would render as "no escalations right now" — the one
+  // answer a dispatcher must never be given wrongly.
+  const unknown = values.filter((v) => !INSERTION_STATUSES.includes(v));
+  if (unknown.length > 0) throw new BadRequestException({ code: 'INVALID_STATUS', status: unknown });
+  return values as IntradayInsertionStatus[];
+}
+
+function parseSince(raw: string | undefined): Date | undefined {
+  if (raw == null || raw === '') return undefined;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) throw new BadRequestException({ code: 'INVALID_SINCE' });
+  return d;
+}
+
+function parseCursor(raw: string | undefined): bigint | undefined {
+  if (raw == null || raw === '') return undefined;
+  const id = toBigIntId(raw);
+  // A 400 and not a 404: the cursor is this read's *argument*, not a resource it fetches — the same
+  // distinction #310 (CB-9) drew for the sweep's `zoneId` two doors down.
+  if (id === null) throw new BadRequestException({ code: 'INVALID_CURSOR' });
+  return id;
+}
 
 /**
  * `/api/intraday-insertions/*` — the system-triggered intra-day CRITICAL insertion surface (Issues
@@ -43,10 +84,25 @@ const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_H
 export class IntradayInsertionController {
   constructor(private readonly svc: IntradayInsertionService) {}
 
+  /**
+   * The Intra-day Queue read — a bounded page since #356 (`{ rows, nextCursor, limit }`).
+   *
+   * Every parameter is validated rather than coerced-and-ignored. A dispatcher who filters to
+   * "escalations since 09:00" and silently gets the unfiltered queue back is being lied to by the one
+   * screen they use to decide where engineers go; a 400 tells them the filter did not take.
+   */
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentScope() scope: ManagerScope): Promise<IntradayInsertionRow[]> {
-    return this.svc.listForScope(scope);
+  list(
+    @CurrentScope() scope: ManagerScope,
+    @Query() q: { take?: string; status?: string; since?: string; cursor?: string },
+  ): Promise<IntradayInsertionPage> {
+    return this.svc.listForScope(scope, {
+      take: parseTake(q.take),
+      status: parseStatuses(q.status),
+      since: parseSince(q.since),
+      cursor: parseCursor(q.cursor),
+    });
   }
 
   /** Qualifying-event sweep — direct-assign newly-CRITICAL tickets in a zone, or escalate. */

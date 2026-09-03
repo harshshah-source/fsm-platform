@@ -61,10 +61,47 @@ export interface IntradayInsertionRow {
   assignedSeName: string | null;
 }
 
-export async function apiIntradayInsertions(): Promise<IntradayInsertionRow[]> {
-  const res = await fetch(`${BASE_URL}/intraday-insertions`, { headers: authHeaders() });
+/**
+ * #356 — what the queue may ask for. `take` is advisory: the server clamps it and reports back what it
+ * actually applied in `limit`, so a client cannot talk itself into an unbounded read.
+ */
+export interface IntradayQuery {
+  take?: number;
+  status?: IntradayInsertionStatus[];
+  /** ISO instant — the queue's "today only" / "since this morning" filter. */
+  since?: string;
+  cursor?: string;
+}
+
+export interface IntradayInsertionPage {
+  rows: IntradayInsertionRow[];
+  /** Non-null when more rows exist behind this page — pass it back as `cursor`. */
+  nextCursor: string | null;
+  limit: number;
+}
+
+/** Shared by both intra-day clients: only the parameters actually set reach the URL. */
+export function intradayQueryString(q: IntradayQuery): string {
+  const params = new URLSearchParams();
+  if (q.take != null) params.set('take', String(q.take));
+  if (q.status && q.status.length > 0) params.set('status', q.status.join(','));
+  if (q.since) params.set('since', q.since);
+  if (q.cursor) params.set('cursor', q.cursor);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/**
+ * The Intra-day Queue's insertion page. Returns an envelope rather than an array since #356: the
+ * server bounds this read, and a truncated array that cannot say it was truncated is worse than the
+ * unbounded one it replaced — a dispatcher would read "that is all of it" off a list that is not.
+ */
+export async function apiIntradayInsertions(query: IntradayQuery = {}): Promise<IntradayInsertionPage> {
+  const res = await fetch(`${BASE_URL}/intraday-insertions${intradayQueryString(query)}`, {
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
-  return (await res.json()) as IntradayInsertionRow[];
+  return (await res.json()) as IntradayInsertionPage;
 }
 
 /**

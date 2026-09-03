@@ -132,6 +132,15 @@ export class StrandedWorkEscalationService {
    * `INTRADAY_ESCALATION_REQUIRED` is reused rather than given a new type: it is the ZM's existing
    * "manual assignment needed" channel, and a new type would land in whatever a client's `default`
    * branch does with an unknown one.
+   *
+   * **#356 AC4 (absorbing #331 AC1).** Recipients come from
+   * {@link NotificationService.zoneManagerRecipients} — designated manager, else the zone's role
+   * holders, else a logged miss — where this used to read `zones.zonal_manager_user_id` and return on
+   * null. That silence was worse here than at the sweep's own escalation site: this path writes a
+   * ledger row per stranded ticket, and #288's re-escalation guard keys on those rows. A zone with no
+   * designated ZM therefore got the "a human already knows" marker for work no human had been told
+   * about, and the next availability write on that engineer would decline to escalate it again. The
+   * day's work went quiet in a way nothing could reopen.
    */
   private async alertZm(
     tx: Prisma.TransactionClient,
@@ -140,11 +149,11 @@ export class StrandedWorkEscalationService {
     seName: string | null,
     ticketIds: string[],
   ): Promise<bigint | null> {
-    const zone = await tx.zone.findUnique({ where: { zoneId } });
-    if (!zone?.zonalManagerUserId) return null;
+    const recipients = await this.notifications.zoneManagerRecipients(zoneId, tx);
+    if (recipients.length === 0) return null;
     const who = seName ?? seId;
     return queueNotification(tx, {
-      recipients: [{ userId: zone.zonalManagerUserId, role: 'ZONAL_MANAGER' }],
+      recipients,
       type: 'INTRADAY_ESCALATION_REQUIRED',
       title: 'Engineer unavailable — work needs reassignment',
       body: `${who} is unavailable for the rest of today. ${ticketIds.length} committed ticket${

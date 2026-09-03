@@ -5,7 +5,7 @@ import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { SeAvailabilityService } from '../engineers/se-availability.service';
 import { Prisma } from '../generated/prisma/client';
-import { type SlaBucket } from '../generated/prisma/enums';
+import { IntradayInsertionStatus, type SlaBucket } from '../generated/prisma/enums';
 import { NotificationService } from '../notifications/notification.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { buildCandidateReadiness } from '../recommender/candidate-readiness';
@@ -70,6 +70,34 @@ export interface IntradayInsertionRow {
    */
   assignedSeId: string | null;
   assignedSeName: string | null;
+}
+
+/** #356 — a queue page a dispatcher can actually load, and the vocabulary for asking for the next one. */
+export const DEFAULT_PAGE_SIZE = 50;
+export const MAX_PAGE_SIZE = 200;
+
+export function clampPageSize(take: number | undefined): number {
+  if (take == null || !Number.isFinite(take)) return DEFAULT_PAGE_SIZE;
+  return Math.min(Math.max(Math.trunc(take), 1), MAX_PAGE_SIZE);
+}
+
+export interface IntradayInsertionQuery {
+  /** Rows to return. Defaults to {@link DEFAULT_PAGE_SIZE}, clamped to {@link MAX_PAGE_SIZE}. */
+  take?: number;
+  /** Statuses to include. Omitted means every status. */
+  status?: IntradayInsertionStatus[];
+  /** Lower bound on `createdAt` — the queue's "today only" / "since lunchtime" filter. */
+  since?: Date;
+  /** The previous page's `nextCursor`: the last `insertionId` the caller has already seen. */
+  cursor?: bigint;
+}
+
+export interface IntradayInsertionPage {
+  rows: IntradayInsertionRow[];
+  /** The cursor for the next page, or null when this page is the end of the window. */
+  nextCursor: string | null;
+  /** The bound actually applied — a caller who asked for 10 000 needs to be told they got 200. */
+  limit: number;
 }
 
 export interface CriticalAssignOutcome {
@@ -516,30 +544,70 @@ export class IntradayInsertionService {
     return { result: 'OK', insertionId: String(insertionId), scheduleId: assigned.scheduleId, batchId: assigned.batchId, seId };
   }
 
-  /** The Intra-day Queue read (zone-scoped for ZM; cross-zone for CSM/OH). */
-  async listForScope(scope: { role: string; zoneId: number | null }): Promise<IntradayInsertionRow[]> {
-    const where: Prisma.IntradayInsertionWhereInput =
-      scope.role === 'ZONAL_MANAGER' && scope.zoneId != null ? { zoneId: BigInt(scope.zoneId) } : {};
-    const rows = await this.prisma.intradayInsertion.findMany({
+  /**
+   * The Intra-day Queue read (zone-scoped for ZM; cross-zone for CSM/OH), **bounded since #356**.
+   *
+   * This returned every insertion ever written in scope — 552 rows for one ZM on the day the survey
+   * measured it, and one more every time the sweep ticks. The queue is the screen a dispatcher stares
+   * at through the working day, so the read degraded exactly in proportion to how busy the day was: at
+   * its slowest when it mattered most, and with no ceiling at all on where that ends.
+   *
+   * It is now a window: newest first, `DEFAULT_PAGE_SIZE` rows unless the caller asks for fewer,
+   * `MAX_PAGE_SIZE` however loudly they ask for more, optionally narrowed by `status` and `since`, and
+   * walked with a `cursor`. The envelope is the point — `nextCursor` is how the page says "there is
+   * more", which a bare truncated array cannot do and which makes a silently-cut list worse than the
+   * unbounded one it replaced.
+   *
+   * Ordering is `createdAt desc` with `insertionId desc` as the tiebreak, and the cursor rides the
+   * primary key. Two rows written in the same transaction (the sweep escalating two tickets in one
+   * tick) share a `createdAt` to the microsecond; ordering on it alone leaves their relative position
+   * undefined, and an undefined order is a cursor that can skip or repeat a row between pages.
+   */
+  async listForScope(
+    scope: { role: string; zoneId: number | null },
+    query: IntradayInsertionQuery = {},
+  ): Promise<IntradayInsertionPage> {
+    const limit = clampPageSize(query.take);
+    const where: Prisma.IntradayInsertionWhereInput = {
+      ...(scope.role === 'ZONAL_MANAGER' && scope.zoneId != null ? { zoneId: BigInt(scope.zoneId) } : {}),
+      ...(query.status && query.status.length > 0 ? { status: { in: query.status } } : {}),
+      ...(query.since ? { createdAt: { gte: query.since } } : {}),
+    };
+    // One row over the limit: the cheapest honest answer to "is there another page?", and it never
+    // reaches the caller.
+    const found = await this.prisma.intradayInsertion.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { insertionId: 'desc' }],
+      take: limit + 1,
+      ...(query.cursor != null ? { cursor: { insertionId: query.cursor }, skip: 1 } : {}),
       include: { ticket: { select: { companyId: true, companyTier: true } } },
     });
+    const rows = found.slice(0, limit);
+    const nextCursor = found.length > limit ? String(rows[rows.length - 1].insertionId) : null;
     // #288 — one query for the whole page rather than one per row; absent means "on nobody's plan".
     const assignees = await currentAssigneesFor(
       this.prisma,
       rows.map((r) => r.ticketId),
     );
-    return rows.map((r) => toRow(r, assignees.get(r.ticketId) ?? null));
+    return { rows: rows.map((r) => toRow(r, assignees.get(r.ticketId) ?? null)), nextCursor, limit };
   }
 
   /**
    * Queue the zone's ZM "Manual assignment needed" Action-Required alert (Issue 30) inside the
-   * caller's transaction (#338). Returns the outbox row id for the caller's post-commit drain, or
-   * null when the zone has no ZM — unchanged behaviour, there is simply nobody to tell.
+   * caller's transaction (#338). Returns the outbox row id for the caller's post-commit drain, or null
+   * when the zone has nobody at all to tell.
    *
-   * The zone is read on `tx` rather than `this.prisma` so the recipient the row records is the one
-   * this transaction saw, not one a re-read at delivery time might disagree with.
+   * **#356 AC4 (absorbing #331 AC1).** This used to read `zones.zonal_manager_user_id`, find null, and
+   * return — no notice, no log, nothing. The ledger row was still written, so a zone between managers
+   * produced `ESCALATION_REQUIRED` rows indistinguishable on the queue from ones a manager had already
+   * seen and was deciding on: "ZM notified" could be false with no trace anywhere that it was false.
+   * {@link NotificationService.zoneManagerRecipients} is now the single answer — designated manager,
+   * else the role holders in the zone, else a logged `NO_RECIPIENT` miss. Still null-returning when
+   * genuinely nobody holds the role, because there is then genuinely nobody to tell; the difference is
+   * that the miss is now on the record.
+   *
+   * Recipients are resolved on `tx` rather than `this.prisma` so the row records the recipients this
+   * transaction saw, not ones a re-read at delivery time might disagree with.
    */
   private async escalateToZm(
     tx: Prisma.TransactionClient,
@@ -547,10 +615,10 @@ export class IntradayInsertionService {
     ticketId: string,
     insertionId: bigint,
   ): Promise<bigint | null> {
-    const zone = await tx.zone.findUnique({ where: { zoneId } });
-    if (!zone?.zonalManagerUserId) return null;
+    const recipients = await this.notifications.zoneManagerRecipients(zoneId, tx);
+    if (recipients.length === 0) return null;
     return queueNotification(tx, {
-      recipients: [{ userId: zone.zonalManagerUserId, role: 'ZONAL_MANAGER' }],
+      recipients,
       type: 'INTRADAY_ESCALATION_REQUIRED',
       title: 'Manual assignment needed',
       body: `CRITICAL ticket ${ticketId} could not be auto-assigned — no capacity-eligible engineer.`,

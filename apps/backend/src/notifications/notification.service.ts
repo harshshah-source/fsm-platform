@@ -9,10 +9,16 @@ import {
 } from './notification-channel.gateway';
 
 /**
- * GENERAL → push/SMS/WhatsApp/email fallback (in-app always fires too); SE_ACCEPTANCE → in-app + the
- * first-class WhatsApp Confirmation (shown as "sent").
+ * How a notice is delivered: in-app always fires, then the push/SMS/WhatsApp/email fallback chain.
+ *
+ * #356 (NOTIF-05) — `SE_ACCEPTANCE` is gone. It delivered WhatsApp as a "first-class" confirmation for
+ * the SE Acceptance step, and CONTEXT §21 retired SE Acceptance itself (#268/#279): a CRITICAL ticket
+ * is assigned directly, so there is no acceptance to confirm and no producer had passed the model in
+ * over a year. The union is kept as a single-member type rather than deleted outright so the call
+ * sites that spell `deliveryModel: 'GENERAL'` keep saying which model they mean — and so a future
+ * second model (#337's push work is the candidate) has somewhere to land.
  */
-export type NotificationDeliveryModel = 'GENERAL' | 'SE_ACCEPTANCE';
+export type NotificationDeliveryModel = 'GENERAL';
 
 export interface NotifyRecipient {
   userId: string;
@@ -34,7 +40,6 @@ export interface NotifyInput {
 export interface DeliveryView {
   channel: NotificationChannel;
   status: 'SENT' | 'ATTEMPTED' | 'SKIPPED' | 'FAILED';
-  firstClass: boolean;
 }
 export interface NotificationView {
   id: string;
@@ -79,11 +84,15 @@ export interface RecipientsInRolesQuery {
 
 /**
  * The notification spine (Issue 03). `notify` writes one Notification per recipient — the in-app
- * notification ALWAYS fires (AC#1) — and records each channel's delivery. GENERAL notifications walk the
+ * notification ALWAYS fires (AC#1) — and records each channel's delivery. Notices walk the
  * push→SMS→WhatsApp→email fallback chain, stopping at the first channel the gateway reports SENT and
- * recording the rest as ATTEMPTED (AC#2). SE_ACCEPTANCE delivers the WhatsApp Confirmation as a first-class
- * channel recorded SENT (shown as "sent", not "attempted") alongside in-app (AC#3). The actual external
- * send is the deferred `NotificationChannelGateway` seam (FCM/APNs/WhatsApp/SMS/SMTP = HITL accounts).
+ * recording the rest as ATTEMPTED (AC#2). The actual external send is the deferred
+ * `NotificationChannelGateway` seam (FCM/APNs/WhatsApp/SMS/SMTP = HITL accounts).
+ *
+ * #356 removed the second delivery model (`SE_ACCEPTANCE`, the first-class WhatsApp Confirmation of
+ * Issue 03 AC#3) along with the SE Acceptance step CONTEXT §21 retired. `notification_deliveries`
+ * still carries its `first_class` column, now written at its `false` default by everything — dropping
+ * the column is a migration this slice deliberately did not take (see the report).
  */
 @Injectable()
 export class NotificationService {
@@ -127,6 +136,32 @@ export class NotificationService {
       logger.warn(`NO_RECIPIENT roles=${roles.join('|')} zone=${zoneId !== null ? String(zoneId) : 'any'}`);
     }
     return users.map((u) => ({ userId: u.userId, role: u.role }));
+  }
+
+  /**
+   * #356 (AC4) — who a zone's news goes to, in one place.
+   *
+   * The designated `zones.zonal_manager_user_id` when there is one: that is the accountable manager,
+   * and a zone that names one does not want its news fanned out to everybody who happens to hold the
+   * role there. When there is none — a zone between managers, or one never linked — the role itself
+   * answers, and {@link recipientsInRoles} logs the miss if *that* is empty too. The one thing this
+   * must never do is what its three call sites used to: read the id, find null, and return nothing,
+   * quietly, leaving an escalation ledger row that looks exactly like one a manager has already seen.
+   *
+   * Promoted here from `cross-zone-escalation.service.ts`, where #354 first wrote it privately. Three
+   * producers now ask this question — cross-zone escalation, the CRITICAL intra-day sweep and
+   * stranded-work escalation — and three private copies of a fallback policy is how the policies drift
+   * apart. Takes a client so it can resolve **inside** the producing transaction, for #338's reason:
+   * the outbox row must record the recipients the transaction saw.
+   */
+  async zoneManagerRecipients(
+    zoneId: number | bigint,
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ): Promise<NotifyRecipient[]> {
+    const id = BigInt(zoneId);
+    const zone = await client.zone.findUnique({ where: { zoneId: id } });
+    if (zone?.zonalManagerUserId) return [{ userId: zone.zonalManagerUserId, role: 'ZONAL_MANAGER' }];
+    return this.recipientsInRoles({ role: 'ZONAL_MANAGER', zoneId: id }, client);
   }
 
   /** The signed-in user's in-app notifications, newest first (AC#1). `unreadOnly` filters to unread. */
@@ -186,7 +221,7 @@ export class NotificationService {
       },
     });
 
-    const deliveries: DeliveryView[] = [{ channel: 'IN_APP', status: 'SENT', firstClass: false }];
+    const deliveries: DeliveryView[] = [{ channel: 'IN_APP', status: 'SENT' }];
     const send = (channel: NotificationChannel) =>
       this.gateway.deliver({
         channel,
@@ -198,28 +233,21 @@ export class NotificationService {
         metadata: input.metadata ?? null,
       });
 
-    if ((input.deliveryModel ?? 'GENERAL') === 'SE_ACCEPTANCE') {
-      // #76 — WhatsApp Confirmation is first-class for SE Acceptance (the *display* layer may still
-      // label it "sent" per product choice, PRD:305), but `notification_deliveries.status` must
-      // record what actually happened — a delivery that provably did not occur is a false record in
-      // the audit trail, not a harmless simplification (the 10-min intraday acceptance timeout runs
-      // on wall-clock regardless of delivery, so a false SENT here means an SE can be recorded as
-      // notified, never actually notified, and rerouted for non-response with no way to contest it).
-      const result = await send('WHATSAPP');
-      deliveries.push({ channel: 'WHATSAPP', status: result === 'SENT' ? 'SENT' : 'ATTEMPTED', firstClass: true });
-    } else {
-      for (const channel of GENERAL_CHAIN) {
-        const result = await send(channel);
-        if (result === 'SENT') {
-          deliveries.push({ channel, status: 'SENT', firstClass: false });
-          break;
-        }
-        deliveries.push({ channel, status: 'ATTEMPTED', firstClass: false });
+    // #76, kept when #356 deleted the branch it was written for: `notification_deliveries.status`
+    // records what actually happened. A delivery that provably did not occur is a false record in the
+    // audit trail, not a harmless simplification — the whole point of the table is that somebody can
+    // afterwards ask "was this person actually told?" and get a truthful answer.
+    for (const channel of GENERAL_CHAIN) {
+      const result = await send(channel);
+      if (result === 'SENT') {
+        deliveries.push({ channel, status: 'SENT' });
+        break;
       }
+      deliveries.push({ channel, status: 'ATTEMPTED' });
     }
 
     await this.prisma.notificationDelivery.createMany({
-      data: deliveries.map((d) => ({ notificationId: notification.id, channel: d.channel, status: d.status, firstClass: d.firstClass })),
+      data: deliveries.map((d) => ({ notificationId: notification.id, channel: d.channel, status: d.status })),
     });
 
     return {

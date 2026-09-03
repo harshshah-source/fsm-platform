@@ -433,7 +433,15 @@ export interface OverrideRouteImpact {
 }
 
 export interface OverrideImpactConflicts {
-  /** The `CONFLICT_ON_SITE` gate — reads empty until `soft_states` exists (Issue 15). */
+  /**
+   * The `CONFLICT_ON_SITE` gate — tickets whose engineer is ON_SITE on them right now.
+   *
+   * #311 — this used to say "reads empty until `soft_states` exists (Issue 15)", which stopped being
+   * true well before anyone noticed: the table, the port and the commit path's gate were all live, and
+   * only the *preview* still hardcoded an empty array. The preview said "no conflicts", the identical
+   * confirm body 409'd, and the comment here told any reader that the emptiness was expected. It is a
+   * real list now, and a non-empty one means the confirm will refuse without `confirm: true`.
+   */
   onSite: string[];
   /** The `CONFLICT_DEFERRED` gate — tickets held to a future return date (#249). */
   deferred: string[];

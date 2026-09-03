@@ -1,5 +1,5 @@
 # 331 — Silent-degradation hygiene: ZM-notify fallback + bounded list reads
-Status: ready-for-agent
+Status: done 2026-09-03 (closed into #356) - report docs/progress/356-intraday-queue-hygiene.md
 Type: AFK
 Wave: 4 · Severity: P3 · Findings: AR-14a/b + A4,
 `audit/2026-09-01-scheduler-engine-forensics.md` §7
@@ -47,8 +47,8 @@ Notify: null-ZM zone → loud log + fallback/counter, never a silent return; lis
 asserted (take present), consumers' suites green.
 
 ## Acceptance criteria
-- [ ] AC1 — a missing ZM can no longer silently swallow an escalation alert.
-- [ ] AC2 — no mutation-adjacent list read is unbounded.
+- [x] AC1 — a missing ZM can no longer silently swallow an escalation alert.
+- [x] AC2 — no mutation-adjacent list read is unbounded.
 
 ## UI surfaces
 n/a.

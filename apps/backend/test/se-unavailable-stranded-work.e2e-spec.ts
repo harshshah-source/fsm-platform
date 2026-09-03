@@ -258,8 +258,8 @@ describe('#288 — unavailable SE, stranded work', () => {
 
     await approveLeaveToday(se);
 
-    const rows = await intraday.listForScope({ role: 'ZONAL_MANAGER', zoneId: Number(zoneId) });
-    const row = rows.find((r) => r.ticketId === t1);
+    const queue = await intraday.listForScope({ role: 'ZONAL_MANAGER', zoneId: Number(zoneId) });
+    const row = queue.rows.find((r) => r.ticketId === t1);
     expect(row).toBeTruthy();
     expect(row!.insertionType).toBe('SE_UNAVAILABLE');
     // The queue's own Assign button cannot resolve this row: the ticket is still formally assigned
@@ -336,5 +336,40 @@ describe('#288 — unavailable SE, stranded work', () => {
     // Otherwise the queue and the cockpit strip would keep asking a manager to decide something they
     // have already decided — and the re-escalation guard would key on a row nobody can clear.
     expect(await escalationsFor(t1)).toHaveLength(0);
+  });
+
+  /**
+   * #356 AC4 (absorbing #331 AC1), the second of the two silent-return sites.
+   *
+   * This one is the worse of the pair. `escalateStrandedWork` writes a ledger row per stranded ticket
+   * **and** #288's re-escalation guard, which keys on those rows — so on a zone with no designated ZM
+   * the old code created the "a human already knows" marker for work no human had been told about, and
+   * then refused to escalate it again on the next availability write. The day's work went quiet in a
+   * way nothing could reopen.
+   */
+  it('#356 AC4 — a zone that names no ZM alerts the role holders in the zone, never returns silently', async () => {
+    const standIn = await prisma.user.create({
+      data: { name: 'ZM stand-in ' + NS, role: 'ZONAL_MANAGER', phone: 'zmsi-sw-' + NS, email: `zmsi-sw-${NS}@sw.test`, zoneId },
+    });
+    userIds.push(standIn.userId);
+    await prisma.zone.update({ where: { zoneId }, data: { zonalManagerUserId: null } });
+    try {
+      const se = await makeSe();
+      const t1 = await makeTicket();
+      const t2 = await makeTicket();
+      await givePlan(se, [t1, t2]);
+
+      await approveLeaveToday(se);
+
+      expect(await escalationsFor(t1)).toHaveLength(1);
+      const notes = await prisma.notification.findMany({ where: { recipientUserId: standIn.userId } });
+      expect(notes).toHaveLength(1);
+      expect(notes[0].type).toBe('INTRADAY_ESCALATION_REQUIRED');
+      expect(notes[0].body ?? '').toContain('2');
+      // The designated ZM is not told twice — they are not the recipient at all here.
+      expect(await zmNotifications()).toHaveLength(0);
+    } finally {
+      await prisma.zone.update({ where: { zoneId }, data: { zonalManagerUserId: zmUserId } });
+    }
   });
 });

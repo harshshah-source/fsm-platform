@@ -259,7 +259,7 @@ describe('#268 — CRITICAL direct assignment', () => {
 
     // The queue itself is the other half of "operationally visible".
     const queue = await svc.listForScope({ role: 'ZONAL_MANAGER', zoneId: Number(zoneId) });
-    expect(queue.some((r) => r.ticketId === ticketId && r.status === 'ESCALATION_REQUIRED')).toBe(true);
+    expect(queue.rows.some((r) => r.ticketId === ticketId && r.status === 'ESCALATION_REQUIRED')).toBe(true);
 
     // Q2 — the ZM's administrative right: manualAssign succeeds and pushes `se` past capacity, no
     // block, no forced confirm.
@@ -361,6 +361,37 @@ describe('#268 — CRITICAL direct assignment', () => {
     const ins = await latestInsertion(ticketId);
     expect(ins.offeredSeId).toBe(se);
     expect(ins.slaBucket).toBe('HIGH_CRITICAL');
+  });
+
+  /**
+   * #356 AC4 (absorbing #331 AC1). A zone whose `zonal_manager_user_id` is null — between managers, or
+   * never linked — used to swallow the escalation alert whole: `escalateToZm` returned null, no notice
+   * was queued, and nothing anywhere recorded that a manager had *not* been told. The ledger row still
+   * said ESCALATION_REQUIRED, so the queue looked identical to one a manager was already deciding on.
+   *
+   * The fallback is the role, not a new routing policy: whoever holds ZONAL_MANAGER **in that zone**.
+   */
+  it('#356 AC4 — a zone that names no ZM alerts the role holders in the zone instead of returning silently', async () => {
+    const standIn = await prisma.user.create({
+      data: { name: 'ZM stand-in ' + NS, role: 'ZONAL_MANAGER', phone: 'zmsi-' + NS, email: `zmsi-${NS}@iq.test`, zoneId },
+    });
+    userIds.push(standIn.userId);
+    await prisma.zone.update({ where: { zoneId }, data: { zonalManagerUserId: null } });
+    try {
+      const se = await makeSe({ dailyCapacity: 0 });
+      expect(se).toBeTruthy();
+      const ticketId = await makeCriticalTicket();
+
+      const outcome = await svc.assignCriticalForZone(zoneId, BASE);
+      expect(outcome).toEqual({ assigned: 0, escalated: 1 });
+
+      const alert = await prisma.notification.findFirst({
+        where: { recipientUserId: standIn.userId, type: 'INTRADAY_ESCALATION_REQUIRED', entityId: ticketId },
+      });
+      expect(alert).not.toBeNull();
+    } finally {
+      await prisma.zone.update({ where: { zoneId }, data: { zonalManagerUserId: zmUserId } });
+    }
   });
 
   it('escalation audit: the CRITICAL_ASSIGN audit row on a direct-assign is stamped SYSTEM, not a human', async () => {

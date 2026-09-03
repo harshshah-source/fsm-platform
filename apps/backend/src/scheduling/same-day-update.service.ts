@@ -1,17 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ActorContext, AssignOutcome, DeferralOverrideInput, OverrideOutcome, OverrideService } from './override.service';
 import { ZmScope } from './zm-schedule-query.service';
 
 /**
- * ZM manual same-day update (Issue 31). The ZM adds / removes / reorders Tickets on an SE's current
- * Day Plan mid-shift — distinct from the system-triggered CRITICAL insertion (Issue 29). Each change
- * applies immediately (no SE Acceptance) and is logged as a `MANUAL_ZM_UPDATE` row so it surfaces in
- * the **Intra-day Queue**. Per the 2026-06-25 decision the queue is a **view over AuditLog** (no new
- * model); Issue 29 later writes its CRITICAL-insertion rows into the same view.
+ * The Intra-day Queue's `MANUAL_ZM_UPDATE` stream (Issue 31), **reduced to a read by #356**.
  *
- * The mutations reuse the Issue 13 override engine; this service only re-tags the audit action and
- * exposes the zone-scoped read.
+ * Issue 31 gave the ZM three same-day writes — add / remove / reorder a stop on an SE's current Day
+ * Plan — each re-tagging the Issue 13 override engine's audit action so the change surfaced here.
+ * #313 then made `POST /batches/:id/override` the single same-day write surface, and nothing has
+ * called these three since: zero references in `apps/admin`, and `dispatch-changes-today.service.ts`
+ * says so in its own docstring. They are deleted rather than left standing, per the recorded decision
+ * (plan §7, "356 deletion"). A live route with no callers is worse than a missing one — it looks like
+ * a supported way in while its validation, its error vocabulary and its audit action quietly drift
+ * away from the surface people actually use.
+ *
+ * What survives is the read. Per the 2026-06-25 decision the queue is a **view over AuditLog** (no new
+ * model); Issue 29's CRITICAL-insertion rows live in the parallel `intraday_insertions` ledger and the
+ * page merges the two. `MANUAL_ZM_UPDATE` is now a historical action — nothing in this repo writes it
+ * any more — and the read still exists because the history it lists is still the record of what
+ * managers did to today's plans.
  */
 export type IntradayUpdateType = 'ADD' | 'REMOVE' | 'REORDER';
 
@@ -25,109 +32,118 @@ export interface IntradayUpdateRow {
   createdAt: string;
 }
 
+/** #356 — the same paging vocabulary the insertions read takes, so the queue asks both streams alike. */
+export interface IntradayUpdateQuery {
+  take?: number;
+  since?: Date;
+  /** The previous page's `nextCursor`: the last audit-log id the caller has already been shown. */
+  cursor?: bigint;
+}
+
+export interface IntradayUpdatePage {
+  rows: IntradayUpdateRow[];
+  nextCursor: string | null;
+  limit: number;
+}
+
 const MANUAL_ZM_UPDATE = 'MANUAL_ZM_UPDATE';
+
+export const DEFAULT_PAGE_SIZE = 50;
+export const MAX_PAGE_SIZE = 200;
+
+/**
+ * How many audit rows one call may examine before giving up and handing back a cursor.
+ *
+ * A ZM's page cannot be bounded by a `take` on the SQL query, because whether a row belongs to their
+ * zone is only knowable *after* it is fetched and its ticket or batch resolved — `audit_logs` carries
+ * no zone. So the read scans in chunks and stops on whichever comes first: the page is full, the
+ * stream is exhausted, or this many rows have been looked at. The cap is what makes the worst case
+ * finite; the cursor is what makes the truncation recoverable rather than a silent loss.
+ */
+const SCAN_CHUNK = 200;
+const MAX_SCAN = 2_000;
+
+function clampPageSize(take: number | undefined): number {
+  if (take == null || !Number.isFinite(take)) return DEFAULT_PAGE_SIZE;
+  return Math.min(Math.max(Math.trunc(take), 1), MAX_PAGE_SIZE);
+}
 
 @Injectable()
 export class SameDayUpdateService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly override: OverrideService,
-  ) {}
-
-  /**
-   * Add an open Ticket to the SE's current Day Plan, logged as a MANUAL_ZM_UPDATE/ADD intra-day row.
-   *
-   * #249 — the return-date gate is the engine's, exactly like the ON_SITE gate on the remove leg
-   * below: this passes the caller's decision through rather than deciding anything itself, so
-   * "no code path can formally assign a deferred ticket without confirm + reason" stays a property of
-   * `assignTicket` and not a rule three call sites each have to remember.
-   */
-  addTicket(
-    ticketId: string,
-    seId: string,
-    scope: ZmScope,
-    actor: ActorContext,
-    now: Date = new Date(),
-    deferral: DeferralOverrideInput = {},
-  ): Promise<AssignOutcome> {
-    return this.override.assignTicket(ticketId, seId, scope, actor, now, MANUAL_ZM_UPDATE, false, deferral);
-  }
-
-  /** Remove a Ticket from the SE's current Day Plan (returns it to the Shared Pool), logged as a
-   *  MANUAL_ZM_UPDATE/REMOVE intra-day row. ON_SITE conflict gating + mandatory reason are the engine's
-   *  (resend with `confirm: true` after the CONFLICT_ON_SITE warning). */
-  removeTicket(
-    batchId: bigint,
-    ticketId: string,
-    reasonCode: string,
-    confirm: boolean,
-    scope: ZmScope,
-    actor: ActorContext,
-    now: Date = new Date(),
-  ): Promise<OverrideOutcome> {
-    return this.override.override(
-      batchId,
-      { action: 'REMOVE_TICKET', ticketId, reasonCode, confirm },
-      scope,
-      actor,
-      now,
-      MANUAL_ZM_UPDATE,
-    );
-  }
-
-  /** Reorder a stop within the SE's current Day Plan, logged as a MANUAL_ZM_UPDATE/REORDER intra-day row. */
-  reorder(
-    batchId: bigint,
-    stopSequence: number,
-    reasonCode: string,
-    scope: ZmScope,
-    actor: ActorContext,
-    now: Date = new Date(),
-  ): Promise<OverrideOutcome> {
-    return this.override.override(
-      batchId,
-      { action: 'REORDER', stopSequence, reasonCode },
-      scope,
-      actor,
-      now,
-      MANUAL_ZM_UPDATE,
-    );
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
    * The Intra-day Queue read — MANUAL_ZM_UPDATE audit rows newest-first, zone-scoped: a ZONAL_MANAGER
    * sees only updates in their own zone; cross-zone roles (CSM / Operations Head) see all. ADD rows are
    * ticket-entity (zone via the ticket's plant); REMOVE / REORDER rows are batch-entity (zone via the
    * batch's schedule), carrying the ticket id (REMOVE) or none (REORDER) in metadata.
+   *
+   * **#356 (absorbing #331 AC2) — bounded.** This loaded *every* `MANUAL_ZM_UPDATE` row ever written,
+   * then filtered by zone in memory: an append-only table read in full, on a page a dispatcher reloads
+   * all day, growing for the life of the deployment. It now walks the stream newest-first in chunks
+   * and stops at the first of a full page, an exhausted stream, or {@link MAX_SCAN} rows examined.
+   *
+   * Ordering and the cursor both ride `audit_logs.id`. It is the primary key and monotonic with
+   * insertion, so `id < cursor` is a keyset that cannot skip or repeat a row — which `createdAt` alone
+   * cannot promise, since two rows written in one transaction share it exactly.
    */
-  async listIntradayUpdates(scope: ZmScope): Promise<IntradayUpdateRow[]> {
-    const logs = await this.prisma.auditLog.findMany({
-      where: { action: MANUAL_ZM_UPDATE },
-      orderBy: { createdAt: 'desc' },
-    });
+  async listIntradayUpdates(scope: ZmScope, query: IntradayUpdateQuery = {}): Promise<IntradayUpdatePage> {
+    const limit = clampPageSize(query.take);
     const zmZone = scope.role === 'ZONAL_MANAGER' && scope.zoneId != null ? BigInt(scope.zoneId) : null;
 
-    const ticketZone = await this.zonesForTickets(logs.filter((l) => l.entityType === 'ticket').map((l) => l.entityId));
-    const batchZone = await this.zonesForBatches(logs.filter((l) => l.entityType === 'plant_batch_assignment').map((l) => l.entityId));
-
     const rows: IntradayUpdateRow[] = [];
-    for (const l of logs) {
-      const meta = (l.metadata ?? {}) as Record<string, unknown>;
-      const zone = l.entityType === 'ticket' ? ticketZone.get(l.entityId) : batchZone.get(l.entityId);
-      if (zmZone != null && zone !== zmZone) continue;
-      const ticketId =
-        l.entityType === 'ticket' ? l.entityId : typeof meta.ticketId === 'string' ? meta.ticketId : null;
-      rows.push({
-        auditId: String(l.id),
-        actorId: l.actorId,
-        actorRole: l.actorRole,
-        updateType: (meta.updateType as IntradayUpdateType) ?? 'ADD',
-        ticketId,
-        seId: typeof meta.seId === 'string' ? meta.seId : null,
-        createdAt: l.createdAt.toISOString(),
+    let scanFrom = query.cursor ?? null;
+    let scanned = 0;
+    /** True when we stopped before the stream ran out, so a next page is worth asking for. */
+    let truncated = false;
+
+    while (rows.length < limit && scanned < MAX_SCAN) {
+      const logs = await this.prisma.auditLog.findMany({
+        where: {
+          action: MANUAL_ZM_UPDATE,
+          ...(query.since ? { createdAt: { gte: query.since } } : {}),
+          ...(scanFrom !== null ? { id: { lt: scanFrom } } : {}),
+        },
+        orderBy: { id: 'desc' },
+        take: SCAN_CHUNK,
       });
+      if (logs.length === 0) break;
+
+      const ticketZone = await this.zonesForTickets(logs.filter((l) => l.entityType === 'ticket').map((l) => l.entityId));
+      const batchZone = await this.zonesForBatches(
+        logs.filter((l) => l.entityType === 'plant_batch_assignment').map((l) => l.entityId),
+      );
+
+      for (const l of logs) {
+        scanned++;
+        // Advanced per row, not per chunk: a page that fills halfway through a chunk must hand back a
+        // cursor pointing at the row it stopped on, or the rest of that chunk is lost to the caller.
+        scanFrom = l.id;
+        const meta = (l.metadata ?? {}) as Record<string, unknown>;
+        const zone = l.entityType === 'ticket' ? ticketZone.get(l.entityId) : batchZone.get(l.entityId);
+        if (zmZone != null && zone !== zmZone) continue;
+        const ticketId =
+          l.entityType === 'ticket' ? l.entityId : typeof meta.ticketId === 'string' ? meta.ticketId : null;
+        rows.push({
+          auditId: String(l.id),
+          actorId: l.actorId,
+          actorRole: l.actorRole,
+          updateType: (meta.updateType as IntradayUpdateType) ?? 'ADD',
+          ticketId,
+          seId: typeof meta.seId === 'string' ? meta.seId : null,
+          createdAt: l.createdAt.toISOString(),
+        });
+        if (rows.length >= limit) {
+          truncated = true;
+          break;
+        }
+      }
+      // A short chunk is the end of the stream — nothing left to page to.
+      if (logs.length < SCAN_CHUNK) break;
+      if (rows.length < limit && scanned >= MAX_SCAN) truncated = true;
     }
-    return rows;
+
+    return { rows, nextCursor: truncated && scanFrom !== null ? String(scanFrom) : null, limit };
   }
 
   private async zonesForTickets(ticketIds: string[]): Promise<Map<string, bigint>> {
