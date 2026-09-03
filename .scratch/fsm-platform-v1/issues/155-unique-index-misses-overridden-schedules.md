@@ -104,3 +104,7 @@ n/a (schema constraint)
 
 ## Blocked by
 - [#153](./153-override-blanks-day-plan-and-capacity.md) — done
+
+## Comments
+
+**2026-09-01 — scheduler-engine forensic investigation (`audit/2026-09-01-scheduler-engine-forensics.md`, finding AR-8) re-confirms this issue and adds one adjacent edge to close in the same slice.** The invariant is still convention-held: every reader/writer goes through `liveScheduleFilter()` (ACTIVE+OVERRIDDEN), so one future writer that hand-spells `status: 'ACTIVE'` recreates the #153 two-day-plans bug unopposed. The **new edge**: `dispatchForSe`'s append lookup matches exact `dateFrom: opts.dateFrom` (`batch-assignment.service.ts:214-217`) while capacity counts by range (`committed-day-load.ts:91` — `dateFrom <= day <= dateTo`). A live schedule spanning today with a *different* `dateFrom` is invisible to the append lookup, so dispatch would create a second live plan for the same (SE, zone, day) with **no unique collision even after this index lands** (`date_from` differs). Whether any writer actually creates multi-day schedules is UNVERIFIED — the duplicate probe this issue already requires should also probe `date_from <> date_to` on live rows, and the fix should either align the append lookup to the range rule or record why single-day is a guaranteed writer invariant. Scheduling note: this issue is the Wave-3 "AR-8" slice of the forensics remediation backlog (#297–#332) — no new issue was filed for it; this file owns it (with [#154](./154-drop-work-schedule-status-overload.md) as the cleaner end state).

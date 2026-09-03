@@ -1,5 +1,5 @@
 # 341 — Acting scope narrows every manager write door
-Status: ready-for-agent
+Status: done 2026-09-03 — report `docs/progress/341-acting-scope-write-doors.md`
 Type: AFK
 Wave: 2 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -35,11 +35,16 @@ so the acting header never reaches those routes.
 
 ## Acceptance criteria
 
-- [ ] AC1 — a contract test enumerates every manager write route and asserts a CSM acting in
-      zone 2 gets 403/404 for a zone-1 entity
-- [ ] AC2 — the same actor with no header keeps pan-India reach (CSM/OH)
-- [ ] AC3 — every admin api client sends `X-Acting-As-Zone` via one builder
-- [ ] AC4 — no behaviour change for ZM/WM/SE
+- [x] AC1 — a contract test enumerates every manager write route and asserts a CSM acting in
+      zone 2 gets 403/404 for a zone-1 entity — **met as two files, per the design above**: the
+      enumeration is `test/acting-scope-route-sweep.spec.ts` (structural, so a route added tomorrow is
+      swept without anyone listing it), the 403/404 is `test/acting-scope-write-doors.e2e-spec.ts` on
+      the reproduced case (verified red by reverting the one line it fixes). The sweep needed **two**
+      checks, not one: a handler can inject `@CurrentActor()` for attribution and still pass a
+      claims-built scope, so "injects the decorator" is necessary and not sufficient
+- [x] AC2 — the same actor with no header keeps pan-India reach (CSM/OH)
+- [x] AC3 — every admin api client sends `X-Acting-As-Zone` via one builder
+- [x] AC4 — no behaviour change for ZM/WM/SE
 
 ## Verification
 

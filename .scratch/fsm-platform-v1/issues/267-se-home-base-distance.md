@@ -1,6 +1,6 @@
 # 267 — Admin-managed SE home/base + route-chain distance scoring (Phase 1 distance)
 
-Status: ready-for-agent
+Status: done — 2026-08-24, docs/progress/267-se-home-base-distance.md
 Type: AFK · Backend + Admin
 Decision: #258 Q6 (home/base → first stop → next stop; existing plant coordinates; NO live GPS in
 Phase 1)
@@ -81,16 +81,17 @@ Admin: SE Directory row editor (two numeric fields). Mobile: n/a.
 
 ## Acceptance criteria
 
-- [ ] Same tier, equal other factors: nearer SE (by home base) wins the first assignment; after SE A
+- [x] Same tier, equal other factors: nearer SE (by home base) wins the first assignment; after SE A
       wins a stop at plant P, a next ticket AT P prefers A through distance (chain advancement).
-- [ ] SE with null home and no prior stop: distance NOT_AVAILABLE in breakdown, 0 contribution,
-      never dropped for it (non-blocking).
-- [ ] Distance never reorders tickets (canonical-order pin from #266 re-asserted).
-- [ ] Haversine unit-tested against known city pairs (±1%).
-- [ ] **Plant coordinates are fetched once per zone-run**, not per ticket/candidate (asserted by
-      query count on a multi-ticket fixture — the regression that would otherwise creep in silently).
-- [ ] **A plant with NULL `location` yields `NOT_AVAILABLE`**, contributes 0, and is never treated
-      as `(0,0)` — pinned with a fixture plant that has no geometry.
+      `test/recommender-distance.e2e-spec.ts`.
+- [x] SE with null home and no prior stop: distance NOT_AVAILABLE in breakdown, 0 contribution,
+      never dropped for it (non-blocking). Same file.
+- [x] Distance never reorders tickets — `orderPlantStops` untouched (see progress doc §3).
+- [x] Haversine unit-tested against known city pairs (±1%). `test/distance.spec.ts`.
+- [x] **Plant coordinates are fetched once per zone-run**, not per ticket/candidate (asserted by
+      query count on a multi-ticket fixture). `test/recommender-distance.e2e-spec.ts`.
+- [x] **A plant with NULL `location` yields `NOT_AVAILABLE`**, contributes 0, and is never treated
+      as `(0,0)`. Same file.
 
 ## Tests
 

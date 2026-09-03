@@ -1,7 +1,8 @@
 # #295 — Scheduler Console: from assignment table to dispatch board
 
-Status: ready-for-agent
-Filed: 2026-09-01
+Status: done
+Filed: 2026-09-01 · **Implemented 2026-09-01** — report:
+[`docs/progress/295-scheduler-console-dispatch-board.md`](../../../docs/progress/295-scheduler-console-dispatch-board.md)
 Depends on: nothing open (all of #283/#284/#285, the 2026-08-28 composition correction, and the
 2026-08-31/09-01 drag fixes are landed)
 Source of truth for every claim below:
@@ -428,6 +429,11 @@ colour meaning. No new schema, no migrations.
   default is a guess awaiting their number; (b) the open question below if it turns out to matter.
 
 ## 11. One open question — resolve during implementation, do not block on it
+
+> **RESOLVED during implementation (2026-09-01).** The population is real: submitting resolves the
+> soft state (`troubleshoot-submission.service.ts:157-160`) while the assignment row stays live until
+> a verification decision, so a finished job did flip green to red. Fixed along the line recommended
+> below — see slice 6b in the progress report.
 
 **Submitted-but-visible work.** Per the operator's rule, `IN_PROGRESS` ⟺ unresolved
 `TROUBLESHOOT_STARTED`. If submitting a troubleshooting report *resolves* that soft state while the

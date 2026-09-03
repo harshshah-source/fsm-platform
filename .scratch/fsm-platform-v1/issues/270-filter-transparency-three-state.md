@@ -1,6 +1,6 @@
 # 270 — Honest filter transparency: evaluated-passed / evaluated-failed / NOT_ENFORCED
 
-Status: ready-for-agent
+Status: done — 2026-08-24, docs/progress/270-filter-transparency-three-state.md
 Type: AFK · Backend + Admin
 Decision: #258 Q5 (both filters stay non-blocking in Phase 1; transparency must not claim a pass
 that was never enforceable) + Q4 documentation AC (eligibility proxy stated, not hidden)
@@ -62,14 +62,16 @@ Admin: dispatch trace drawer (state chip), Settings eligibility row (helper text
 
 ## Acceptance criteria
 
-- [ ] With today's stub feeds, every trace shows VEHICLE_ON_TRIP and COMPONENT_UNAVAILABLE as
+- [x] With today's stub feeds, every trace shows VEHICLE_ON_TRIP and COMPONENT_UNAVAILABLE as
       NOT_ENFORCED — zero occurrences of a PASSED claim for either (asserted over a full run's
-      traces).
-- [ ] Real filters unchanged: SE_UNAVAILABLE/OVER_CAPACITY/COMMON_KIT show PASSED/FAILED exactly as
-      before; drop behaviour byte-identical.
-- [ ] Feeding a real readiness value in a test flips VEHICLE_ON_TRIP to PASSED/FAILED with no
-      filter-layer edit (the Phase 2 seam proven).
-- [ ] Settings page shows the proxy limitation text.
+      traces). `test/recommender-filter-honesty.e2e-spec.ts`.
+- [x] Real filters unchanged: SE_UNAVAILABLE/OVER_CAPACITY/COMMON_KIT show PASSED/FAILED exactly as
+      before; drop behaviour byte-identical. `test/hard-filters.spec.ts`.
+- [x] Feeding a real readiness value in a test flips VEHICLE_ON_TRIP to PASSED/FAILED with no
+      filter-layer edit (the Phase 2 seam proven). `test/hard-filters.spec.ts`.
+- [x] Settings page shows the proxy limitation text — **correction:** no dedicated Settings-page row
+      for `eligibility_mode` exists; the text landed on `ConfigInEffectPanel`, the actual surface an
+      operator reads the live value from. See `docs/progress/270-filter-transparency-three-state.md` §3.
 
 ## Tests
 

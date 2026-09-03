@@ -1,6 +1,6 @@
 # 264 — Durable day-plan notification outbox (executes #189)
 
-Status: ready-for-agent
+Status: done — 2026-08-24, docs/progress/264-day-plan-notification-outbox.md
 Type: AFK · Backend
 Decision: #258 Part 7 (G5, G7). This is #189's build issue under the ratified decision; #189 stays
 as the defect record and is marked superseded-by-#264.
@@ -53,17 +53,21 @@ None required. Mobile: n/a. (Build-health/ops surfacing of stuck outbox rows may
 
 ## Acceptance criteria
 
-- [ ] Kill between commit and drain (simulated: write rows, skip drain): the sweep delivers; the SE
-      notification exists exactly once.
-- [ ] A notifier that throws: dispatch summary and zone row stay SUCCESS; the outbox row carries
+- [x] Kill between commit and drain (simulated: write rows, skip drain): the sweep delivers; the SE
+      notification exists exactly once. `test/day-plan-notification-outbox.e2e-spec.ts`.
+- [x] A notifier that throws: dispatch summary and zone row stay SUCCESS; the outbox row carries
       the error; the run ledger shows no zone error (kills the misreport inversion).
-- [ ] Rolled-back SE tx leaves no outbox row (no ghost "plan is live").
-- [ ] Duplicate drain (sweep racing post-commit drain) delivers once — guard the send with a
+      `test/day-plan-notification-outbox-writers.e2e-spec.ts`.
+- [x] Rolled-back SE tx leaves no outbox row (no ghost "plan is live"). Both specs above.
+- [x] Duplicate drain (sweep racing post-commit drain) delivers once — guard the send with a
       conditional `sent_at IS NULL` claim update, the `transitionOrConflict` idiom.
-- [ ] **`dayPlanOverridden` is covered too**: a ZM override/assign/same-day update writes its
+      `test/day-plan-notification-outbox.e2e-spec.ts` (two real concurrent racers).
+- [x] **`dayPlanOverridden` is covered too**: a ZM override/assign/same-day update writes its
       notification intent inside the existing `withAudit` transaction (`override.service.ts`), and a
       notifier throw on that path leaves the override committed and successful — these calls share
-      the dispatch path's post-commit fragility and must not be left on the old mechanism.
+      the dispatch path's post-commit fragility and must not be left on the old mechanism. All six
+      `override.service.ts` call sites (`removeTicket`, `deferTicket`, `reorder`, `assignTicket`,
+      `swapSe`, `moveTickets`) migrated; see `docs/progress/264-day-plan-notification-outbox.md`.
 
 ## Tests
 
