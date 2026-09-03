@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { AuditService } from '../src/audit/audit.service';
 import type { RequestActor } from '../src/common/request-actor';
+import { EnqueueFailed, failingNotifyEnqueue } from './fixtures/outbox-crash-injection';
+import type { NotifyInput } from '../src/notifications/notification.service';
+import { PRD_NOTICE_TYPES } from '../src/notifications/prd-event-notice';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { NotificationVoucherNotifier } from '../src/vouchers/notification-voucher-notifier';
 import { VouchersService } from '../src/vouchers/vouchers.service';
 import type { VoucherNotifier, VoucherPaidEvent, VoucherReviewedEvent } from '../src/vouchers/voucher-notifier';
 
@@ -20,14 +24,24 @@ import type { VoucherNotifier, VoucherPaidEvent, VoucherReviewedEvent } from '..
  *  - ticket match: the activity check joins ticket → assignment SE + plant and warns rather than refusing
  */
 
+/**
+ * #361 — the port now **returns** the notice rather than delivering it (see `voucher-notifier.ts`), so
+ * the fake records the event and then delegates to the real builder. Two properties come out of that
+ * shape that a recording-only fake could not give: the existing "the SE is notified on every decision"
+ * assertions below keep meaning what they meant, and the notice the service actually enqueues is the
+ * production one — so a change to the recipient or the copy cannot pass here and fail in the app.
+ */
 class FakeNotifier implements VoucherNotifier {
+  private readonly real = new NotificationVoucherNotifier();
   reviewedEvents: VoucherReviewedEvent[] = [];
   paidEvents: VoucherPaidEvent[] = [];
-  reviewed(event: VoucherReviewedEvent): void {
+  reviewed(event: VoucherReviewedEvent): NotifyInput {
     this.reviewedEvents.push(event);
+    return this.real.reviewed(event);
   }
-  paid(event: VoucherPaidEvent): void {
+  paid(event: VoucherPaidEvent): NotifyInput {
     this.paidEvents.push(event);
+    return this.real.paid(event);
   }
 }
 
@@ -147,6 +161,12 @@ describe('Issue 38 — VouchersService', () => {
 
   afterAll(async () => {
     if (createdVoucherIds.length > 0) {
+      // #361 — the notices this file's decisions now write. Cleaned up for the same reason the audit
+      // rows are: an unsent NOTIFY row left behind is a row the shared outbox specs would later count.
+      await prisma.dayPlanNotificationOutbox.deleteMany({
+        where: { eventType: 'NOTIFY', payload: { path: ['entityType'], equals: 'expense_voucher' } },
+      });
+      await prisma.notification.deleteMany({ where: { entityType: 'expense_voucher', entityId: { in: createdVoucherIds } } });
       await prisma.auditLog.deleteMany({ where: { entityType: 'expense_vouchers', entityId: { in: createdVoucherIds } } });
       await prisma.expenseVoucherItem.deleteMany({ where: { voucherId: { in: createdVoucherIds } } });
       await prisma.expenseVoucher.deleteMany({ where: { voucherId: { in: createdVoucherIds } } });
@@ -570,6 +590,98 @@ describe('Issue 38 — VouchersService', () => {
       expect(dataLines).toHaveLength(2); // one per line item
       expect(out.csv).toContain('TRAVEL');
       expect(out.csv).toContain('PARTS');
+    });
+  });
+
+  /**
+   * #361 (VCH-07) — the Voucher Review page has told the reviewing manager "the SE is notified" since
+   * Issue 38, over a module that bound `LoggingVoucherNotifier`. Nothing reached the engineer.
+   *
+   * Two properties, and they are different properties. The `notifier.reviewedEvents` assertions above
+   * only ever proved the *port was called*; a logging port satisfies that and tells nobody. These
+   * assert the two things that make the page's sentence true: a durable notice **addressed to that
+   * voucher's own SE** exists, and it was written **inside the review transaction** rather than after
+   * it — which is the only difference between a notice that survives a crash and one that does not.
+   */
+  describe('#361 — the SE is actually notified', () => {
+    async function freshVoucher(se = seA): Promise<string> {
+      const out = await service.create({ seId: se, clientSubmissionId: randomUUID(), items: baseItems(), now: NOW });
+      if (out.result !== 'OK') throw new Error('seed failed');
+      createdVoucherIds.push(out.voucher.voucherId);
+      return out.voucher.voucherId;
+    }
+
+    const noticesFor = (voucherId: string, type: string) =>
+      prisma.dayPlanNotificationOutbox.findMany({
+        where: {
+          eventType: 'NOTIFY',
+          AND: [
+            { payload: { path: ['type'], equals: type } },
+            { payload: { path: ['entityId'], equals: voucherId } },
+          ],
+        },
+      });
+
+    it('a review decision enqueues one notice addressed to that voucher\'s SE', async () => {
+      const id = await freshVoucher();
+      await service.review(
+        id,
+        { action: 'REJECT', notes: 'Receipt unreadable' },
+        { role: 'ZONAL_MANAGER', zoneId: Number(zoneA) },
+        zmAActor(),
+      );
+
+      const rows = await noticesFor(id, PRD_NOTICE_TYPES.voucherReviewed);
+      expect(rows).toHaveLength(1);
+      const payload = rows[0].payload as unknown as NotifyInput;
+      // One recipient, and it is the engineer who filed it — not the zone, not every manager.
+      expect(payload.recipients).toEqual([{ userId: seA, role: 'SERVICE_ENGINEER' }]);
+      // The reason travels with the notice: "rejected" alone moves the question rather than answering it.
+      expect(payload.body).toContain('Receipt unreadable');
+    });
+
+    it('Mark PAID enqueues one notice per voucher actually paid, and none for a skipped one', async () => {
+      const paidId = await freshVoucher();
+      const reviewer = zmAActor();
+      await service.review(paidId, { action: 'APPROVE', notes: null }, { role: 'ZONAL_MANAGER', zoneId: Number(zoneA) }, reviewer);
+
+      // #359's separation of duties: the reviewer may not pay it. A skipped row must not notify —
+      // telling an engineer they have been paid when they have not is worse than saying nothing.
+      const selfPay = await service.markPaid([paidId], 'BATCH-361', reviewer, NOW);
+      expect(selfPay.result === 'OK' && selfPay.skipped.map((s) => s.reason)).toEqual(['SAME_APPROVER']);
+      expect(await noticesFor(paidId, PRD_NOTICE_TYPES.voucherPaid)).toHaveLength(0);
+
+      const out = await service.markPaid([paidId], 'BATCH-361', zmAActor(), NOW);
+      expect(out.result === 'OK' && out.paid).toEqual([paidId]);
+      const rows = await noticesFor(paidId, PRD_NOTICE_TYPES.voucherPaid);
+      expect(rows).toHaveLength(1);
+      const payload = rows[0].payload as unknown as NotifyInput;
+      expect(payload.recipients).toEqual([{ userId: seA, role: 'SERVICE_ENGINEER' }]);
+      expect(payload.body).toContain('BATCH-361');
+    });
+
+    /**
+     * The in-transaction claim, asserted the only way it can be: make the **enqueue** fail and show
+     * the review rolled back with it. A post-commit notify would leave the voucher REJECTED with no
+     * notice — which is exactly the state #338 was built to make impossible, and exactly what this
+     * page's copy would then be lying about.
+     */
+    it('an enqueue failure rolls the review back — the decision and its notice are one commit', async () => {
+      const id = await freshVoucher();
+      // #338's shared rig — it wraps the transaction client, which an outer proxy on `PrismaService`
+      // does not: `$transaction` hands out a fresh client from the real one.
+      const failing = failingNotifyEnqueue(prisma);
+      // `withAudit` opens its transaction on the AuditService's OWN client (#338's recorded trap), so
+      // both have to be built on the interfering client or the enqueue under test is never reached.
+      const sabotaged = new VouchersService(failing, new AuditService(failing), notifier);
+
+      await expect(
+        sabotaged.review(id, { action: 'APPROVE', notes: null }, { role: 'ZONAL_MANAGER', zoneId: Number(zoneA) }, zmAActor()),
+      ).rejects.toThrow(EnqueueFailed);
+
+      const row = await prisma.expenseVoucher.findUniqueOrThrow({ where: { voucherId: id } });
+      expect(row.status).toBe('ZONAL_MANAGER_REVIEW'); // unchanged — the decision rolled back
+      expect(row.reviewedAt).toBeNull();
     });
   });
 });

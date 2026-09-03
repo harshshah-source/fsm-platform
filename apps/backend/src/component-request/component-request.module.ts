@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ComponentRequestService } from './component-request.service';
 
@@ -10,7 +11,9 @@ import { ComponentRequestService } from './component-request.service';
  * `ComponentRequestController` are registered in AppModule.
  */
 @Module({
-  imports: [PrismaModule],
+  // #361 — for `NotificationService`: the WM legs enqueue the SE's notice in their own transaction and
+  // deliver it post-commit, and the 7-day sweep resolves each zone's manager through it.
+  imports: [PrismaModule, NotificationsModule],
   providers: [ComponentRequestService],
   exports: [ComponentRequestService],
 })

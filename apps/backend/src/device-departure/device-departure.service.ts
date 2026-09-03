@@ -2,8 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import type { $Enums } from '../generated/prisma/client';
 import { isOperationalStatus } from '../ingestion/autoplant/master-mapping';
+import { NotificationService } from '../notifications/notification.service';
+import { PRD_NOTICE_TYPES } from '../notifications/prd-event-notice';
 import { PrismaService } from '../prisma/prisma.service';
 import { LIVE_FAILURE_CYCLE_STATES, RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
+import { drainProducerRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
 import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 
 /**
@@ -118,7 +121,13 @@ export class DeviceDepartureService {
   // that helper wraps a transaction and writes exactly ONE row, while a reconcile emits one row per
   // transitioning device. The invariant it exists to protect is preserved — the audit inserts commit
   // in the same transaction as the mutations they record, so nothing is ever persisted unaudited.
-  constructor(private readonly prisma: PrismaService) {}
+  // #361 — `NotificationService` is defaulted rather than required: `autoplant-sync.ts`,
+  // `autoplant-departure-dryrun.ts` and three specs construct this service by hand, and DI still
+  // supplies the container's singleton wherever the module resolves it.
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationService = new NotificationService(prisma),
+  ) {}
 
   /** Devices with an ACTIVE departure — the exclusion set every downstream gate keys on. */
   async activeDepartedDeviceIds(): Promise<string[]> {
@@ -215,11 +224,16 @@ export class DeviceDepartureService {
       return { departed: 0, restored: 0, cancelledTickets: 0, absentCandidates: absent.length, guardTripped, skippedByReason };
     }
 
-    const cancelledTickets = await this.prisma.$transaction(async (tx) => {
-      const cancelled = await this.openDepartures(tx, toDepart, input.runId ?? null, now);
+    const { cancelled: cancelledTickets, queued } = await this.prisma.$transaction(async (tx) => {
+      const opened = await this.openDepartures(tx, toDepart, input.runId ?? null, now);
       await this.closeDepartures(tx, toRestore, input.runId ?? null, now);
-      return cancelled;
+      return opened;
     });
+
+    // #361 (ING-01) — post-commit delivery off the rows the transaction already committed. The
+    // auto-close is the durable fact; the manager's push is an attempt at telling them about it, and
+    // a failed attempt must neither be lost nor able to damage a reconcile that has already run.
+    await drainProducerRows(this.prisma, { notify: this.notifications }, queued, now);
 
     this.logger.log(
       `Departure reconcile: +${toDepart.length} departed (${absent.length} absent${
@@ -253,15 +267,18 @@ export class DeviceDepartureService {
     rows: DeparturePlanRow[],
     runId: bigint | null,
     now: Date,
-  ): Promise<number> {
-    if (rows.length === 0) return 0;
+  ): Promise<{ cancelled: number; queued: bigint[] }> {
+    if (rows.length === 0) return { cancelled: 0, queued: [] };
     const deviceIds = rows.map((r) => r.deviceId);
 
     // Every ticket these devices hold, so the live-cycle sweep below can see the cycles hanging off
     // ALREADY-terminal tickets too (#308) — `open` is only the subset this pass closes.
+    // #361 selects `plantId` as well: the ZM the auto-close has to be reported to is the manager of
+    // the ticket's own plant's zone, and re-reading the tickets to find that out would be a second
+    // query over the same rows.
     const allTickets = await tx.ticket.findMany({
       where: { deviceId: { in: deviceIds } },
-      select: { ticketId: true, status: true, deviceId: true, failureCycleId: true },
+      select: { ticketId: true, status: true, deviceId: true, failureCycleId: true, plantId: true },
     });
     const terminal = new Set<string>(TERMINAL_TICKET_STATUSES);
     const open = allTickets.filter((t) => !terminal.has(t.status));
@@ -279,6 +296,10 @@ export class DeviceDepartureService {
         cancelledTicketsCount: cancelledByDevice.get(r.deviceId) ?? 0,
       })),
     });
+
+    // #361 — the tickets this pass ACTUALLY closed, hoisted out of the branch below so the ZM notice
+    // can be worded from them. `open` is a candidate list; only these moved.
+    let closedTickets: { ticketId: string; plantId: bigint; deviceId: string }[] = [];
 
     if (open.length > 0) {
       // `closure_reason` carries the observed status verbatim, so grouping keeps the reason honest
@@ -323,6 +344,7 @@ export class DeviceDepartureService {
         ).map((t) => t.ticketId),
       );
       const closed = open.filter((t) => closedIds.has(t.ticketId));
+      closedTickets = closed.map((t) => ({ ticketId: t.ticketId, plantId: t.plantId, deviceId: t.deviceId }));
       await tx.ticketEvent.createMany({
         data: closed.map((t) => ({
           ticketId: t.ticketId,
@@ -385,7 +407,73 @@ export class DeviceDepartureService {
         },
       })),
     });
-    return open.length;
+
+    return { cancelled: open.length, queued: await this.notifyAutoClose(tx, closedTickets) };
+  }
+
+  /**
+   * #361 (ING-01) — tell each affected zone's manager that a departed device took their open tickets
+   * with it, in the same transaction that closed them.
+   *
+   * **This was the last silent mass mutation in the system.** The auto-close has been audited since
+   * #128 (`DEVICE_DEPARTED` rows carry the cancelled count) and #349 gives it a surface, but nothing
+   * pushed. A ZM's queue could lose work overnight — measured at 3,310 rows in the dev mirror, 20 of
+   * them on ACTIVE schedules — and the only trace was an audit row nobody reads and a ticket that had
+   * quietly stopped existing. A manager who notices tomorrow that a customer's job vanished has no way
+   * to tell an auto-close from a bug, which is precisely the doubt that makes people distrust the
+   * dispatch board.
+   *
+   * **One notice per zone, not per ticket or per device.** A backfill run departs thousands of devices
+   * at once; a per-ticket push would be an unreadable storm on the one day the information matters
+   * most. The count is the fact, the zone is the audience, and #349's surface is where the itemised
+   * list belongs.
+   *
+   * Not deduplicated: unlike the three sweep events, this fires only when a reconcile *actually closed
+   * something*, so a second run over an unchanged read enqueues nothing because it closes nothing.
+   */
+  private async notifyAutoClose(
+    tx: Prisma.TransactionClient,
+    closed: { ticketId: string; plantId: bigint; deviceId: string }[],
+  ): Promise<bigint[]> {
+    if (closed.length === 0) return [];
+
+    const plantIds = [...new Set(closed.map((t) => t.plantId.toString()))].map((p) => BigInt(p));
+    const plants = await tx.plant.findMany({ where: { plantId: { in: plantIds } }, select: { plantId: true, zoneId: true } });
+    const zoneByPlant = new Map(plants.map((p) => [p.plantId.toString(), p.zoneId]));
+
+    const byZone = new Map<string, { zoneId: bigint; ticketIds: string[]; deviceIds: Set<string> }>();
+    for (const t of closed) {
+      const zoneId = zoneByPlant.get(t.plantId.toString());
+      if (zoneId == null) continue; // a plant that vanished between the two reads — nothing to address
+      const key = zoneId.toString();
+      const entry = byZone.get(key) ?? { zoneId, ticketIds: [], deviceIds: new Set<string>() };
+      entry.ticketIds.push(t.ticketId);
+      entry.deviceIds.add(t.deviceId);
+      byZone.set(key, entry);
+    }
+
+    const queued: bigint[] = [];
+    for (const { zoneId, ticketIds, deviceIds } of byZone.values()) {
+      const recipients = await this.notifications.zoneManagerRecipients(zoneId, tx);
+      if (recipients.length === 0) continue;
+      queued.push(
+        await queueNotification(tx, {
+          recipients,
+          type: PRD_NOTICE_TYPES.deviceDepartureAutoClose,
+          title: 'Tickets auto-closed — devices left the fleet',
+          body:
+            `${ticketIds.length} open ticket${ticketIds.length === 1 ? '' : 's'} in your zone ` +
+            `${ticketIds.length === 1 ? 'was' : 'were'} closed automatically because ` +
+            `${deviceIds.size === 1 ? 'its device is' : `${deviceIds.size} devices are`} no longer deployed at source. ` +
+            `No engineer visit is needed.`,
+          entityType: 'zone',
+          entityId: String(zoneId),
+          deliveryModel: 'GENERAL',
+          metadata: { ticketIds, deviceIds: [...deviceIds] },
+        }),
+      );
+    }
+    return queued;
   }
 
   /** Stamp the active departure restored. History is kept; nothing is deleted. */

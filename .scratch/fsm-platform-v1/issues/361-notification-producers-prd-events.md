@@ -1,5 +1,5 @@
 # 361 — Notification producers for the remaining PRD events
-Status: ready-for-agent
+Status: done 2026-09-04 - report docs/progress/361-notification-producers-prd-events.md
 Type: AFK
 Wave: 4 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -50,13 +50,13 @@ and recovery decisions as events that notify someone. The following producers ar
   `component-request-warehouse`, `voucher-service` e2e.
 
 ## Acceptance criteria
-- [ ] AC1 — one notification per listed event, to the role the PRD names: SE for ship/reject and
+- [x] AC1 — one notification per listed event, to the role the PRD names: SE for ship/reject and
       kit-short, WM for approval requests, ZM for waiting-component and departure auto-close, OH for
       snapshot failed/overdue, SE for voucher decisions
-- [ ] AC2 — every producer enqueues via the #338 helper inside the mutation transaction
-- [ ] AC3 — sweep-driven events are deduplicated per (event, entity, day); a double sweep yields one
+- [x] AC2 — every producer enqueues via the #338 helper inside the mutation transaction
+- [x] AC3 — sweep-driven events are deduplicated per (event, entity, day); a double sweep yields one
       notice
-- [ ] AC4 — the Voucher Review page's "SE is notified" wording is true, or removed
+- [x] AC4 — the Voucher Review page's "SE is notified" wording is true, or removed
 
 ## Verification
 

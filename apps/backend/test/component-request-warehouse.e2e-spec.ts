@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import type { NotifyInput } from '../src/notifications/notification.service';
+import { PRD_NOTICE_TYPES } from '../src/notifications/prd-event-notice';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ComponentRequestService } from '../src/component-request/component-request.service';
+import { EnqueueFailed, failingNotifyEnqueue } from './fixtures/outbox-crash-injection';
 
 /**
  * Issue 22, slice 3 — the Warehouse Manager flow (CONTEXT §Component Request, ADR-0008). The WM queue
@@ -97,6 +100,11 @@ describe('Issue 22 slice 3 — warehouse manager component-request flow', () => 
   });
 
   afterAll(async () => {
+    // #361 — this file's decisions now write notices; leave none behind for the shared outbox specs.
+    await prisma.dayPlanNotificationOutbox.deleteMany({
+      where: { eventType: 'NOTIFY', payload: { path: ['entityType'], equals: 'component_request' } },
+    });
+    await prisma.notification.deleteMany({ where: { entityType: 'component_request' } });
     await prisma.componentRequest.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'component_request' } });
@@ -166,5 +174,84 @@ describe('Issue 22 slice 3 — warehouse manager component-request flow', () => 
   it('returns NOT_FOUND for an unknown request', async () => {
     const out = await svc.approve(randomUUID(), wmActor(), NOW);
     expect(out.result).toBe('NOT_FOUND');
+  });
+
+  /**
+   * #361 (INV-G3) — every WM decision now reaches the engineer waiting on it.
+   *
+   * Until this slice all three legs wrote an audit row and stopped, on the reading that the channel
+   * was an external seam. It was not — #337 landed the exit and #338 the durable enqueue — so an SE
+   * whose part was refused learnt about it only by opening the app and noticing. The rejection case
+   * is the one that costs a day in the field: the engineer needs to know now, because their next move
+   * changes.
+   *
+   * The notice is asserted on the **outbox row**, not on a spy. A spy proves a method was called; the
+   * row is the thing that survives a crash, carries who was told, and is what the sweep retries.
+   */
+  describe('#361 — the SE is told', () => {
+    const noticesFor = (requestId: string, type: string) =>
+      prisma.dayPlanNotificationOutbox.findMany({
+        where: {
+          eventType: 'NOTIFY',
+          AND: [
+            { payload: { path: ['type'], equals: type } },
+            { payload: { path: ['entityId'], equals: requestId } },
+          ],
+        },
+      });
+
+    const payloadOf = (row: { payload: unknown }) => row.payload as unknown as NotifyInput;
+
+    it('approve, then ship, each enqueue exactly one notice to the requesting SE', async () => {
+      const id = await makeRequest();
+
+      await svc.approve(id, wmActor(), NOW);
+      const approved = await noticesFor(id, PRD_NOTICE_TYPES.componentRequestApproved);
+      expect(approved).toHaveLength(1);
+      expect(payloadOf(approved[0]).recipients).toEqual([{ userId: se, role: 'SERVICE_ENGINEER' }]);
+
+      await svc.markShipped(id, { trackingRef: 'TRK-361', deliveryDestination: 'SE_LOCATION' }, wmActor(), NOW);
+      const shipped = await noticesFor(id, PRD_NOTICE_TYPES.componentRequestShipped);
+      expect(shipped).toHaveLength(1);
+      const payload = payloadOf(shipped[0]);
+      expect(payload.recipients).toEqual([{ userId: se, role: 'SERVICE_ENGINEER' }]);
+      // Tracking and destination ARE the notice: an engineer who does not know whether the part is
+      // coming to them or to the plant warehouse cannot plan tomorrow around it.
+      expect(payload.body).toContain('TRK-361');
+      expect(payload.body).toContain('your location');
+    });
+
+    it('reject carries the WM reason to the SE — not to the ZM', async () => {
+      const id = await makeRequest();
+      await svc.reject(id, 'No stock until Tuesday', wmActor(), NOW);
+
+      const rows = await noticesFor(id, PRD_NOTICE_TYPES.componentRequestRejected);
+      expect(rows).toHaveLength(1);
+      const payload = payloadOf(rows[0]);
+      // The person blocked by a refusal is the engineer standing at the vehicle, not the manager. The
+      // old comment at this call site claimed the ZM was notified; neither was true, and only one is
+      // the right audience.
+      expect(payload.recipients).toEqual([{ userId: se, role: 'SERVICE_ENGINEER' }]);
+      expect(payload.body).toContain('No stock until Tuesday');
+    });
+
+    /**
+     * The in-transaction property (AC2), asserted the only way that tells it apart from a
+     * post-commit notify that merely happens to write a row: break the **enqueue** and require the
+     * status change to roll back with it.
+     */
+    it('an enqueue failure rolls back the status change — one commit, or neither', async () => {
+      const id = await makeRequest();
+      // #338's shared rig: it wraps the transaction client too, which a proxy on `PrismaService`
+      // alone does not — `$transaction` hands out a fresh client from the real one, so an outer proxy
+      // is simply not in the path the enqueue takes. (Learnt the hard way here; the first version of
+      // this test passed the mutation through and asserted nothing.)
+      const failing = failingNotifyEnqueue(prisma);
+
+      await expect(new ComponentRequestService(failing).approve(id, wmActor(), NOW)).rejects.toThrow(EnqueueFailed);
+      const row = await prisma.componentRequest.findUniqueOrThrow({ where: { requestId: id } });
+      expect(row.status).toBe('REQUESTED');
+      expect(row.approvedAt).toBeNull();
+    });
   });
 });

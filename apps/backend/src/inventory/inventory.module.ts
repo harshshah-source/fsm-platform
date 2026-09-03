@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ComponentCatalogService } from './component-catalog.service';
 import { InventoryService } from './inventory.service';
@@ -13,7 +14,9 @@ import { WarehouseStockService } from './warehouse-stock.service';
  * `ComponentCatalogController` (#352) — whose service is exported below for it.
  */
 @Module({
-  imports: [PrismaModule],
+  // #361 — for `NotificationService`: the Common-Kit-short notice is delivered post-commit off the
+  // outbox row `recordComponentBlock` writes in the same transaction as the queue row.
+  imports: [PrismaModule, NotificationsModule],
   providers: [InventoryService, ShadowUseService, WarehouseStockService, ComponentCatalogService],
   exports: [InventoryService, ShadowUseService, WarehouseStockService, ComponentCatalogService],
 })

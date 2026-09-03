@@ -37,6 +37,7 @@ import { RoleBackupModule } from './roles/role-backup.module';
 import { RoleBackupController } from './roles/role-backup.controller';
 import { NotificationsModule } from './notifications/notifications.module';
 import { NotificationsController } from './notifications/notifications.controller';
+import { PrdEventNoticeModule } from './notifications/prd-event-notice.module';
 import { MeController } from './me/me.controller';
 import { MeModule } from './me/me.module';
 import { MeTicketsModule } from './me-tickets/me-tickets.module';
@@ -130,6 +131,9 @@ import { MediaController } from './media/media.controller';
     EngineersModule,
     RoleBackupModule,
     NotificationsModule,
+    // #361 — the hourly tick behind the 7-day waiting-component escalation and the ingestion
+    // FAILED/overdue alert to the Operations Head.
+    PrdEventNoticeModule,
     VouchersModule,
     ExportsModule,
     OpsExplorerModule,

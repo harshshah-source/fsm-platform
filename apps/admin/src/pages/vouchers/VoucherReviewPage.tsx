@@ -21,7 +21,15 @@ import { downloadCsv } from '../../lib/csv';
  * sorted by submitted_at) on the canonical queue recipe (`MetricCard` strip + `DataTable` + `StatusPill`):
  * the activity check (linked Ticket the ZM verifies against, or a warning when none), over-limit line
  * items in red, photo thumbnails with a full-screen lightbox, and the Approve / Reject (mandatory reason) /
- * Needs Clarification (comment) actions — all of which notify the SE on the backend.
+ * Needs Clarification (comment) actions.
+ *
+ * **The "the SE is notified" line below is load-bearing copy, and until #361 it was false.** The
+ * backend bound a logging-only voucher notifier, so a ZM rejecting an engineer's month of expenses was
+ * told the engineer had been informed while nothing anywhere told them. #361 replaced that binding
+ * (`vouchers/notification-voucher-notifier.ts`) and enqueues the notice inside the review transaction,
+ * so the sentence is now true for all three actions and for Mark PAID. If that producer is ever
+ * removed, this copy has to go with it — a promise in the UI that the code does not keep is worse than
+ * silence, because it stops anyone chasing the gap.
  *
  * The Operations Head additionally gets the APPROVED Finance view: Export Finance (monthly CSV of all
  * APPROVED vouchers) + multi-select Mark PAID (after Finance confirms the batch). No selector contract to

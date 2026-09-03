@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { DeviceDepartureService } from './device-departure.service';
 
@@ -12,7 +13,9 @@ import { DeviceDepartureService } from './device-departure.service';
  * service's constructor note), so the audit inserts stay atomic with the mutations they record.
  */
 @Module({
-  imports: [PrismaModule],
+  // #361 — for `NotificationService`: the auto-close notice resolves each affected zone's manager
+  // inside the reconcile transaction and is delivered post-commit off the committed outbox row.
+  imports: [PrismaModule, NotificationsModule],
   providers: [DeviceDepartureService],
   exports: [DeviceDepartureService],
 })

@@ -351,6 +351,63 @@ export function deriveIngestionAlert(
   };
 }
 
+/**
+ * #361 — the two shapes of "ingestion is not producing data" the Operations Head has to be told about.
+ *
+ * Deliberately two types, not one `INGESTION_ALERT`, because they are two different problems with two
+ * different first moves. FAILED means runs are happening and dying — there is a poison chunk or a
+ * source read to go and look at, and {@link IngestionAlertHealth.failingChunk} names it. OVERDUE means
+ * no run is happening at all — the cron, the process or the VPN is down, and there is no chunk to
+ * inspect because nothing got far enough to fail. Collapsing them would send an operator to read
+ * chunk errors that do not exist.
+ */
+export const INGESTION_NOTICE_KINDS = ['FAILED', 'OVERDUE'] as const;
+export type IngestionNoticeKind = (typeof INGESTION_NOTICE_KINDS)[number];
+
+/**
+ * Which OH notices a given health reading is due — pure, so the rule is provable without a database
+ * and without the sweep that carries it.
+ *
+ * **`alert`, not `streak >= threshold`.** `alert` already folds in the repeating-poison-chunk case,
+ * which is a wedge at streak 2 that the raw threshold would not fire on for another hour.
+ *
+ * **A paused scheduler yields nothing at all.** `deriveIngestionAlert` cannot set `overdue` while
+ * `schedulerPaused`, and it must not: ingestion being off is a decision somebody made, and paging them
+ * about their own decision every night is how an alert channel dies. The surface still reports
+ * "paused" rather than "healthy" (#348 AC4) — that distinction stays where a human is looking, not in
+ * a push.
+ *
+ * **Both can be due at once** and both are returned: three failed runs *and* nothing succeeding for a
+ * day are independently true and independently actionable.
+ */
+export function dueIngestionNotices(health: IngestionAlertHealth): IngestionNoticeKind[] {
+  const due: IngestionNoticeKind[] = [];
+  // `alert` is also set BY `overdue`, so the failure arm is qualified: silence is not a failed run,
+  // and reporting it as one would send the operator hunting a chunk error that never existed.
+  if (health.alert && (health.streak > 0 || health.repeatingFailure)) due.push('FAILED');
+  if (health.overdue) due.push('OVERDUE');
+  return due;
+}
+
+/** The sentence an Operations Head reads at 07:00, per notice kind. */
+export function ingestionNoticeBody(kind: IngestionNoticeKind, health: IngestionAlertHealth): string {
+  if (kind === 'OVERDUE') {
+    const age = health.silenceMinutes === null ? 'no run has ever succeeded' : `${health.silenceMinutes} minutes ago`;
+    return (
+      `Telemetry ingestion has produced no successful run since ${age} (expected every ` +
+      `${health.expectedCadenceMinutes} minutes). Device state, auto-recovery and ticket creation are ` +
+      `not running on fresh data.`
+    );
+  }
+  const chunk = health.failingChunk;
+  const where = chunk ? ` Chunk ${chunk.chunkNo} of run ${chunk.runId} failed: ${chunk.error ?? 'no error recorded'}.` : '';
+  return (
+    `${health.streak} consecutive ingestion run${health.streak === 1 ? '' : 's'} did not finish successfully` +
+    `${health.repeatingFailure ? ' with the same error each time' : ''}.` +
+    `${where} ${GATED_STAGES.join(', ')} are being skipped.`
+  );
+}
+
 /** The two queries the derivation reads, kept as an interface so the reader is DB-shape-agnostic. */
 export interface IngestionAlertSource {
   findFinalizedRuns(limit: number): Promise<StreakRun[]>;

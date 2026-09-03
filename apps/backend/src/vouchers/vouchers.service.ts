@@ -4,7 +4,10 @@ import { Prisma } from '../generated/prisma/client';
 import type { ExpenseCategory, VoucherStatus } from '../generated/prisma/enums';
 import { AuditService, auditActor } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
+import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { drainProducerRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
+import { NotificationVoucherNotifier } from './notification-voucher-notifier';
 import { VOUCHER_NOTIFIER, type VoucherNotifier } from './voucher-notifier';
 
 /**
@@ -176,10 +179,14 @@ const ACTION_TO_STATUS: Record<ReviewAction, VoucherStatus> = {
 
 @Injectable()
 export class VouchersService {
+  // #361 — `notifier` builds the notice, `notifications` delivers the row the transaction committed.
+  // Both are defaulted so the four hand-constructions of this service (`voucher-service.e2e-spec.ts`
+  // and its neighbours) keep compiling; DI supplies the container's bindings in the running app.
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
-    @Inject(VOUCHER_NOTIFIER) private readonly notifier: VoucherNotifier,
+    @Inject(VOUCHER_NOTIFIER) private readonly notifier: VoucherNotifier = new NotificationVoucherNotifier(),
+    private readonly notifications: NotificationService = new NotificationService(prisma),
   ) {}
 
   /**
@@ -335,7 +342,12 @@ export class VouchersService {
     const next = ACTION_TO_STATUS[input.action];
     const now = new Date();
 
-    await this.audit.withAudit(
+    // #361 — the SE's notice is written INSIDE the review transaction, beside the status change and
+    // its audit row. Not after it: this is the site the Voucher Review page has been promising for a
+    // year ("the SE is notified"), and a decision that commits while its notice is lost to a crash —
+    // or a notice whose failure throws back through a review that already happened — is exactly the
+    // pair of failures #338 removed from every other producer.
+    const queued = await this.audit.withAudit(
       {
         ...auditActor(actor),
         action: 'VOUCHER_REVIEWED',
@@ -343,14 +355,19 @@ export class VouchersService {
         entityId: voucherId,
         metadata: { action: input.action, notes },
       },
-      (tx) =>
-        tx.expenseVoucher.update({
+      async (tx) => {
+        await tx.expenseVoucher.update({
           where: { voucherId },
           data: { status: next, reviewedBy: actor.userId, reviewedAt: now, reviewNotes: notes },
-        }),
+        });
+        return queueNotification(
+          tx,
+          this.notifier.reviewed({ voucherId, seId: voucher.seId, action: input.action, notes }),
+        );
+      },
     );
 
-    await this.notifier.reviewed({ voucherId, seId: voucher.seId, action: input.action, notes });
+    await drainProducerRows(this.prisma, { notify: this.notifications }, [queued], now);
     return { result: 'OK', status: next };
   }
 
@@ -406,7 +423,7 @@ export class VouchersService {
     const failed: MarkPaidOutcome['failed'] = [];
 
     for (const voucherId of voucherIds) {
-      let seId: string;
+      let queuedNotice: bigint;
       try {
         const voucher = await this.prisma.expenseVoucher.findUnique({ where: { voucherId } });
         if (!voucher) {
@@ -431,7 +448,10 @@ export class VouchersService {
           continue;
         }
 
-        await this.audit.withAudit(
+        // #361 — the notice rides the payment's own transaction, per row. The per-row isolation above
+        // is preserved exactly: an enqueue that fails rolls back only THIS voucher's payment, which is
+        // the same blast radius the row already had, and the rest of the batch proceeds.
+        queuedNotice = await this.audit.withAudit(
           {
             ...auditActor(actor),
             action: 'VOUCHER_MARKED_PAID',
@@ -439,26 +459,24 @@ export class VouchersService {
             entityId: voucherId,
             metadata: { paidBatchRef: batchRef },
           },
-          (tx) =>
-            tx.expenseVoucher.update({
+          async (tx) => {
+            await tx.expenseVoucher.update({
               where: { voucherId },
               data: { status: 'PAID', paidAt: now, paidBatchRef: batchRef },
-            }),
+            });
+            return queueNotification(tx, this.notifier.paid({ voucherId, seId: voucher.seId, paidBatchRef: batchRef }));
+          },
         );
-        seId = voucher.seId;
       } catch (err) {
         failed.push({ voucherId, reason: errorReason(err) });
         continue;
       }
 
       paid.push(voucherId);
-      // The payment has committed. A notifier that throws must not re-report the row as failed — the
-      // money moved either way, and the SE notice is a separate, retryable concern.
-      try {
-        await this.notifier.paid({ voucherId, seId, paidBatchRef: batchRef });
-      } catch {
-        /* notice-only failure — the PAID row and its audit are already durable */
-      }
+      // The payment has committed and its notice is durable. Delivery is attempted now and cannot
+      // re-report the row as failed — `drainProducerRows` swallows a delivery failure and un-claims
+      // the row for the retry sweep. The money moved either way.
+      await drainProducerRows(this.prisma, { notify: this.notifications }, [queuedNotice], now);
     }
 
     return { result: 'OK', paid, skipped, failed };

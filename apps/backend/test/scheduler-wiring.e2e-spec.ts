@@ -52,6 +52,12 @@ const EXPECTED_CRON_JOBS = [
   'business-install-verification',
   // #264 — the day-plan notification outbox re-drain sweep.
   'business-notification-outbox',
+  // #361 — the two PRD notification events that have no mutation to hang off: the 7-day
+  // waiting-component escalation (nothing happens on day seven — only a clock notices) and the
+  // ingestion FAILED/overdue alert to the Operations Head (a stopped pipeline produces no runs to
+  // hook, which was #348's whole finding). Both dedupe to one notice per entity per IST day, so the
+  // hourly cadence sets only how promptly the first one goes out.
+  'business-prd-event-notices',
   'business-repeat-escalation',
   'business-root-cause',
   'business-soft-inactive',
@@ -90,11 +96,11 @@ describe('#229 AC-2 — scheduled-work wiring, asserted on the real AppModule', 
     await app.close();
   });
 
-  it('registers exactly the 21 expected cron jobs — no more, no fewer', () => {
+  it('registers exactly the 22 expected cron jobs — no more, no fewer', () => {
     const registered = [...app.get(SchedulerRegistry).getCronJobs().keys()].sort();
 
     expect(registered).toEqual(EXPECTED_CRON_JOBS);
-    expect(registered).toHaveLength(21);
+    expect(registered).toHaveLength(22);
   });
 
   /**

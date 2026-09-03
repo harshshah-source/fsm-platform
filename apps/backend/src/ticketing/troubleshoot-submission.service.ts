@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { type PresenceSource, type RootCauseCategory, type SubmissionType } from '../generated/prisma/enums';
+import { NotificationService } from '../notifications/notification.service';
+import { queueWarehouseNotice } from '../notifications/prd-event-notice';
 import { PrismaService } from '../prisma/prisma.service';
+import { drainProducerRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
 import { SeCoverageService } from '../shared-pool/se-coverage.service';
 import { foldAndResumeSlaPause } from './sla-pause';
 
@@ -115,9 +118,11 @@ function toView(row: {
 
 @Injectable()
 export class TroubleshootSubmissionService {
+  // #361 — defaulted, so the several hand-constructions of this service in `test/` keep compiling.
   constructor(
     private readonly prisma: PrismaService,
     private readonly coverage: SeCoverageService,
+    private readonly notifications: NotificationService = new NotificationService(prisma),
   ) {}
 
   async submit(input: SubmitTroubleshootInput): Promise<SubmitOutcome> {
@@ -165,6 +170,9 @@ export class TroubleshootSubmissionService {
     if (shortages.length > 0) return { result: 'INSUFFICIENT_VAN_STOCK', shortages };
 
     const presenceSource: PresenceSource = input.presenceSource ?? (input.seGps ? 'FORM_GPS' : 'NONE');
+
+    /** #361 — outbox rows written inside the submission transaction, delivered after it commits. */
+    const wmNotices: bigint[] = [];
 
     const submission = await this.prisma.$transaction(async (tx) => {
       const created = await tx.troubleshootingSubmission.create({
@@ -260,7 +268,7 @@ export class TroubleshootSubmissionService {
             slaPauseSource: 'SE_COMPONENT_UNAVAILABLE',
           },
         });
-        await tx.componentRequest.create({
+        const request = await tx.componentRequest.create({
           data: {
             ticketId: input.ticketId,
             failureCycleId: ticket.failureCycleId!,
@@ -270,6 +278,19 @@ export class TroubleshootSubmissionService {
             status: 'REQUESTED',
           },
         });
+        // #361 (INV-G3, the approval-request half) — the Warehouse Manager is told a request is
+        // waiting, in the transaction that raises it. Nothing pushed here before: the request landed
+        // in a queue page and waited for somebody to open it, while the ticket's SLA clock sat paused
+        // and the engineer stood at a vehicle they could not fix. The WM role is the recipient rather
+        // than one stored id — the warehouse queue itself is not zone-scoped (`ComponentRequestService.queue`
+        // has no zone filter), so the accountable audience is everyone holding the role.
+        wmNotices.push(
+          ...(await queueWarehouseNotice(tx, this.notifications, {
+            requestId: request.requestId,
+            ticketId: input.ticketId,
+            seId: input.seId,
+          })),
+        );
         await tx.ticketEvent.create({
           data: {
             ticketId: input.ticketId,
@@ -340,6 +361,9 @@ export class TroubleshootSubmissionService {
       return created;
     });
 
+    // #361 — post-commit, off the committed rows. A push that cannot be delivered must not fail a
+    // form submission the engineer has already made in the field.
+    await drainProducerRows(this.prisma, { notify: this.notifications }, wmNotices, now);
     return { result: 'OK', duplicate: false, submission: toView(submission) };
   }
 

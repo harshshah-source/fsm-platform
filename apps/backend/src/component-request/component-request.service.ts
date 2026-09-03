@@ -1,7 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { type ComponentRequestStatus, type CoverageType, type DeliveryDestination } from '../generated/prisma/enums';
+import { NotificationService, type NotifyInput } from '../notifications/notification.service';
+import {
+  PRD_NOTICE_TYPES,
+  WAITING_COMPONENT_OVERDUE_DAYS,
+  pluralDays,
+  queueNoticeOnce,
+} from '../notifications/prd-event-notice';
 import { PrismaService } from '../prisma/prisma.service';
+import { drainProducerRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
 import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 import { foldAndResumeSlaPause } from '../ticketing/sla-pause';
 
@@ -11,8 +19,13 @@ import { foldAndResumeSlaPause } from '../ticketing/sla-pause';
  * (queue, approve, mark-shipped, reject); the raise lives in the troubleshoot submission (slice 2) and
  * SE Confirm Receipt / resubmit land in later slices. Out-of-order transitions are refused.
  *
- * Notifications (SE push on ship, ZM notify on reject) are recorded as audit events here and delivered
- * by the notification spine (Issue 03, HITL) — the delivery channel is the external seam, not this slice.
+ * **#361 — the decisions now reach the engineer.** Every WM leg used to write an audit row and stop,
+ * on the reading that the notification channel was an external seam. It was not: the channel landed in
+ * #337 and the durable in-transaction enqueue in #338, so the missing piece here was only the
+ * producer. An SE whose component request is approved, shipped or refused is the person whose next
+ * move depends on the answer — a refusal in particular means they must do something else today — and
+ * the only place that knew was `audit_log`. Each transition now enqueues **one** notice to **that
+ * request's own SE** inside the same transaction that moves the status (INV-G3).
  */
 export interface ComponentRequestView {
   requestId: string;
@@ -83,7 +96,16 @@ const ACTIVE: ComponentRequestStatus[] = ['REQUESTED', 'APPROVED', 'SHIPPED'];
 
 @Injectable()
 export class ComponentRequestService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ComponentRequestService.name);
+
+  // The default mirrors `RecommenderService`'s own `InventoryService` default: five call sites
+  // construct this service by hand (`removal-reason-cancellation`, four component-request specs), and
+  // a required second parameter would make every one of them a compile error for no gain. Nest still
+  // injects the container's singleton — with the configured channel gateway — wherever DI resolves it.
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationService = new NotificationService(prisma),
+  ) {}
 
   /** The Warehouse Manager queue: active requests, newest first, with ticket / SE / component context. */
   async queue(now: Date = new Date()): Promise<ComponentRequestRow[]> {
@@ -143,14 +165,24 @@ export class ComponentRequestService {
     }));
   }
 
-  /** REQUESTED → APPROVED. */
+  /** REQUESTED → APPROVED. The SE waiting on the part is told (#361). */
   async approve(requestId: string, actor: { userId: string; role: string }, now: Date = new Date()): Promise<WmOutcome> {
     return this.transition(requestId, 'REQUESTED', actor, now, (tx) =>
       tx.componentRequest.update({
         where: { requestId },
         data: { status: 'APPROVED', approvedAt: now, wmActorId: actor.userId },
       }),
-    'COMPONENT_REQUEST_APPROVED');
+    'COMPONENT_REQUEST_APPROVED',
+    (row) => ({
+      recipients: [{ userId: row.seId, role: 'SERVICE_ENGINEER' }],
+      type: PRD_NOTICE_TYPES.componentRequestApproved,
+      title: 'Component request approved',
+      body: 'The warehouse approved your component request. You will be told again when it ships.',
+      entityType: 'component_request',
+      entityId: row.requestId,
+      deliveryModel: 'GENERAL',
+      metadata: { ticketId: row.ticketId },
+    }));
   }
 
   /** APPROVED → SHIPPED, recording tracking + the delivery destination (drives resubmit ownership). */
@@ -171,7 +203,24 @@ export class ComponentRequestService {
           wmActorId: actor.userId,
         },
       }),
-    'COMPONENT_REQUEST_SHIPPED');
+    'COMPONENT_REQUEST_SHIPPED',
+    (row) => ({
+      recipients: [{ userId: row.seId, role: 'SERVICE_ENGINEER' }],
+      type: PRD_NOTICE_TYPES.componentRequestShipped,
+      title: 'Component shipped',
+      // The tracking reference and the destination are the whole content of this notice: an engineer
+      // who does not know whether the part is coming to them or to the plant warehouse cannot plan
+      // tomorrow around it, and the destination is also what decides resubmit ownership below.
+      body: `Your component has shipped to ${destinationLabel(ship.deliveryDestination)} — tracking ${ship.trackingRef}.`,
+      entityType: 'component_request',
+      entityId: row.requestId,
+      deliveryModel: 'GENERAL',
+      metadata: {
+        ticketId: row.ticketId,
+        trackingRef: ship.trackingRef,
+        deliveryDestination: ship.deliveryDestination,
+      },
+    }));
   }
 
   /**
@@ -215,7 +264,16 @@ export class ComponentRequestService {
     return { result: 'OK', request: toView(updated) };
   }
 
-  /** REQUESTED → REJECTED with a mandatory reason (the Zonal Manager is notified — Issue 03 seam). */
+  /**
+   * REQUESTED → REJECTED with a mandatory reason.
+   *
+   * **#361 — the notice goes to the SE, not the ZM.** The old comment here said "the Zonal Manager is
+   * notified", which was neither built nor right: the person blocked by a refusal is the engineer who
+   * raised it and is still standing at a vehicle they cannot fix. The reason travels with the notice,
+   * because "rejected" without it just moves the question rather than answering it. The ZM keeps the
+   * oversight queue (`oversightQueue`) and the 7-day escalation below, which are the manager-grain
+   * views of the same fact.
+   */
   async reject(
     requestId: string,
     reason: string,
@@ -227,7 +285,17 @@ export class ComponentRequestService {
         where: { requestId },
         data: { status: 'REJECTED', rejectedAt: now, rejectionReason: reason, wmActorId: actor.userId },
       }),
-    'COMPONENT_REQUEST_REJECTED');
+    'COMPONENT_REQUEST_REJECTED',
+    (row) => ({
+      recipients: [{ userId: row.seId, role: 'SERVICE_ENGINEER' }],
+      type: PRD_NOTICE_TYPES.componentRequestRejected,
+      title: 'Component request rejected',
+      body: `The warehouse rejected your component request: ${reason}`,
+      entityType: 'component_request',
+      entityId: row.requestId,
+      deliveryModel: 'GENERAL',
+      metadata: { ticketId: row.ticketId, rejectionReason: reason },
+    }));
   }
 
   /**
@@ -320,6 +388,95 @@ export class ComponentRequestService {
     await foldAndResumeSlaPause(tx, cycleId, now);
   }
 
+  /**
+   * #361 (INV-G4) — push the ZM the component requests their zone has been waiting on for more than
+   * {@link WAITING_COMPONENT_OVERDUE_DAYS}.
+   *
+   * **The surfacing already existed; only the push was missing.** `dashboard.service.ts` has carried a
+   * `waiting_component_overdue` card, zone-scoped and at the same 7-day threshold, since before this
+   * slice — which is exactly why the gap was survivable and also why it never got fixed. A card is a
+   * thing you see when you happen to open the page; a stalled component request is a ticket whose SLA
+   * clock is paused and whose customer is waiting, and the manager who can chase the warehouse has no
+   * reason to go and look at a page about it. This sweep is the half that goes and finds them.
+   *
+   * **One notice per zone per day, not one per request.** Deduplicated on the *zone*, because that is
+   * the grain of the action: a ZM with nine stalled requests has one job to do — go and lean on the
+   * warehouse — and nine pushes describing it would be the alert storm that gets the channel muted.
+   * The count and the oldest age are in the body so the notice is still worth reading on day two.
+   */
+  async sweepWaitingComponentEscalations(now: Date = new Date()): Promise<{ notified: number }> {
+    const cutoff = new Date(now.getTime() - WAITING_COMPONENT_OVERDUE_DAYS * 24 * 60 * 60 * 1000);
+    const overdue = await this.prisma.componentRequest.findMany({
+      // ACTIVE, not just REQUESTED: a request approved six days ago and never shipped is exactly as
+      // stuck as one nobody has looked at, and the SE is waiting either way.
+      where: { status: { in: ACTIVE }, createdAt: { lt: cutoff } },
+      select: { requestId: true, createdAt: true, ticket: { select: { plant: { select: { zoneId: true } } } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (overdue.length === 0) return { notified: 0 };
+
+    const byZone = new Map<string, { zoneId: bigint; requestIds: string[]; oldest: Date }>();
+    for (const row of overdue) {
+      const zoneId = row.ticket.plant.zoneId;
+      const key = zoneId.toString();
+      const entry = byZone.get(key) ?? { zoneId, requestIds: [], oldest: row.createdAt };
+      entry.requestIds.push(row.requestId);
+      if (row.createdAt < entry.oldest) entry.oldest = row.createdAt;
+      byZone.set(key, entry);
+    }
+
+    const queued = await this.prisma.$transaction(async (tx) => {
+      const ids: bigint[] = [];
+      for (const { zoneId, requestIds, oldest } of byZone.values()) {
+        // #356's policy: the designated manager, else the zone's role holders, else a logged miss —
+        // never a silent return on a null `zones.zonal_manager_user_id`.
+        const recipients = await this.notifications.zoneManagerRecipients(zoneId, tx);
+        if (recipients.length === 0) continue;
+        const ageDays = Math.floor((now.getTime() - oldest.getTime()) / (24 * 60 * 60 * 1000));
+        const id = await queueNoticeOnce(
+          tx,
+          {
+            recipients,
+            type: PRD_NOTICE_TYPES.componentRequestOverdue,
+            title: 'Component requests overdue in your zone',
+            body:
+              `${requestIds.length} component request${requestIds.length === 1 ? ' has' : 's have'} been waiting ` +
+              `more than ${pluralDays(WAITING_COMPONENT_OVERDUE_DAYS)} in your zone — the oldest for ` +
+              `${pluralDays(ageDays)}. Their tickets' SLA clocks are paused until the parts arrive.`,
+            // The zone is the entity, because the zone is what the dedup and the action are keyed on.
+            entityType: 'zone',
+            entityId: String(zoneId),
+            deliveryModel: 'GENERAL',
+            metadata: { requestIds, oldestAgeDays: ageDays, thresholdDays: WAITING_COMPONENT_OVERDUE_DAYS },
+          },
+          now,
+        );
+        if (id !== null) ids.push(id);
+      }
+      return ids;
+    });
+
+    // Post-commit, off the committed rows (#338): a push that cannot be delivered must not damage — or
+    // be lost by — the sweep that found the backlog.
+    await drainProducerRows(this.prisma, { notify: this.notifications }, queued, now);
+    if (queued.length > 0) this.logger.log(`waiting-component escalation: notified ${queued.length} zone(s)`);
+    return { notified: queued.length };
+  }
+
+  /**
+   * The shared WM transition: guard the from-state, mutate, audit — and, since #361, enqueue the SE's
+   * notice **inside the same transaction**.
+   *
+   * In-transaction is the whole point and not a stylistic preference. The alternative — notify after
+   * the commit — is what every one of these legs effectively did by writing only an audit row, and
+   * #338 catalogued both ways it fails: a crash between the commit and the push loses the notice with
+   * no trace, and a *throw* in the push damages a status change that had already succeeded. The
+   * request has moved either way; the notice is a durable row that rides with it, and delivery is
+   * attempted afterwards where a failure can only cost a retry.
+   *
+   * `notice` is a builder over the updated row rather than a prepared value because two of the three
+   * legs word themselves from data the mutation itself writes.
+   */
   private async transition(
     requestId: string,
     from: ComponentRequestStatus,
@@ -327,12 +484,13 @@ export class ComponentRequestService {
     now: Date,
     mutate: (tx: PrismaService) => Promise<RequestRow>,
     action: string,
+    notice?: (row: RequestRow) => NotifyInput,
   ): Promise<WmOutcome> {
     const existing = await this.prisma.componentRequest.findUnique({ where: { requestId } });
     if (!existing) return { result: 'NOT_FOUND' };
     if (existing.status !== from) return { result: 'INVALID_STATE', status: existing.status };
 
-    const updated = await this.prisma.$transaction(async (tx) => {
+    const { updated, queued } = await this.prisma.$transaction(async (tx) => {
       const row = await mutate(tx as unknown as PrismaService);
       await tx.auditLog.create({
         data: {
@@ -344,8 +502,16 @@ export class ComponentRequestService {
           metadata: { ticketId: existing.ticketId, at: now.toISOString() },
         },
       });
-      return row;
+      const outboxId = notice ? await queueNotification(tx, notice(row)) : null;
+      return { updated: row, queued: outboxId === null ? [] : [outboxId] };
     });
+
+    await drainProducerRows(this.prisma, { notify: this.notifications }, queued, now);
     return { result: 'OK', request: toView(updated) };
   }
+}
+
+/** The destination, in the words the SE mobile Component card already uses. */
+function destinationLabel(destination: DeliveryDestination): string {
+  return destination === 'SE_LOCATION' ? 'your location' : 'the plant warehouse';
 }
