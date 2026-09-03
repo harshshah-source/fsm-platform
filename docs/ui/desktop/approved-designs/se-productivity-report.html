@@ -1,0 +1,222 @@
+<title>SE Productivity Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --bg: #eef0f3; --surface: #ffffff; --surface-2: #f6f7f9;
+    --ink: #14151a; --ink-2: #4c505a; --ink-3: #767b85;
+    --line: #dcdfe4; --line-2: #c6cad1;
+    --accent: #b9102b; --good: #197a3d; --good-soft: #e3f5e9;
+    --warn: #9a6700; --warn-soft: #fdf2d9; --crit: #b42318; --crit-soft: #fbe3e3;
+    --info: #1d4ed8; --info-soft: #e5eeff;
+    --app-caps: #83868e; --app-chrome: #0a0a0c; --app-chrome-text: #d6d6db;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0b0d; --surface: #141417; --surface-2: #1b1b1f;
+      --ink: #e9eaee; --ink-2: #a8adb6; --ink-3: #7d828c;
+      --line: #2a2b30; --line-2: #3b3d44;
+      --accent: #e0455e; --good: #56c07d; --good-soft: #12291b;
+      --warn: #d9a441; --warn-soft: #2c2313; --crit: #f07167; --crit-soft: #33191a;
+      --info: #7aa2f7; --info-soft: #16203a;
+      --app-caps: #83868e; --app-chrome: #000; --app-chrome-text: #d6d6db;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0b0d; --surface: #141417; --surface-2: #1b1b1f;
+    --ink: #e9eaee; --ink-2: #a8adb6; --ink-3: #7d828c;
+    --line: #2a2b30; --line-2: #3b3d44;
+    --accent: #e0455e; --good: #56c07d; --good-soft: #12291b;
+    --warn: #d9a441; --warn-soft: #2c2313; --crit: #f07167; --crit-soft: #33191a;
+    --info: #7aa2f7; --info-soft: #16203a;
+  }
+
+  body { background: var(--bg); color: var(--ink); font-family: Inter, system-ui, sans-serif; margin: 0; padding: 32px 24px 64px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-family: Newsreader, Georgia, serif; font-weight: 600; font-size: 30px; margin: 0 0 4px; letter-spacing: -.01em; }
+  h2 { font-family: Newsreader, Georgia, serif; font-weight: 600; font-size: 21px; margin: 40px 0 10px; }
+  .sub { color: var(--ink-2); font-size: 14px; margin: 0 0 28px; max-width: 70ch; line-height: 1.55; }
+  p { line-height: 1.6; font-size: 14px; color: var(--ink-2); max-width: 78ch; }
+  .caps { font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--app-caps); font-weight: 600; }
+
+  /* ── the wireframe ────────────────────────────────────────────────── */
+  .screen { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  .chrome { background: var(--app-chrome); color: var(--app-chrome-text); padding: 9px 14px; font-size: 12px; display: flex; gap: 14px; align-items: center; }
+  .chrome .brand { font-weight: 700; color: #fff; letter-spacing: -.01em; }
+  .chrome .crumb { color: #8e8e96; }
+  .band { border-bottom: 1px solid var(--line); padding: 10px 14px; background: var(--surface-2); }
+  .bandrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; }
+  .bandrow + .bandrow { margin-top: 9px; border-top: 1px solid var(--line); padding-top: 9px; }
+  .chip { border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 9px; font-size: 11.5px; color: var(--ink-2); background: var(--surface); }
+  .chip.scope { border-color: var(--info); color: var(--info); background: var(--info-soft); font-weight: 600; }
+  .chip.stamp { border-style: dashed; }
+  .ctrl { border: 1px solid var(--line-2); border-radius: 6px; padding: 3px 9px; font-size: 11.5px; background: var(--surface); color: var(--ink); }
+  .ctrl::after { content: " ▾"; color: var(--ink-3); }
+  .ctrl.plain::after { content: ""; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { text-align: left; font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--app-caps); font-weight: 600; padding: 9px 10px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+  th.num, td.num { text-align: right; font-family: "JetBrains Mono", monospace; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); color: var(--ink); }
+  tr:last-child td { border-bottom: 0; }
+  .name { font-weight: 600; }
+  .muted { color: var(--ink-3); }
+  .flag { color: var(--warn); font-weight: 600; }
+  .flag.bad { color: var(--crit); }
+  .thin { color: var(--ink-3); font-style: italic; }
+  .foot { padding: 9px 14px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); display: flex; justify-content: space-between; }
+
+  .note { border-left: 3px solid var(--line-2); padding: 2px 0 2px 14px; margin: 16px 0; }
+  .note.warn { border-color: var(--warn); }
+  .note.crit { border-color: var(--crit); }
+  ul { font-size: 14px; color: var(--ink-2); line-height: 1.6; max-width: 78ch; }
+  li { margin-bottom: 7px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  .scroll { overflow-x: auto; }
+</style>
+
+<div class="wrap">
+
+<h1>SE Productivity Report</h1>
+<p class="sub">
+  Approved direction for <code>/reports/se-productivity</code> (issue #365). No v2 reference image
+  covers this screen; this file is its reference. The page chrome is governed by
+  <code>21-reports.png</code> — this design only decides what the body of the page is.
+</p>
+
+<h2>The wireframe</h2>
+
+<div class="screen">
+  <div class="chrome">
+    <span class="brand">FSM</span>
+    <span class="crumb">Reports / SE Productivity</span>
+  </div>
+
+  <div class="band">
+    <div class="bandrow">
+      <span class="chip scope">Zone · Rajasthan North</span>
+      <span class="chip stamp">as of 28 Jun, 09:00</span>
+      <span class="muted" style="margin-left:auto">Cube rebuilt daily 06:00 IST</span>
+    </div>
+    <div class="bandrow">
+      <span class="ctrl">Zone: Rajasthan North</span>
+      <span class="ctrl">Month: June 2026</span>
+      <span class="ctrl">Granularity: Monthly</span>
+      <span class="ctrl">Coverage: All</span>
+      <span class="ctrl plain" style="margin-left:auto">Export CSV</span>
+    </div>
+  </div>
+
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr>
+        <th>Engineer</th>
+        <th>Coverage</th>
+        <th class="num">Closures</th>
+        <th class="num">Repair</th>
+        <th class="num">Departure</th>
+        <th class="num">First-time fix</th>
+        <th class="num">Failed verif.</th>
+        <th class="num">Avg on-site → submit</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="name">Ramesh Kumar</td><td class="muted">Dedicated</td>
+        <td class="num">42</td><td class="num">31</td><td class="num">11</td>
+        <td class="num">74.2%</td><td class="num">4.8%</td><td class="num">1h 12m</td>
+      </tr>
+      <tr>
+        <td class="name">Suresh Patel</td><td class="muted">Dedicated</td>
+        <td class="num">38</td><td class="num">29</td><td class="num">9</td>
+        <td class="num">76.3%</td><td class="num">2.6%</td><td class="num">0h 58m</td>
+      </tr>
+      <tr>
+        <td class="name">Anil Singh</td><td class="muted">Floating</td>
+        <td class="num">21</td><td class="num">12</td><td class="num">9</td>
+        <td class="num flag">57.1%</td><td class="num flag bad">14.3%</td><td class="num flag">2h 05m</td>
+      </tr>
+      <tr>
+        <td class="name">Manoj Rao</td><td class="muted">Floating</td>
+        <td class="num">6</td><td class="num">4</td><td class="num">2</td>
+        <td class="num thin">—</td><td class="num thin">—</td><td class="num">1h 30m</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="foot">
+    <span>4 engineers · 107 closures in window</span>
+    <span>Rates suppressed below 10 closures</span>
+  </div>
+</div>
+
+<h2>Why this shape</h2>
+
+<p>
+  A zone has a roster, and the question a manager brings to this page is <em>which of my engineers
+  needs attention</em> — not "tell me about Ramesh". A table answers that in one read and a per-SE
+  scorecard cannot: it makes you already know the name before you can look it up. The per-SE view is
+  a reasonable second screen later, reached by clicking a row; it is the wrong first one.
+</p>
+
+<p>
+  It reuses what <a href="#">#364</a> built rather than inventing a parallel mechanism: the filter
+  bar lives inside the same header band as the freshness stamp and the scope chip, because that band
+  is what states the scope of the numbers under it. The scope chip renders the server's echoed zone,
+  never the local pick — a ZM whose zone is clamped must see the zone they are actually reading.
+</p>
+
+<div class="note warn">
+  <p>
+    <strong>Small samples must not be dressed as rates.</strong> A floating SE with six closures has
+    no meaningful first-time-fix percentage, and rendering one invites a manager to act on noise.
+    Below the threshold the rate columns show <span class="thin">—</span>, and the footer says why.
+    The count columns are always shown, because a count of six is a true fact about six jobs.
+  </p>
+</div>
+
+<div class="note crit">
+  <p>
+    <strong>This is a diagnostic surface, not a league table.</strong> The design deliberately does
+    not rank, badge a "best" engineer, or colour a whole row. Only individual out-of-band metrics are
+    marked, in the same amber/crimson grammar the other two approved designs use, so the eye lands on
+    <em>a number worth asking about</em> rather than on a person worth blaming. Ordering is by name
+    by default — sortable, but never pre-sorted worst-first.
+  </p>
+</div>
+
+<h2>What the page must not do</h2>
+<ul>
+  <li>
+    <strong>Never show <code>se_repaired_closures</code> unsplit.</strong> Audit finding F7: that
+    column mis-attributes departure closures, so an engineer whose plants had vehicles leave the
+    fleet reads as more productive than one who repaired devices. #365 fixes the aggregation
+    (<code>fleet-uptime-aggregation.service.ts</code>) <em>before</em> the page exists — a page built
+    on the unsplit column would publish the mis-attribution to the people who make staffing
+    decisions. Repair and Departure are separate columns here for that reason, and the split is the
+    prerequisite, not a nicety.
+  </li>
+  <li>
+    <strong>No live recomputation.</strong> Every figure comes from the daily summary tables, and the
+    stamp says which rebuild. A page that recomputed on request would disagree with the ZM scorecard
+    beside it.
+  </li>
+  <li>
+    <strong>Zone clamp is server-side.</strong> A ZM sees their own zone; CSM and OH see all. The
+    dropdown is a convenience, never the enforcement.
+  </li>
+</ul>
+
+<h2>Grammar</h2>
+<p>
+  Shared with <code>assign-work-console.html</code> and <code>todays-dispatch-crew-deck.html</code>
+  so the boards read as one product: amber = worth a look, heavy crimson = act now, dashed border =
+  a value whose freshness is provisional. Nothing here relies on colour alone — every flagged number
+  is also the outlier in its column, and the design survives grayscale.
+</p>
+
+</div>

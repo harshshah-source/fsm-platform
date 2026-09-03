@@ -18,6 +18,8 @@ here may contradict it — an approved design may only add screens the reference
 |---|---|---|---|
 | [`assign-work-console.html`](./assign-work-console.html) | Manual assignment / reassignment console (`/assign`), its work pool, draft lanes, candidate column and commit review | 2026-08-20 | [`#272`](../../../../.scratch/fsm-platform-v1/issues/272-decision-assign-work-console.md) |
 | [`todays-dispatch-crew-deck.html`](./todays-dispatch-crew-deck.html) | The scheduler engine's operator cockpit (`/dispatch/today`) — Plan / Live / Replay, engineer deck with ordered stops, critical interception, work rails, and the override impact-preview flow | 2026-08-25 | [`#282`](../../../../.scratch/fsm-platform-v1/issues/282-decision-todays-dispatch-crew-deck.md) |
+| [`se-productivity-report.html`](./se-productivity-report.html) | SE productivity report (`/reports/se-productivity`) — the page body: a filterable roster table, per-SE metrics, small-sample suppression. Page chrome stays governed by `21-reports.png` | 2026-09-03 | [`#368`](../../../../.scratch/fsm-platform-v1/issues/368-decision-se-productivity-report.md) |
+| [`warehouse-pickup-stop.html`](./warehouse-pickup-stop.html) | The Zone Warehouse pickup stop on the admin schedule detail — stop 0, its own kind, parts named. Surrounding chrome stays governed by `12-batch-schedule-review.png` | 2026-09-03 | [`#369`](../../../../.scratch/fsm-platform-v1/issues/369-decision-warehouse-pickup-stop.md) |
 
 The two designs share one visual grammar deliberately — *"the two boards read as one product"*
 (`#272:64`): solid + dot = system decision, dashed = a human crossed/overrode, heavy crimson =
@@ -42,3 +44,14 @@ what it is; the two wireframes are the authoritative part.
 An approved design is added only by an operator decision, recorded as a `DECISION RECORD` issue in
 `.scratch/fsm-platform-v1/issues/` and linked in the table above. Do not add a design here because it
 looks finished — approval is the entry condition, not authorship.
+
+## Known gaps — screens built without a reference
+
+Screens that exist in the product but have **neither** a v2 image **nor** an approved design. They
+were built to the surrounding chrome and the issue's acceptance criteria alone. Listing them is not a
+defect report; it is so the next person to touch one knows there is no authority to match, and that
+a design stop is the way to acquire one.
+
+| Screen | Built by | Note |
+|---|---|---|
+| Audit ledger search + viewer (`/admin/audit`) and the ticket drawer's Audit tab | [`#342`](../../../../.scratch/fsm-platform-v1/issues/342-audit-ledger-search-viewer.md) | Built to the Ops Explorer's table grammar. #342 asked for the gap to be recorded here rather than left implicit. |

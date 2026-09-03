@@ -1,0 +1,186 @@
+<title>Zone Warehouse Pickup Stop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --bg: #eef0f3; --surface: #ffffff; --surface-2: #f6f7f9;
+    --ink: #14151a; --ink-2: #4c505a; --ink-3: #767b85;
+    --line: #dcdfe4; --line-2: #c6cad1;
+    --accent: #b9102b; --good: #197a3d; --good-soft: #e3f5e9;
+    --warn: #9a6700; --warn-soft: #fdf2d9; --crit: #b42318; --crit-soft: #fbe3e3;
+    --info: #1d4ed8; --info-soft: #e5eeff; --violet: #6d28d9; --violet-soft: #eee7fb;
+    --app-caps: #83868e; --app-chrome: #0a0a0c; --app-chrome-text: #d6d6db;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0b0d; --surface: #141417; --surface-2: #1b1b1f;
+      --ink: #e9eaee; --ink-2: #a8adb6; --ink-3: #7d828c;
+      --line: #2a2b30; --line-2: #3b3d44;
+      --accent: #e0455e; --good: #56c07d; --good-soft: #12291b;
+      --warn: #d9a441; --warn-soft: #2c2313; --crit: #f07167; --crit-soft: #33191a;
+      --info: #7aa2f7; --info-soft: #16203a; --violet: #b69bf0; --violet-soft: #211936;
+      --app-chrome: #000;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0b0d; --surface: #141417; --surface-2: #1b1b1f;
+    --ink: #e9eaee; --ink-2: #a8adb6; --ink-3: #7d828c;
+    --line: #2a2b30; --line-2: #3b3d44;
+    --warn: #d9a441; --warn-soft: #2c2313; --crit: #f07167; --crit-soft: #33191a;
+    --info: #7aa2f7; --info-soft: #16203a; --violet: #b69bf0; --violet-soft: #211936;
+  }
+
+  body { background: var(--bg); color: var(--ink); font-family: Inter, system-ui, sans-serif; margin: 0; padding: 32px 24px 64px; }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  h1 { font-family: Newsreader, Georgia, serif; font-weight: 600; font-size: 30px; margin: 0 0 4px; letter-spacing: -.01em; }
+  h2 { font-family: Newsreader, Georgia, serif; font-weight: 600; font-size: 21px; margin: 40px 0 10px; }
+  .sub { color: var(--ink-2); font-size: 14px; margin: 0 0 28px; max-width: 72ch; line-height: 1.55; }
+  p { line-height: 1.6; font-size: 14px; color: var(--ink-2); max-width: 78ch; }
+
+  .screen { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  .chrome { background: var(--app-chrome); color: var(--app-chrome-text); padding: 9px 14px; font-size: 12px; display: flex; gap: 14px; }
+  .chrome .brand { font-weight: 700; color: #fff; }
+  .chrome .crumb { color: #8e8e96; }
+  .hdr { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; }
+  .hdr .who { font-size: 16px; font-weight: 600; }
+  .hdr .meta { font-size: 12px; color: var(--ink-3); }
+  .pill { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; font-weight: 700; border-radius: 4px; padding: 2px 7px; }
+  .pill.auto { background: var(--info-soft); color: var(--info); }
+
+  .stop { display: flex; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+  .stop:last-child { border-bottom: 0; }
+  .seq { font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--ink-3); width: 20px; flex: none; padding-top: 1px; }
+  .body { flex: 1; min-width: 0; }
+  .title { font-weight: 600; font-size: 13.5px; }
+  .sec { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+  .right { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+
+  /* The pickup stop: same row, its own kind. Violet + left rule = "not a plant". */
+  .stop.pickup { background: var(--violet-soft); border-left: 3px solid var(--violet); }
+  .stop.pickup .title { color: var(--violet); letter-spacing: .02em; }
+  .kind { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; color: var(--violet); border: 1px solid var(--violet); border-radius: 3px; padding: 1px 5px; margin-left: 7px; }
+  .parts { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--ink-2); margin-top: 5px; }
+
+  .note { border-left: 3px solid var(--line-2); padding: 2px 0 2px 14px; margin: 16px 0; }
+  .note.warn { border-color: var(--warn); }
+  .note.violet { border-color: var(--violet); }
+  ul { font-size: 14px; color: var(--ink-2); line-height: 1.6; max-width: 78ch; }
+  li { margin-bottom: 7px; }
+  code { font-family: "JetBrains Mono", monospace; font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+</style>
+
+<div class="wrap">
+
+<h1>Zone Warehouse Pickup Stop</h1>
+<p class="sub">
+  Approved direction for the pickup stop on the admin schedule detail (issue #366). No v2 reference
+  image covers it; this file is its reference. The surrounding page chrome is governed by
+  <code>12-batch-schedule-review.png</code> — this design only decides how the pickup stop itself
+  reads. Mobile rendering is out of scope for #366.
+</p>
+
+<h2>The wireframe</h2>
+
+<div class="screen">
+  <div class="chrome">
+    <span class="brand">FSM</span>
+    <span class="crumb">Schedules / Day plan</span>
+  </div>
+
+  <div class="hdr">
+    <span class="who">Ramesh Kumar</span>
+    <span class="meta">Sun 28 Jun 2026 · Rajasthan North</span>
+    <span class="pill auto" style="margin-left:auto">Auto assigned</span>
+  </div>
+
+  <div class="stop pickup">
+    <div class="seq">0</div>
+    <div class="body">
+      <div class="title">Zone Warehouse<span class="kind">Pickup</span></div>
+      <div class="sec">Jaipur Zone Warehouse · collect before first plant</div>
+      <div class="parts">REQ-114 · Modem board ×1 &nbsp;·&nbsp; REQ-119 · Antenna assembly ×1</div>
+    </div>
+    <div class="right">2 parts</div>
+  </div>
+
+  <div class="stop">
+    <div class="seq">1</div>
+    <div class="body">
+      <div class="title">ACP-9106 — Bhilwara Cement Works</div>
+      <div class="sec">3 tickets · 2 critical</div>
+    </div>
+    <div class="right">Auto</div>
+  </div>
+
+  <div class="stop">
+    <div class="seq">2</div>
+    <div class="body">
+      <div class="title">ACP-9241 — Chittorgarh Depot</div>
+      <div class="sec">2 tickets</div>
+    </div>
+    <div class="right">Auto</div>
+  </div>
+</div>
+
+<h2>Why a stop and not a banner</h2>
+
+<p>
+  An engineer's day is <em>one ordered sequence</em>, and the pickup is genuinely the first thing in
+  it — they cannot do the job at stop 1 without the part. Rendering it as a stop keeps the ordering
+  literal: stop 0 comes before stop 1, and nobody has to infer where in the day the warehouse visit
+  belongs. A banner above the list says "also, collect something", which is exactly the ambiguity the
+  stop numbering exists to remove, and it detaches the pickup from the sequence it is part of.
+</p>
+
+<p>
+  It is <strong>a different kind of stop, not a different-looking plant</strong>. The violet left rule
+  and the <span class="kind">Pickup</span> tag say "this is not a plant visit" — no ticket list, no
+  device count, no SLA, because none of those exist for a warehouse. The row shows the one thing the
+  dispatcher needs: which parts, and how many. Listing them beats a bare label; a dispatcher checking
+  a plan should not have to open the component requests to learn what the engineer is carrying.
+</p>
+
+<div class="note violet">
+  <p>
+    <strong>Colour is a kind, not a severity.</strong> Violet is used because the existing grammar
+    already spends crimson on critical and amber on over-capacity; a pickup is neither urgent nor
+    wrong, it is simply a different sort of thing. The tag carries the meaning on its own, so the row
+    survives grayscale and colour-blind rendering.
+  </p>
+</div>
+
+<div class="note warn">
+  <p>
+    <strong>Stop 0 appears only when it is real.</strong> One pickup stop when the plan has at least
+    one ticket whose component request is SHIPPED and not yet RECEIVED; none otherwise. Never an
+    empty pickup stop, and never more than one — an engineer makes a single warehouse visit, however
+    many parts are waiting there.
+  </p>
+</div>
+
+<h2>What this pins for the implementation</h2>
+<ul>
+  <li>
+    <code>DayPlanStop</code> gains <code>kind: 'PLANT' | 'WAREHOUSE_PICKUP'</code> in
+    <code>packages/shared</code>. A discriminated kind, not a boolean flag — the shapes differ (a
+    pickup has parts and no tickets), and a boolean invites a renderer to read plant fields off a row
+    that has none.
+  </li>
+  <li>
+    The pickup carries the <strong>request references and part names</strong>, since the row displays
+    them. That is the contract the admin schedule detail renders and the mobile screen will later
+    render too.
+  </li>
+  <li>
+    Sequence <strong>0</strong>, so existing stop numbering is untouched and a plan without a pickup
+    is byte-identical to today.
+  </li>
+  <li>
+    Mobile rendering is explicitly <strong>not</strong> in #366. When it is built it inherits this
+    grammar — a distinct kind, first in the list, parts named — rather than inventing its own.
+  </li>
+</ul>
+
+</div>
