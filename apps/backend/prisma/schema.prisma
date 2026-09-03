@@ -1655,6 +1655,12 @@ model SnapshotRun {
   cursor     String?
   dataAsOf   DateTime?      @map("data_as_of") @db.Timestamptz(6)
   chunkStats Json?          @map("chunk_stats") @db.JsonB
+  /// #348 — why the run ended the way it did. Until now the snapshot reaper flipped an orphaned
+  /// RUNNING row to FAILED with nothing but a `finished_at` to show for it, so the run history could
+  /// not tell "the source read blew up" apart from "the process died mid-run" — two failures with
+  /// completely different responses. `master_sync_runs.error` has carried `ORPHANED_RUN_ERROR` since
+  /// Issue 97; this is the snapshot twin of that column, and the reaper is the twin of that writer.
+  error      String?
   // #130 L3 — build that produced this run (nullable/additive; stamped at creation from build-info).
   buildVersion     BigInt?  @map("build_version")
   buildFingerprint String?  @map("build_fingerprint")

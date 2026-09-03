@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { SnapshotRunService } from '../src/ingestion/snapshot-run.service';
+import { ORPHANED_RUN_ERROR } from '../src/ingestion/stale-run';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -95,5 +96,70 @@ describe('Issue 04 slice 4 — run lifecycle', () => {
     expect((await prisma.snapshotRun.findUnique({ where: { runId } }))?.cursor).toBeNull();
     expect('lastResumeCursor' in (service as unknown as Record<string, unknown>)).toBe(false);
     expect((service as unknown as Record<string, unknown>).lastResumeCursor).toBeUndefined();
+  });
+
+  /**
+   * #348 — the reap now says WHY.
+   *
+   * `snapshot_runs` had no `error` column, so a run the heartbeat reaper closed (#261) left nothing
+   * behind but a status flip and a `finished_at`. In the run history that is indistinguishable from a
+   * run whose AutoPlant read genuinely threw — two entries that look identical and call for opposite
+   * responses ("restart the box" vs "go look at the source data"). `master_sync_runs` has recorded
+   * `ORPHANED_RUN_ERROR` for this since Issue 97; the snapshot ledger now matches it.
+   */
+  describe('#348 — a reaped run records its reason', () => {
+    /** A run whose process died: RUNNING with a heartbeat well past the stale threshold. */
+    const seedOrphan = async (minutesAgo = 90): Promise<bigint> => {
+      const dead = new Date(Date.now() - minutesAgo * 60_000);
+      const run = await prisma.snapshotRun.create({
+        data: { status: 'RUNNING', startedAt: dead, heartbeatAt: dead },
+      });
+      created.push(run.runId);
+      return run.runId;
+    };
+
+    it('marks an orphaned run FAILED with ORPHANED_RUN_ERROR', async () => {
+      const runId = await seedOrphan();
+
+      expect(await service.reapStaleRuns()).toBeGreaterThanOrEqual(1);
+
+      const run = await prisma.snapshotRun.findUnique({ where: { runId } });
+      expect(run?.status).toBe('FAILED');
+      expect(run?.error).toBe(ORPHANED_RUN_ERROR);
+      expect(run?.finishedAt).not.toBeNull();
+    });
+
+    it('reaps as a side effect of the next startRun, which is how it happens in production', async () => {
+      const orphaned = await seedOrphan();
+
+      const { runId } = await service.startRun();
+      created.push(runId);
+
+      expect((await prisma.snapshotRun.findUnique({ where: { runId: orphaned } }))?.error).toBe(ORPHANED_RUN_ERROR);
+    });
+
+    it('leaves a live run alone — a fresh heartbeat is not an orphan, and gets no reason', async () => {
+      // The #261 rule: slow is not dead. A run still beating must not be reaped, and must certainly
+      // not be labelled as having been restarted out from under itself.
+      const { runId } = await service.startRun();
+      created.push(runId);
+
+      await service.reapStaleRuns();
+
+      const run = await prisma.snapshotRun.findUnique({ where: { runId } });
+      expect(run?.status).toBe('RUNNING');
+      expect(run?.error).toBeNull();
+    });
+
+    it('a run that finishes normally carries no reason, so the marker keeps its meaning', async () => {
+      const { runId } = await service.startRun();
+      created.push(runId);
+
+      await service.finishRun(runId, { status: 'FAILED', dataAsOf: null });
+
+      const run = await prisma.snapshotRun.findUnique({ where: { runId } });
+      expect(run?.status).toBe('FAILED');
+      expect(run?.error).toBeNull();
+    });
   });
 });

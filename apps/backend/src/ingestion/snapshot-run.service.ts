@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { buildStampFields } from '../build-info/run-stamp';
 import { PrismaService } from '../prisma/prisma.service';
-import { staleRunFilter } from './stale-run';
+import { ORPHANED_RUN_ERROR, staleRunFilter } from './stale-run';
 
 export type SnapshotRunOutcome = 'SUCCESS' | 'FAILED' | 'PARTIAL';
 
@@ -29,17 +29,23 @@ export class SnapshotRunService {
 
   /**
    * Reap orphaned RUNNING rows → FAILED, so a process death never permanently locks out future runs
-   * (review A2). `snapshot_runs` has no `error` column, so the status flip + `finished_at` are the
-   * record. Runs before the guard is taken; a live RUNNING row still 409s. Supersedes the CLI-only
-   * `deleteMany({status:'RUNNING'})` workaround.
+   * (review A2). Runs before the guard is taken; a live RUNNING row still 409s. Supersedes the
+   * CLI-only `deleteMany({status:'RUNNING'})` workaround.
    *
    * #261 — "orphaned" is now decided by {@link staleRunFilter}: a stale *heartbeat*, not an old
    * `started_at`. A slow run that is still beating is alive and is left alone.
+   *
+   * #348 — and it now says so. The reap used to leave nothing but the status flip and `finished_at`,
+   * because `snapshot_runs` had no `error` column; a reaped run and a run whose source read threw
+   * were the same row in the history, and an operator reading `/snapshots/runs` had no way to tell a
+   * restart from a real ingestion failure. `ORPHANED_RUN_ERROR` is the same marker
+   * `MasterSyncRunService.reapStaleRuns` has written since Issue 97 — one vocabulary across both run
+   * ledgers, so the two histories read the same way.
    */
   async reapStaleRuns(now: Date = new Date()): Promise<number> {
     const { count } = await this.prisma.snapshotRun.updateMany({
       where: { status: 'RUNNING', ...staleRunFilter(now) },
-      data: { status: 'FAILED', finishedAt: now },
+      data: { status: 'FAILED', finishedAt: now, error: ORPHANED_RUN_ERROR },
     });
     return count;
   }

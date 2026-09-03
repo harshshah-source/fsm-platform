@@ -16,10 +16,34 @@ import type { SnapshotStatus } from '../generated/prisma/enums';
  *
  * Modelled on #218's `quietRunsAlert`, which is the in-repo precedent for "a run of runs saying
  * nothing happened is itself the signal".
+ *
+ * #348 adds the failure #300 structurally could not see. Everything above counts runs that
+ * *happened*: a stopped cron produces none, so a silent pipeline scored `streak: 0`,
+ * `downstreamGated: false` and read as perfectly healthy while its newest data aged past a day.
+ * {@link IngestionAlertHealth.overdue} closes that by judging the *age* of the newest SUCCESS
+ * against the cadence the scheduler is configured for — and {@link IngestionAlertHealth.schedulerPaused}
+ * keeps a deliberately-disabled scheduler out of the alert path without letting it read as fresh.
  */
 
 /** How many consecutive non-SUCCESS runs before the alert fires. */
 export const DEFAULT_INGESTION_STREAK_THRESHOLD = 3;
+
+/**
+ * #348 — the cadence assumed when the configured cron cannot be reduced to one (see
+ * {@link cronCadenceMinutes}). Matches `DEFAULT_TELEMETRY_CRON` (`*​/30 * * * *`); it is a fallback,
+ * not a second source of truth — the live value is always derived from the cron the scheduler
+ * actually registered.
+ */
+export const DEFAULT_INGESTION_CADENCE_MINUTES = 30;
+
+/**
+ * #348 — how many cadences of silence before {@link IngestionAlertHealth.overdue}.
+ *
+ * Two, not one: one missed tick is a slow run, a restart, or a tick another instance claimed, and
+ * paging on it would train operators to ignore the banner. Two consecutive missed windows is no
+ * longer explicable by a single late run — something has stopped.
+ */
+export const OVERDUE_CADENCE_MULTIPLIER = 2;
 
 /**
  * Runs scanned back from the newest to measure the streak. Only the *leading* non-SUCCESS block is
@@ -78,6 +102,116 @@ export interface IngestionAlertHealth {
   rejected: Record<string, number>;
   /** Fields nulled with their row kept across the streak, by reason (#299) — `{}` when none. */
   repaired: Record<string, number>;
+
+  // ---- #348: silence. Everything above counts runs that HAPPENED; a stopped cron produces none. ----
+
+  /**
+   * Whole minutes since the newest SUCCESS run in the scan window; null when there is no SUCCESS to
+   * measure from (a fresh database, or {@link INGESTION_STREAK_SCAN_LIMIT} consecutive failures).
+   *
+   * Reported even while {@link schedulerPaused} — "paused" must never read as "fresh".
+   */
+  silenceMinutes: number | null;
+  /** The scheduler's configured interval in minutes, derived from its cron ({@link cronCadenceMinutes}). */
+  expectedCadenceMinutes: number;
+  /** `expectedCadenceMinutes × ` {@link OVERDUE_CADENCE_MULTIPLIER} — the age `overdue` is decided at. */
+  overdueAfterMinutes: number;
+  /**
+   * The scheduler master switch is off (`INGESTION_SCHEDULER_ENABLED !== 'true'`). Ingestion is
+   * stopped **on purpose**, so nothing is overdue and nothing alerts — but the surface still says
+   * "paused" rather than "healthy" (AC4), because an operator who cannot tell those two apart will
+   * eventually read a switched-off pipeline as a working one.
+   */
+  schedulerPaused: boolean;
+  /**
+   * No SUCCESS run inside {@link overdueAfterMinutes} while the scheduler is supposed to be running —
+   * i.e. the pipeline has gone SILENT. This is the state the streak rules structurally cannot see:
+   * zero runs means zero non-SUCCESS runs, so `streak` is 0, `downstreamGated` is false, and every
+   * field above reports a healthy pipeline whose data is a day old.
+   */
+  overdue: boolean;
+}
+
+/**
+ * #348 — what the silence rule needs that the run ledger cannot tell it: how often ingestion is
+ * *supposed* to run, and whether it is supposed to be running at all. Both come from
+ * `IngestionSchedulerConfig`, resolved by the callers (`SnapshotQueryService`,
+ * `AutoPlantHealthService`) so this module stays free of Nest and of `process.env`.
+ */
+export interface IngestionCadence {
+  expectedCadenceMinutes: number;
+  /** `IngestionSchedulerConfig.enabled`. */
+  schedulerEnabled: boolean;
+  /** Injectable clock, so the cadence rule is provable against a frozen `now`. */
+  now?: Date;
+}
+
+/**
+ * The default when a caller supplies no cadence: **paused**.
+ *
+ * Deliberately the quiet direction. A caller that forgets to thread the scheduler config through
+ * must not be able to fabricate a red banner out of nothing — a false silence alarm on every surface
+ * is exactly how alerting gets switched off, which would cost more than the gap it closes.
+ */
+const PAUSED: Required<IngestionCadence> = {
+  expectedCadenceMinutes: DEFAULT_INGESTION_CADENCE_MINUTES,
+  schedulerEnabled: false,
+  now: new Date(0),
+};
+
+/**
+ * Reduce a cron expression to the interval between its firings, in minutes; null when it has no
+ * single interval.
+ *
+ * The freshness threshold has to move with the ops knob that sets the cadence
+ * (`INGESTION_TELEMETRY_CRON` / `INGESTION_MASTERS_CRON`). A hard-coded "stale after 60 minutes"
+ * starts lying the first time somebody widens the cron, and lies in the dangerous direction — the
+ * banner goes red on a correctly-configured pipeline until it is muted, and then stays muted.
+ *
+ * Handles the forms the platform actually configures: `*​/N * * * *` (every N minutes), `* * * * *`,
+ * `M * * * *` (hourly), `M *​/H * * *` (every H hours) and `M H * * *` (daily). Anything with a
+ * day-of-month or day-of-week restriction returns **null** rather than a guess: "every Monday at 2am"
+ * has no cadence, and inventing one would fire the alert every weekend. `@nestjs/schedule` also
+ * accepts a 6-field form leading with seconds, so that is normalized away first.
+ */
+export function cronCadenceMinutes(cron: string): number | null {
+  const parts = cron.trim().split(/\s+/).filter((p) => p.length > 0);
+  // 6 fields = seconds-leading. Sub-minute cadences round to the 1-minute floor below, which is the
+  // right answer for a threshold measured in whole minutes.
+  const fields = parts.length === 6 ? parts.slice(1) : parts;
+  if (fields.length !== 5) return null;
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+  // A calendar restriction has no interval — see the docblock.
+  if (dayOfMonth !== '*' || month !== '*' || dayOfWeek !== '*') return null;
+
+  const step = (field: string): number | null => {
+    const m = /^\*\/(\d+)$/.exec(field);
+    if (!m) return null;
+    const n = Number(m[1]);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  };
+
+  if (hour === '*') {
+    if (minute === '*') return 1;
+    const minuteStep = step(minute);
+    if (minuteStep !== null) return minuteStep;
+    return /^\d+$/.test(minute) ? 60 : null;
+  }
+
+  // An hour restriction only yields a cadence when the minute is a single fixed value.
+  if (!/^\d+$/.test(minute)) return null;
+  const hourStep = step(hour);
+  if (hourStep !== null) return hourStep * 60;
+  return /^\d+$/.test(hour) ? 1440 : null;
+}
+
+/** {@link cronCadenceMinutes} with the fallback applied — what every caller actually wants. */
+export function cadenceMinutesOrDefault(
+  cron: string,
+  fallback: number = DEFAULT_INGESTION_CADENCE_MINUTES,
+): number {
+  return cronCadenceMinutes(cron) ?? fallback;
 }
 
 /**
@@ -97,6 +231,15 @@ export interface StreakRun {
   runId: bigint;
   status: SnapshotStatus;
   chunkStats: unknown;
+  /**
+   * #348 — the run's own clock, so silence is measured **inside the window already being read**
+   * rather than by a second query. The scan already returns the newest
+   * {@link INGESTION_STREAK_SCAN_LIMIT} finalized runs; the newest SUCCESS among them is exactly the
+   * timestamp the freshness threshold needs, and the healthy path stays one query (which it must —
+   * this is polled from every admin page on a 60-second timer).
+   */
+  startedAt: Date;
+  finishedAt: Date | null;
 }
 
 /** A FAILED chunk row belonging to one of the streak's runs. */
@@ -134,11 +277,14 @@ const fold = (into: Record<string, number>, from: Record<string, number> | undef
  *   a failure, and letting one reset the streak would hide a wedge behind the very retry that is
  *   failing).
  * @param failedChunks FAILED chunks belonging to the runs in the leading streak, newest run first.
+ * @param cadence #348 — the configured cadence + scheduler switch behind the silence rule. Omitted
+ *   ⇒ {@link PAUSED}: no cadence means no verdict, and a missing verdict must be quiet, not loud.
  */
 export function deriveIngestionAlert(
   runs: readonly StreakRun[],
   failedChunks: readonly StreakChunk[],
   threshold: number,
+  cadence: IngestionCadence = PAUSED,
 ): IngestionAlertHealth {
   const latestStatus = runs[0]?.status ?? null;
 
@@ -166,10 +312,23 @@ export function deriveIngestionAlert(
   );
   const repeatingFailure = streak >= 2 && runsWithThatError.size === streak;
 
+  // #348 — silence. `runs` is already newest-first, so the first SUCCESS in it is the newest one.
+  // `finishedAt` is the moment the run's data landed; `startedAt` is the fallback for a legacy row
+  // written before the column was always populated, so a missing timestamp can never read as "never".
+  const now = cadence.now ?? new Date();
+  const lastSuccess = runs.find((r) => r.status === 'SUCCESS');
+  const lastSuccessAt = lastSuccess ? (lastSuccess.finishedAt ?? lastSuccess.startedAt) : null;
+  const silenceMinutes =
+    lastSuccessAt === null ? null : Math.max(0, Math.floor((now.getTime() - lastSuccessAt.getTime()) / 60_000));
+  const overdueAfterMinutes = cadence.expectedCadenceMinutes * OVERDUE_CADENCE_MULTIPLIER;
+  // No SUCCESS anywhere in the scan window counts as overdue: either nothing has ever run, or the
+  // last 20 finalized runs all failed. Both are the pipeline not producing data.
+  const overdue = cadence.schedulerEnabled && (silenceMinutes === null || silenceMinutes > overdueAfterMinutes);
+
   return {
     streak,
     threshold,
-    alert: streak >= threshold || repeatingFailure,
+    alert: streak >= threshold || repeatingFailure || overdue,
     latestStatus,
     downstreamGated: latestStatus !== null && latestStatus !== 'SUCCESS',
     gatedStages: latestStatus !== null && latestStatus !== 'SUCCESS' ? [...GATED_STAGES] : [],
@@ -184,6 +343,11 @@ export function deriveIngestionAlert(
     repeatingFailure,
     rejected,
     repaired,
+    silenceMinutes,
+    expectedCadenceMinutes: cadence.expectedCadenceMinutes,
+    overdueAfterMinutes,
+    schedulerPaused: !cadence.schedulerEnabled,
+    overdue,
   };
 }
 
@@ -200,6 +364,7 @@ export interface IngestionAlertSource {
 export async function readIngestionAlert(
   source: IngestionAlertSource,
   threshold: number = readIngestionStreakThreshold(),
+  cadence?: IngestionCadence,
 ): Promise<IngestionAlertHealth> {
   const runs = await source.findFinalizedRuns(INGESTION_STREAK_SCAN_LIMIT);
 
@@ -207,5 +372,5 @@ export async function readIngestionAlert(
   while (streak < runs.length && runs[streak].status !== 'SUCCESS') streak += 1;
 
   const chunks = streak === 0 ? [] : await source.findFailedChunks(runs.slice(0, streak).map((r) => r.runId));
-  return deriveIngestionAlert(runs, chunks, threshold);
+  return deriveIngestionAlert(runs, chunks, threshold, cadence);
 }

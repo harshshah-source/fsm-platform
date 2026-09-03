@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { type SnapshotStatus } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { readIngestionSchedulerConfig } from './autoplant/integration-scheduler.service';
 import {
+  cadenceMinutesOrDefault,
   readIngestionAlert,
   readIngestionStreakThreshold,
   type IngestionAlertHealth,
   type IngestionAlertSource,
+  type IngestionCadence,
 } from './ingestion-alert';
 
 export interface SnapshotRunView {
@@ -14,6 +17,30 @@ export interface SnapshotRunView {
   startedAt: string;
   finishedAt: string | null;
   dataAsOf: string | null;
+  /**
+   * #348 — why the run ended, when it recorded a reason. `ORPHANED_RUN_ERROR` for a run the heartbeat
+   * reaper closed; null for everything written before the column existed, and for runs that ended
+   * without one. Surfaced on the OH run history so a process restart is distinguishable from a real
+   * ingestion failure.
+   */
+  error: string | null;
+}
+
+/**
+ * #348 — the scheduler's configured cadence + master switch, as the silence rule needs them.
+ *
+ * Resolved HERE rather than inside `ingestion-alert.ts` so that module stays free of `process.env`
+ * and of the Nest graph, and read from `readIngestionSchedulerConfig` rather than re-spelled so the
+ * freshness threshold can never disagree with the cron the scheduler actually registered — a
+ * threshold that does not move with its cadence is the exact failure #348 exists to fix.
+ */
+export function readIngestionCadence(now: Date = new Date()): IngestionCadence {
+  const config = readIngestionSchedulerConfig();
+  return {
+    expectedCadenceMinutes: cadenceMinutesOrDefault(config.telemetryCron),
+    schedulerEnabled: config.enabled,
+    now,
+  };
 }
 
 export interface SnapshotLatestView {
@@ -43,6 +70,17 @@ export interface SnapshotLatestView {
    * (AC2). Same derivation the OH integration-health card renders, so the two cannot disagree.
    */
   ingestion: IngestionAlertHealth;
+  /**
+   * #348 — ingestion has gone SILENT: no SUCCESS run inside twice the configured cadence, while the
+   * scheduler is supposed to be running. Lifted to the top level next to `dataAsOf` because it is a
+   * verdict about *this timestamp*, not a detail of the wedge state — the banner must be able to
+   * decide "do not present this as freshness" without reading into `ingestion`.
+   *
+   * False while {@link schedulerPaused}: a switched-off scheduler is not overdue (AC4).
+   */
+  overdue: boolean;
+  /** #348 — the scheduler is deliberately disabled; the banner says "paused", never "healthy" (AC4). */
+  schedulerPaused: boolean;
 }
 
 const STATUSES: SnapshotStatus[] = ['RUNNING', 'SUCCESS', 'FAILED', 'PARTIAL'];
@@ -53,6 +91,7 @@ type RunRow = {
   startedAt: Date;
   finishedAt: Date | null;
   dataAsOf: Date | null;
+  error?: string | null;
 };
 
 const toView = (r: RunRow): SnapshotRunView => ({
@@ -61,6 +100,7 @@ const toView = (r: RunRow): SnapshotRunView => ({
   startedAt: r.startedAt.toISOString(),
   finishedAt: r.finishedAt?.toISOString() ?? null,
   dataAsOf: r.dataAsOf?.toISOString() ?? null,
+  error: r.error ?? null,
 });
 
 /**
@@ -79,7 +119,9 @@ export function prismaIngestionAlertSource(prisma: PrismaService): IngestionAler
         where: { status: { not: 'RUNNING' } },
         orderBy: { runId: 'desc' },
         take: limit,
-        select: { runId: true, status: true, chunkStats: true },
+        // #348 — `startedAt`/`finishedAt` ride along so the silence rule measures the newest SUCCESS's
+        // age from THIS window instead of paying a second query on a path polled every 60 seconds.
+        select: { runId: true, status: true, chunkStats: true, startedAt: true, finishedAt: true },
       }),
     findFailedChunks: (runIds) =>
       prisma.snapshotRunChunk.findMany({
@@ -95,7 +137,8 @@ export function prismaIngestionAlertSource(prisma: PrismaService): IngestionAler
 export class SnapshotQueryService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async latest(): Promise<SnapshotLatestView> {
+  async latest(now: Date = new Date()): Promise<SnapshotLatestView> {
+    const cadence = readIngestionCadence(now);
     const [lastSuccess, latest, lastPartial, ingestion] = await Promise.all([
       this.prisma.snapshotRun.findFirst({
         where: { status: 'SUCCESS' },
@@ -107,7 +150,7 @@ export class SnapshotQueryService {
         orderBy: { runId: 'desc' },
         select: { dataAsOf: true },
       }),
-      readIngestionAlert(prismaIngestionAlertSource(this.prisma), readIngestionStreakThreshold()),
+      readIngestionAlert(prismaIngestionAlertSource(this.prisma), readIngestionStreakThreshold(), cadence),
     ]);
 
     const dataAsOf = lastSuccess?.dataAsOf ?? null;
@@ -122,6 +165,8 @@ export class SnapshotQueryService {
       latest: latest ? toView(latest) : null,
       partialDataAsOf: partialDataAsOf?.toISOString() ?? null,
       ingestion,
+      overdue: ingestion.overdue,
+      schedulerPaused: ingestion.schedulerPaused,
     };
   }
 

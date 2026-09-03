@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { ORPHANED_RUN_ERROR } from '../src/ingestion/stale-run';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
@@ -114,5 +115,188 @@ describe('Issue 04 slice 7 — /api/snapshots', () => {
 
   it('GET /latest requires authentication', async () => {
     await request(app.getHttpServer()).get('/api/snapshots/latest').expect(401);
+  });
+});
+
+/**
+ * #348 — the three gaps the freshness surface had, at the HTTP edge.
+ *
+ * 1. `/latest` was ZM/CSM/OH only, so the global banner 403'd for a Warehouse Manager and a Service
+ *    Engineer — and swallowed it, which is why nobody noticed. Those two roles never saw freshness.
+ * 2. The payload carried no verdict about the AGE of `dataAsOf`; a 21-hour-old snapshot came back
+ *    looking exactly like a two-minute-old one, because no age threshold existed anywhere.
+ * 3. A run the heartbeat reaper closed appeared in `/runs` as a bare FAILED with no reason, so a
+ *    process restart and a real ingestion failure were the same row.
+ */
+describe('#348 — role-safe freshness, silence, and the reaped-run reason', () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
+
+  const SCHEDULER_FLAG = 'INGESTION_SCHEDULER_ENABLED';
+  let originalFlag: string | undefined;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
+    await app.init();
+    prisma = app.get(PrismaService);
+    originalFlag = process.env[SCHEDULER_FLAG];
+  });
+
+  beforeEach(async () => {
+    await prisma.rawDeviceSnapshot.deleteMany({});
+    await prisma.snapshotRunChunk.deleteMany({});
+    await prisma.snapshotRun.deleteMany({});
+  });
+
+  afterEach(() => {
+    if (originalFlag === undefined) delete process.env[SCHEDULER_FLAG];
+    else process.env[SCHEDULER_FLAG] = originalFlag;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const login = async (email: string): Promise<string> => {
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email, password: 'correct-password' })
+      .expect(200);
+    return res.body.accessToken as string;
+  };
+
+  const latestAs = async (email: string): Promise<Record<string, unknown>> => {
+    const token = await login(email);
+    const res = await request(app.getHttpServer())
+      .get('/api/snapshots/latest')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    return res.body as Record<string, unknown>;
+  };
+
+  /** A finished SUCCESS run whose data landed `minutesAgo` minutes back. */
+  const seedSuccess = async (minutesAgo: number): Promise<void> => {
+    const at = new Date(Date.now() - minutesAgo * 60_000);
+    await prisma.snapshotRun.create({ data: { status: 'SUCCESS', dataAsOf: at, finishedAt: at, startedAt: at } });
+  };
+
+  it('AC3 — a Warehouse Manager gets the banner feed', async () => {
+    await seedSuccess(2);
+    const body = await latestAs('wm@fsm.test');
+    expect(body.dataAsOf).toBeTruthy();
+  });
+
+  it('AC3 — a Service Engineer gets the banner feed', async () => {
+    // The role furthest from a screen that would otherwise tell them the fleet view is a day old.
+    await seedSuccess(2);
+    const body = await latestAs('se.north@fsm.test');
+    expect(body.dataAsOf).toBeTruthy();
+  });
+
+  it('AC3 — and the roles that already had it still do', async () => {
+    await seedSuccess(2);
+    expect((await latestAs('zm.north@fsm.test')).dataAsOf).toBeTruthy();
+    expect((await latestAs('csm@fsm.test')).dataAsOf).toBeTruthy();
+    expect((await latestAs('ops.head@fsm.test')).dataAsOf).toBeTruthy();
+  });
+
+  it('AC3 — widening the role list did not make it public', async () => {
+    await request(app.getHttpServer()).get('/api/snapshots/latest').expect(401);
+  });
+
+  it('AC1 — a snapshot older than 2x the cadence comes back overdue', async () => {
+    process.env[SCHEDULER_FLAG] = 'true';
+    // 21 hours: the case the survey found reading as healthy, because nothing compared the age to
+    // anything at all. At the shipped 30-minute cadence the threshold is 60 minutes.
+    await seedSuccess(21 * 60);
+
+    const body = await latestAs('zm.north@fsm.test');
+
+    expect(body.overdue).toBe(true);
+    expect(body.schedulerPaused).toBe(false);
+    expect((body.ingestion as Record<string, unknown>).silenceMinutes).toBe(21 * 60);
+  });
+
+  it('AC1 — every role is told, not just the ones that used to have the route', async () => {
+    process.env[SCHEDULER_FLAG] = 'true';
+    await seedSuccess(21 * 60);
+
+    for (const email of ['wm@fsm.test', 'se.north@fsm.test', 'zm.north@fsm.test', 'ops.head@fsm.test']) {
+      expect((await latestAs(email)).overdue).toBe(true);
+    }
+  });
+
+  it('AC1 — zero runs at all is overdue, not healthy', async () => {
+    process.env[SCHEDULER_FLAG] = 'true';
+    // The exact silence case: no run means no non-SUCCESS run, so every streak rule scores clean.
+    const body = await latestAs('zm.north@fsm.test');
+
+    expect(body.overdue).toBe(true);
+    expect(body.dataAsOf).toBeNull();
+    expect((body.ingestion as Record<string, unknown>).streak).toBe(0);
+  });
+
+  it('a recent snapshot is not overdue', async () => {
+    process.env[SCHEDULER_FLAG] = 'true';
+    await seedSuccess(5);
+
+    const body = await latestAs('zm.north@fsm.test');
+    expect(body.overdue).toBe(false);
+    expect((body.ingestion as Record<string, unknown>).alert).toBe(false);
+  });
+
+  it('AC4 — a deliberately disabled scheduler is paused, never overdue', async () => {
+    process.env[SCHEDULER_FLAG] = 'false';
+    await seedSuccess(21 * 60);
+
+    const body = await latestAs('zm.north@fsm.test');
+
+    expect(body.schedulerPaused).toBe(true);
+    expect(body.overdue).toBe(false);
+    expect((body.ingestion as Record<string, unknown>).alert).toBe(false);
+    // Paused is not fresh: the age is still on the payload for the banner to state.
+    expect((body.ingestion as Record<string, unknown>).silenceMinutes).toBe(21 * 60);
+  });
+
+  it('AC2 — a reaped run records ORPHANED_RUN_ERROR in the run history', async () => {
+    // A run whose process died: RUNNING, with a heartbeat well past the stale threshold. The reaper
+    // fires inside `startRun`, so triggering the next run is what closes it — exactly the production
+    // path, not a direct call to the reaper.
+    const dead = new Date(Date.now() - 90 * 60_000);
+    const orphan = await prisma.snapshotRun.create({
+      data: { status: 'RUNNING', startedAt: dead, heartbeatAt: dead },
+    });
+
+    const opsToken = await login('ops.head@fsm.test');
+    await request(app.getHttpServer())
+      .post('/api/snapshots/run')
+      .set('Authorization', `Bearer ${opsToken}`)
+      .expect(200);
+
+    const runs = await request(app.getHttpServer())
+      .get('/api/snapshots/runs')
+      .set('Authorization', `Bearer ${opsToken}`)
+      .expect(200);
+
+    const reaped = (runs.body as Array<Record<string, unknown>>).find((r) => r.runId === orphan.runId.toString());
+    expect(reaped?.status).toBe('FAILED');
+    expect(reaped?.error).toBe(ORPHANED_RUN_ERROR);
+  });
+
+  it('AC2 — a run that ended on its own carries no reason, so the marker means something', async () => {
+    const opsToken = await login('ops.head@fsm.test');
+    await request(app.getHttpServer())
+      .post('/api/snapshots/run')
+      .set('Authorization', `Bearer ${opsToken}`)
+      .expect(200);
+
+    const runs = await request(app.getHttpServer())
+      .get('/api/snapshots/runs')
+      .set('Authorization', `Bearer ${opsToken}`)
+      .expect(200);
+
+    expect((runs.body as Array<Record<string, unknown>>)[0].error).toBeNull();
   });
 });

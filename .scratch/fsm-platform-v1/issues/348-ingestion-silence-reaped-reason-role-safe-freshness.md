@@ -1,5 +1,5 @@
 # 348 — Ingestion silence detection, reaped-run reason, role-safe freshness
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/348-ingestion-silence-reaped-reason-role-safe-freshness.md
 Type: AFK
 Wave: 2 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -43,11 +43,22 @@ is restricted to ZM/CSM/OH (`snapshots.controller.ts:28-29`) while the banner sw
 
 ## Acceptance criteria
 
-- [ ] AC1 — zero runs within 2× cadence → `overdue: true`, and the banner is red for every role.
-- [ ] AC2 — a reaped run shows `error: ORPHANED_RUN_ERROR` in `/snapshots/runs`.
-- [ ] AC3 — WM and SE sessions get the banner.
-- [ ] AC4 — no false alert while the scheduler is deliberately disabled — the disabled state renders
+- [x] AC1 — zero runs within 2× cadence → `overdue: true`, and the banner is red for every role.
+- [x] AC2 — a reaped run shows `error: ORPHANED_RUN_ERROR` in `/snapshots/runs`.
+- [x] AC3 — WM and SE sessions get the banner.
+- [x] AC4 — no false alert while the scheduler is deliberately disabled — the disabled state renders
       as "ingestion paused", not healthy.
+
+## Correction to the premise
+
+The finding on the freshness badge understated it. There was **no age threshold anywhere in the
+ingestion path** before this slice — not in `ingestion-alert.ts`, not in `health.service.ts` (which
+computed `ageMinutes` and compared it with nothing, in any file), and not in `SnapshotBanner.tsx`
+(which flagged only a run stuck RUNNING past 15 minutes). A 21-hour-old snapshot and a two-minute-old
+one drew the identical grey line. The badge was not partly wrong; it was never a function of freshness.
+
+Everything else in the issue matched the tree, including the swallowed 403. Note the schema lives at
+`apps/backend/prisma/schema.prisma`, not `prisma/schema.prisma`.
 
 ## Verification
 

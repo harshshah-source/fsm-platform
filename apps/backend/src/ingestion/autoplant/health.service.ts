@@ -1,8 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { evaluateRecomputeCanary } from '../../device-state/recompute-canary';
 import { PrismaService } from '../../prisma/prisma.service';
-import { readIngestionAlert, readIngestionStreakThreshold, type IngestionAlertHealth } from '../ingestion-alert';
-import { prismaIngestionAlertSource } from '../snapshot-query.service';
+import {
+  OVERDUE_CADENCE_MULTIPLIER,
+  cadenceMinutesOrDefault,
+  readIngestionAlert,
+  readIngestionStreakThreshold,
+  type IngestionAlertHealth,
+} from '../ingestion-alert';
+import { prismaIngestionAlertSource, readIngestionCadence } from '../snapshot-query.service';
+import { readIngestionSchedulerConfig } from './integration-scheduler.service';
 
 /** How many recent recompute-ledger rows the health surface returns (#130 L5). */
 const RECOMPUTE_HISTORY_LIMIT = 10;
@@ -42,6 +49,24 @@ export interface FreshnessHealth {
   lastStatus: string | null;
   /** Whole minutes between `lastAt` and now; null when there is no good run yet. */
   ageMinutes: number | null;
+  /**
+   * #348 — the age at which this feed stops being fresh: twice the cadence of the cron that feeds it
+   * (`INGESTION_TELEMETRY_CRON` for the snapshot, `INGESTION_MASTERS_CRON` for the master sync).
+   *
+   * Derived from the configured cron rather than fixed, so widening the schedule widens the threshold
+   * with it. Published alongside the verdict so the health page can show the operator what the number
+   * was measured against instead of asserting "stale" with no yardstick.
+   */
+  staleAfterMinutes: number;
+  /**
+   * #348 — `ageMinutes` is past `staleAfterMinutes`, or there is no good run at all.
+   *
+   * This is the judgement that did not exist: `ageMinutes` was computed here and then compared with
+   * nothing, anywhere, so a 21-hour-old snapshot returned a large number that every surface rendered
+   * as an ordinary timestamp. False while the scheduler is deliberately disabled (AC4) — see
+   * {@link IntegrationHealth.schedulerEnabled}, which is how the page distinguishes paused from fresh.
+   */
+  stale: boolean;
   /** #130 L3 — build attribution of the most recent run (null when it predates stamping). */
   build: RunBuildStamp | null;
 }
@@ -153,6 +178,12 @@ export interface IntegrationHealth {
   runtimeLock: RuntimeLockHealth;
   /** #130 L5 — last-N recompute ledger rows (counts + build + swing), newest first. */
   recomputes: RecomputeLedgerEntry[];
+  /**
+   * #348 — the ingestion scheduler master switch (`INGESTION_SCHEDULER_ENABLED`). False means the
+   * crons are dormant by choice, which is why every `stale`/`overdue` flag above is suppressed: the
+   * page renders "ingestion paused", never "healthy" and never a false alarm (AC4).
+   */
+  schedulerEnabled: boolean;
   checkedAt: Date;
 }
 
@@ -200,16 +231,40 @@ export class AutoPlantHealthService {
     // #130 — the lock version is the reference for every stale-build comparison below.
     const lock = await this.runtimeLock();
     const lockVersion = lock.version != null ? Number(lock.version) : null;
+    // #348 — one read of the scheduler config for the whole payload, so the two freshness thresholds
+    // and the ingestion alert are all judged against the same configured cadence and the same switch.
+    const scheduler = readIngestionSchedulerConfig();
     return {
       source: await this.sourceHealth(),
-      masterSync: await this.masterSyncHealth(now, lockVersion),
-      snapshot: await this.snapshotHealth(now, lockVersion),
+      masterSync: await this.masterSyncHealth(now, lockVersion, scheduler.mastersCron, scheduler.enabled),
+      snapshot: await this.snapshotHealth(now, lockVersion, scheduler.telemetryCron, scheduler.enabled),
       reconciliation: await this.reconciliationHealth(),
       lifecycle: await this.lifecycleHealth(),
-      ingestion: await this.ingestionHealth(),
+      ingestion: await this.ingestionHealth(now),
       runtimeLock: lock,
       recomputes: await this.recomputeHistory(lockVersion),
+      schedulerEnabled: scheduler.enabled,
       checkedAt: now,
+    };
+  }
+
+  /**
+   * #348 — the freshness verdict, in one place for both feeds.
+   *
+   * `ageMinutes` existed here from the start and was compared with nothing; this is that missing
+   * comparison. Threshold = twice the feed's own cron cadence (see {@link FreshnessHealth.staleAfterMinutes}).
+   * No good run at all counts as stale — "never" is not "recent". Suppressed entirely while the
+   * scheduler is off, so a deliberately-paused pipeline never renders as a fault (AC4).
+   */
+  private freshnessVerdict(
+    ageMinutes: number | null,
+    cron: string,
+    schedulerEnabled: boolean,
+  ): { staleAfterMinutes: number; stale: boolean } {
+    const staleAfterMinutes = cadenceMinutesOrDefault(cron) * OVERDUE_CADENCE_MULTIPLIER;
+    return {
+      staleAfterMinutes,
+      stale: schedulerEnabled && (ageMinutes === null || ageMinutes > staleAfterMinutes),
     };
   }
 
@@ -390,8 +445,14 @@ export class AutoPlantHealthService {
    * **Public** for the same reason {@link lifecycleHealth} is — one predicate, reused rather than
    * respelled by whatever surface needs it next.
    */
-  async ingestionHealth(): Promise<IngestionAlertHealth> {
-    return readIngestionAlert(prismaIngestionAlertSource(this.prisma), readIngestionStreakThreshold());
+  async ingestionHealth(now: Date = new Date()): Promise<IngestionAlertHealth> {
+    return readIngestionAlert(
+      prismaIngestionAlertSource(this.prisma),
+      readIngestionStreakThreshold(),
+      // #348 — the SAME cadence resolution the banner feed uses, for the same reason the source is
+      // shared: one derivation, two surfaces, no way for them to disagree about whether it is silent.
+      readIngestionCadence(now),
+    );
   }
 
   private async sourceHealth(): Promise<IntegrationSourceHealth> {
@@ -411,7 +472,12 @@ export class AutoPlantHealthService {
     return Math.max(0, Math.round((now.getTime() - from.getTime()) / 60_000));
   }
 
-  private async masterSyncHealth(now: Date, lockVersion: number | null): Promise<FreshnessHealth> {
+  private async masterSyncHealth(
+    now: Date,
+    lockVersion: number | null,
+    cron: string,
+    schedulerEnabled: boolean,
+  ): Promise<FreshnessHealth> {
     const [latest, lastGood] = await Promise.all([
       this.prisma.masterSyncRun.findFirst({
         orderBy: { runId: 'desc' },
@@ -424,15 +490,22 @@ export class AutoPlantHealthService {
       }),
     ]);
     const lastAt = lastGood?.finishedAt ?? null;
+    const ageMinutes = this.ageMinutes(lastAt, now);
     return {
       lastAt,
       lastStatus: latest?.status ?? null,
-      ageMinutes: this.ageMinutes(lastAt, now),
+      ageMinutes,
+      ...this.freshnessVerdict(ageMinutes, cron, schedulerEnabled),
       build: latest ? this.buildStamp(latest.buildVersion, latest.buildFingerprint, lockVersion) : null,
     };
   }
 
-  private async snapshotHealth(now: Date, lockVersion: number | null): Promise<FreshnessHealth> {
+  private async snapshotHealth(
+    now: Date,
+    lockVersion: number | null,
+    cron: string,
+    schedulerEnabled: boolean,
+  ): Promise<FreshnessHealth> {
     const [latest, lastGood] = await Promise.all([
       this.prisma.snapshotRun.findFirst({
         orderBy: { runId: 'desc' },
@@ -445,10 +518,12 @@ export class AutoPlantHealthService {
       }),
     ]);
     const lastAt = lastGood?.dataAsOf ?? null;
+    const ageMinutes = this.ageMinutes(lastAt, now);
     return {
       lastAt,
       lastStatus: latest?.status ?? null,
-      ageMinutes: this.ageMinutes(lastAt, now),
+      ageMinutes,
+      ...this.freshnessVerdict(ageMinutes, cron, schedulerEnabled),
       build: latest ? this.buildStamp(latest.buildVersion, latest.buildFingerprint, lockVersion) : null,
     };
   }
