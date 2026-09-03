@@ -310,6 +310,59 @@ describe('#348 — role-safe freshness, silence, and the reaped-run reason', () 
     expect(reaped?.error).toBe(ORPHANED_RUN_ERROR);
   });
 
+  /**
+   * #349 AC2 — `GET /snapshots/runs` had no consumer at all, so nothing ever exercised the paging
+   * and status-filter arguments it has always accepted. The health page's run-history table is that
+   * consumer; these two cases pin the contract it pages and filters against, so the table cannot be
+   * built on arguments that quietly do nothing.
+   */
+  it('#349 AC2 — /runs pages with limit + offset, newest first', async () => {
+    const base = Date.now() - 10 * 60_000;
+    for (let i = 0; i < 3; i++) {
+      const at = new Date(base + i * 60_000);
+      await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: at, finishedAt: at, dataAsOf: at } });
+    }
+    const token = await login('ops.head@fsm.test');
+
+    const page1 = await request(app.getHttpServer())
+      .get('/api/snapshots/runs?limit=2&offset=0')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const page2 = await request(app.getHttpServer())
+      .get('/api/snapshots/runs?limit=2&offset=2')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(page1.body).toHaveLength(2);
+    expect(page2.body).toHaveLength(1);
+    // Newest first, and the pages do not overlap — the two properties a prev/next pager needs.
+    const ids = [...page1.body, ...page2.body].map((r: { runId: string }) => r.runId);
+    expect(new Set(ids).size).toBe(3);
+    expect(Number(ids[0])).toBeGreaterThan(Number(ids[2]));
+  });
+
+  it('#349 AC2 — /runs filters by status and ignores a status that is not one', async () => {
+    const now = new Date();
+    await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: now, finishedAt: now } });
+    await prisma.snapshotRun.create({ data: { status: 'FAILED', startedAt: now, finishedAt: now } });
+    const token = await login('ops.head@fsm.test');
+
+    const failed = await request(app.getHttpServer())
+      .get('/api/snapshots/runs?status=FAILED')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(failed.body).toHaveLength(1);
+    expect(failed.body[0].status).toBe('FAILED');
+
+    // A junk filter must widen to everything rather than 500 or return nothing — the table's
+    // "All statuses" option sends no status at all, but a stale bookmark can send anything.
+    const junk = await request(app.getHttpServer())
+      .get('/api/snapshots/runs?status=NOPE')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(junk.body).toHaveLength(2);
+  });
+
   it('AC2 — a run that ended on its own carries no reason, so the marker means something', async () => {
     const opsToken = await login('ops.head@fsm.test');
     await request(app.getHttpServer())

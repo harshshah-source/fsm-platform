@@ -1,6 +1,6 @@
 # 224 — The lifecycle check is not on the Integration Health page
 
-Status: ready-for-agent
+Status: done 2026-09-03 — closed into #349, report docs/progress/349-integration-health-page-completion.md
 Type: Admin (frontend only — the API already returns the data)
 Filed: 2026-08-07
 Origin: `/code-review` of the uncommitted [#218](./218-lifecycle-drift-detection.md) work, Spec axis
@@ -39,14 +39,14 @@ shipped shape, not §5's original sentence.
 
 ## Acceptance criteria
 
-- `IntegrationHealthView` carries `lifecycle` (`drift`, `missingFromSource`, `quietRuns`,
-  `quietRunsAlert`, `quietRunsThreshold`, `healthy`).
-- `BuildHealthPage` renders it, with `drift` and `quietRunsAlert` visible without interaction.
-- `drift` is presented as a **contradiction, not a measurement** — its correct value is exactly 0, and
+- [x] `IntegrationHealthView` carries `lifecycle` (`drift`, `missingFromSource`, `quietRuns`,
+  `quietRunsAlert`, `quietRunsThreshold`, `healthy`) — plus #349's `runs` (per-run churn).
+- [x] `BuildHealthPage` renders it, with `drift` and `quietRunsAlert` visible without interaction.
+- [x] `drift` is presented as a **contradiction, not a measurement** — its correct value is exactly 0, and
   any non-zero is a defect by construction. It must not read like a tolerance-band metric.
-- `missingFromSource` is shown **beside** `drift`, never folded into it (218a's whole point: the
+- [x] `missingFromSource` is shown **beside** `drift`, never folded into it (218a's whole point: the
   excluded population is surfaced, not hidden).
-- Not added to the main KPI strip — FIX-PLAN §5 is explicit that those tiles count devices by
+- [x] Not added to the main KPI strip — FIX-PLAN §5 is explicit that those tiles count devices by
   lifecycle state while this counts a disagreement *about* it, and putting them together invites
   subtraction between non-commensurable numbers.
 

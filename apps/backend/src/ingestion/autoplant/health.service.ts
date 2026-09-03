@@ -16,6 +16,14 @@ const RECOMPUTE_HISTORY_LIMIT = 10;
 const DEFAULT_CANARY_THRESHOLD_PCT = 5;
 
 /**
+ * How many recent master-sync runs the lifecycle churn history returns (#129/#349). Ten daily runs is
+ * a fortnight and a half of fleet movement — enough to see that a quiet run is a pattern rather than
+ * one still day, which is the reading {@link LifecycleHealth.quietRuns} gives as a single number and
+ * cannot show the shape of.
+ */
+const LIFECYCLE_RUN_HISTORY_LIMIT = 10;
+
+/**
  * The minimal slice of `AutoPlantMysqlClient` the health surface needs — kept as an interface so the
  * connectivity branches are unit-testable without a live MySQL / VPN. `AutoPlantMysqlClient` satisfies
  * it (`isConfigured()` + `ping()`).
@@ -158,6 +166,42 @@ export interface LifecycleHealth {
   quietRunsThreshold: number;
   /** `drift === 0 && !quietRunsAlert` — the whole check in one flag, for the banner. */
   healthy: boolean;
+  /**
+   * #129/#349 — per-run lifecycle churn, newest first. {@link quietRuns} answers "how long has the
+   * pass been saying nothing"; this answers "and what did it say before that", which is the
+   * difference between a quiet day and a dead pass.
+   */
+  runs: LifecycleRunEntry[];
+}
+
+/**
+ * #129/#349 — one master-sync run's lifecycle churn, and what it cost in open work.
+ *
+ * Every number here has been persisted since #128 and read back by nothing: `entity_stats.departures`
+ * carries what the pass opened and closed per run, and `device_departures.cancelled_tickets_count`
+ * carries the tickets those departures auto-closed. The auto-close is audited
+ * (`DEVICE_DEPARTED`, system actor) and appeared on no screen — a technician's open work vanished and
+ * the only trace was a row nobody queries.
+ */
+export interface LifecycleRunEntry {
+  /** BigInt serialized as a string (no BigInt in the JSON payload). */
+  runId: string;
+  startedAt: Date;
+  finishedAt: Date | null;
+  status: string;
+  /** `entity_stats.departures.inserted` — departures this run opened. */
+  departed: number;
+  /** `entity_stats.departures.updated` — active departures this run closed on a re-deployment. */
+  restored: number;
+  /** Open tickets auto-closed by the departures this run detected. */
+  ticketsAutoClosed: number;
+  /** `entity_stats.departures.skippedByReason` — `ABSENCE_GUARD_TRIPPED`, `RECONCILE_FAILED`. */
+  skippedByReason: Record<string, number>;
+  /**
+   * The pass ran and moved nothing. Reported rather than filtered out: a run that did nothing IS the
+   * #218 signal, and a history that hides its own no-ops is the shape that let 33 of them pass.
+   */
+  quiet: boolean;
 }
 
 export interface IntegrationHealth {
@@ -208,6 +252,16 @@ export function readReconMaxDrift(env: NodeJS.ProcessEnv = process.env): number 
 export function readLifecycleQuietRuns(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.INGESTION_LIFECYCLE_QUIET_RUNS);
   return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 3;
+}
+
+/** `entity_stats.departures.skippedByReason` is untyped JSON on the way out of Postgres. */
+function readSkipTally(value: unknown): Record<string, number> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+  const out: Record<string, number> = {};
+  for (const [reason, n] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof n === 'number' && Number.isFinite(n)) out[reason] = n;
+  }
+  return out;
 }
 
 /**
@@ -434,7 +488,67 @@ export class AutoPlantHealthService {
       quietRunsAlert,
       quietRunsThreshold,
       healthy: drift === 0 && !quietRunsAlert,
+      runs: await this.lifecycleRunHistory(),
     };
+  }
+
+  /**
+   * #129/#349 — the last {@link LIFECYCLE_RUN_HISTORY_LIMIT} master-sync runs with what their
+   * lifecycle pass moved, and how much open work the departures took with them.
+   *
+   * Part of {@link lifecycleHealth} rather than a second entry point for the same reason
+   * `lifecycleHealth` is public at all: one derivation, so no surface can report a different churn
+   * from another. It is one indexed `LIMIT 10` over `master_sync_runs` plus a correlated sum, on a
+   * page that is not polled per-second.
+   *
+   * The ticket count is keyed on `detected_by_run_id`, not on the departure's timestamp: the run that
+   * observed the departure is the run that cancelled the work, and joining on time would attribute a
+   * backfilled departure to whichever sync happened to be adjacent.
+   *
+   * Raw SQL for the `entity_stats` JSON paths — same reason as the queries above; constant statement,
+   * no interpolation.
+   */
+  async lifecycleRunHistory(): Promise<LifecycleRunEntry[]> {
+    const rows = await this.prisma.$queryRawUnsafe<
+      Array<{
+        runId: string;
+        startedAt: Date;
+        finishedAt: Date | null;
+        status: string;
+        departed: number;
+        restored: number;
+        ticketsAutoClosed: number;
+        skippedByReason: unknown;
+      }>
+    >(
+      `SELECT r.run_id::text                                                        AS "runId",
+              r.started_at                                                          AS "startedAt",
+              r.finished_at                                                         AS "finishedAt",
+              r.status,
+              COALESCE((r.entity_stats -> 'departures' ->> 'inserted')::int, 0)     AS "departed",
+              COALESCE((r.entity_stats -> 'departures' ->> 'updated')::int, 0)      AS "restored",
+              r.entity_stats -> 'departures' -> 'skippedByReason'                   AS "skippedByReason",
+              COALESCE((SELECT SUM(dd.cancelled_tickets_count)
+                          FROM device_departures dd
+                         WHERE dd.detected_by_run_id = r.run_id), 0)::int           AS "ticketsAutoClosed"
+         FROM master_sync_runs r
+        ORDER BY r.run_id DESC
+        LIMIT ${LIFECYCLE_RUN_HISTORY_LIMIT}`,
+    );
+
+    return rows.map((row) => ({
+      runId: row.runId,
+      startedAt: row.startedAt,
+      finishedAt: row.finishedAt,
+      status: row.status,
+      departed: row.departed,
+      restored: row.restored,
+      ticketsAutoClosed: row.ticketsAutoClosed,
+      skippedByReason: readSkipTally(row.skippedByReason),
+      // A run that opened nothing and closed nothing. Deliberately independent of `status`: a FAILED
+      // run moved nothing because it died, which is not the same fact and must not read as quiet.
+      quiet: row.status === 'SUCCESS' && row.departed === 0 && row.restored === 0,
+    }));
   }
 
   /**

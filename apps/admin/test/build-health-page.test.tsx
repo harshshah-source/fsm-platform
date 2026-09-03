@@ -1,4 +1,5 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BuildHealthPage } from '../src/pages/admin/BuildHealthPage';
 import { buildNav } from '../src/components/shell/nav';
@@ -200,5 +201,234 @@ describe('#300 — wedged-ingestion card', () => {
 
     expect(await screen.findByText(/v200/)).toBeInTheDocument();
     expect(screen.queryByTestId('ingestion-alert')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * #349 — the four sections the page dropped.
+ *
+ * The backend has always returned source connectivity, both freshness ages, reconciliation and the
+ * #218 lifecycle check; the view type modelled four fields of it and the page drew three cards. The
+ * effect was a page that could not answer the one question it exists for — is the pipeline working
+ * right now, and if not, since when — while the answer sat in the payload it was already fetching.
+ *
+ * `GET /snapshots/runs` had no consumer at all: the run history here is its first one.
+ */
+const RUN = (runId: string, status: string, over: Record<string, unknown> = {}) => ({
+  runId,
+  status,
+  startedAt: '2026-09-03T05:30:00.000Z',
+  finishedAt: '2026-09-03T05:34:00.000Z',
+  dataAsOf: '2026-09-03T05:30:00.000Z',
+  error: null,
+  ...over,
+});
+
+const RUNS = [RUN('901', 'SUCCESS'), RUN('900', 'FAILED', { dataAsOf: null, error: 'ORPHANED_RUN_ERROR' })];
+
+const FULL = {
+  ...HEALTH,
+  source: { configured: true, connected: true, vehicleRows: 21322 },
+  masterSync: {
+    ...HEALTH.masterSync,
+    lastAt: '2026-09-03T04:00:00.000Z',
+    lastStatus: 'SUCCESS',
+    ageMinutes: 130,
+    staleAfterMinutes: 2880,
+    stale: false,
+  },
+  snapshot: {
+    ...HEALTH.snapshot,
+    lastAt: '2026-09-02T07:00:00.000Z',
+    lastStatus: 'PARTIAL',
+    ageMinutes: 21 * 60,
+    staleAfterMinutes: 60,
+    stale: true,
+  },
+  reconciliation: { entities: [], reconciled: null, maxDriftAllowed: 0 },
+  lifecycle: {
+    drift: 5134,
+    missingFromSource: 212,
+    quietRuns: 27,
+    quietRunsAlert: true,
+    quietRunsThreshold: 3,
+    healthy: false,
+    runs: [
+      {
+        runId: '512',
+        startedAt: '2026-09-03T02:00:00.000Z',
+        finishedAt: '2026-09-03T02:12:00.000Z',
+        status: 'SUCCESS',
+        departed: 212,
+        restored: 37,
+        ticketsAutoClosed: 41,
+        skippedByReason: {},
+        quiet: false,
+      },
+      {
+        runId: '511',
+        startedAt: '2026-09-02T02:00:00.000Z',
+        finishedAt: '2026-09-02T02:09:00.000Z',
+        status: 'SUCCESS',
+        departed: 0,
+        restored: 0,
+        ticketsAutoClosed: 0,
+        skippedByReason: { ABSENCE_GUARD_TRIPPED: 1 },
+        quiet: true,
+      },
+    ],
+  },
+  schedulerEnabled: true,
+  checkedAt: '2026-09-03T06:10:00.000Z',
+};
+
+/** Route by URL — the page now reads two endpoints, and the run history is the second. */
+const stub = (health: unknown = FULL, runs: unknown = RUNS) => {
+  fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : String(input);
+    return url.includes('/snapshots/runs') ? json(runs) : json(health);
+  });
+};
+
+/** The query string of the most recent `/snapshots/runs` call. */
+const lastRunsUrl = (): string => {
+  const calls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/snapshots/runs'));
+  return calls[calls.length - 1] ?? '';
+};
+
+describe('#349 — connectivity and freshness', () => {
+  it('AC1 — names the source and whether it is reachable right now', async () => {
+    stub();
+    render(<BuildHealthPage />);
+
+    const card = await screen.findByTestId('integration-source');
+    expect(card).toHaveTextContent(/connected/i);
+    expect(card).toHaveTextContent('21,322');
+  });
+
+  it('AC1 — an unreachable source states the reason instead of reading as healthy', async () => {
+    stub({ ...FULL, source: { configured: true, connected: false, error: 'ETIMEDOUT 10.8.0.1:3306' } });
+    render(<BuildHealthPage />);
+
+    const card = await screen.findByTestId('integration-source');
+    expect(card).toHaveTextContent(/not reachable|disconnected/i);
+    expect(card).toHaveTextContent(/ETIMEDOUT/);
+  });
+
+  it('AC1 — freshness shows the age AND the threshold it is judged against', async () => {
+    stub();
+    render(<BuildHealthPage />);
+
+    const snapshot = within(await screen.findByTestId('freshness-snapshot'));
+    // The 21-hour snapshot the survey found reading as an ordinary timestamp.
+    expect(snapshot.getByText(/21 h/)).toBeInTheDocument();
+    expect(snapshot.getByText(/stale/i)).toBeInTheDocument();
+    // An age with no yardstick is not actionable — the number it was measured against is on screen,
+    // in the same units grammar as the age so the two can be read against each other.
+    expect(screen.getByTestId('freshness-snapshot')).toHaveTextContent(/threshold 1 h/i);
+
+    const master = within(screen.getByTestId('freshness-masterSync'));
+    expect(master.queryByText(/^stale$/i)).not.toBeInTheDocument();
+  });
+
+  it('AC1 — a deliberately paused scheduler reads as paused, never as fresh or as a fault', async () => {
+    stub({ ...FULL, schedulerEnabled: false, snapshot: { ...FULL.snapshot, stale: false } });
+    render(<BuildHealthPage />);
+
+    expect(await screen.findByTestId('scheduler-paused')).toHaveTextContent(/paused/i);
+  });
+});
+
+describe('#349 / #224 — the lifecycle check reaches a screen', () => {
+  it('AC1 — drift reads as a contradiction, with missingFromSource beside it, not folded in', async () => {
+    stub();
+    render(<BuildHealthPage />);
+
+    const drift = await screen.findByTestId('lifecycle-drift');
+    expect(drift).toHaveTextContent('5,134');
+    // #224: its correct value is exactly 0. It must not read like a tolerance band.
+    expect(drift).toHaveTextContent(/contradict/i);
+
+    // The excluded population is surfaced, never hidden inside drift (218a's whole point).
+    const missing = screen.getByTestId('lifecycle-missing-from-source');
+    expect(missing).toHaveTextContent('212');
+    expect(drift).not.toHaveTextContent('212');
+  });
+
+  it('AC1 — quiet runs past the threshold are called out, with the threshold', async () => {
+    stub();
+    render(<BuildHealthPage />);
+
+    const quiet = await screen.findByTestId('lifecycle-quiet-runs');
+    expect(quiet).toHaveTextContent('27');
+    expect(quiet).toHaveTextContent('3');
+  });
+
+  it('AC3 — departures, restores and departure-auto-closed tickets, per run', async () => {
+    stub();
+    render(<BuildHealthPage />);
+
+    const row = await screen.findByTestId('lifecycle-run-512');
+    expect(row).toHaveTextContent('212');
+    expect(row).toHaveTextContent('37');
+    expect(row).toHaveTextContent('41');
+
+    // A run that moved nothing is the #218 signal, so it is shown as quiet rather than dropped.
+    expect(screen.getByTestId('lifecycle-run-511')).toHaveTextContent(/quiet/i);
+  });
+});
+
+describe('#349 — snapshot run history (AC2)', () => {
+  it('renders the run history GET /snapshots/runs has never had a consumer for', async () => {
+    stub();
+    render(<BuildHealthPage />);
+
+    const ok = await screen.findByTestId('snapshot-run-901');
+    expect(ok).toHaveTextContent('SUCCESS');
+
+    // #348's reaped-run reason: a process restart must be distinguishable from an ingestion failure.
+    expect(screen.getByTestId('snapshot-run-900')).toHaveTextContent('ORPHANED_RUN_ERROR');
+  });
+
+  it('filters by status', async () => {
+    stub();
+    render(<BuildHealthPage />);
+    await screen.findByTestId('snapshot-run-901');
+
+    await userEvent.selectOptions(screen.getByLabelText(/run status/i), 'FAILED');
+
+    await waitFor(() => expect(lastRunsUrl()).toMatch(/status=FAILED/));
+  });
+
+  it('pages, and cannot page past the end', async () => {
+    stub(FULL, [RUN('901', 'SUCCESS')]);
+    render(<BuildHealthPage />);
+    await screen.findByTestId('snapshot-run-901');
+
+    // A short page is the last page — a pager that keeps offering "next" over an endpoint with no
+    // total is how an operator ends up staring at an empty table.
+    expect(screen.getByTestId('snapshot-runs-next')).toBeDisabled();
+    expect(screen.getByTestId('snapshot-runs-prev')).toBeDisabled();
+  });
+
+  it('pages forward when the page came back full', async () => {
+    const full = Array.from({ length: 20 }, (_, i) => RUN(String(900 + i), 'SUCCESS'));
+    stub(FULL, full);
+    render(<BuildHealthPage />);
+    await screen.findByTestId('snapshot-run-900');
+
+    await userEvent.click(screen.getByTestId('snapshot-runs-next'));
+
+    await waitFor(() => expect(lastRunsUrl()).toMatch(/offset=20/));
+  });
+
+  it('an older payload without the new sections still renders the page', async () => {
+    // Upgrade order: a new FE against a not-yet-deployed BE must degrade, not white-screen.
+    stub(HEALTH, []);
+    render(<BuildHealthPage />);
+
+    expect(await screen.findByText(/v200/)).toBeInTheDocument();
+    expect(screen.queryByTestId('lifecycle-drift')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('integration-source')).not.toBeInTheDocument();
   });
 });

@@ -37,8 +37,12 @@ gate these in-scope UI ACs cannot be silently dropped; they are deferred here, n
 - [ ] Device detail page shows **lifecycle status** (operational / departed, with observed status) and
       the **departure/restore history** (each transition: status, reason, run id, timestamp,
       cancelled-ticket count).
-- [ ] Integration-health page shows **per-run departures/restores** (from `entity_stats`) — the churn
+- [x] Integration-health page shows **per-run departures/restores** (from `entity_stats`) — the churn
       delta per master-sync run ("+212 departed, 37 restored").
+      **Landed in #349, 2026-09-03** (`docs/progress/349-integration-health-page-completion.md`) —
+      `LifecycleHealth.runs` on `GET /api/integration/health` plus the per-run churn table on the
+      Build Health page, with the departure-auto-closed ticket count beside the two counters. The
+      remaining ACs below stay with this issue.
 - [ ] Reference the authoritative UI images under `docs/ui/desktop/v2-reference/` before building
       (surfacing rule); match layout / hierarchy / role visibility — do not redesign.
 - [ ] Tests: admin specs for each surface; role visibility (ZM sees own zone, OH sees fleet).

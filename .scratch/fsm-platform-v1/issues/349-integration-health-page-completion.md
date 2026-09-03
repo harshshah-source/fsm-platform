@@ -1,5 +1,5 @@
 # 349 — Integration Health page completion
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/349-integration-health-page-completion.md
 Type: AFK
 Wave: 2 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -38,11 +38,15 @@ running build") is precondition P0-b (restart the dev backend on HEAD), not part
 
 ## Acceptance criteria
 
-- [ ] AC1 — the four dropped sections (connectivity, freshness age, lifecycle, run history) render
+- [x] AC1 — the four dropped sections (connectivity, freshness age, lifecycle, run history) render
       with the live values.
-- [ ] AC2 — run history is paged and filterable by status.
-- [ ] AC3 — departures / restores / auto-closed counts are shown per run.
-- [ ] AC4 — the page stays OH-only (role unchanged).
+- [x] AC2 — run history is paged and filterable by status. *(The route was already paged and
+      filterable — `limit`/`offset`/`status` since Issue 04 slice 7. What was missing was any consumer,
+      so the arguments had never been exercised; met client-side, with the contract now pinned in
+      `snapshots-api.e2e-spec.ts`.)*
+- [x] AC3 — departures / restores / auto-closed counts are shown per run.
+      *(New: `LifecycleHealth.runs` on the payload; no schema change needed.)*
+- [x] AC4 — the page stays OH-only (role unchanged).
 
 ## Verification
 
