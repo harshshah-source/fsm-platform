@@ -1,5 +1,5 @@
 # 339 — Acting-scope gate, manager-unavailability windows, audited enter/exit
-Status: ready-for-agent
+Status: in-progress (code complete + tested 2026-09-03 `a1270ad`; ACs not yet ticked, report not yet written — see `docs/audits/handoffs/HANDOFF-ACTIVE.md`)
 Type: AFK
 Wave: 1 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
