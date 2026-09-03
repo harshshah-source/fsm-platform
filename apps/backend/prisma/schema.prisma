@@ -1819,6 +1819,12 @@ model NotificationDelivery {
   channel        NotificationChannel
   status         NotificationDeliveryStatus
   firstClass     Boolean                    @default(false) @map("first_class")
+  /// #337 — what the external provider said, kept beside the status it produced. The provider's own
+  /// message id is the only handle an operator has when they have to ask FCM "what happened to this
+  /// one"; `error` is why a FAILED row failed. Both null for IN_APP (never leaves the building) and
+  /// for the inert logging gateway, which has nothing to report.
+  providerMessageId String?                 @map("provider_message_id")
+  error             String?
   createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)

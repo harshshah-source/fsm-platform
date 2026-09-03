@@ -1,5 +1,5 @@
 # 337 — Push delivery exit behind the existing gateway seam
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/337-push-delivery-exit-fcm-gateway.md
 Type: AFK
 Type: AFK (build the seam) + HITL (FCM credentials — external provisioning)
 Wave: 1 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
@@ -48,12 +48,12 @@ The residual is exactly this dead push exit (plan §1).
 
 ## Acceptance criteria
 
-- [ ] AC1 — the FCM adapter sends `{title, body, data:{type, entityId}}` and maps HTTP 200 → SENT;
+- [x] AC1 — the FCM adapter sends `{title, body, data:{type, entityId}}` and maps HTTP 200 → SENT;
       404/410 (stale token) → FAILED + token row deleted; 5xx → FAILED with retry left to the outbox
-- [ ] AC2 — default binding unchanged (logging), so every existing test passes untouched
-- [ ] AC3 — seam assertion rewritten and its e2e updated
-- [ ] AC4 — `notification_deliveries` carries `providerMessageId` / `error`
-- [ ] AC5 — no SMS/WhatsApp/email adapter is added (those channels stay UNAVAILABLE)
+- [x] AC2 — default binding unchanged (logging), so every existing test passes untouched
+- [x] AC3 — seam assertion rewritten and its e2e updated
+- [x] AC4 — `notification_deliveries` carries `providerMessageId` / `error`
+- [x] AC5 — no SMS/WhatsApp/email adapter is added (those channels stay UNAVAILABLE)
 
 ## Verification
 

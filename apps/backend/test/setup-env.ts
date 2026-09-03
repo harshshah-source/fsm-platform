@@ -29,6 +29,10 @@ const APP_NAMESPACE_LITERALS = [
   // `dev-seed.e2e-spec.ts` pass an explicit env object rather than reading `process.env`.
   'ALLOW_DEV_SEED',
   'DEV_SEED_PASSWORD',
+  // #337 — the push-provider switch. A developer who has armed the real FCM adapter on their own box
+  // must not thereby arm it inside the suite: the seam-assertion e2e asserts that no real provider is
+  // configured, and every notification spec is written against the inert default.
+  'PUSH_PROVIDER',
 ];
 
 /**
@@ -49,6 +53,9 @@ const APP_NAMESPACE_PREFIXES = [
   // contended-zone assertion wait minutes for an answer it expects at once. `BUSINESS_SWEEP` already
   // covers `BUSINESS_SWEEP_DISPATCH_CRON`; these are the ones outside that family.
   'DISPATCH_',
+  // #337 — FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY / FCM_TOKEN_URL / FCM_BASE_URL. A
+  // whole family, so the prefix rather than five names.
+  'FCM_',
   'INGESTION_',
   'PARTITION_',
   'PLANT_ELIGIBILITY_',

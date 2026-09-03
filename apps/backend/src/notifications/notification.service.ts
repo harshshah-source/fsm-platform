@@ -6,6 +6,7 @@ import {
   type NotificationChannelGateway,
   NOTIFICATION_CHANNEL_GATEWAY,
   LoggingChannelGateway,
+  channelDeliveryDetail,
 } from './notification-channel.gateway';
 
 /**
@@ -37,9 +38,18 @@ export interface NotifyInput {
   deliveryModel?: NotificationDeliveryModel;
 }
 
+/**
+ * One channel's outcome, as a producer reads it back (#337).
+ *
+ * `providerMessageId` / `error` mirror what was written to `notification_deliveries`, so a producer
+ * that wants to say something about a delivery — or #361, which adds the remaining PRD event
+ * producers on top of this shape — never has to re-read the row it just caused to be written.
+ */
 export interface DeliveryView {
   channel: NotificationChannel;
   status: 'SENT' | 'ATTEMPTED' | 'SKIPPED' | 'FAILED';
+  providerMessageId?: string | null;
+  error?: string | null;
 }
 export interface NotificationView {
   id: string;
@@ -230,6 +240,10 @@ export class NotificationService {
         type: input.type,
         title: input.title,
         body: input.body ?? null,
+        // #337 — the push payload routes the tap (`data: { type, entityId }`), so the gateway needs to
+        // know what the notice is about, not only what it says.
+        entityType: input.entityType ?? null,
+        entityId: input.entityId ?? null,
         metadata: input.metadata ?? null,
       });
 
@@ -237,17 +251,33 @@ export class NotificationService {
     // records what actually happened. A delivery that provably did not occur is a false record in the
     // audit trail, not a harmless simplification — the whole point of the table is that somebody can
     // afterwards ask "was this person actually told?" and get a truthful answer.
+    //
+    // #337 gave that answer two more words. While every external channel was inert, ATTEMPTED covered
+    // the only thing that ever happened ("there was no adapter"). With a real provider on the other
+    // end, "we tried and FCM refused" is a different fact with a different owner, so a gateway that
+    // reports FAILED is recorded FAILED — with the provider's own error text beside it — and only a
+    // channel that had nothing to try is ATTEMPTED. The chain walks on either way: a failed push is
+    // exactly the case the SMS rung below it exists for.
     for (const channel of GENERAL_CHAIN) {
-      const result = await send(channel);
-      if (result === 'SENT') {
-        deliveries.push({ channel, status: 'SENT' });
-        break;
-      }
-      deliveries.push({ channel, status: 'ATTEMPTED' });
+      const detail = channelDeliveryDetail(await send(channel));
+      const record: DeliveryView = {
+        channel,
+        status: detail.status === 'SENT' ? 'SENT' : detail.status === 'FAILED' ? 'FAILED' : 'ATTEMPTED',
+        providerMessageId: detail.providerMessageId ?? null,
+        error: detail.error ?? null,
+      };
+      deliveries.push(record);
+      if (detail.status === 'SENT') break;
     }
 
     await this.prisma.notificationDelivery.createMany({
-      data: deliveries.map((d) => ({ notificationId: notification.id, channel: d.channel, status: d.status })),
+      data: deliveries.map((d) => ({
+        notificationId: notification.id,
+        channel: d.channel,
+        status: d.status,
+        providerMessageId: d.providerMessageId ?? null,
+        error: d.error ?? null,
+      })),
     });
 
     return {
