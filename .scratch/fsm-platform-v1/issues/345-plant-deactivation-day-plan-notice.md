@@ -1,5 +1,5 @@
 # 345 — Plant deactivation reaches the SE's day-plan notice
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/345-plant-deactivation-day-plan-notice.md
 Type: AFK
 Wave: 1 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -29,9 +29,9 @@ plan", PRD story 51) is carried by "a human remembers". Reactivation restores no
 
 ## Acceptance criteria
 
-- [ ] AC1 — every SE whose live plan lost a stop gets one outbox row in the same transaction
-- [ ] AC2 — the message names the plant
-- [ ] AC3 — reactivation behaviour is **unchanged**, and the "restore" question is recorded as a
+- [x] AC1 — every SE whose live plan lost a stop gets one outbox row in the same transaction
+- [x] AC2 — the message names the plant
+- [x] AC3 — reactivation behaviour is **unchanged**, and the "restore" question is recorded as a
       decision item (§7 AC-03), not built
 
 ## Verification
@@ -60,3 +60,20 @@ n/a
 - **AC-03** — Should reactivating a plant restore the tickets/stops it cancelled? Default assumed:
   **No**; a fresh cycle opens on the next pipeline run (current behaviour). Recorded here as a
   Strategic HITL decision item; it does not block this slice.
+  **Kept.** `reactivate` is unchanged and a test pins that it restores no ticket, no stop and no
+  notice — see the report's "Decision recorded (§7 AC-03)" for the reasoning.
+
+## Built (2026-09-03)
+
+- `plant-deactivation.service.ts` — `cancelOpenTickets` now returns `{ cancelledTickets,
+  strippedStops }`, reading the affected live stops **before** the strip that destroys the evidence;
+  `deactivate` enqueues one `queueDayPlanOverridden` per stop inside its `withAudit` transaction.
+- `scheduling/day-plan-notification-outbox.ts` — `DAY_PLAN_ACTION_PLANT_DEACTIVATED`, and `plantName`
+  carried through the payload and the drain.
+- `scheduling/day-plan-notifier.ts` — `plantName` on `DayPlanOverriddenEvent`, and
+  `dayPlanOverriddenBody()`; every other action's copy is byte-for-byte unchanged.
+- Liveness uses `schedule-status.ts` + `istDate(now)`, not a bare `removed_at IS NULL` — a stop on a
+  plan that stopped being today's produces no notice.
+- Delivery rides the existing `business-notification-outbox` sweep (~2 min). An immediate
+  post-commit drain needs `plant-deactivation.module.ts`, which was outside this slice's file
+  ownership — filed as a follow-up in the report.

@@ -48,6 +48,20 @@ export async function queueDayPlanDispatched(
 }
 
 /**
+ * The one `DAY_PLAN_OVERRIDDEN` action that no Zonal Manager performed (#345).
+ *
+ * Every other action in this vocabulary is a ZM override command verbatim (`REMOVE_TICKET`,
+ * `DEFER_TICKET`, `REORDER`, `SWAP_SE`, `REASSIGN`, `SPLIT_BATCH`, `MOVE_TICKET`) — the manager who
+ * changed the plan is the one who typed it. A plant deactivation is an Operations-Head act on the
+ * *plant*, and the SE's stop disappears as a consequence (`plant-deactivation.service.ts` strips the
+ * `batch_assignment_tickets` rows in the same transaction, #241). Naming it here rather than at the
+ * producer keeps the closed set of things a Day Plan notice can say in one readable place, beside the
+ * writer that puts them on the wire — and it is why {@link DayPlanOverriddenEvent} grew `plantName`:
+ * this is the first action whose sentence is useless without a noun.
+ */
+export const DAY_PLAN_ACTION_PLANT_DEACTIVATED = 'PLANT_DEACTIVATED';
+
+/**
  * Write an override's "Day Plan updated" intent INSIDE the caller's existing `withAudit` transaction
  * (#264 AC — `dayPlanOverridden` shares the same commit-fragility as the dispatch path and must not
  * be left on the old post-commit-call mechanism).
@@ -62,7 +76,10 @@ export async function queueDayPlanOverridden(
       seId: event.seId,
       scheduleId: event.scheduleId,
       zoneId: null,
-      payload: { batchId: event.batchId.toString(), action: event.action },
+      // `plantName` is stored, not re-derived at delivery: the row has to say what the plant was
+      // called *when the plan changed*, and a rename (or a master-sync) between the enqueue and the
+      // drain would otherwise silently rewrite history in the notice the SE finally receives.
+      payload: { batchId: event.batchId.toString(), action: event.action, plantName: event.plantName ?? null },
     },
     select: { id: true },
   });
@@ -220,6 +237,8 @@ async function deliver(notifier: DayPlanNotifier, row: OutboxRow, deliverers: Ou
       scheduleId: row.scheduleId!,
       batchId: BigInt(String(payload.batchId ?? '0')),
       action: String(payload.action ?? ''),
+      // Absent on every row written before #345, and null on every action that names no plant.
+      plantName: payload.plantName == null ? null : String(payload.plantName),
     });
     return;
   }

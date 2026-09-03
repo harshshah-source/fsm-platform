@@ -3,6 +3,13 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import type { ActorContext } from '../src/scheduling/override.service';
 import { OverrideService } from '../src/scheduling/override.service';
 import type { DayPlanDispatchedEvent, DayPlanNotifier, DayPlanOverriddenEvent } from '../src/scheduling/day-plan-notifier';
+import { SpineDayPlanNotifier } from '../src/scheduling/day-plan-notifier';
+import {
+  DAY_PLAN_ACTION_PLANT_DEACTIVATED,
+  drainRows,
+  queueDayPlanOverridden,
+} from '../src/scheduling/day-plan-notification-outbox';
+import type { NotificationService, NotifyInput } from '../src/notifications/notification.service';
 import { CandidateSelectionService } from '../src/recommender/candidate-selection.service';
 import { RecommenderService } from '../src/recommender/recommender.service';
 import { BatchAssignmentService } from '../src/scheduling/batch-assignment.service';
@@ -24,6 +31,15 @@ class ThrowingNotifier implements DayPlanNotifier {
   dayPlanOverridden(event: DayPlanOverriddenEvent): void {
     this.overriddenCalls.push(event);
     throw new Error('notifier down');
+  }
+}
+
+/** #345 — the same port, recording rather than throwing: a drain has to be able to succeed. */
+class RecordingNotifier implements DayPlanNotifier {
+  overriddenCalls: DayPlanOverriddenEvent[] = [];
+  dayPlanDispatched(): void {}
+  dayPlanOverridden(event: DayPlanOverriddenEvent): void {
+    this.overriddenCalls.push(event);
   }
 }
 
@@ -219,5 +235,102 @@ describe('#264 — a notifier throw never fails the writer it belongs to', () =>
     expect(row.sentAt).toBeNull();
     expect(row.lastError).toContain('notifier down');
     expect(notifier.overriddenCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  /**
+   * #345 — the writer half of spine edge E-26. `PLANT_DEACTIVATED` is the first override action no ZM
+   * performed, and the first that has to carry a name: "your Day Plan was updated (PLANT_DEACTIVATED)"
+   * tells an engineer standing in a yard nothing about *which* stop to drop.
+   */
+  it('#345 — a PLANT_DEACTIVATED override row round-trips its action and its plant name', async () => {
+    const scheduleId = BigInt(NS % 1_000_000);
+    const batchId = BigInt((NS % 1_000_000) + 1);
+    const rowId = await queueDayPlanOverridden(prisma, {
+      seId,
+      scheduleId,
+      batchId,
+      action: DAY_PLAN_ACTION_PLANT_DEACTIVATED,
+      plantName: 'STAR CEMENT — Guwahati',
+    });
+
+    const stored = await prisma.dayPlanNotificationOutbox.findUniqueOrThrow({ where: { id: rowId } });
+    expect(stored.eventType).toBe('DAY_PLAN_OVERRIDDEN');
+    expect(stored.payload).toMatchObject({
+      action: 'PLANT_DEACTIVATED',
+      batchId: String(batchId),
+      plantName: 'STAR CEMENT — Guwahati',
+    });
+
+    const notifier = new RecordingNotifier();
+    await drainRows(prisma, notifier, [rowId]);
+    expect(notifier.overriddenCalls).toHaveLength(1);
+    expect(notifier.overriddenCalls[0]).toMatchObject({
+      seId,
+      scheduleId,
+      batchId,
+      action: 'PLANT_DEACTIVATED',
+      plantName: 'STAR CEMENT — Guwahati',
+    });
+  });
+
+  it('#345 — an override row with no plant name still delivers, with plantName null', async () => {
+    const rowId = await queueDayPlanOverridden(prisma, {
+      seId,
+      scheduleId: BigInt(NS % 1_000_000),
+      batchId: BigInt((NS % 1_000_000) + 2),
+      action: 'REMOVE_TICKET',
+    });
+    const notifier = new RecordingNotifier();
+    await drainRows(prisma, notifier, [rowId]);
+    expect(notifier.overriddenCalls).toHaveLength(1);
+    expect(notifier.overriddenCalls[0].plantName ?? null).toBeNull();
+  });
+});
+
+/**
+ * #345 AC2 — the copy. The notice reaches the SE through the existing day-plan channel, so the only
+ * place the plant can be named is `SpineDayPlanNotifier`'s body.
+ */
+describe('#345 — SpineDayPlanNotifier names the deactivated plant', () => {
+  const captureNotifier = (): { sent: NotifyInput[]; notifier: SpineDayPlanNotifier } => {
+    const sent: NotifyInput[] = [];
+    const notifications = {
+      notify: async (input: NotifyInput) => {
+        sent.push(input);
+      },
+    } as unknown as NotificationService;
+    return { sent, notifier: new SpineDayPlanNotifier(notifications) };
+  };
+
+  it('names the plant in the body a PLANT_DEACTIVATED notice', async () => {
+    const { sent, notifier } = captureNotifier();
+    await notifier.dayPlanOverridden({
+      seId: 'se-1',
+      scheduleId: 1n,
+      batchId: 2n,
+      action: DAY_PLAN_ACTION_PLANT_DEACTIVATED,
+      plantName: 'STAR CEMENT — Guwahati',
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].body).toContain('STAR CEMENT — Guwahati');
+    expect(sent[0].metadata).toMatchObject({ action: 'PLANT_DEACTIVATED', plantName: 'STAR CEMENT — Guwahati' });
+  });
+
+  it('falls back to a nameless sentence rather than printing "undefined"', async () => {
+    const { sent, notifier } = captureNotifier();
+    await notifier.dayPlanOverridden({
+      seId: 'se-1',
+      scheduleId: 1n,
+      batchId: 2n,
+      action: DAY_PLAN_ACTION_PLANT_DEACTIVATED,
+    });
+    expect(sent[0].body).not.toContain('undefined');
+    expect(sent[0].body.toLowerCase()).toContain('deactivated');
+  });
+
+  it('leaves every other override action copy untouched', async () => {
+    const { sent, notifier } = captureNotifier();
+    await notifier.dayPlanOverridden({ seId: 'se-1', scheduleId: 1n, batchId: 2n, action: 'REMOVE_TICKET' });
+    expect(sent[0].body).toBe('Your Day Plan was updated (REMOVE_TICKET).');
   });
 });

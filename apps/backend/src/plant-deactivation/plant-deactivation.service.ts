@@ -4,6 +4,12 @@ import type { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LIVE_FAILURE_CYCLE_STATES, RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 import { REMOVAL_REASONS } from '../scheduling/removal-reason';
+import { liveBatchFilter, liveScheduleFilter } from '../scheduling/schedule-status';
+import {
+  DAY_PLAN_ACTION_PLANT_DEACTIVATED,
+  queueDayPlanOverridden,
+} from '../scheduling/day-plan-notification-outbox';
+import { istDate } from '../common/ist-day';
 import { AuditService, auditActor } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 
@@ -36,6 +42,13 @@ export type ReactivateResult =
   | { result: 'OK'; cancelledTicketsAtDeactivation: number | null }
   | { result: 'NOT_DEACTIVATED' };
 
+/** One SE's stop that a deactivation took off a live Day Plan — the addressee of a #345 notice. */
+interface StrippedStop {
+  batchId: bigint;
+  scheduleId: bigint;
+  seId: string;
+}
+
 export interface DeactivationRow {
   id: string;
   plantId: string;
@@ -57,7 +70,7 @@ export class PlantDeactivationService {
   ) {}
 
   async deactivate(plantId: bigint, reason: string, actor: RequestActor): Promise<DeactivateResult> {
-    const plant = await this.prisma.plant.findUnique({ where: { plantId }, select: { plantId: true } });
+    const plant = await this.prisma.plant.findUnique({ where: { plantId }, select: { plantId: true, name: true } });
     if (!plant) return { result: 'PLANT_NOT_FOUND' };
 
     const existing = await this.prisma.plantDeactivation.findFirst({
@@ -77,7 +90,29 @@ export class PlantDeactivationService {
           metadata: { reason },
         },
         async (tx): Promise<DeactivateResult> => {
-          const cancelledTickets = await this.cancelOpenTickets(tx, plantId, reason, actor, now);
+          const { cancelledTickets, strippedStops } = await this.cancelOpenTickets(tx, plantId, reason, actor, now);
+          // #345 (spine edge E-26) — the SEs whose plan just lost a stop are told, INSIDE this
+          // transaction. #241 already ended their assignments here; the news that they had was
+          // carried by "a human remembers". The notice therefore commits with the cancellation or
+          // not at all — a post-commit call would leave the plan silently short whenever the process
+          // died between the two, and a throw in it would undo an Operations-Head decision that had
+          // already happened (#338).
+          //
+          // No post-commit drain here, deliberately: this module owns no `DayPlanNotifier` and
+          // acquiring one would mean importing `SchedulingModule` into `PlantDeactivationModule` for
+          // a single port. The `business-notification-outbox` sweep already carries it and runs every
+          // two minutes (`DEFAULT_NOTIFICATION_OUTBOX_CRON`), which is the right latency for news an
+          // engineer reacts to by *not* driving somewhere. Wiring the port for an immediate drain is a
+          // strict improvement, not a correctness one — see this slice's report.
+          for (const stop of strippedStops) {
+            await queueDayPlanOverridden(tx, {
+              seId: stop.seId,
+              scheduleId: stop.scheduleId,
+              batchId: stop.batchId,
+              action: DAY_PLAN_ACTION_PLANT_DEACTIVATED,
+              plantName: plant.name,
+            });
+          }
           const created = await tx.plantDeactivation.create({
             data: { plantId, reason, deactivatedBy: actor.userId, deactivatedAt: now },
             select: { id: true },
@@ -168,7 +203,7 @@ export class PlantDeactivationService {
     reason: string,
     actor: RequestActor,
     now: Date,
-  ): Promise<number> {
+  ): Promise<{ cancelledTickets: number; strippedStops: StrippedStop[] }> {
     // Every ticket on the plant, so the live-cycle sweep below can also see cycles hanging off
     // ALREADY-terminal tickets (#308) — `open` is only the subset this deactivation closes.
     const allTickets = await tx.ticket.findMany({
@@ -225,7 +260,32 @@ export class PlantDeactivationService {
     // `removed_at IS NULL` and not on ticket status, so a cancelled ticket whose batch row stayed
     // live kept appearing as work to do on an SE's plan. Symmetric with the device-departure path.
     // `removed_by` is NULL: the OH deactivated the *plant*, nobody withdrew these tickets by hand.
+    const strippedStops: StrippedStop[] = [];
     if (closed.length > 0) {
+      // #345 — read the affected stops BEFORE the strip below, because the strip is what destroys the
+      // evidence: after it every one of these rows has `removed_at` set and the same query answers
+      // nothing. Narrowed to a **live** stop on a **live** plan (`schedule-status.ts`, the one
+      // definition of both, and the IST day the plan covers): a row still hanging off a plan from
+      // last week is #242's un-recycled history, and waking an engineer for a stop that stopped being
+      // theirs days ago is noise, not news.
+      const today = istDate(now);
+      const affected = await tx.batchAssignmentTicket.findMany({
+        where: {
+          ticketId: { in: closed.map((t) => t.ticketId) },
+          removedAt: null,
+          batch: {
+            ...liveBatchFilter(),
+            schedule: { ...liveScheduleFilter(), dateFrom: { lte: today }, dateTo: { gte: today } },
+          },
+        },
+        select: { batch: { select: { batchId: true, scheduleId: true, seId: true } } },
+      });
+      // One notice per stop, not per ticket: a plant is one stop on the plan, and an SE whose batch
+      // held four of this plant's tickets lost that stop once.
+      const byBatch = new Map<bigint, StrippedStop>();
+      for (const row of affected) byBatch.set(row.batch.batchId, row.batch);
+      strippedStops.push(...byBatch.values());
+
       await tx.batchAssignmentTicket.updateMany({
         where: { ticketId: { in: closed.map((t) => t.ticketId) }, removedAt: null },
         data: { removedAt: now, removedBy: null, removalReason: REMOVAL_REASONS.TICKET_CANCELLED },
@@ -233,6 +293,6 @@ export class PlantDeactivationService {
     }
     // Clear the hot-state open-cycle flag for the plant's devices — the ticket-creation gate keys on it.
     await tx.deviceState.updateMany({ where: { plantId }, data: { hasOpenFailureCycle: false } });
-    return closed.length;
+    return { cancelledTickets: closed.length, strippedStops };
   }
 }
