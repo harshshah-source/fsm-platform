@@ -1,5 +1,5 @@
 # 338 — One durable outbox for every post-commit notify site
-Status: in-progress (infrastructure `1f20620`; intraday trio converted 2026-09-03; 9 producers left)
+Status: done 2026-09-03 — all 12 producers converted ([report](../../../docs/progress/338-durable-notification-outbox.md))
 Type: AFK
 Wave: 1 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -44,20 +44,20 @@ Existing outbox machinery:
 
 ## Acceptance criteria
 
-- [ ] AC1 — each of the 12 sites enqueues inside its mutation tx (intraday via the #325
-      `inTransaction` hook) — **3 of 12 done**: `intraday-insertion.service.ts` (both assign doors
-      through the #325 hook; the escalation door got a transaction of its own, since its ledger write
-      and its alert were two bare awaits). The remaining 9 are `stranded-work-escalation:121`,
-      `bulk-unassign:322`, `install-notifier:52,64`, `recovery-notifier:76,93`,
-      `cross-zone-escalation:300,321,339` — the last three are structurally blocked on #354, which
-      creates the transaction they would enqueue into (see the plan's AC1 note).
-- [ ] AC2 — a notify that throws no longer aborts or half-commits the mutation — **3 of 12**, proved
-      per door by crash injection in `test/intraday-notification-outbox.e2e-spec.ts`
+- [x] AC1 — each of the 12 sites enqueues inside its mutation tx (intraday via the #325
+      `inTransaction` hook). Three producers had **no** transaction — intraday's `escalate`,
+      `stranded-work-escalation`, and every cross-zone door — and each was given one here rather
+      than deferred; their mutations are local, which is exactly what CZ-02 asks for. **The earlier
+      "AC1 is only half-satisfiable before #354" finding was too pessimistic and is corrected in the
+      report.** What #354 still owns is CZ-01: `approve` calls `assignTicket` in its own transaction
+      before updating the escalation, which is cross-service atomicity, not a missing enqueue.
+- [x] AC2 — a notify that throws no longer aborts or half-commits the mutation — proved per door by
+      crash injection over the shared rig `test/fixtures/outbox-crash-injection.ts`
 - [x] AC3 — drain delivers, marks `sent_at`, retries to `MAX_OUTBOX_ATTEMPTS`, prunes at 30 d —
       unchanged policy
 - [x] AC4 — day-plan events keep their exact payload and tests
-- [ ] AC5 — the at-most-once claim-then-deliver semantics of #264 are kept and documented —
-      demonstrated for the converted trio (each door's spec drains twice and asserts one delivery)
+- [x] AC5 — the at-most-once claim-then-deliver semantics of #264 are kept and documented — every
+      door's spec drains twice and asserts exactly one delivery
 
 ## Verification
 
