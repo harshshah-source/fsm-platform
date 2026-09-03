@@ -3,6 +3,12 @@ import { AuditService } from '../src/audit/audit.service';
 import { RecoveryService } from '../src/ticketing/recovery.service';
 import type { RecoveryClosedEvent, RecoveryNotifier, RecoveryUnableToCollectEvent } from '../src/ticketing/recovery-notifier';
 import type { RequestActor } from '../src/common/request-actor';
+import {
+  RECOVERY_CLOSED_EVENT_TYPE,
+  RECOVERY_UNABLE_TO_COLLECT_EVENT_TYPE,
+  drainRows,
+} from '../src/scheduling/day-plan-notification-outbox';
+import { EnqueueFailed, failingNotifyEnqueue, inertDayPlanNotifier } from './fixtures/outbox-crash-injection';
 
 /**
  * Issue 36, slice 2 — warehouse receipt auto-close + closure notification + unable-to-collect
@@ -107,5 +113,91 @@ describe('Issue 36 slice 2 — receipt auto-close + unable-to-collect', () => {
 
     const queue = await service.zmDecisionQueue();
     expect(queue.some((r) => r.ticketId === id)).toBe(true);
+  });
+
+  /**
+   * #338 — the recovery notices are outbox rows, delivered through `RecoveryNotifier`.
+   *
+   * Both fired after `withAudit`'s transaction had committed: a crash in the gap closed a recovery
+   * ticket without telling the engineer, or routed one to the ZM decision queue with the ZM never
+   * told — and a throwing port turned a committed write into a 500 for the Warehouse Manager who had
+   * already done the thing.
+   *
+   * Delivered through the port, not flattened into a resolved notice: `SpineRecoveryNotifier`
+   * resolves the ZM by ticket → plant → zone, and `escalatedToOh` deliberately notifies nobody. The
+   * spy above still sees both events — it is now the drain that calls it.
+   */
+  describe('#338 — the recovery notices are outbox rows delivered through the port', () => {
+    const dead: RecoveryNotifier = {
+      recoveryClosed: () => { throw new Error('injected: the recovery push failed'); },
+      unableToCollect: () => { throw new Error('injected: the recovery push failed'); },
+    };
+
+    const rowsOfType = async (eventType: string, ticketId: string) => {
+      const rows = await prisma.dayPlanNotificationOutbox.findMany({ where: { eventType }, orderBy: { id: 'asc' } });
+      return rows.filter((r) => (r.payload as { ticketId?: string } | null)?.ticketId === ticketId);
+    };
+
+    it('a port that throws leaves the ticket CLOSED and the notice retryable', async () => {
+      const id = await collectedTicket();
+      closed.length = 0;
+
+      const service = new RecoveryService(prisma, new AuditService(prisma), dead);
+      expect((await service.confirmWarehouseReceipt(id, wm)).result).toBe('OK');
+      expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId: id } })).status).toBe('CLOSED');
+
+      const rows = await rowsOfType(RECOVERY_CLOSED_EVENT_TYPE, id);
+      expect(rows).toHaveLength(1);
+      const row = rows[0]!;
+      expect(row.sentAt).toBeNull();
+      expect(row.lastError).toMatch(/injected/);
+      expect(closed).toHaveLength(0);
+
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], new Date(), { recovery: notifier });
+      expect(closed.filter((e) => e.ticketId === id)).toHaveLength(1);
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], new Date(), { recovery: notifier });
+      expect(closed.filter((e) => e.ticketId === id)).toHaveLength(1);
+      await prisma.dayPlanNotificationOutbox.deleteMany({ where: { id: row.id } });
+    });
+
+    it('a failed enqueue rolls the warehouse receipt back — no silent close', async () => {
+      const id = await collectedTicket();
+      // Both services over the SAME interfering client: `withAudit` opens the transaction on the
+      // `AuditService`'s own connection, so a proxy given only to `RecoveryService` never sees it
+      // (#325's spec records the same trap).
+      const interfering = failingNotifyEnqueue(prisma);
+      const service = new RecoveryService(interfering, new AuditService(interfering), notifier);
+
+      await expect(service.confirmWarehouseReceipt(id, wm)).rejects.toThrow(EnqueueFailed);
+
+      const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: id } });
+      expect(t.status).toBe('COLLECTED');
+      expect(t.closedAt).toBeNull();
+      expect(await prisma.ticketEvent.count({ where: { ticketId: id, toState: 'CLOSED' } })).toBe(0);
+      expect(await rowsOfType(RECOVERY_CLOSED_EVENT_TYPE, id)).toHaveLength(0);
+    });
+
+    it("unable-to-collect's ZM notice commits with the flag that routes the ticket", async () => {
+      const id = await collectedTicket();
+      // Back to ON_SITE is not a transition this service offers, so the unable-to-collect door is
+      // reached on a fresh ticket taken only as far as ON_SITE.
+      const fresh = (await prisma.ticket.create({
+        data: { workType: 'RECOVERY', status: 'REQUESTED', deviceId: DEV, plantId, companyId, companyTier: 'GOLD', lastStateChangedAt: new Date() },
+      })).ticketId;
+      await service.scheduleRecovery(fresh, SE_ID, zm);
+      await service.markOnSite(fresh, se);
+
+      const interfering = failingNotifyEnqueue(prisma);
+      const failing = new RecoveryService(interfering, new AuditService(interfering), notifier);
+      await expect(
+        failing.markUnableToCollect(fresh, { reasonCode: 'DEVICE_MISSING' }, se),
+      ).rejects.toThrow(EnqueueFailed);
+
+      const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId: fresh } });
+      expect(t.unableToCollectReason).toBeNull();
+      expect(t.unableToCollectAt).toBeNull();
+      expect(await rowsOfType(RECOVERY_UNABLE_TO_COLLECT_EVENT_TYPE, fresh)).toHaveLength(0);
+      expect(id).toBeTruthy();
+    });
   });
 });

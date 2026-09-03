@@ -5,6 +5,11 @@ import { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
 import {
+  drainProducerRows,
+  queueRecoveryClosed,
+  queueRecoveryUnableToCollect,
+} from '../scheduling/day-plan-notification-outbox';
+import {
   LoggingRecoveryNotifier,
   RECOVERY_NOTIFIER,
   type RecoveryNotifier,
@@ -161,11 +166,19 @@ export class RecoveryService {
         // #178 — the device is physically back in the warehouse; there is nothing left to collect, so
         // the assignment ends with the ticket rather than outliving it as a phantom stop.
         await retireAssignmentOnClosure(tx, [ticketId], now);
-        return row;
+        // #338 — the SE's notice commits with the closure it announces. It used to fire after this
+        // transaction, so a crash in the gap closed a recovery ticket and told nobody, and a throwing
+        // port turned a committed close into a 500 for the WM who had already done the thing.
+        const outboxId = await queueRecoveryClosed(tx, {
+          ticketId,
+          deviceId: ticket.deviceId,
+          seId: ticket.assignedSeId,
+        });
+        return { row, outboxId };
       },
     );
-    await this.notifier.recoveryClosed({ ticketId, deviceId: ticket.deviceId, seId: ticket.assignedSeId });
-    return { result: 'OK', ticket: toView(updated) };
+    await drainProducerRows(this.prisma, { recovery: this.notifier }, [updated.outboxId], now);
+    return { result: 'OK', ticket: toView(updated.row) };
   }
 
   /**
@@ -198,11 +211,20 @@ export class RecoveryService {
           data: { unableToCollectReason: input.reasonCode, unableToCollectAt: now },
         });
         await tx.ticketEvent.create({ data: { ticketId, fromState: ticket.status, toState: 'ON_SITE', reasonCode: input.reasonCode, ...eventActor(actor), at: now } });
-        return row;
+        // #338 — the ZM's "decision needed" notice commits with the flag that routes the ticket into
+        // their queue. Separately, they were two facts that could disagree: a flagged ticket sitting
+        // in a queue nobody had been told to look at.
+        const outboxId = await queueRecoveryUnableToCollect(tx, {
+          ticketId,
+          deviceId: ticket.deviceId,
+          seId: ticket.assignedSeId,
+          reasonCode: input.reasonCode,
+        });
+        return { row, outboxId };
       },
     );
-    await this.notifier.unableToCollect({ ticketId, deviceId: ticket.deviceId, seId: ticket.assignedSeId, reasonCode: input.reasonCode });
-    return { result: 'OK', ticket: toView(updated) };
+    await drainProducerRows(this.prisma, { recovery: this.notifier }, [updated.outboxId], now);
+    return { result: 'OK', ticket: toView(updated.row) };
   }
 
   /**
