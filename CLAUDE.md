@@ -26,6 +26,13 @@ See `docs/agents/triage-labels.md`.
 Single-context. Authority order is `CONTEXT.md` → PRD → workflow → backend design docs → ADRs
 (ADRs are historical only). `docs/agents/domain.md` owns the full hierarchy, including UI authority.
 
+### Parallel rounds
+
+Several slices can be built at once by one agent each. `docs/agents/parallel-execution.md` owns the
+rules — above all that **backend e2e runs cannot be parallelised on this box** (one `fsm_test`
+database, a role that cannot `CREATE DATABASE`), so implementation is concurrent and verification is
+serialised behind a mutex. `docs/agents/parallel-agent-brief.md` is the per-agent brief template.
+
 ### Workflow
 
 Strategic HITL policy (AFK by default; stop only for architecture / business-rule conflict /

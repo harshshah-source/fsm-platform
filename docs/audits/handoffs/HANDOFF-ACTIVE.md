@@ -1,12 +1,11 @@
-# HANDOFF — module-gaps backlog, next parallel round — 2026-09-03
+# HANDOFF — module-gaps backlog, Round 2 ready to launch — 2026-09-03
 
 Auto-handoff: **ARMED**. Disarm with `/autohandoff off` when the run finishes, and rename this file
 `HANDOFF-<issue>-<date>.md` in place — that folder is the audit trail, nothing moves to `docs/archive/`.
 
 Status: active
-Branch: `feat/autoplant-integration` · working tree **clean** (4 untracked junk files, see below)
-This session's commits: `615f4d8` `88d81e5` `f29725e` `04c6b6d` `80418c3` `1863f5e` `b3c8396`
-`dd5da2f` `7ebb5e0` `f22d227` `bc1eef2` (+ earlier `f686e23` `0f323d5` `a50e4b3`)
+Branch: `feat/autoplant-integration` · working tree **clean**
+Last commit: `3d74eff`
 
 ## The job
 
@@ -16,187 +15,199 @@ findings corrected or refuted (**where §1 disagrees with the survey brief, §1 
 wave/dependency table, §4 the per-slice detail, §7 the ten operator decisions and the default each
 slice assumes. `INDEX.md` section **P12** carries the same table with links, hashes and status.
 
-One slice at a time (or one agent per file-disjoint slice, see below), red-first (`/tdd`), each with a
-`docs/progress/<issue>.md` report, an INDEX row update and a session-log line.
+**How to run several slices at once is documented in `docs/agents/parallel-execution.md`.** Read it
+before launching anything — it carries the single-test-database constraint, the git discipline, the
+mutex script (with the two bugs it has already had), and the agent-brief checklist.
 
 ### Done — 15 of 31
 
-`#336` `#338` `#339` `#340` `#341` — the fixtures, the durable outbox, and the whole acting chain
-(gate → attribution → write-door scope).
-`#342` `#344` `#345` `#346` `#348` `#350` `#352` `#354` `#359` `#362` — one parallel round of ten.
+`#336` `#338` `#339` `#340` `#341` — fixtures, the durable notification outbox, and the whole acting
+chain (gate → attribution → write-door scope).
+`#342` `#344` `#345` `#346` `#348` `#350` `#352` `#354` `#359` `#362` — one parallel round of ten,
+verified together: **backend 466 files / 2630 tests, 461 passed, 3 skipped, zero failures; admin
+129 files / 928 tests, all passing.**
 
-Every one has a report in `docs/progress/`. **Read the report, not this file, for a slice's detail** —
-each owns its decisions and its follow-ups.
+**Read each slice's `docs/progress/<n>-*.md` report for its detail** — each owns its decisions,
+its defaults and its follow-ups. Do not re-derive them from the diff.
 
-## Next step
+---
 
-**The operator's last instruction was: "dont launch new issues , after these are done, then wait".**
-The ten finished and were committed. **Do not start anything without asking.** When the operator says
-go, the analysis below is done and current — no new dependency work is needed.
+## Next step — launch Round 2
 
-**Six slices are ready right now.** None is blocked by a dependency; each was held back only because it
-collided on a file with a slice in the last round, and those slices are now committed:
+Six agents, file-disjoint, all dependencies satisfied. This grouping is already computed from
+plan §4's "Code areas"; **spot-check each list against the tree before launching**, because the plan
+has been wrong about paths before (see Gotchas).
 
-| slice | was blocked on | the file they shared |
+| slice | what it is | owns (from plan §4 — verify) |
 |---|---|---|
-| #337 push delivery exit (FCM) | #354 | `notifications/notification.service.ts` |
-| #356 intra-day queue hygiene | #354 | `notifications/notification.service.ts` |
-| #347 report freshness stamps | #346 | `reports/reports.service.ts`, `api/reports.ts`, `ReportsPage.tsx` |
-| #357 verification integrity | #346, #348 | `reports.service.ts:545-556`, `prisma/schema.prisma` |
-| #360 SE poll contract | #345, #352 | day-plan outbox/notifier, `packages/shared/src/index.ts` |
-| #343 audit writers | #348 | `ingestion/snapshots.controller.ts` |
+| **#343** | Audit writers: leave, planner, ingestion triggers, voucher export, settings, VU pause/resume | `engineers/leave-request.{service,controller}.ts`, `planner/se-planner.controller.ts`, the ingestion trigger routes, `exports/exports.controller.ts`, `settings/settings.service.ts`, `ticketing/vehicle-unavailability.{service,controller}.ts` + their e2e specs |
+| **#347** | Report freshness stamps + auto-escalations cube (absorbs **#333**) | `reports/reports.service.ts`, `api/reports.ts`, `ReportsPage.tsx`, `RootCauseAnalyticsPage.tsx`, `SystemEfficiencyPage.tsx`, `ZmScorecardPage.tsx` + the four report e2e specs |
+| **#353** | Inventory ledger closure: dispute restore, recovery receipt, ZM dispute view | `inventory/shadow-use.{service,controller}.ts`, `ticketing/recovery.service.ts`, `inventory/warehouse-stock.service.ts`, `api/shadowUse.ts`, the ZM disputes surface |
+| **#355** | Cross-zone page completion: flag from ticket, re-escalate, modal, deferred resurfacing, history | `cross-zone/*.{service,controller,dtos}.ts`, `business-sweep-scheduler.service.ts` (`crossZoneTick` only), `CrossZonePage.tsx`, `api/crossZone.ts`, `pages/tickets/TicketDetailDrawer.tsx` |
+| **#356** | Intra-day queue hygiene: bounded reads, refresh, labels, dead routes (absorbs **#331**) | `intraday/intraday-insertion.{service,controller}.ts`, `scheduling/same-day-update.service.ts`, `stranded-work-escalation.service.ts`, `scheduling/intraday-updates.controller.ts`, `api/intradayInsertions.ts`, `api/intradayUpdates.ts`, `IntradayQueuePage.tsx`, `api/schedules.ts`, `notifications/notification.service.ts` |
+| **#360** | SE poll contract: paginated tickets, VU-deferred visibility, readable day-plan notices | `me-tickets/me-tickets.controller.ts` + query service, `scheduling/day-plan-notifier.ts`, `scheduling/day-plan-notification-outbox.ts`, `packages/shared/src/index.ts` |
 
-**#337 still needs FCM credentials** (external provisioning) — the seam builds and is testable; only
-live delivery is blocked.
+**Why these six and not more.** Every remaining slice with satisfied dependencies is in this list or
+conflicts with something in it:
 
-**Newly unblocked by the last round, second wave:** #349 and #351 (needed #348), #353 and #366
-(needed #352), #355 (needed #354). Still blocked: #358 (needs #357), #361 (needs #337), #363 (needs
-#343), #364 (needs #347), #365 (needs #346 — satisfied — **plus a design stop**), #366 also has a
-design stop.
+- **#337** (push/FCM) shares `notification.service.ts` with **#356** → next round. It also needs FCM
+  credentials, which are external; the seam builds and is testable without them, live delivery is not.
+- **#357** (verification integrity) shares `reports.service.ts:545-556` with **#347** and needs
+  `prisma/schema.prisma` → next round.
+- **#349** (Integration Health page) shares the integration-health backend with **#343**'s trigger
+  audits, and `api/snapshots.ts` with **#351** → next round.
+- **#351** (dashboard fidelity) shares `api/snapshots.ts` with **#349** → next round.
+- **#366** shares `packages/shared` with **#360** and `schema.prisma` with **#357**, *and* carries a
+  design stop → not before an operator decision.
 
-**Do not re-derive the overlap matrix from wave numbers.** The plan's §3 says "within a wave, slices
-are file-disjoint unless a dependency is listed" and **that is not true** — #346/#347/#357 are three
-waves apart and share `reports.service.ts`. Build it from §4's "Code areas" plus a real `git grep`.
+### How to launch Round 2
+
+1. Recreate `.scratch/locks/backend-test.sh` from `docs/agents/parallel-execution.md` §3 and
+   `chmod +x` it. Verify it round-trips: `.scratch/locks/backend-test.sh echo ok`.
+2. Copy `docs/agents/parallel-agent-brief.md` to `.scratch/PARALLEL-BRIEF.md` and refresh its
+   in-flight specifics (dates, which slices are concurrent).
+3. Launch the six agents **in one message** so they run concurrently. Each prompt is short:
+
+   > Read `/c/fsm-platform-backup/.scratch/PARALLEL-BRIEF.md` FIRST — project rules, concurrency rules
+   > (no state-mutating git; backend tests only through the lock script), gotchas. Then implement
+   > **issue #N — <title>**. Your brief: `docs/module-gaps/IMPLEMENTATION-PLAN.md` §4 slice N, plus
+   > `.scratch/fsm-platform-v1/issues/N-*.md`. **Files you own — do not edit anything else:** <list>.
+   > <one or two sentences on the slice's real point, and anything the plan gets wrong about it.>
+   > Work red-first. Backend specs via
+   > `/c/fsm-platform-backup/.scratch/locks/backend-test.sh npx vitest run test/...`; admin tests
+   > directly.
+
+   Give each agent the *reason* the slice exists, not just its file list — the reports that came back
+   best were the ones whose prompt said what the defect actually costs an operator.
+4. As each reports: check its paths with `git status --porcelain -- <paths>`, read the diff for hunks
+   that are not that slice's, then commit by explicit path. Do not batch several slices into one
+   commit.
+5. When all six are in: run the full backend suite once with nothing else running, then the admin
+   suite. Then write the INDEX P12 rows, the session-log line and the SYSTEM-STATE update — **the
+   orchestrator owns those three files, never the agents.**
+
+### Round 3, once Round 2 lands
+
+**#337** (after #356 frees `notification.service.ts`), **#357** (after #347 frees `reports.service.ts`;
+it owns `schema.prisma` that round), **#349** (after #343), then **#351** (after #349 frees
+`api/snapshots.ts`). Those four are mutually disjoint apart from that ordering.
+
+### Round 4, dependency-gated
+
+**#358** needs #357 · **#361** needs #337 · **#363** needs #343 · **#364** needs #347 ·
+**#365** needs #346 (satisfied) **plus a design stop** · **#366** needs #352 (satisfied) **plus a
+design stop**.
+
+### Two things Round 2 should fold in
+
+Small debts the last round left because the file had no owner that round. Give each to the agent that
+owns the file:
+
+- **#355** — fold `direction` into `CrossZoneRow` in `api/crossZone.ts` (`CrossZonePage` declares a
+  local intersection type meanwhile and says why).
+- **#351** — lift #348's new snapshot fields (`overdue`, `silenceMinutes`, `expectedCadenceMinutes`,
+  `overdueAfterMinutes`, `schedulerPaused`) out of `SnapshotBanner`'s local declaration into
+  `api/snapshots.ts`. **#349** needs the same for `stale`/`staleAfterMinutes`/`schedulerEnabled` in
+  `api/integrationHealth.ts`.
+
+---
 
 ## Standing instructions from the user
 
 Quoted, not paraphrased:
 
-- **"dont launch new issues , after these are done, then wait /stop"** — the most recent, and it
-  governs. The ten completed; nothing further was started.
 - **"Do NOT parallelize blindly by wave number. Use BOTH: the explicit dependency graph … and actual
-  file ownership/overlap in the repository"**, and *"uncertain ownership → treat as conflicting and
-  serialize"*, and *"If the current environment cannot safely isolate concurrent work, reduce
-  concurrency rather than risking the repository."*
+  file ownership/overlap in the repository"**; *"uncertain ownership → treat as conflicting and
+  serialize"*; *"If the current environment cannot safely isolate concurrent work, reduce concurrency
+  rather than risking the repository."*
 - **"The objective is maximum safe parallelism, not maximum simultaneous agents."**
+- **"dont launch new issues , after these are done, then wait"** — this governed the *previous* round
+  and was honoured; it is why Round 2 is planned but unstarted. The operator then asked for this
+  handoff so the next session "knows what to build in parallel", so Round 2 is the intended next move.
+  Confirm before launching if anything above looks stale.
 - **"continue and use /autohandoff on"** — the loop is armed.
-- **"start implementation and use /autohandoff on"** — given after being shown the tree carried ~246
-  uncommitted files from a parallel scheduler-forensics run. The user reaffirmed. That run has since
-  committed everything; the tree is clean now.
 - **"use option 3, then finish 336 and continue"** — the Platinum fixture is a scoped, expiring tier
   override (#157), never a re-tiered company.
-- **"option 1"** — on #338's migration: hand-write it and rely on the suite, flagging that the drift
-  gate was not run. **Standing answer for any later migration in this run** (#348 used it).
+- **"option 1"** — on a migration: hand-write it and rely on the suite, flagging that the drift gate
+  was not run. **Standing answer for any migration in this run** (#338 and #348 both used it).
 - **"commit it and start 338"** — commits are wanted per slice, **explicit paths only**.
 - From the plan session, still live: *"Analyze the `docs/module-gaps/` results against the **current
   codebase** … verify every important finding against the current code before creating work. Do not
-  blindly implement the report."* **This keeps paying** — see "What the premise got wrong" below.
+  blindly implement the report."*
 - Treat the AFK policy in `CLAUDE.md` as live: stop only for architecture / business-rule conflict /
   backlog-ownership / external-access / security.
 - **Handoffs live in `docs/audits/handoffs/HANDOFF-ACTIVE.md`.** There is only ever one.
 
 ## State of the tree
 
-- **Everything is committed.** `git status` shows only 4 untracked files, none of them this work's:
+- **Everything is committed**; `git status` shows only four untracked files, none of them this work's:
   `.scratch-backend-run.json`, `apps/backend/_wh_evidence.mjs`, `audit/analysis-results.xlsx`,
-  `docs/SUMMARYReport11thAug.xlsx`. Leave them or bin them; they are not part of any slice.
-- **`.scratch/` is partly gitignored.** `.scratch/fsm-platform-v1/` is tracked; `.scratch/locks/` and
-  `.scratch/PARALLEL-BRIEF.md` are **not** — the parallel tooling below lives only on this disk.
-- **Verification of the integrated tree:** the session-log line in `INDEX.md` records it, and the raw
-  log is `.scratch/backend-suite-parallel.log`. Per-slice results are in each `docs/progress/` report.
+  `docs/SUMMARYReport11thAug.xlsx`.
+- **`.scratch/` is partly gitignored.** `.scratch/fsm-platform-v1/` is tracked; **`.scratch/locks/`
+  and `.scratch/PARALLEL-BRIEF.md` are not** — recreate the mutex from
+  `docs/agents/parallel-execution.md` §3 and the brief from §4.
+- Raw logs from the last verification: `.scratch/backend-suite-parallel.log`.
 - **Half-done / stubbed:** nothing.
 
-## How the parallel round was run (repeat this, with the fixes)
+## Decisions taken that are not recoverable from the diff
 
-**The concurrency limit is the database, not the agents.**
+Each slice's `docs/progress/` report owns its own. The cross-cutting ones:
 
-- The `fsm` Postgres role is **not superuser and cannot `CREATE DATABASE`** (verified, not assumed).
-  There is exactly one `fsm_test`, and `test/global-setup.ts` **truncates and re-seeds it on every
-  run**. Two concurrent backend suites destroy each other, and the symptom — dozens of files failing
-  on `401 Unauthorized` at login — is indistinguishable from a real regression. This cost three
-  wasted suite runs across the session before it was understood.
-- `TEST_DATABASE_URL` *does* override the derived URL (`test/test-db-url.ts`), so per-agent databases
-  would work if the role could create them. Per-**schema** isolation is half-possible (`CREATE SCHEMA`
-  succeeds) but **PostGIS is installed in `public`**, so migrations would need search-path surgery
-  that was not verified. Not attempted.
+- **Acting is finished as a chain and is now load-bearing.** #339 gates the `X-Acting-As-Zone` header
+  once per request (a CSM only when the cascade names them; an OH anywhere; an unknown or non-numeric
+  zone is a 400, never a silent pan-India read). #340 makes every write attributed. #341 makes acting
+  actually *narrow* a manager write door. Two sweeps enforce it: `test/acting-scope-route-sweep.spec.ts`
+  fails any manager write route that hand-builds a scope, and `apps/admin/test/acting-header-builder.test.ts`
+  fails any admin client that does not authenticate through `authHeaders()`.
+- **Every post-commit notification is a durable outbox row enqueued inside the producing
+  transaction** (#338). New producers use `queueNotification` inside their own transaction; there is
+  one pattern to copy and `docs/progress/338-durable-notification-outbox.md` explains the two row
+  shapes and why a port is not flattened into a resolved notice.
+- **A pin's allowlist is a list of reasons, checked from both ends.** #340/#341/#342's sweeps each
+  assert that every allowlist entry still names a real, still-offending target — a stale entry is a
+  suppression nobody is reading, and it silently covers the next thing that takes the same name.
 
-What was done instead, and it worked:
+## Known follow-ups (none blocking)
 
-1. **File isolation by strict per-agent ownership**, declared in each agent's prompt.
-2. **Agents ran NO state-mutating git** — no `add`, `commit`, `checkout`, `stash`, `reset`. They left
-   work in the tree and reported their exact paths; the orchestrator committed each slice by explicit
-   path after inspecting its diff. This removed every index-lock race and every cross-staging risk.
-3. **The one shared resource serialised by an atomic `mkdir` mutex**, `.scratch/locks/backend-test.sh`
-   (untracked — recreate it if it is gone). Admin tests need no lock (jsdom, no DB).
-4. A shared brief at `.scratch/PARALLEL-BRIEF.md` (untracked) carried the rules so prompts stayed short.
-
-**The mutex had two bugs and both cost real test runs. If you rebuild it, avoid both:**
-
-- **v1 failed OPEN**: `$(stat -c %Y "$LOCK" || echo 0)` — any transient failure (including the holder
-  `rmdir`-ing between the `-d` test and the `stat`) made a fresh lock look decades old, so **every
-  waiter broke the lock it was waiting on**. One agent lost two suites to it. Break a lock only when
-  you *positively* know its age.
-- **The fail-safe fix then failed CLOSED**: a lock abandoned between `mkdir` and its first write has
-  no age at all, and "unknown means fresh" deadlocked waiters for the full 45-minute fallback. One
-  agent sat 25 minutes behind an empty lock directory. A contentless lock (no `owner`, no `epoch`)
-  older than a 60-second grace is now cleared.
-
-**Ownership assignment was right but not sufficient.** Two things a plan-derived matrix misses:
-
-- **Shared leaf files with no owner in the plan.** #346 had to touch `charts/TrendChart.tsx` (a gap
-  cannot be drawn without a nullable datum) and `cron-tick-claim-wiring.e2e-spec.ts`; #352 had to
-  touch `app.module.ts` and `inventory.module.ts` (a new controller cannot be reached unregistered).
-  Both disclosed; both minimal. **Budget for module registration and shared chart/util files.**
-- **Two agents can legitimately need one page.** #346 and #350 both needed `ManagerDashboard.tsx`;
-  #346's edit was swept into #350's commit (`f29725e`) because the orchestrator committed by path
-  without checking for a second author. Harmless here — both green — but check `git diff` per file for
-  unexpected hunks before staging, the way the #340 pass did.
-
-## What the premise got wrong (the verify-first rule earning its keep)
-
-Four of ten slices found the issue file or plan wrong about the code. Expect this and check first:
-
-- **#342** — `entity_type` is written three ways (`'ticket'` 16 sites, `'tickets'` 15, `'TICKET'` 1)
-  and the per-ticket trail hard-filtered one. It had been **dropping about half its rows**. Readers
-  now normalise; **normalising the 32 writers needs a backfill decision on an append-only table and is
-  NOT done**.
-- **#346** — the zero-window uptime rendered **100**, not 0 (flattering, so nobody investigates), and
-  the unguarded maps are in `ManagerDashboard.tsx:86,92`, not `api/reports.ts`.
-- **#348** — there was **no age threshold anywhere**; `ageMinutes` was computed and compared with
-  nothing, so a 21-hour-old snapshot drew the same line as a two-minute-old one.
-- **#354** — plan §4 is **stale**: #338 already landed CZ-02, so only CZ-01 remained.
-- **#344** — the `?since=` both the issue and §4 promise "from #165" does not exist; #165 is unstarted.
-- **#352** — the "active rows" the brief asks `GET /api/components` to return have **no column**;
-  `ComponentMaster` has only `name`, `category`, `serial_tracked`.
-
-## Known follow-ups left by this round (none blocking)
-
-- **`audit_logs` has no index on `created_at`** — the sort is on every ledger query, the actor filter
-  only on some. Recommended when someone owns `schema.prisma`: `(created_at DESC, id DESC)`, then
+- **`audit_logs` has no index on `created_at`** — the ledger sort is on every query, the actor filter
+  only on some. When someone owns `schema.prisma`: `(created_at DESC, id DESC)` first, then
   `(actor_id, created_at)`, `(action, created_at)`, and an expression index on
   `(lower(entity_type), entity_id)`. Not a correctness or latency problem at `LIMIT <= 200` today.
-- **`api/snapshots.ts`** should lift #348's new fields out of `SnapshotBanner`'s local declaration
-  (**#351**); **`api/integrationHealth.ts`** needs `stale`/`staleAfterMinutes`/`schedulerEnabled`
-  (**#349**); **`api/crossZone.ts`** should fold `direction` into `CrossZoneRow` (**#355**);
-  **`api/vouchers.ts`** still types `apiMarkVouchersPaid` without `reason`/`failed[]` (whoever owns it
-  next). Each page declares the type locally meanwhile and says why.
-- **#362 left a real residual**: revocation kills the refresh token, but an **already-minted access
-  token stays valid until it expires**. Closing it needs a token-version claim in `AuthGuard`.
+- **`entity_type` is written three ways** — `'ticket'` (16 sites), `'tickets'` (15), `'TICKET'` (1).
+  Both audit readers now normalise; **normalising the 32 writers needs a backfill decision on an
+  append-only table and was deliberately not taken.**
+- **#362's residual:** revoking refresh tokens ends the session's ability to renew, but an
+  **already-minted access token stays valid until it expires**. Closing that needs a token-version
+  claim in `AuthGuard`.
 - **#345 has no post-commit drain** — `PlantDeactivationModule` owns no `DayPlanNotifier`, so the
-  2-minute sweep delivers. Latency, not durability.
+  2-minute outbox sweep delivers. Latency, not durability.
+- **`api/vouchers.ts`** still types `apiMarkVouchersPaid` without `reason`/`failed[]` and
+  `VoucherActivityCheck` without `warnings` (#359 did not own the file).
 - **A pre-existing drawer crash, found and deliberately not fixed:** `TicketDetailDrawer.tsx:537`
-  reads `attempts.attempts.length` and throws on another shape (#244, present at HEAD).
+  reads `attempts.attempts.length` and throws on another shape (#244, present at HEAD). **#355 owns
+  that file in Round 2** and is the natural place to fix it.
 - **`docs/ui/desktop/approved-designs/README.md`** should record the audit-ledger page as an
-  approved-design gap (#342's ask; the file had no owner that round).
+  approved-design gap (#342's ask).
 
 ## Dead ends — do not retry
 
-- **NEVER run two backend suites at once.** See above. Check for a live `node` process first.
-- **Do not edit `src/` while a suite runs** — vitest transforms each test file as it loads it, so
-  later files pick up half-finished edits and the run means nothing.
+- **NEVER run two backend suites at once** — `docs/agents/parallel-execution.md` §1. Check for a live
+  `node` process first.
+- **Do not edit `src/` while a suite runs.** Vitest transforms each test file as it loads it, so later
+  files pick up half-finished edits and the run means nothing.
 - **Do not `git add` a directory.** `git add apps/backend/test/` once staged ~60 files from another
-  session. Stage individual paths.
+  session. Stage individual paths, always.
 - **Converting every caller of a function does not exercise a unit spec of the function itself.** #339
   changed `resolveManagerScope`'s signature, converted both decorators, and left `manager-scope.spec.ts`
   on the old shape — five tests throwing, invisible to every acting e2e. Grep `test/` for the
   **symbol** when you change a signature.
-- **Do not defer an enqueue (or a gate) because "there is no transaction to enqueue into".** Wrong
-  three times in #338 — the mutations were local and a local transaction was available.
+- **Do not defer an enqueue (or a gate) because "there is no transaction to enqueue into".** That
+  reading was wrong three times in #338 — the mutations were local and a local transaction was there.
 - **Do not hand an interfering Prisma proxy only to the service under test when the write goes through
   `withAudit`** — it opens its transaction on the **`AuditService`'s own** client.
-- **Do not reuse `test/fixtures/outbox-crash-injection.ts` for a day-plan producer** —
-  `failingNotifyEnqueue` deliberately lets day-plan rows through (#338 needed that), so it injects
-  nothing. #345 used a local proxy.
+- **Do not reuse `test/fixtures/outbox-crash-injection.ts` for a day-plan producer.**
+  `failingNotifyEnqueue` deliberately lets day-plan rows through (#338 needed exactly that), so it
+  injects nothing. #345 used a local proxy instead of widening the shared fixture.
 - **Do not regenerate `prisma/drift-baseline.txt`** (99 lines, must not grow).
 
 ## Gotchas
@@ -206,38 +217,28 @@ Four of ten slices found the issue file or plan wrong about the code. Expect thi
 - **The Bash tool truncates a long heredoc**; write files over ~120 lines with the Write tool.
 - **`print()` of non-ASCII fails on this box** (cp1252 stdout) *after* the write already happened —
   check the file before redoing an edit; a blind retry can double-apply.
-- **A backgrounded command piped through `tail` writes nothing until it exits**, and its task-output
+- **A backgrounded command piped through `tail` writes nothing until it exits** and its task-output
   file stays empty. Redirect to a log file directly (`> log 2>&1`).
 - **The generated Prisma client is TypeScript** (`src/generated/prisma/client.ts`), so a throwaway
   `node` script cannot require it. Query the test DB from a spec, not a script.
 - **`apps/backend/src/generated/` is gitignored** — run `npx prisma generate` after a schema edit.
 - **The schema is at `apps/backend/prisma/schema.prisma`**, not `prisma/schema.prisma`.
 - **The admin nav is `apps/admin/src/components/shell/nav.ts`** — `src/lib/nav.ts` does not exist,
-  whatever the plan says.
-- **e2e fixture logins**: `zm.north@fsm.test`, `csm@fsm.test`, `ops.head@fsm.test`, `wm@fsm.test`,
+  whatever plan §4 says.
+- **e2e fixture logins:** `zm.north@fsm.test`, `csm@fsm.test`, `ops.head@fsm.test`, `wm@fsm.test`,
   `se.north@fsm.test`, password `correct-password`. There is no `oh@fsm.test`.
 - **`OPEN` is TROUBLESHOOT-only** (`tickets_work_type_status`, #309) — invalid fixture states cost
   #350 a red cycle.
 - Known-flaky, neither broken: `dispatch-crashed-zone-recovery`, `global-guard-validation` (#184).
-  Under parallel load several admin files time out and pass in isolation; re-run before believing one.
-- **Acting is gated (#339), attributed (#340) and narrowing (#341).** A manager write door takes
-  `@CurrentScope()`/`@CurrentActor()`, never `{ role: user.role, zoneId: user.zone_id }`;
-  `test/acting-scope-route-sweep.spec.ts` fails any new door that hand-builds a scope, and
-  `apps/admin/test/acting-header-builder.test.ts` fails any admin client not going through
-  `authHeaders()`.
-
-## Remaining acceptance criteria
-
-All fifteen landed slices have their ACs ticked in their issue files, each with a report named in the
-`Status:` line. #341's AC1 and #340's AC1 were each met with a deliberately narrowed reading, recorded
-in the issue file at the AC itself. Nothing is half-met.
+  Under parallel load several admin files time out and pass alone — re-run before believing one.
 
 ## Open questions / HITL
 
-- **Plan §7 holds ten operator decisions**, each with the default its slice assumes. Live ones for the
-  next round: **VCH-08** (un-pay — #359 did not build it), **AC-03** (reactivation restores nothing —
-  #345 kept the default), **E-15/E-17**, **INTRA-G4**, **INV-G2** (#353), **AA-06** (not built).
-- **#365 and #366 carry design stops** in the plan and should not start without one.
+- **Plan §7 holds ten operator decisions**, each with the default its slice assumes. Live for the next
+  rounds: **INV-G2** (#353 — whether a recovery receipt increments zone warehouse stock or only writes
+  a transaction row; default: transaction row only), **VCH-08** (un-pay — not built), **AC-03**
+  (reactivation restores nothing — kept), **E-15/E-17**, **INTRA-G4**, **AA-06** (not built).
+- **#365 and #366 carry design stops** and should not start without one.
 - **#337 needs FCM credentials** — external provisioning.
 - **The request-scoped acting guard** (#339) was raised to the operator and never answered; it was
   built on plan §7's default. `common/guards/acting-context.guard.ts` is the file to change if the
