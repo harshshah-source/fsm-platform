@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { SeCoverageService } from '../src/shared-pool/se-coverage.service';
 import { TroubleshootSubmissionService } from '../src/ticketing/troubleshoot-submission.service';
+import { VerificationQueryService } from '../src/verification/verification-query.service';
 import { VerificationService } from '../src/verification/verification.service';
 
 /**
@@ -34,6 +35,7 @@ describe('#148 — verification does not expire on stale telemetry', () => {
   let prisma: PrismaService;
   let verify: VerificationService;
   let submit: TroubleshootSubmissionService;
+  let query: VerificationQueryService;
 
   let zoneId: bigint;
   let companyId: bigint;
@@ -94,6 +96,7 @@ describe('#148 — verification does not expire on stale telemetry', () => {
     await prisma.onModuleInit();
     verify = new VerificationService(prisma);
     submit = new TroubleshootSubmissionService(prisma, new SeCoverageService(prisma));
+    query = new VerificationQueryService(prisma);
 
     zoneId = (await prisma.zone.create({ data: { name: 'Z-vs-' + NS } })).zoneId;
     companyId = (
@@ -202,6 +205,103 @@ describe('#148 — verification does not expire on stale telemetry', () => {
     expect(res.pending).toBe(1);
     const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
     expect(ticket.status).toBe('VERIFICATION_PENDING');
+  });
+
+  /**
+   * #358 — the same precondition, read back on the review surface.
+   *
+   * `windowExpired` above will not expire a window whose watermark is behind the submission, so the
+   * review page's 24-hour countdown for that window runs to zero and keeps going. The page printed
+   * "overdue" for it, which tells a reviewer the SE missed a deadline; the truth is that the ingestion
+   * pipeline stalled. Those are opposite actions — chase the engineer, or chase the pipeline — so the
+   * read surface has to carry the distinction rather than let the client infer it from a clock.
+   *
+   * `stalled` is deliberately the SAME predicate the sweep guards on (telemetry has not advanced past
+   * `startedAt`), so "this window cannot conclude" has one definition on the platform: what the page
+   * says is exactly what the sweep will do.
+   */
+  const reviewRowFor = async (ticketId: string) => {
+    const rows = await query.review({ companyId }, { role: 'OPERATIONS_HEAD', zoneId: null });
+    const row = rows.find((r) => r.ticketId === ticketId);
+    if (!row) throw new Error(`no review row for ${ticketId}`);
+    return row;
+  };
+
+  it('#358 — a window the sweep cannot expire reads STALLED, with the watermark it is stuck behind', async () => {
+    const { ticketId } = await makeTicket();
+    await submitForm(ticketId);
+    await setWatermark(HOURS(-1));
+    await verify.runVerification(HOURS(25), { ticketIds: [ticketId] });
+
+    const row = await reviewRowFor(ticketId);
+
+    expect(row.stalled).toBe(true);
+    expect(row.telemetryAsOf?.toISOString()).toBe(HOURS(-1).toISOString());
+  });
+
+  it('#358 — the same window with an advanced watermark is NOT stalled', async () => {
+    const { ticketId } = await makeTicket();
+    await submitForm(ticketId);
+    await setWatermark(HOURS(26));
+    await verify.runVerification(HOURS(23), { ticketIds: [ticketId] });
+
+    const row = await reviewRowFor(ticketId);
+
+    expect(row.stalled).toBe(false);
+    expect(row.telemetryAsOf?.toISOString()).toBe(HOURS(26).toISOString());
+  });
+
+  /**
+   * A concluded run is never stalled, however old the watermark is. The flag answers "can this window
+   * still reach a verdict" — a run that already has one is answered by its outcome, and calling it
+   * stalled would put a pipeline warning on a row nobody is waiting on.
+   */
+  it('#358 — a run that already concluded is never stalled, even on a stale watermark', async () => {
+    const { ticketId } = await makeTicket();
+    await submitForm(ticketId);
+    await setWatermark(HOURS(26));
+    expect((await verify.runVerification(HOURS(25), { ticketIds: [ticketId] })).failed).toBe(1);
+    await setWatermark(HOURS(-1)); // ingestion stops AFTER the verdict
+
+    const row = await reviewRowFor(ticketId);
+
+    expect(row.outcome).toBe('FAILED_VERIFICATION');
+    expect(row.stalled).toBe(false);
+  });
+
+  /**
+   * #358 AC4 — de-escalate is shown only on ESCALATED rows, and the page can only know that if the
+   * read surface says so. The predicate has to be the ticket status the `deescalate` door itself
+   * guards on (`status !== 'ESCALATED'` → 409), so the button is visible exactly when the door will
+   * accept it — not "there is an escalation reason", which is a consequence rather than the guard.
+   */
+  it('#358 — review and fraud-flag rows carry the ticket status the de-escalate door guards on', async () => {
+    const { ticketId, deviceId } = await makeTicket();
+    await submitForm(ticketId);
+    const submission = await prisma.troubleshootingSubmission.findFirstOrThrow({ where: { ticketId } });
+    await prisma.verificationRun.create({
+      data: {
+        ticketId,
+        submissionId: submission.submissionId,
+        deviceId,
+        startedAt: T0,
+        phase: 'PHASE_1_PASS',
+        outcome: 'FAILED_VERIFICATION',
+        outcomeAt: HOURS(25),
+        fraudFlag: true,
+        firstPingDistanceMeters: 54_213,
+        escalationReason: 'SE GPS 54 km from the device',
+      },
+    });
+    await prisma.ticket.update({ where: { ticketId }, data: { status: 'ESCALATED' } });
+
+    const row = await reviewRowFor(ticketId);
+    expect(row.ticketStatus).toBe('ESCALATED');
+    expect(row.escalationReason).toBe('SE GPS 54 km from the device');
+
+    const flags = await query.fraudFlags({ role: 'OPERATIONS_HEAD', zoneId: null });
+    const flagged = flags.find((f) => f.ticketId === ticketId);
+    expect(flagged?.ticketStatus).toBe('ESCALATED');
   });
 
   // COLD START (no watermark at all) is deliberately NOT covered here. The watermark is global, so

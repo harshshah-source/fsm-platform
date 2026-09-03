@@ -34,6 +34,37 @@ export interface VerificationReviewRow {
   startedAt: string;
   rowType: VerificationRowType;
   partialDeadline: string | null;
+  /** #358 — the live ticket status; `ESCALATED` is the one state the de-escalate door accepts. */
+  ticketStatus: string;
+  /** #357 — the LIVE escalation verdict: set by escalate, cleared by de-escalate. */
+  escalationReason: string | null;
+  /** #358 — `snapshot_runs.data_as_of` this read was answered against (global; same on every row). */
+  telemetryAsOf: string | null;
+  /** #358 — the sweep cannot conclude this window: telemetry has not advanced past its start. */
+  stalled: boolean;
+}
+
+/**
+ * One row of the zone-scoped Phase-1 fraud queue (`GET /verification/fraud-flags`, scoped by #357).
+ * A separate read from `review()` with its own columns, so the Fraud-flagged tab renders THIS rather
+ * than a filtered copy of the review list — which is what made the queue invisible before #358.
+ */
+export interface FraudFlagRow {
+  ticketId: string;
+  deviceId: string;
+  firstPingDistanceMeters: number | null;
+  outcome: string | null;
+  outcomeAt: string | null;
+  zoneId: string;
+  zoneName: string;
+  escalationReason: string | null;
+  ticketStatus: string;
+}
+
+export async function apiFraudFlags(): Promise<FraudFlagRow[]> {
+  const res = await fetch(`${BASE_URL}/verification/fraud-flags`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+  return (await res.json()) as FraudFlagRow[];
 }
 
 export interface VerificationReviewFilters {
@@ -57,6 +88,20 @@ export async function apiVerificationReview(filters: VerificationReviewFilters =
 
 export async function apiEscalateVerification(ticketId: string, reason: string): Promise<void> {
   const res = await fetch(`${BASE_URL}/verification/${encodeURIComponent(ticketId)}/escalate`, {
+    method: 'POST',
+    headers: jsonHeaders(true),
+    body: JSON.stringify({ reason }),
+  });
+  if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
+}
+
+/**
+ * #357 — reverse an escalation raised in error, back to the state the ticket was escalated FROM.
+ * `reason` is mandatory (400 without one) and the door 409s on anything not currently ESCALATED,
+ * which is why the page offers it on ESCALATED rows only.
+ */
+export async function apiDeescalate(ticketId: string, reason: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/verification/${encodeURIComponent(ticketId)}/deescalate`, {
     method: 'POST',
     headers: jsonHeaders(true),
     body: JSON.stringify({ reason }),

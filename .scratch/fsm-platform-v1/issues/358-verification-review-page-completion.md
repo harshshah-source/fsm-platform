@@ -1,5 +1,5 @@
 # 358 — Verification review page completion
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/358-verification-review-page-completion.md
 Type: AFK
 Wave: 3 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -37,10 +37,15 @@ windows.
 - Admin tests for the page.
 
 ## Acceptance criteria
-- [ ] AC1 — fraud-flagged rows come from the scoped endpoint.
-- [ ] AC2 — a window whose telemetry watermark has not advanced shows "stalled", never "overdue".
-- [ ] AC3 — both destructive actions (mark-auto-recovery, de-escalate) need a reason and a confirm.
-- [ ] AC4 — de-escalate is visible only on ESCALATED rows.
+- [x] AC1 — fraud-flagged rows come from the scoped endpoint.
+- [x] AC2 — a window whose telemetry watermark has not advanced shows "stalled", never "overdue".
+- [x] AC3 — both destructive actions (mark-auto-recovery, de-escalate) need a reason and a confirm.
+- [x] AC4 — de-escalate is visible only on ESCALATED rows.
+
+Two cited lines had moved: the "overdue" string was never in `verification-query.service.ts` (it is
+`hoursLeft` in the page), and `:228` was Escalate by the time this ran — #357 had already given
+mark-auto-recovery its reason capture. What was missing on both doors was the **confirm**. See the
+report's "Where the issue's premise held, and where it had moved".
 
 ## Verification
 

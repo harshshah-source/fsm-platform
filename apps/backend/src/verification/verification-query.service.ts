@@ -48,6 +48,28 @@ export interface VerificationReviewRow {
   rowType: VerificationRowType;
   /** For PARTIAL_RECOVERY: startedAt + 24 h — the review-page countdown; null otherwise. */
   partialDeadline: Date | null;
+  /**
+   * #358 — the live ticket status, so the page can show De-escalate on exactly the rows the
+   * `deescalate` door will accept (`status !== 'ESCALATED'` → 409) rather than on rows that merely
+   * look escalated.
+   */
+  ticketStatus: string;
+  /** #357's live escalation verdict, surfaced beside the row it explains; null when not escalated. */
+  escalationReason: string | null;
+  /**
+   * #358 / #148 slice 3 — the telemetry watermark (`snapshot_runs.data_as_of`) this read was answered
+   * against. Global, so it is identical on every row of a response; carried per-row rather than in an
+   * envelope because this endpoint returns a bare array and reshaping it would break every existing
+   * client for a field that is presentational.
+   */
+  telemetryAsOf: Date | null;
+  /**
+   * #358 / #148 slice 3 — this window cannot reach a verdict: it has not concluded and telemetry has
+   * not advanced past its start, so the sweep's own guard will not expire it however long the clock
+   * runs. The page renders "stalled — telemetry as of …" here, never "overdue": "overdue" says the
+   * engineer missed a deadline, and this says the pipeline did. Opposite actions.
+   */
+  stalled: boolean;
 }
 
 function rowTypeFor(outcome: VerifyOutcome | null, fraud: boolean, pings: number): VerificationRowType {
@@ -56,6 +78,21 @@ function rowTypeFor(outcome: VerifyOutcome | null, fraud: boolean, pings: number
   if (outcome === 'FAILED_VERIFICATION') return fraud ? 'FAILED_FRAUD' : 'FAILED_NO_PINGS';
   if (!outcome && pings >= 1 && pings <= 2) return 'PARTIAL_RECOVERY';
   return 'PENDING';
+}
+
+/**
+ * #358 / #148 slice 3 — "the sweep will never expire this window".
+ *
+ * Mirrors the second half of `VerificationService.windowExpired` exactly: a window expires only once
+ * telemetry has advanced past the run's start, so while it has not, no amount of elapsed wall-clock
+ * produces a verdict. A concluded run is never stalled — the flag answers "can this still reach a
+ * verdict", and one that already has an outcome is answered by its outcome. A null watermark (no
+ * snapshot run has ever recorded one) counts as *not advanced*, the same limiting case the sweep's
+ * guard treats it as.
+ */
+function isStalled(outcome: VerifyOutcome | null, startedAt: Date, telemetryAsOf: Date | null): boolean {
+  if (outcome) return false;
+  return telemetryAsOf == null || telemetryAsOf.getTime() <= startedAt.getTime();
 }
 
 /**
@@ -85,6 +122,8 @@ export interface FraudFlagView {
   zoneName: string;
   /** #357 — why this run's ticket is escalated right now; null when it is not under escalation. */
   escalationReason: string | null;
+  /** #358 — the same de-escalate gate `review()` carries, so both queues test one predicate. */
+  ticketStatus: string;
 }
 
 function badgeFor(pings: number, outcome: VerifyOutcome | null): VerificationBadge {
@@ -193,11 +232,14 @@ export class VerificationQueryService {
       },
     };
 
-    const runs = await this.prisma.verificationRun.findMany({
-      where,
-      orderBy: { startedAt: 'desc' },
-      include: { ticket: { include: { company: true, plant: { include: { zone: true } } } } },
-    });
+    const [runs, telemetryAsOf] = await Promise.all([
+      this.prisma.verificationRun.findMany({
+        where,
+        orderBy: { startedAt: 'desc' },
+        include: { ticket: { include: { company: true, plant: { include: { zone: true } } } } },
+      }),
+      this.telemetryWatermark(),
+    ]);
 
     return runs.map((r) => ({
       ticketId: r.ticketId,
@@ -216,7 +258,27 @@ export class VerificationQueryService {
         !r.outcome && r.pingsReceivedCount >= 1 && r.pingsReceivedCount <= 2
           ? new Date(r.startedAt.getTime() + PARTIAL_WINDOW_MS)
           : null,
+      ticketStatus: r.ticket.status,
+      escalationReason: r.escalationReason,
+      telemetryAsOf,
+      stalled: isStalled(r.outcome, r.startedAt, telemetryAsOf),
     }));
+  }
+
+  /**
+   * Newest telemetry watermark — the `data_as_of` of the most recent snapshot run that recorded one.
+   * The same read `VerificationService.telemetryWatermark` and `AutoPlantHealthService.snapshotHealth`
+   * make, deliberately: "how fresh is telemetry" has one definition on the platform, and this surface
+   * exists to *report* the sweep's own precondition, so reading it differently would be the bug.
+   * `null` = no run has ever recorded a watermark.
+   */
+  private async telemetryWatermark(): Promise<Date | null> {
+    const lastGood = await this.prisma.snapshotRun.findFirst({
+      where: { dataAsOf: { not: null } },
+      orderBy: { runId: 'desc' },
+      select: { dataAsOf: true },
+    });
+    return lastGood?.dataAsOf ?? null;
   }
 
   /**
@@ -248,6 +310,7 @@ export class VerificationQueryService {
       zoneId: String(r.ticket.plant.zoneId),
       zoneName: r.ticket.plant.zone.name,
       escalationReason: r.escalationReason,
+      ticketStatus: r.ticket.status,
     }));
   }
 }

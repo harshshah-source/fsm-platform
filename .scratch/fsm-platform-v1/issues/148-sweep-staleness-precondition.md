@@ -1,5 +1,5 @@
 # 148 — Business sweeps expire on wall-clock, not telemetry freshness
-Status: ready-for-agent  # slices 1, 2, 4 landed 2026-07-22; slice 3 (stall observability on /build-health) open
+Status: done 2026-09-03 — slices 1, 2, 4 landed 2026-07-22; slice 3 landed with #358, report docs/progress/358-verification-review-page-completion.md
 Type: AFK
 
 > Source: `docs/audits/2026-07-22-full-project-audit.md` §5 B4, re-verified still-open by
@@ -94,7 +94,14 @@ switch-pair coupling.
 - [x] The same precondition guards install-activation expiry (`FAILED_ACTIVATION`).
 - [x] With **fresh** telemetry, expiry behaviour is **unchanged** — pinned by regression assertions that pass before any source change.
 - [x] No code path can write `FAILED_VERIFICATION` or `FAILED_ACTIVATION` on stale telemetry.
-- [ ] A stalled window is **observable** — surfaced on the existing integration-health page (`/build-health`, [#131](./131-build-health-ui-parity.md)) rather than failing silently.
+- [x] A stalled window is **observable** — rather than failing silently. **Surface changed by #358,
+      deliberately:** the indicator landed on the **Verification Review page** (a per-row
+      "stalled — telemetry as of …" chip in place of "overdue", plus a page banner counting them),
+      not on `/build-health`. `docs/module-gaps/IMPLEMENTATION-PLAN.md` §4 re-homed it there because
+      the reader who would otherwise draw the wrong conclusion — "overdue" reads as *the engineer
+      missed a deadline* when the truth is *the pipeline stalled* — is standing on that page. A
+      platform-wide count on `/build-health` remains worth adding for an ops reader and is listed as
+      a follow-up in `docs/progress/358-verification-review-page-completion.md`.
 - [x] The ingestion↔sweeps coupling is documented as a **switch pair** in the INDEX activation checklist, matching the existing ingestion↔partition-maintenance precedent.
 - [x] Full backend suite green — **287 files passed / 3 skipped (290); 1176 passed / 5 skipped (1181); exit 0; 494s** — re-run after slices 1+2, +4 tests vs the 1172 baseline.
 
@@ -147,15 +154,18 @@ one genuinely new assertion is provably the only change.
 - **Acceptance criteria:** AC 2, 3, 4 (install half).
 - **Definition of Done:** install-lifecycle suite green.
 
-### Slice 3 — Stall observability
+### Slice 3 — Stall observability — **landed 2026-09-03 in #358**
 
 - **Objective:** the tail risk introduced by the precondition is visible, not silent.
-- **Files:** integration-health read + `apps/admin/src/pages/` `BuildHealthPage.tsx`.
-- **Services:** `integration` health read.
-- **Frontend:** stalled-window count/table on the existing `/build-health` page — **no new page**.
-- **Tests:** backend read returns stalled windows; admin spec renders them.
+- **Files (as built):** `apps/backend/src/verification/verification-query.service.ts` (`stalled` +
+  `telemetryAsOf` on the review row, mirroring `windowExpired`'s own guard) and
+  `apps/admin/src/pages/verification/VerificationReviewPage.tsx`. **Not** `BuildHealthPage.tsx` — see
+  the AC note above for why the surface moved.
+- **Tests:** `apps/backend/test/verification-staleness.e2e-spec.ts` (three `#358` cases beside the
+  three original ones) and `apps/admin/test/verification-review.test.tsx` (a stalled row and an
+  overdue row with the same past deadline, differing only in `stalled`).
 - **Acceptance criteria:** AC 5.
-- **Definition of Done:** parity gate satisfied **in-slice**; admin suite green.
+- **Definition of Done:** parity gate satisfied in-slice; both suites green.
 
 ### Slice 4 — Document the switch pair
 
