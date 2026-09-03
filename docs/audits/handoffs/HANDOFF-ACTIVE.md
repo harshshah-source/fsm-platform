@@ -34,6 +34,10 @@ its defaults and its follow-ups. Do not re-derive them from the diff.
 
 ## Next step — launch Round 2
 
+**Start here. The operator's first message is the go-ahead, not a brief — it may be one word.** Do not
+ask what to do next and do not summarise this file back at them.
+
+
 Six agents, file-disjoint, all dependencies satisfied. This grouping is already computed from
 plan §4's "Code areas"; **spot-check each list against the tree before launching**, because the plan
 has been wrong about paths before (see Gotchas).
@@ -122,9 +126,12 @@ Quoted, not paraphrased:
   rather than risking the repository."*
 - **"The objective is maximum safe parallelism, not maximum simultaneous agents."**
 - **"dont launch new issues , after these are done, then wait"** — this governed the *previous* round
-  and was honoured; it is why Round 2 is planned but unstarted. The operator then asked for this
-  handoff so the next session "knows what to build in parallel", so Round 2 is the intended next move.
-  Confirm before launching if anything above looks stale.
+  only, and was honoured; it is why Round 2 is planned but unstarted. The operator then asked for a
+  handoff so the next session "knows what to build in parallel" and confirmed that **the next session
+  should launch Round 2 on its first message**. A one-word "go" is the go-ahead — do not ask again,
+  and do not summarise this file back at them. Verify the six file lists against the tree as you
+  launch (the plan has been wrong about paths before), but do not treat a stale path as a reason to
+  stop: correct it and carry on.
 - **"continue and use /autohandoff on"** — the loop is armed.
 - **"use option 3, then finish 336 and continue"** — the Platinum fixture is a scoped, expiring tier
   override (#157), never a re-tiered company.
