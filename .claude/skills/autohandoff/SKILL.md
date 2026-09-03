@@ -28,6 +28,23 @@ Nothing about how you work — only what happens when the context window fills.
 
 Disarmed, both hooks exit silently and sessions behave exactly as they did before.
 
+## Two modes at the threshold
+
+`atThreshold` in `.claude/context-budget.json` decides what happens when the guard fires. No
+hook can run `/clear` or send a message - those are user-only - so the choice is really
+"stop and be restarted cleanly" versus "never stop".
+
+- **`stop`** (default) - write the handoff, commit, print the ready line, stop. The user types
+  `/clear` and one word. Two keystrokes, and the next session starts on a genuinely clean
+  window, which is the best context the work will ever get.
+- **`continue`** - write the handoff, commit, and carry straight on. Claude Code's own
+  auto-compact reclaims the window when it needs to, and the `SessionStart` hook re-injects
+  the handoff afterwards. Zero keystrokes, but the session then carries a compaction summary
+  rather than a clean slate, and compaction can land mid-edit rather than at a chosen point.
+
+In `continue` mode the handoff matters more, not less: compaction summarises and drifts, and
+the file on disk is the only thing that does not.
+
 ## Notes worth passing on to the user
 
 The arm marker is a file (`.claude/state/guard-armed.json`), not session state — it has to

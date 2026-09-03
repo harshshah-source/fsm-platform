@@ -1,5 +1,6 @@
 {
   "mode": "manual",
+  "atThreshold": "stop",
   "enabled": true,
   "thresholds": [
     50,
@@ -9,6 +10,7 @@
   "contextLimit": null,
   "handoffPath": "docs/audits/handoffs/HANDOFF-ACTIVE.md",
   "_mode": "manual = off until you run /autohandoff on (the arm marker outlives /clear, and expires after 7 days). always = every session in this project. off = never.",
+  "_atThreshold": "stop = write the handoff, then stop and wait for you to /clear (cleanest context, two keystrokes). continue = write the handoff and keep working; Claude Code's own auto-compact reclaims the window and the SessionStart hook re-injects the handoff. Zero keystrokes, but the session carries a compaction summary rather than a clean slate.",
   "_enabled": "false is a hard kill switch that overrides mode.",
   "_thresholds": "percentages of the context window at which a handoff is forced; each fires once per session."
 }

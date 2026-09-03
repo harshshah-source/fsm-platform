@@ -79,15 +79,24 @@ def cmd_on(root, note):
     cfg = load_config(root)
     thresholds = cfg.get("thresholds", [50, 70, 85])
     rel = cfg.get("handoffPath", "docs/audits/handoffs/HANDOFF-ACTIVE.md")
+    hands_free = cfg.get("atThreshold", "stop") == "continue"
     print("Auto-handoff ARMED%s." % (" for: " + note if note else ""))
     print("  From here it runs itself. Just work.")
     print("")
-    print("  At %s%% of the context window this session will stop on its own," % thresholds[0])
-    print("  write %s, and commit it." % rel)
-    print("  It then prints:  HANDOFF READY - run /clear, then send any message")
-    print("")
-    print("  You type /clear and then any single word. The next session loads that")
-    print("  handoff by itself and carries on - you never paste anything.")
+    if hands_free:
+        print("  Mode: continue (hands-free). At %s%% of the context window this session" % thresholds[0])
+        print("  saves %s, commits it, and keeps going." % rel)
+        print("  Auto-compact reclaims the window on its own; the handoff is re-injected")
+        print("  afterwards. You do nothing at all.")
+    else:
+        print("  Mode: stop (cleanest context). At %s%% of the context window this session" % thresholds[0])
+        print("  stops, writes %s, and commits it." % rel)
+        print("  It then prints:  HANDOFF READY - run /clear, then send any message")
+        print("")
+        print("  You type /clear and then any single word. The next session loads that")
+        print("  handoff by itself and carries on - you never paste anything.")
+        print("  For zero keystrokes instead, set atThreshold to continue in")
+        print("  .claude/context-budget.json.")
     print("")
     print("  Later thresholds: %s%%. Expires after %d days if left armed."
           % (", ".join(str(t) for t in thresholds[1:]) or "none", ARM_TTL_DAYS))
@@ -108,6 +117,9 @@ def cmd_status(root):
     cfg = load_config(root)
     print("Auto-handoff: %s (%s)" % ("ARMED" if ok else "off", reason))
     print("  mode:       %s" % cfg.get("mode", "manual"))
+    print("  at 50%%:      %s" % ("save a checkpoint and keep working (hands-free)"
+                                  if cfg.get("atThreshold", "stop") == "continue"
+                                  else "stop and wait for /clear"))
     print("  thresholds: %s" % cfg.get("thresholds", [50, 70, 85]))
 
     rel = cfg.get("handoffPath", "docs/audits/handoffs/HANDOFF-ACTIVE.md")

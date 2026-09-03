@@ -100,6 +100,13 @@ project in permanently.
   resume immediately. This is what makes `/clear` continuous rather than amnesiac: the user
   pastes nothing and their first message can be a single word.
 
+**`atThreshold` decides what the 50% mark does.** No hook can run `/clear` or send a message,
+so a session that stops needs two keystrokes to restart. `stop` (the default) takes them in
+exchange for a genuinely clean window next session; `continue` never stops, writes the handoff
+and carries on, and lets auto-compact reclaim the window by itself - zero keystrokes, at the
+cost of working from a compaction summary rather than a clean slate. The rest of this section
+describes `stop`.
+
 **At the 50% mark, stop taking on new work.** Finishing the red-green step in flight is fine;
 starting another is not. Then run `/handoff`, commit, and print the ready line. The user runs
 `/clear` and sends any message; the SessionStart hook does the rest.

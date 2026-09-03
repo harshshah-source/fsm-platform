@@ -128,6 +128,44 @@ def state_file(project_dir, session_id):
     return os.path.join(d, "context-guard-%s.json" % (session_id or "unknown"))
 
 
+def directive_continue(pct, used, limit, handoff_path, final):
+    """atThreshold=continue: save a checkpoint and keep going, hands-free.
+
+    No hook can run /clear or send a message, so a session that stops needs two
+    keystrokes to restart. This mode never stops: it keeps the handoff current on
+    disk and lets Claude Code's own auto-compact reclaim the window when it must.
+    Compaction summarises and drifts; the handoff does not, and SessionStart
+    re-injects it afterwards - that is what makes the drift survivable.
+    """
+    return (
+        "[CHECKPOINT] {1}% of the context window is in use ({2:,} / {3:,} tokens).\n"
+        "\n"
+        "Save a checkpoint now, then CARRY ON. Do not stop, do not ask the user for\n"
+        "/clear, and do not print a handoff-ready line - this session keeps working.\n"
+        "\n"
+        "  1. Reach a coherent point - finish or revert the in-flight edit. If tests\n"
+        "     covering your changes have not run since the last edit, run them now.\n"
+        "  2. Rewrite {4} from scratch using\n"
+        "     docs/audits/handoffs/HANDOFF-TEMPLATE.md, filling in EVERY section. It must\n"
+        "     stand alone: after the next compaction your memory of this conversation is a\n"
+        "     lossy summary, and after a /clear it is nothing at all. Scroll back through the\n"
+        "     whole session - in particular for corrections the user gave you, which go under\n"
+        "     'Standing instructions from the user' quoted, not paraphrased. Record decisions,\n"
+        "     dead ends and gotchas that are NOT recoverable from the diff; reference the\n"
+        "     issue file, diff and commits by path instead of restating them.\n"
+        "  3. Commit it (a WIP commit is correct here).\n"
+        "  4. Resume exactly what you were doing.\n"
+        "\n"
+        "{5}\n"
+        "Auto-compact will reclaim the window by itself when it needs to, and the\n"
+        "SessionStart hook re-injects this handoff afterwards. Nothing here needs the user."
+    ).format(None, pct, used, limit, handoff_path,
+             "This is the highest threshold - refresh the checkpoint every time you reach a\n"
+             "green test run from here, not just when a threshold fires."
+             if final else
+             "Refresh it again at each later threshold, and after every green test run.")
+
+
 def directive(pct, used, limit, handoff_path, final):
     urgency = "LAST CALL" if final else "CONTEXT BUDGET"
     tail = (
@@ -216,11 +254,14 @@ def main():
         pass
 
     is_final = highest == max(cfg["thresholds"])
-    text = directive(pct, used, limit, cfg["handoffPath"], is_final)
+    hands_free = cfg.get("atThreshold", "stop") == "continue"
+    build = directive_continue if hands_free else directive
+    text = build(pct, used, limit, cfg["handoffPath"], is_final)
     json.dump(
         {
-            "systemMessage": "Context %d%% (%s/%s) - handoff threshold %d%% reached."
-            % (pct, f"{used:,}", f"{limit:,}", highest),
+            "systemMessage": "Context %d%% (%s/%s) - %s at %d%%."
+            % (pct, f"{used:,}", f"{limit:,}",
+               "checkpoint" if hands_free else "handoff threshold", highest),
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
                 "additionalContext": text,
