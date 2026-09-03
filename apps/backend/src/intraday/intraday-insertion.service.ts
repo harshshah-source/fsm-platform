@@ -30,7 +30,7 @@ import {
 } from '../scheduling/override.service';
 import { CandidateQueryService, type CandidateRow } from '../scheduling/candidate-query.service';
 import { committedDayPlan } from '../scheduling/committed-day-load';
-import { drainNotificationRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
+import { drainProducerRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
 import { type CurrentAssignee, currentAssigneesFor } from './current-assignee';
 import { ZmScope } from '../scheduling/zm-schedule-query.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -369,7 +369,7 @@ export class IntradayInsertionService {
       // and there is no un-sending it. What moved (#338) is the *intent*, which is now a committed
       // row — so a push that fails here is retried by the sweep instead of lost, and can no longer
       // abandon the rest of this zone's CRITICAL tickets by throwing out of the loop.
-      await drainNotificationRows(this.prisma, this.notifications, queuedNotices, now);
+      await drainProducerRows(this.prisma, { notify: this.notifications }, queuedNotices, now);
       assigned++;
     }
     return { assigned, escalated };
@@ -418,7 +418,7 @@ export class IntradayInsertionService {
       });
       return this.escalateToZm(tx, zoneId, ticket.ticketId, ins.insertionId);
     });
-    await drainNotificationRows(this.prisma, this.notifications, outboxId === null ? [] : [outboxId], now);
+    await drainProducerRows(this.prisma, { notify: this.notifications }, outboxId === null ? [] : [outboxId], now);
   }
 
   /**
@@ -512,7 +512,7 @@ export class IntradayInsertionService {
 
     // Delivered post-commit, for the same reason as the direct-assign path above — off a row that is
     // already durable (#338).
-    await drainNotificationRows(this.prisma, this.notifications, queuedNotices, now);
+    await drainProducerRows(this.prisma, { notify: this.notifications }, queuedNotices, now);
     return { result: 'OK', insertionId: String(insertionId), scheduleId: assigned.scheduleId, batchId: assigned.batchId, seId };
   }
 

@@ -1,6 +1,7 @@
 import type { NotificationService } from '../../src/notifications/notification.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
-import { NOTIFY_EVENT_TYPE } from '../../src/scheduling/day-plan-notification-outbox';
+/** The two event types that predate #338. Everything else is a producer's own converted notice. */
+const DAY_PLAN_EVENT_TYPES = ['DAY_PLAN_DISPATCHED', 'DAY_PLAN_OVERRIDDEN'];
 import type { DayPlanNotifier } from '../../src/scheduling/day-plan-notifier';
 
 /**
@@ -40,12 +41,12 @@ export function throwingNotifications(): NotificationService {
 }
 
 /**
- * A client on which enqueueing a *general* notice throws — on the client itself and on any
+ * A client on which enqueueing a producer's own notice throws — on the client itself and on any
  * transaction client it hands out, so it catches the write wherever the producer puts it.
  *
- * Deliberately narrowed to `eventType === NOTIFY`: a day-plan row written in the same transaction
- * (`assignTicket` writes one) must keep working, or the rollback under test would be caused by the
- * wrong write.
+ * Deliberately narrowed to the rows #338 adds (`NOTIFY` and the port events): a **day-plan** row
+ * written in the same transaction (`assignTicket` writes one) must keep working, or the rollback
+ * under test would be caused by the wrong write.
  */
 export function failingNotifyEnqueue(prisma: PrismaService): PrismaService {
   const wrapDelegate = (delegate: object): object =>
@@ -53,7 +54,8 @@ export function failingNotifyEnqueue(prisma: PrismaService): PrismaService {
       get(d, dp) {
         if (dp !== 'create') return Reflect.get(d, dp);
         return async (args: { data?: { eventType?: string } }) => {
-          if (args?.data?.eventType === NOTIFY_EVENT_TYPE) throw new EnqueueFailed();
+          const eventType = args?.data?.eventType;
+          if (eventType !== undefined && !DAY_PLAN_EVENT_TYPES.includes(eventType)) throw new EnqueueFailed();
           const create = Reflect.get(d, 'create') as (a: unknown) => Promise<unknown>;
           return create.call(d, args);
         };

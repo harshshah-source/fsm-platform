@@ -4,6 +4,11 @@ import type { RequestActor } from '../common/request-actor';
 import { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
+import {
+  drainProducerRows,
+  queueInstallFailedActivation,
+  queueInstallVerified,
+} from '../scheduling/day-plan-notification-outbox';
 import { INSTALL_NOTIFIER, type InstallNotifier, LoggingInstallNotifier } from './install-notifier';
 
 type TicketStatus = $Enums.TicketStatus;
@@ -193,12 +198,15 @@ export class InstallLifecycleService {
       });
 
       if (firstPing) {
-        await this.closeVerified(t, now);
-        await this.notifier.installVerified({ ticketId: t.ticketId, deviceId: t.deviceId, seId: t.assignedSeId });
+        // #338 — the notice is written inside `closeVerified`'s transaction and delivered here, through
+        // the same port as before. A push that fails is now retried by the outbox sweep rather than
+        // thrown out of this loop, which used to abandon every ACTIVATED ticket after this one.
+        const outboxId = await this.closeVerified(t, now);
+        await drainProducerRows(this.prisma, { install: this.notifier }, [outboxId], now);
         result.verified++;
       } else if (this.activationWindowExpired(anchor, now, telemetryAsOf)) {
-        await this.failActivation(t, now);
-        await this.notifier.failedActivation({ ticketId: t.ticketId, deviceId: t.deviceId, seId: t.assignedSeId });
+        const outboxId = await this.failActivation(t, now);
+        await drainProducerRows(this.prisma, { install: this.notifier }, [outboxId], now);
         result.failed++;
       } else {
         result.pending++;
@@ -236,25 +244,35 @@ export class InstallLifecycleService {
     return telemetryAsOf != null && telemetryAsOf.getTime() > anchor.getTime();
   }
 
-  /** ACTIVATED → CLOSED on a verified first ping (SYSTEM-driven, audited, one tx). */
-  private async closeVerified(t: { ticketId: string; deviceId: string }, now: Date): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  /** ACTIVATED → CLOSED on a verified first ping (SYSTEM-driven, audited, one tx). Returns the
+   *  outbox row id for the caller's post-commit delivery (#338). */
+  private async closeVerified(
+    t: { ticketId: string; deviceId: string; assignedSeId: string | null },
+    now: Date,
+  ): Promise<bigint> {
+    return this.prisma.$transaction(async (tx) => {
       await tx.ticket.update({ where: { ticketId: t.ticketId }, data: { status: 'CLOSED', closedAt: now, lastStateChangedAt: now } });
       await tx.ticketEvent.create({ data: { ticketId: t.ticketId, fromState: 'ACTIVATED', toState: 'CLOSED', reasonCode: 'INSTALL_VERIFIED', at: now } });
       await tx.auditLog.create({ data: { actorId: 'SYSTEM', actorRole: 'SYSTEM', action: 'INSTALL_VERIFIED', entityType: 'tickets', entityId: t.ticketId, metadata: { deviceId: String(t.deviceId) } } });
       // #178 — the install is verified and the ticket terminal; the assignment ends with it.
       await retireAssignmentOnClosure(tx, [t.ticketId], now);
+      return queueInstallVerified(tx, { ticketId: t.ticketId, deviceId: t.deviceId, seId: t.assignedSeId });
     });
   }
 
-  /** ACTIVATED → FAILED_ACTIVATION when the activation window elapses with no valid ping (SYSTEM, audited). */
-  private async failActivation(t: { ticketId: string; deviceId: string }, now: Date): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  /** ACTIVATED → FAILED_ACTIVATION when the activation window elapses with no valid ping (SYSTEM,
+   *  audited). Returns the outbox row id, as {@link closeVerified} does (#338). */
+  private async failActivation(
+    t: { ticketId: string; deviceId: string; assignedSeId: string | null },
+    now: Date,
+  ): Promise<bigint> {
+    return this.prisma.$transaction(async (tx) => {
       await tx.ticket.update({ where: { ticketId: t.ticketId }, data: { status: 'FAILED_ACTIVATION', lastStateChangedAt: now } });
       await tx.ticketEvent.create({ data: { ticketId: t.ticketId, fromState: 'ACTIVATED', toState: 'FAILED_ACTIVATION', reasonCode: 'INSTALL_FAILED_ACTIVATION', at: now } });
       await tx.auditLog.create({ data: { actorId: 'SYSTEM', actorRole: 'SYSTEM', action: 'INSTALL_FAILED_ACTIVATION', entityType: 'tickets', entityId: t.ticketId, metadata: { deviceId: String(t.deviceId) } } });
       // #178 — FAILED_ACTIVATION is terminal too: the attempt is over either way, so the stop goes.
       await retireAssignmentOnClosure(tx, [t.ticketId], now);
+      return queueInstallFailedActivation(tx, { ticketId: t.ticketId, deviceId: t.deviceId, seId: t.assignedSeId });
     });
   }
 

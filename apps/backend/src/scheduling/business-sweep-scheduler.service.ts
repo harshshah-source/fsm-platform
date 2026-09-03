@@ -14,6 +14,8 @@ import { SoftInactiveCountService } from '../reports/soft-inactive-count.service
 import { SystemEfficiencyAggregationService } from '../reports/system-efficiency-aggregation.service';
 import { ZmPerformanceAggregationService } from '../reports/zm-performance-aggregation.service';
 import { InstallLifecycleService } from '../ticketing/install-lifecycle.service';
+import { INSTALL_NOTIFIER, type InstallNotifier } from '../ticketing/install-notifier';
+import { RECOVERY_NOTIFIER, type RecoveryNotifier } from '../ticketing/recovery-notifier';
 import { RepeatEscalationService } from '../ticketing/repeat-escalation.service';
 import { VerificationService } from '../verification/verification.service';
 
@@ -175,6 +177,10 @@ export class BusinessSweepSchedulerService {
     // that hand-builds this class and never touches the outbox tick must not have to supply it.
     // Without it, NOTIFY rows are left un-claimed and retried rather than silently marked sent.
     @Optional() private readonly notifications?: NotificationService,
+    // #338 — the two ports whose events the outbox now carries. Optional for the same reason, and
+    // supplied by the same factory: a drain missing one un-claims the row rather than losing it.
+    @Optional() @Inject(INSTALL_NOTIFIER) private readonly installNotifier?: InstallNotifier,
+    @Optional() @Inject(RECOVERY_NOTIFIER) private readonly recoveryNotifier?: RecoveryNotifier,
   ) {
     this.config = { ...readBusinessSweepSchedulerConfig(), ...config };
   }
@@ -289,7 +295,14 @@ export class BusinessSweepSchedulerService {
       // that hand-builds this class without them and then calls this specific tick gets a clean ERROR
       // outcome from `runGuarded` rather than a crash.
       if (!this.prisma || !this.dayPlanNotifier) throw new Error('notification outbox sweep: prisma/dayPlanNotifier not wired');
-      return drainUnsent(this.prisma, this.dayPlanNotifier, now, undefined, this.notifications);
+      // #338 — this is the ONE drain that sees every producer's rows, so it is the one place that
+      // must carry every deliverer. A missing one is not silent: the row is un-claimed with a
+      // `last_error` naming which deliverer was absent.
+      return drainUnsent(this.prisma, this.dayPlanNotifier, now, undefined, {
+        notify: this.notifications,
+        install: this.installNotifier,
+        recovery: this.recoveryNotifier,
+      });
     });
   }
 }

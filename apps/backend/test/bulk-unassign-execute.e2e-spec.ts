@@ -656,9 +656,9 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
         expect(row.sentAt).toBeNull();
         expect(await prisma.notification.count({ where: { recipientUserId: f.seId, type: 'DAY_PLAN_REBALANCED' } })).toBe(0);
 
-        await drainRows(prisma, inertDayPlanNotifier, [row.id], NOW, new NotificationService(prisma));
+        await drainRows(prisma, inertDayPlanNotifier, [row.id], NOW, { notify: new NotificationService(prisma) });
         expect(await prisma.notification.count({ where: { recipientUserId: f.seId, type: 'DAY_PLAN_REBALANCED' } })).toBe(1);
-        await drainRows(prisma, inertDayPlanNotifier, [row.id], NOW, new NotificationService(prisma));
+        await drainRows(prisma, inertDayPlanNotifier, [row.id], NOW, { notify: new NotificationService(prisma) });
         expect(await prisma.notification.count({ where: { recipientUserId: f.seId, type: 'DAY_PLAN_REBALANCED' } })).toBe(1);
 
         await prisma.dayPlanNotificationOutbox.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });

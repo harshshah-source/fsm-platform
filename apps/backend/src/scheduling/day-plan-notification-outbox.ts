@@ -1,6 +1,16 @@
 import { Logger } from '@nestjs/common';
 import { transitionOrConflict } from '../common/transition-or-conflict';
 import type { NotifyInput } from '../notifications/notification.service';
+import type {
+  InstallFailedActivationEvent,
+  InstallNotifier,
+  InstallVerifiedEvent,
+} from '../ticketing/install-notifier';
+import type {
+  RecoveryClosedEvent,
+  RecoveryNotifier,
+  RecoveryUnableToCollectEvent,
+} from '../ticketing/recovery-notifier';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { DayPlanDispatchedEvent, DayPlanNotifier, DayPlanOverriddenEvent } from './day-plan-notifier';
 
@@ -91,6 +101,65 @@ export async function queueNotification(tx: OutboxWriteClient, input: NotifyInpu
   return row.id;
 }
 
+/**
+ * The four **port-delivered** event types (#338).
+ *
+ * `InstallNotifier` and `RecoveryNotifier` are seams with their own implementations and DI bindings,
+ * not thin wrappers: `RecoveryNotifier.escalatedToOh` deliberately logs and notifies nobody, and both
+ * ports resolve their own recipients. Flattening them into a resolved `NotifyInput` would therefore
+ * delete a documented seam rather than convert a call — so these rows carry the *event*, and the
+ * drain hands it to the port, exactly as {@link queueDayPlanDispatched}'s rows have always been
+ * handed to `DayPlanNotifier`. `NOTIFY` stays the right shape for the sites that call
+ * `NotificationService` directly and own no port.
+ */
+export const INSTALL_VERIFIED_EVENT_TYPE = 'INSTALL_VERIFIED';
+export const INSTALL_FAILED_ACTIVATION_EVENT_TYPE = 'INSTALL_FAILED_ACTIVATION';
+export const RECOVERY_CLOSED_EVENT_TYPE = 'RECOVERY_CLOSED';
+export const RECOVERY_UNABLE_TO_COLLECT_EVENT_TYPE = 'RECOVERY_UNABLE_TO_COLLECT';
+
+/** Write one port event inside the caller's transaction. The payload is the event, verbatim. */
+async function queuePortEvent(tx: OutboxWriteClient, eventType: string, event: object): Promise<bigint> {
+  const row = await tx.dayPlanNotificationOutbox.create({
+    data: {
+      eventType,
+      // As for a general notice: a port event belongs to no engineer's schedule. `se_id` stays null
+      // even when the event names an SE, because that column means "this row is that SE's day plan".
+      seId: null,
+      scheduleId: null,
+      zoneId: null,
+      payload: event as unknown as object,
+    },
+    select: { id: true },
+  });
+  return row.id;
+}
+
+/** #338 — "installation verified, ticket closed", written in the transaction that closed it. */
+export function queueInstallVerified(tx: OutboxWriteClient, event: InstallVerifiedEvent): Promise<bigint> {
+  return queuePortEvent(tx, INSTALL_VERIFIED_EVENT_TYPE, event);
+}
+
+/** #338 — "no ping in the activation window", written in the transaction that failed the activation. */
+export function queueInstallFailedActivation(
+  tx: OutboxWriteClient,
+  event: InstallFailedActivationEvent,
+): Promise<bigint> {
+  return queuePortEvent(tx, INSTALL_FAILED_ACTIVATION_EVENT_TYPE, event);
+}
+
+/** #338 — "recovery closed on warehouse receipt", written in the transaction that closed it. */
+export function queueRecoveryClosed(tx: OutboxWriteClient, event: RecoveryClosedEvent): Promise<bigint> {
+  return queuePortEvent(tx, RECOVERY_CLOSED_EVENT_TYPE, event);
+}
+
+/** #338 — "unable to collect → ZM decision queue", written in the transaction that recorded it. */
+export function queueRecoveryUnableToCollect(
+  tx: OutboxWriteClient,
+  event: RecoveryUnableToCollectEvent,
+): Promise<bigint> {
+  return queuePortEvent(tx, RECOVERY_UNABLE_TO_COLLECT_EVENT_TYPE, event);
+}
+
 /** The bits of one outbox row `drainRow` needs — a subset of the generated model type. */
 interface OutboxRow {
   id: bigint;
@@ -110,11 +179,30 @@ export interface OutboxNotifyDeliverer {
   notify(input: NotifyInput): Promise<unknown>;
 }
 
-async function deliver(
-  notifier: DayPlanNotifier,
-  row: OutboxRow,
-  notifications?: OutboxNotifyDeliverer,
-): Promise<void> {
+/**
+ * Everything a drain can deliver *through*, named rather than positional (#338).
+ *
+ * A bag, not three more optional trailing parameters: the one defect this slice found in its own
+ * infrastructure was a `useFactory` that stopped one positional argument short of the deliverer, and
+ * every deliverer added the old way widens exactly that hole. A producer passes only its own port;
+ * the sweep, which retries everybody's rows, passes all of them.
+ */
+export interface OutboxDeliverers {
+  notify?: OutboxNotifyDeliverer;
+  install?: InstallNotifier;
+  recovery?: RecoveryNotifier;
+}
+
+/**
+ * The row is claimed *before* delivery, so a missing deliverer must throw and never skip: a quiet
+ * skip would mark a notice sent that nobody sent. Throwing un-claims the row for a drain that does
+ * carry the port — the sweep.
+ */
+function missingDeliverer(rowId: bigint, eventType: string, which: string): Error {
+  return new Error(`outbox row ${rowId} is a ${eventType} row and this drain was given no ${which} deliverer`);
+}
+
+async function deliver(notifier: DayPlanNotifier, row: OutboxRow, deliverers: OutboxDeliverers): Promise<void> {
   const payload = (row.payload ?? {}) as Record<string, unknown>;
   if (row.eventType === 'DAY_PLAN_DISPATCHED') {
     await notifier.dayPlanDispatched({
@@ -136,15 +224,28 @@ async function deliver(
     return;
   }
   if (row.eventType === NOTIFY_EVENT_TYPE) {
-    if (!notifications) {
-      // THROWN, never skipped. `drainRow` claims the row before delivering, so returning quietly here
-      // would mark a notice sent that nobody ever sent. Throwing un-claims it, and the sweep — which
-      // does carry a deliverer — picks it up on the next tick.
-      throw new Error(
-        `outbox row ${row.id} is a ${NOTIFY_EVENT_TYPE} row and this drain was given no notify deliverer`,
-      );
-    }
-    await notifications.notify(payload as unknown as NotifyInput);
+    if (!deliverers.notify) throw missingDeliverer(row.id, NOTIFY_EVENT_TYPE, 'notify');
+    await deliverers.notify.notify(payload as unknown as NotifyInput);
+    return;
+  }
+  if (row.eventType === INSTALL_VERIFIED_EVENT_TYPE) {
+    if (!deliverers.install) throw missingDeliverer(row.id, row.eventType, 'install');
+    await deliverers.install.installVerified(payload as unknown as InstallVerifiedEvent);
+    return;
+  }
+  if (row.eventType === INSTALL_FAILED_ACTIVATION_EVENT_TYPE) {
+    if (!deliverers.install) throw missingDeliverer(row.id, row.eventType, 'install');
+    await deliverers.install.failedActivation(payload as unknown as InstallFailedActivationEvent);
+    return;
+  }
+  if (row.eventType === RECOVERY_CLOSED_EVENT_TYPE) {
+    if (!deliverers.recovery) throw missingDeliverer(row.id, row.eventType, 'recovery');
+    await deliverers.recovery.recoveryClosed(payload as unknown as RecoveryClosedEvent);
+    return;
+  }
+  if (row.eventType === RECOVERY_UNABLE_TO_COLLECT_EVENT_TYPE) {
+    if (!deliverers.recovery) throw missingDeliverer(row.id, row.eventType, 'recovery');
+    await deliverers.recovery.unableToCollect(payload as unknown as RecoveryUnableToCollectEvent);
     return;
   }
   // Unreachable under the two writers above — logged, not thrown, so one malformed row can never wedge
@@ -166,7 +267,7 @@ export async function drainRow(
   notifier: DayPlanNotifier,
   row: OutboxRow,
   now: Date,
-  notifications?: OutboxNotifyDeliverer,
+  deliverers: OutboxDeliverers = {},
 ): Promise<void> {
   const claim = await transitionOrConflict(
     prisma.dayPlanNotificationOutbox,
@@ -176,7 +277,7 @@ export async function drainRow(
   if (!claim.won) return; // already sent, or another drain just claimed it
 
   try {
-    await deliver(notifier, row, notifications);
+    await deliver(notifier, row, deliverers);
   } catch (e) {
     // The dispatch/override this row belongs to has ALREADY committed — a delivery failure here must
     // never propagate into that outcome (#264's core guarantee). Un-claim so the sweep retries it.
@@ -195,11 +296,11 @@ export async function drainRows(
   notifier: DayPlanNotifier,
   rowIds: bigint[],
   now: Date = new Date(),
-  notifications?: OutboxNotifyDeliverer,
+  deliverers: OutboxDeliverers = {},
 ): Promise<void> {
   if (rowIds.length === 0) return;
   const rows = await prisma.dayPlanNotificationOutbox.findMany({ where: { id: { in: rowIds } } });
-  for (const row of rows) await drainRow(prisma, notifier, row, now, notifications);
+  for (const row of rows) await drainRow(prisma, notifier, row, now, deliverers);
 }
 
 /**
@@ -221,21 +322,21 @@ const NOTIFY_ONLY_DRAIN: DayPlanNotifier = {
 };
 
 /**
- * Attempt delivery of rows a producer just wrote with {@link queueNotification} inside its own
- * mutation transaction (#338) — the post-commit half of the pattern, and the reason converting a
- * `notify()` site does not delay its notice to the next sweep tick.
+ * Attempt delivery of rows a producer just wrote inside its own mutation transaction (#338) — the
+ * post-commit half of the pattern, and the reason converting a `notify()` site does not delay its
+ * notice to the next sweep tick. The producer passes the one deliverer its own rows need.
  *
  * A failure here is not the caller's problem and never propagates: {@link drainRow} swallows it and
  * un-claims the row, so the sweep retries it. That is the whole point of the conversion — the notice
  * survives, and a push that cannot be delivered can no longer damage the outcome it announces.
  */
-export async function drainNotificationRows(
+export async function drainProducerRows(
   prisma: OutboxReadClient & OutboxWriteClient,
-  notifications: OutboxNotifyDeliverer,
+  deliverers: OutboxDeliverers,
   rowIds: bigint[],
   now: Date = new Date(),
 ): Promise<void> {
-  await drainRows(prisma, NOTIFY_ONLY_DRAIN, rowIds, now, notifications);
+  await drainRows(prisma, NOTIFY_ONLY_DRAIN, rowIds, now, deliverers);
 }
 
 /**
@@ -248,14 +349,14 @@ export async function drainUnsent(
   notifier: DayPlanNotifier,
   now: Date = new Date(),
   limit = 200,
-  notifications?: OutboxNotifyDeliverer,
+  deliverers: OutboxDeliverers = {},
 ): Promise<{ drained: number }> {
   const rows = await prisma.dayPlanNotificationOutbox.findMany({
     where: { sentAt: null, attempts: { lt: MAX_OUTBOX_ATTEMPTS } },
     orderBy: { createdAt: 'asc' },
     take: limit,
   });
-  for (const row of rows) await drainRow(prisma, notifier, row, now, notifications);
+  for (const row of rows) await drainRow(prisma, notifier, row, now, deliverers);
   return { drained: rows.length };
 }
 

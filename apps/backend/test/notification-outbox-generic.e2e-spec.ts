@@ -74,7 +74,7 @@ describe('#338 generic notification outbox (e2e)', () => {
     const before = await prisma.notification.count({ where: { type: 'FIXTURE_338_GENERIC' } });
     expect(before).toBe(0);
 
-    await drainRows(prisma, { dayPlanDispatched: async () => {}, dayPlanOverridden: async () => {} }, [id], new Date(), notifications);
+    await drainRows(prisma, { dayPlanDispatched: async () => {}, dayPlanOverridden: async () => {} }, [id], new Date(), { notify: notifications });
 
     const after = await prisma.notification.findMany({ where: { type: 'FIXTURE_338_GENERIC' } });
     expect(after).toHaveLength(1);

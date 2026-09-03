@@ -83,6 +83,10 @@ import { VehicleUnavailabilityService } from './vehicle-unavailability.service';
     RecoveryService,
     InstallService,
     InstallLifecycleService,
+    // #338 — exported so the outbox sweep (`BusinessSweepSchedulerModule`) can deliver the install
+    // and recovery events the outbox now carries through the very same ports these services use.
+    INSTALL_NOTIFIER,
+    RECOVERY_NOTIFIER,
   ],
 })
 export class TicketingModule {}

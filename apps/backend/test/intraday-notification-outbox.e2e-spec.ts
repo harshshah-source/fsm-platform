@@ -288,9 +288,9 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
       expect(await deliveredCount(seId, 'INTRADAY_DIRECT_ASSIGNED')).toBe(0);
 
       // The next drain carries a deliverer that works. It delivers once — and only once.
-      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, { notify: new NotificationService(prisma) });
       expect(await deliveredCount(seId, 'INTRADAY_DIRECT_ASSIGNED')).toBe(1);
-      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, { notify: new NotificationService(prisma) });
       expect(await deliveredCount(seId, 'INTRADAY_DIRECT_ASSIGNED')).toBe(1);
     });
 
@@ -330,9 +330,9 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
       expect(row.sentAt).toBeNull();
       expect(await deliveredCount(target, 'INTRADAY_MANUAL_ASSIGNED')).toBe(0);
 
-      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, { notify: new NotificationService(prisma) });
       expect(await deliveredCount(target, 'INTRADAY_MANUAL_ASSIGNED')).toBe(1);
-      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, { notify: new NotificationService(prisma) });
       expect(await deliveredCount(target, 'INTRADAY_MANUAL_ASSIGNED')).toBe(1);
     });
 
@@ -378,9 +378,9 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
       expect(row.sentAt).toBeNull();
       expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(0);
 
-      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, { notify: new NotificationService(prisma) });
       expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(1);
-      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, { notify: new NotificationService(prisma) });
       expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(1);
     });
 
@@ -422,9 +422,9 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
       expect(row.sentAt).toBeNull();
       expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(0);
 
-      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, { notify: new NotificationService(prisma) });
       expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(1);
-      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, { notify: new NotificationService(prisma) });
       expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(1);
     });
 

@@ -17,6 +17,8 @@ import { SystemEfficiencyAggregationService } from '../reports/system-efficiency
 import { ZmPerformanceAggregationService } from '../reports/zm-performance-aggregation.service';
 import { TicketingModule } from '../ticketing/ticketing.module';
 import { InstallLifecycleService } from '../ticketing/install-lifecycle.service';
+import { INSTALL_NOTIFIER, type InstallNotifier } from '../ticketing/install-notifier';
+import { RECOVERY_NOTIFIER, type RecoveryNotifier } from '../ticketing/recovery-notifier';
 import { RepeatEscalationService } from '../ticketing/repeat-escalation.service';
 import { VerificationModule } from '../verification/verification.module';
 import { VerificationService } from '../verification/verification.service';
@@ -79,6 +81,8 @@ import { SchedulingModule } from './scheduling.module';
         prisma: PrismaService,
         dayPlanNotifier: DayPlanNotifier,
         notifications: NotificationService,
+        installNotifier: InstallNotifier,
+        recoveryNotifier: RecoveryNotifier,
       ) =>
         new BusinessSweepSchedulerService(
           verification,
@@ -103,6 +107,10 @@ import { SchedulingModule } from './scheduling.module';
           // and retried to exhaustion. The post-commit drains hid it, since they succeed on the happy
           // path and only a *failed* push ever reaches this sweep.
           notifications,
+          // #338 — the outbox carries install and recovery events too, and this sweep is the only
+          // drain that sees every producer's rows.
+          installNotifier,
+          recoveryNotifier,
         ),
       inject: [
         VerificationService,
@@ -120,6 +128,8 @@ import { SchedulingModule } from './scheduling.module';
         PrismaService,
         DAY_PLAN_NOTIFIER,
         NotificationService,
+        INSTALL_NOTIFIER,
+        RECOVERY_NOTIFIER,
       ],
     },
   ],

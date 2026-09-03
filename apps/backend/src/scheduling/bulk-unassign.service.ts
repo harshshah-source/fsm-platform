@@ -6,7 +6,7 @@ import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { drainNotificationRows, queueNotification } from './day-plan-notification-outbox';
+import { drainProducerRows, queueNotification } from './day-plan-notification-outbox';
 import { dispatchZoneLockKey } from './dispatch-zone-lock';
 import { signPreviewToken, verifyPreviewToken } from './preview-token';
 import { REMOVAL_REASONS } from './removal-reason';
@@ -339,7 +339,7 @@ export class BulkUnassignService {
     // Delivery still happens only AFTER commit (same posture as DayPlanNotifier) — a rolled-back
     // rebalance must never tell an SE their plan changed. The intent is now a committed row (#338),
     // so a failure here is the sweep's retry rather than a notice nobody will ever send.
-    await drainNotificationRows(this.prisma, this.notifications, outcome.queuedNotices, now);
+    await drainProducerRows(this.prisma, { notify: this.notifications }, outcome.queuedNotices, now);
 
     return {
       zoneId: zoneId.toString(),

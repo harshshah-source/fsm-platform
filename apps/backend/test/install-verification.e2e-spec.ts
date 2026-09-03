@@ -3,6 +3,12 @@ import { AuditService } from '../src/audit/audit.service';
 import { InstallLifecycleService, INSTALL_ACTIVATION_WINDOW_MS } from '../src/ticketing/install-lifecycle.service';
 import type { InstallNotifier } from '../src/ticketing/install-notifier';
 import { PrismaService } from '../src/prisma/prisma.service';
+import {
+  INSTALL_FAILED_ACTIVATION_EVENT_TYPE,
+  INSTALL_VERIFIED_EVENT_TYPE,
+  drainRows,
+} from '../src/scheduling/day-plan-notification-outbox';
+import { EnqueueFailed, failingNotifyEnqueue, inertDayPlanNotifier } from './fixtures/outbox-crash-injection';
 
 /**
  * Issue 34 — install auto-verification sweep (AC#3, AC#4, AC#6). A re-entrant scan of ACTIVATED
@@ -164,5 +170,80 @@ describe('Issue 34 — InstallLifecycleService.runInstallVerification', () => {
     const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
     expect(t.status).toBe('ACTIVATED');
     expect(failed).not.toContain(ticketId);
+  });
+
+  /**
+   * #338 — the install pushes are durable, and they commit with the state change they announce.
+   *
+   * Both fired *after* `closeVerified`/`failActivation` had committed, with nothing behind them: a
+   * crash in the gap closed a ticket and told the engineer nothing, and a throwing port abandoned the
+   * rest of the sweep's ACTIVATED tickets. The row now goes into the same transaction as the closure.
+   *
+   * The event goes into the row and the drain hands it to `InstallNotifier` — the port keeps its job.
+   * That is the #264 shape (`DayPlanNotifier` has always been fed this way) and it is why the spy
+   * above still records both events: it is now called by the post-commit drain rather than directly.
+   */
+  describe('#338 — the install notices are outbox rows delivered through the port', () => {
+    const dead = { installVerified: () => { throw new Error('injected: the install push failed'); },
+      failedActivation: () => { throw new Error('injected: the install push failed'); } } satisfies InstallNotifier;
+
+    const rowsOfType = async (eventType: string, ticketId: string) => {
+      const rows = await prisma.dayPlanNotificationOutbox.findMany({ where: { eventType }, orderBy: { id: 'asc' } });
+      return rows.filter((r) => (r.payload as { ticketId?: string } | null)?.ticketId === ticketId);
+    };
+
+    it('a port that throws leaves the ticket CLOSED and the verified push retryable', async () => {
+      const service = new InstallLifecycleService(prisma, new AuditService(prisma), dead);
+      const { ticketId, deviceId } = await makeActivated();
+      await ping(deviceId, new Date(T_ACT.getTime() + 30 * 60_000));
+
+      const res = await service.runInstallVerification(new Date(T_ACT.getTime() + 60 * 60_000), { ticketIds: [ticketId] });
+      expect(res.verified).toBe(1);
+      expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).status).toBe('CLOSED');
+
+      const rows = await rowsOfType(INSTALL_VERIFIED_EVENT_TYPE, ticketId);
+      expect(rows).toHaveLength(1);
+      const row = rows[0]!;
+      expect(row.sentAt).toBeNull();
+      expect(row.lastError).toMatch(/injected/);
+      expect(verified).not.toContain(ticketId);
+
+      // The sweep's drain carries the real port: one delivery, and draining again does not repeat it.
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], new Date(), { install: spyNotifier });
+      expect(verified.filter((t) => t === ticketId)).toHaveLength(1);
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], new Date(), { install: spyNotifier });
+      expect(verified.filter((t) => t === ticketId)).toHaveLength(1);
+      await prisma.dayPlanNotificationOutbox.deleteMany({ where: { id: row.id } });
+    });
+
+    it('a failed enqueue rolls the closure back — no ticket closed without its notice', async () => {
+      const service = new InstallLifecycleService(failingNotifyEnqueue(prisma), new AuditService(prisma), spyNotifier);
+      const { ticketId, deviceId } = await makeActivated();
+      await ping(deviceId, new Date(T_ACT.getTime() + 30 * 60_000));
+
+      await expect(
+        service.runInstallVerification(new Date(T_ACT.getTime() + 60 * 60_000), { ticketIds: [ticketId] }),
+      ).rejects.toThrow(EnqueueFailed);
+
+      const t = await prisma.ticket.findUniqueOrThrow({ where: { ticketId } });
+      expect(t.status).toBe('ACTIVATED');
+      expect(t.closedAt).toBeNull();
+      expect(await prisma.ticketEvent.count({ where: { ticketId, toState: 'CLOSED' } })).toBe(0);
+      expect(await prisma.auditLog.count({ where: { entityId: ticketId, action: 'INSTALL_VERIFIED' } })).toBe(0);
+      expect(await rowsOfType(INSTALL_VERIFIED_EVENT_TYPE, ticketId)).toHaveLength(0);
+    });
+
+    it('the FAILED_ACTIVATION notice is written in the same transaction as the failure', async () => {
+      const service = new InstallLifecycleService(failingNotifyEnqueue(prisma), new AuditService(prisma), spyNotifier);
+      const { ticketId } = await makeActivated();
+      await setWatermark(new Date(T_ACT.getTime() + INSTALL_ACTIVATION_WINDOW_MS + 2 * 60 * 60_000));
+      const past = new Date(T_ACT.getTime() + INSTALL_ACTIVATION_WINDOW_MS + 60_000);
+
+      await expect(service.runInstallVerification(past, { ticketIds: [ticketId] })).rejects.toThrow(EnqueueFailed);
+
+      expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId } })).status).toBe('ACTIVATED');
+      expect(await rowsOfType(INSTALL_FAILED_ACTIVATION_EVENT_TYPE, ticketId)).toHaveLength(0);
+      expect(failed).not.toContain(ticketId);
+    });
   });
 });

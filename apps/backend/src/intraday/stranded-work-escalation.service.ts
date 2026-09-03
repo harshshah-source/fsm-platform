@@ -3,7 +3,7 @@ import { istDate } from '../common/ist-day';
 import { Prisma } from '../generated/prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { drainNotificationRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
+import { drainProducerRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 
 /** What one unavailability did to one engineer's day. */
@@ -118,7 +118,7 @@ export class StrandedWorkEscalationService {
     });
 
     // Delivered post-commit: the escalations are the durable fact, the push is an attempt at it.
-    await drainNotificationRows(this.prisma, this.notifications, queuedNotices, now);
+    await drainProducerRows(this.prisma, { notify: this.notifications }, queuedNotices, now);
 
     return { escalated: rows.length, ticketIds: rows.map((r) => r.ticketId) };
   }
