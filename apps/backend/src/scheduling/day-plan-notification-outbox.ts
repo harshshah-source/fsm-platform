@@ -203,6 +203,42 @@ export async function drainRows(
 }
 
 /**
+ * The day-plan half of a drain that will never see a day-plan row (#338).
+ *
+ * A producer of general notices has no `DayPlanNotifier` and no business acquiring one — injecting
+ * the port into eight services so each can pass it to a drain that ignores it would be wiring for
+ * nothing. It throws rather than no-ops for the same reason the missing-deliverer branch above does:
+ * the claim precedes the delivery, so a quiet skip would mark a notice sent that nobody sent, while a
+ * throw un-claims the row for the sweep, which carries both halves.
+ */
+const NOTIFY_ONLY_DRAIN: DayPlanNotifier = {
+  dayPlanDispatched: () => {
+    throw new Error('a day-plan row reached a drain that carries no day-plan notifier');
+  },
+  dayPlanOverridden: () => {
+    throw new Error('a day-plan row reached a drain that carries no day-plan notifier');
+  },
+};
+
+/**
+ * Attempt delivery of rows a producer just wrote with {@link queueNotification} inside its own
+ * mutation transaction (#338) — the post-commit half of the pattern, and the reason converting a
+ * `notify()` site does not delay its notice to the next sweep tick.
+ *
+ * A failure here is not the caller's problem and never propagates: {@link drainRow} swallows it and
+ * un-claims the row, so the sweep retries it. That is the whole point of the conversion — the notice
+ * survives, and a push that cannot be delivered can no longer damage the outcome it announces.
+ */
+export async function drainNotificationRows(
+  prisma: OutboxReadClient & OutboxWriteClient,
+  notifications: OutboxNotifyDeliverer,
+  rowIds: bigint[],
+  now: Date = new Date(),
+): Promise<void> {
+  await drainRows(prisma, NOTIFY_ONLY_DRAIN, rowIds, now, notifications);
+}
+
+/**
  * The re-drain sweep (`business-notification-outbox`): retries unsent rows with bounded `attempts`.
  * Exhausted rows (>= {@link MAX_OUTBOX_ATTEMPTS}) stay visible via `lastError` rather than being
  * retried forever or silently dropped.

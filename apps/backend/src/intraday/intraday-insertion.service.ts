@@ -30,6 +30,7 @@ import {
 } from '../scheduling/override.service';
 import { CandidateQueryService, type CandidateRow } from '../scheduling/candidate-query.service';
 import { committedDayPlan } from '../scheduling/committed-day-load';
+import { drainNotificationRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
 import { type CurrentAssignee, currentAssigneesFor } from './current-assignee';
 import { ZmScope } from '../scheduling/zm-schedule-query.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -289,6 +290,10 @@ export class IntradayInsertionService {
         continue;
       }
 
+      // #338 — the rows the hook below enqueues, for the post-commit delivery attempt. Cleared at the
+      // top of every hook run because `assignTicket` re-runs it on a `WorkSchedule` race: the losing
+      // attempt's row rolled back with it and must not be drained for.
+      const queuedNotices: bigint[] = [];
       const result = await this.override.assignTicket(
         ticket.ticketId,
         chosen.seId,
@@ -302,6 +307,49 @@ export class IntradayInsertionService {
         // `chooseWithinTier` over `orderedCandidatesForPlant`. Passing it records the tier the engine
         // actually evaluated, rather than one re-derived from `se_coverage` a moment later.
         chosen.coverageType,
+        // #325 (RC-9) — the ledger row is the record that this assignment happened at all: the
+        // Intra-day Queue reads nothing else, and the efficiency cube counts these rows. Written here,
+        // inside the assignment's own transaction, it can no longer be the thing that was lost when
+        // the process died a moment after the commit — an assigned CRITICAL ticket that, to every
+        // reader of the queue, was never assigned by anybody.
+        async (tx, ids) => {
+          queuedNotices.length = 0;
+          await tx.intradayInsertion.create({
+            data: {
+              ticketId: ticket.ticketId,
+              zoneId,
+              insertionType: 'SYSTEM_CRITICAL',
+              slaBucket: ticket.device.state?.slaBucket ?? null,
+              offeredSeId: chosen.seId,
+              offeredAt: now,
+              acceptanceDeadline: now,
+              respondedAt: now,
+              status: 'ASSIGNED_DIRECT',
+              assignedScheduleId: ids.scheduleId,
+              assignedBatchId: ids.batchId,
+            },
+          });
+          // #338 — the SE's notice, written in the same transaction as the assignment it announces.
+          // Same payload as the post-commit `notify()` this replaces (the ids are stringified here
+          // because they were already strings on the `AssignOutcome` this used to read them from —
+          // and because a `bigint` cannot go into a JSON column).
+          queuedNotices.push(
+            await queueNotification(tx, {
+              recipients: [{ userId: chosen.seId, role: 'SERVICE_ENGINEER' }],
+              type: 'INTRADAY_DIRECT_ASSIGNED',
+              title: 'CRITICAL ticket added to your Day Plan',
+              body: `Ticket ${ticket.ticketId} was assigned to you and added at the top of your Day Plan.`,
+              entityType: 'ticket',
+              entityId: ticket.ticketId,
+              deliveryModel: 'GENERAL',
+              metadata: {
+                ticketId: ticket.ticketId,
+                scheduleId: String(ids.scheduleId),
+                batchId: String(ids.batchId),
+              },
+            }),
+          );
+        },
       );
       // Not OK: a concurrent writer (a ZM's manual assign, a second sweep instance) already moved this
       // ticket, or the deferral check inside `assignTicket` disagreed with the query above by a
@@ -316,31 +364,12 @@ export class IntradayInsertionService {
       const wonCoord = plantCoords.get(ticketPlant);
       if (wonCoord) currentPos.set(chosen.seId, wonCoord);
 
-      await this.prisma.intradayInsertion.create({
-        data: {
-          ticketId: ticket.ticketId,
-          zoneId,
-          insertionType: 'SYSTEM_CRITICAL',
-          slaBucket: ticket.device.state?.slaBucket ?? null,
-          offeredSeId: chosen.seId,
-          offeredAt: now,
-          acceptanceDeadline: now,
-          respondedAt: now,
-          status: 'ASSIGNED_DIRECT',
-          assignedScheduleId: BigInt(result.scheduleId),
-          assignedBatchId: BigInt(result.batchId),
-        },
-      });
-      await this.notifications.notify({
-        recipients: [{ userId: chosen.seId, role: 'SERVICE_ENGINEER' }],
-        type: 'INTRADAY_DIRECT_ASSIGNED',
-        title: 'CRITICAL ticket added to your Day Plan',
-        body: `Ticket ${ticket.ticketId} was assigned to you and added at the top of your Day Plan.`,
-        entityType: 'ticket',
-        entityId: ticket.ticketId,
-        deliveryModel: 'GENERAL',
-        metadata: { ticketId: ticket.ticketId, scheduleId: result.scheduleId, batchId: result.batchId },
-      });
+      // The DELIVERY stays out of the transaction, for the reason this comment has always given: an
+      // SE told their Day Plan changed for a change that then rolled back is worse than a late push,
+      // and there is no un-sending it. What moved (#338) is the *intent*, which is now a committed
+      // row — so a push that fails here is retried by the sweep instead of lost, and can no longer
+      // abandon the rest of this zone's CRITICAL tickets by throwing out of the loop.
+      await drainNotificationRows(this.prisma, this.notifications, queuedNotices, now);
       assigned++;
     }
     return { assigned, escalated };
@@ -361,22 +390,35 @@ export class IntradayInsertionService {
     return { assigned, escalated };
   }
 
-  /** Write the escalation ledger row + alert the ZM. `offeredSeId`/`acceptanceDeadline` are null (#268): no SE was ever offered anything. */
+  /**
+   * Write the escalation ledger row + alert the ZM. `offeredSeId`/`acceptanceDeadline` are null
+   * (#268): no SE was ever offered anything.
+   *
+   * #338 — the row and the alert are now one transaction. They were two bare awaits, which is the
+   * absence NOTIF-02 named: a crash between them left an `ESCALATION_REQUIRED` row that nobody had
+   * been told about, indistinguishable on the Intra-day Queue from one a manager has already seen and
+   * is deciding on. Unlike the two assign doors above, this path had no transaction to enqueue into —
+   * so it gets one here, rather than the weaker "enqueue on `this.prisma`" the sites blocked on #354
+   * are stuck with.
+   */
   private async escalate(ticket: ActiveInsertionTicket, zoneId: bigint, now: Date): Promise<void> {
-    const ins = await this.prisma.intradayInsertion.create({
-      data: {
-        ticketId: ticket.ticketId,
-        zoneId,
-        insertionType: 'SYSTEM_CRITICAL',
-        slaBucket: ticket.device.state?.slaBucket ?? null,
-        offeredSeId: null,
-        offeredAt: now,
-        acceptanceDeadline: null,
-        respondedAt: now,
-        status: 'ESCALATION_REQUIRED',
-      },
+    const outboxId = await this.prisma.$transaction(async (tx) => {
+      const ins = await tx.intradayInsertion.create({
+        data: {
+          ticketId: ticket.ticketId,
+          zoneId,
+          insertionType: 'SYSTEM_CRITICAL',
+          slaBucket: ticket.device.state?.slaBucket ?? null,
+          offeredSeId: null,
+          offeredAt: now,
+          acceptanceDeadline: null,
+          respondedAt: now,
+          status: 'ESCALATION_REQUIRED',
+        },
+      });
+      return this.escalateToZm(tx, zoneId, ticket.ticketId, ins.insertionId);
     });
-    await this.escalateToZm(zoneId, ticket.ticketId, ins.insertionId);
+    await drainNotificationRows(this.prisma, this.notifications, outboxId === null ? [] : [outboxId], now);
   }
 
   /**
@@ -416,6 +458,8 @@ export class IntradayInsertionService {
   ): Promise<ManualAssignOutcome> {
     const ins = await this.prisma.intradayInsertion.findUnique({ where: { insertionId } });
     if (!ins) return { result: 'NOT_FOUND' };
+    // #338 — see the direct-assign door above; the hook clears this on every run for the same reason.
+    const queuedNotices: bigint[] = [];
     const assigned = await this.override.assignTicket(
       ins.ticketId,
       seId,
@@ -425,6 +469,39 @@ export class IntradayInsertionService {
       'CRITICAL_ASSIGN',
       true,
       deferral,
+      null,
+      // #325 (RC-9), re-scoped after #298. #298 already closes an `ESCALATION_REQUIRED` row inside
+      // this transaction, so the status alone survived a crash here — but it closed it without the
+      // ids, and an ACCEPTED row that cannot name the schedule or batch the work went onto is a
+      // ledger entry that does not describe an assignment. This is that stamp, in the same
+      // transaction; it runs after #298's guarded `updateMany` and is unconditional on `insertionId`,
+      // which is the pre-#325 behaviour unchanged — this door owns the response for its own row.
+      async (tx, ids) => {
+        queuedNotices.length = 0;
+        await tx.intradayInsertion.update({
+          where: { insertionId },
+          data: {
+            status: 'ACCEPTED',
+            offeredSeId: seId,
+            respondedAt: now,
+            assignedScheduleId: ids.scheduleId,
+            assignedBatchId: ids.batchId,
+          },
+        });
+        // #338 — the SE's notice, in the same transaction as the assignment. Payload unchanged from
+        // the post-commit `notify()` this replaces.
+        queuedNotices.push(
+          await queueNotification(tx, {
+            recipients: [{ userId: seId, role: 'SERVICE_ENGINEER' }],
+            type: 'INTRADAY_MANUAL_ASSIGNED',
+            title: 'CRITICAL insertion assigned to you',
+            body: `Ticket ${ins.ticketId} added to your Day Plan by your manager.`,
+            entityType: 'ticket',
+            entityId: ins.ticketId,
+            metadata: { insertionId: String(insertionId), ticketId: ins.ticketId },
+          }),
+        );
+      },
     );
     if (assigned.result === 'ALREADY_ASSIGNED') return { result: 'ALREADY_ASSIGNED' };
     // #265 — carried through verbatim instead of flattened. `NOT_FOUND` stays what it always meant:
@@ -433,25 +510,9 @@ export class IntradayInsertionService {
     if (assigned.result === 'REASON_REQUIRED') return { result: 'REASON_REQUIRED' };
     if (assigned.result !== 'OK') return { result: 'NOT_FOUND' };
 
-    await this.prisma.intradayInsertion.update({
-      where: { insertionId },
-      data: {
-        status: 'ACCEPTED',
-        offeredSeId: seId,
-        respondedAt: now,
-        assignedScheduleId: BigInt(assigned.scheduleId),
-        assignedBatchId: BigInt(assigned.batchId),
-      },
-    });
-    await this.notifications.notify({
-      recipients: [{ userId: seId, role: 'SERVICE_ENGINEER' }],
-      type: 'INTRADAY_MANUAL_ASSIGNED',
-      title: 'CRITICAL insertion assigned to you',
-      body: `Ticket ${ins.ticketId} added to your Day Plan by your manager.`,
-      entityType: 'ticket',
-      entityId: ins.ticketId,
-      metadata: { insertionId: String(insertionId), ticketId: ins.ticketId },
-    });
+    // Delivered post-commit, for the same reason as the direct-assign path above — off a row that is
+    // already durable (#338).
+    await drainNotificationRows(this.prisma, this.notifications, queuedNotices, now);
     return { result: 'OK', insertionId: String(insertionId), scheduleId: assigned.scheduleId, batchId: assigned.batchId, seId };
   }
 
@@ -472,11 +533,23 @@ export class IntradayInsertionService {
     return rows.map((r) => toRow(r, assignees.get(r.ticketId) ?? null));
   }
 
-  /** Escalate to the zone's ZM "Manual assignment needed" Action-Required alert (Issue 30). */
-  private async escalateToZm(zoneId: bigint, ticketId: string, insertionId: bigint): Promise<void> {
-    const zone = await this.prisma.zone.findUnique({ where: { zoneId } });
-    if (!zone?.zonalManagerUserId) return;
-    await this.notifications.notify({
+  /**
+   * Queue the zone's ZM "Manual assignment needed" Action-Required alert (Issue 30) inside the
+   * caller's transaction (#338). Returns the outbox row id for the caller's post-commit drain, or
+   * null when the zone has no ZM — unchanged behaviour, there is simply nobody to tell.
+   *
+   * The zone is read on `tx` rather than `this.prisma` so the recipient the row records is the one
+   * this transaction saw, not one a re-read at delivery time might disagree with.
+   */
+  private async escalateToZm(
+    tx: Prisma.TransactionClient,
+    zoneId: bigint,
+    ticketId: string,
+    insertionId: bigint,
+  ): Promise<bigint | null> {
+    const zone = await tx.zone.findUnique({ where: { zoneId } });
+    if (!zone?.zonalManagerUserId) return null;
+    return queueNotification(tx, {
       recipients: [{ userId: zone.zonalManagerUserId, role: 'ZONAL_MANAGER' }],
       type: 'INTRADAY_ESCALATION_REQUIRED',
       title: 'Manual assignment needed',
