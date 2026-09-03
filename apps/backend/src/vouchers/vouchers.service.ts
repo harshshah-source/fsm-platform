@@ -66,12 +66,40 @@ export interface VoucherItemView {
   overLimit: boolean;
 }
 
+/**
+ * Review signals on the activity anchor (#359). Every one of these is a *cue for the reviewer*, never
+ * a refusal: a voucher whose ticket does not line up is still reviewable — a mis-keyed ticket id is a
+ * clerical slip, and the ZM is the one who can tell that from a false claim. Ordered by how strongly
+ * the row needs a second look; `warning` carries the first of them.
+ */
+export type VoucherActivityWarning =
+  | 'NO_ACTIVITY_LINK'
+  | 'LINKED_TICKET_NOT_FOUND'
+  | 'TICKET_NOT_ASSIGNED_TO_SE'
+  | 'TICKET_PLANT_MISMATCH';
+
 export interface VoucherActivityCheck {
   linkedTicketId: string | null;
   linkedPlantId: number | null;
   ticketFound: boolean;
-  /** Set when the ZM has no automatic activity anchor to verify against. */
-  warning: string | null;
+  /** The SE the linked ticket is actually assigned to (live batch row first, else the ticket's own assignee). */
+  ticketAssignedSeId: string | null;
+  /** The plant the linked ticket belongs to — what `linkedPlantId` is checked against. */
+  ticketPlantId: number | null;
+  /**
+   * The headline signal, kept as the single-code field the review queue has always rendered.
+   * Always `warnings[0] ?? null`.
+   */
+  warning: VoucherActivityWarning | null;
+  /** Every signal on this row, most serious first. Empty = the claim matches its activity record. */
+  warnings: VoucherActivityWarning[];
+}
+
+/** What a ticket says about who worked it and where — the facts the ticket match is made against. */
+interface TicketMatchFacts {
+  plantId: bigint;
+  /** Every SE the ticket is live-assigned to: live batch rows plus the ticket's own `assignedSeId`. */
+  assignedSeIds: string[];
 }
 
 export interface VoucherQueueRow {
@@ -111,10 +139,26 @@ export type ResubmitOutcome =
   | { result: 'FORBIDDEN' }
   | { result: 'INVALID_STATE'; status: VoucherStatus };
 
+/**
+ * Why an id in a mark-PAID batch was not paid (#359). All three are ordinary, expected outcomes of a
+ * month's batch — none is an error:
+ *  - `NOT_FOUND` — no such voucher.
+ *  - `NOT_APPROVED` — the voucher has not cleared the review gate (or is already PAID).
+ *  - `SAME_APPROVER` — the actor is the person who approved it. Separation of duties: two money gates,
+ *    two people. This is the control the slice exists for, so it is the one skip that is audited.
+ */
+export type MarkPaidSkipReason = 'NOT_FOUND' | 'NOT_APPROVED' | 'SAME_APPROVER';
+
+/**
+ * The result of one mark-PAID batch (#359). Every submitted id lands in exactly one of the three
+ * arrays, so the caller can render the batch honestly: `paid` moved, `skipped` was declined by a rule,
+ * `failed` hit an infrastructure error and may be retried.
+ */
 export interface MarkPaidOutcome {
   result: 'OK';
   paid: string[];
-  skipped: { voucherId: string; status: VoucherStatus | 'NOT_FOUND' }[];
+  skipped: { voucherId: string; status: VoucherStatus | 'NOT_FOUND'; reason: MarkPaidSkipReason }[];
+  failed: { voucherId: string; reason: string }[];
 }
 
 export interface ExportResult {
@@ -223,16 +267,45 @@ export class VouchersService {
       include: { items: true, engineer: { include: { user: true } } },
     });
 
-    const ticketIds = rows.map((r) => r.ticketId).filter((t): t is string => t != null);
-    const foundTickets = ticketIds.length
-      ? new Set(
-          (await this.prisma.ticket.findMany({ where: { ticketId: { in: ticketIds } }, select: { ticketId: true } })).map(
-            (t) => t.ticketId,
-          ),
-        )
-      : new Set<string>();
+    // One batched read for the whole page, not one per row: the ticket-match check needs each linked
+    // ticket's plant and its live assignment, and the queue is rendered for a screenful of vouchers.
+    const facts = await this.ticketMatchFacts(rows.map((r) => r.ticketId));
 
-    return rows.map((r) => this.toQueueRow(r, foundTickets));
+    return rows.map((r) => this.toQueueRow(r, facts));
+  }
+
+  /**
+   * The activity anchor's own facts, keyed by ticket id: which plant the ticket is at, and which SEs
+   * it is live-assigned to. "Live-assigned" = a `batch_assignment_tickets` row that has not been
+   * removed (a removed row is history — the SE no longer owns that stop), plus the ticket's own
+   * `assignedSeId`, which is how RECOVERY work is assigned without a batch. A ticket absent from the
+   * map does not exist.
+   */
+  private async ticketMatchFacts(ticketIds: (string | null)[]): Promise<Map<string, TicketMatchFacts>> {
+    const ids = [...new Set(ticketIds.filter((t): t is string => t != null))];
+    if (ids.length === 0) return new Map();
+
+    const tickets = await this.prisma.ticket.findMany({
+      where: { ticketId: { in: ids } },
+      select: {
+        ticketId: true,
+        plantId: true,
+        assignedSeId: true,
+        batchTickets: { where: { removedAt: null }, select: { batch: { select: { seId: true } } } },
+      },
+    });
+
+    return new Map(
+      tickets.map((t) => [
+        t.ticketId,
+        {
+          plantId: t.plantId,
+          assignedSeIds: [
+            ...new Set([...t.batchTickets.map((bt) => bt.batch.seId), ...(t.assignedSeId ? [t.assignedSeId] : [])]),
+          ],
+        },
+      ]),
+    );
   }
 
   async review(
@@ -306,8 +379,21 @@ export class VouchersService {
 
   /**
    * Operations-Head Mark PAID (POST /api/vouchers/mark-paid). Multi-select over APPROVED vouchers
-   * after Finance confirms the monthly batch. Non-APPROVED ids are skipped (not an error). Each paid
-   * SE is notified.
+   * after Finance confirms the monthly batch. Each paid SE is notified.
+   *
+   * **Separation of duties (#359).** A voucher the actor reviewed themselves is skipped with
+   * `SAME_APPROVER`: approving and paying are two money gates and one person may not clear both.
+   * REVIEW_ROLES deliberately still includes the Operations Head — an OH reviewing a voucher is
+   * legitimate; an OH reviewing *and paying the same voucher* is not, and that is the narrower rule
+   * enforced here, on the voucher, rather than by taking the review door away from the role.
+   *
+   * **Per-row isolation, not one batch transaction (#359).** Each voucher is paid in its own audited
+   * transaction inside its own try/catch, and a row that blows up lands in `failed[]` while the rest of
+   * the batch proceeds. Wrapping the batch in a single `$transaction` was the alternative and was
+   * rejected: this is a month's reimbursement run, and one unpayable id (a mis-pasted uuid, a row
+   * locked by a concurrent write) must not hold back everyone else's money. The trade is that a batch
+   * can end partially applied — which is exactly why every id is reported in `paid` / `skipped` /
+   * `failed` and nothing is left to be inferred from a 500.
    */
   async markPaid(
     voucherIds: string[],
@@ -316,37 +402,66 @@ export class VouchersService {
     now: Date = new Date(),
   ): Promise<MarkPaidOutcome> {
     const paid: string[] = [];
-    const skipped: { voucherId: string; status: VoucherStatus | 'NOT_FOUND' }[] = [];
+    const skipped: MarkPaidOutcome['skipped'] = [];
+    const failed: MarkPaidOutcome['failed'] = [];
 
     for (const voucherId of voucherIds) {
-      const voucher = await this.prisma.expenseVoucher.findUnique({ where: { voucherId } });
-      if (!voucher) {
-        skipped.push({ voucherId, status: 'NOT_FOUND' });
+      let seId: string;
+      try {
+        const voucher = await this.prisma.expenseVoucher.findUnique({ where: { voucherId } });
+        if (!voucher) {
+          skipped.push({ voucherId, status: 'NOT_FOUND', reason: 'NOT_FOUND' });
+          continue;
+        }
+        if (voucher.status !== 'APPROVED') {
+          skipped.push({ voucherId, status: voucher.status, reason: 'NOT_APPROVED' });
+          continue;
+        }
+        if (voucher.reviewedBy === actor.userId) {
+          // Audited: a self-payment attempt is the control event, so it leaves a trail even though
+          // nothing changed. The other two skips are ordinary batch noise and are not audited.
+          await this.audit.record({
+            ...auditActor(actor),
+            action: 'VOUCHER_MARK_PAID_SKIPPED',
+            entityType: 'expense_vouchers',
+            entityId: voucherId,
+            metadata: { reason: 'SAME_APPROVER', reviewedBy: voucher.reviewedBy, paidBatchRef: batchRef },
+          });
+          skipped.push({ voucherId, status: voucher.status, reason: 'SAME_APPROVER' });
+          continue;
+        }
+
+        await this.audit.withAudit(
+          {
+            ...auditActor(actor),
+            action: 'VOUCHER_MARKED_PAID',
+            entityType: 'expense_vouchers',
+            entityId: voucherId,
+            metadata: { paidBatchRef: batchRef },
+          },
+          (tx) =>
+            tx.expenseVoucher.update({
+              where: { voucherId },
+              data: { status: 'PAID', paidAt: now, paidBatchRef: batchRef },
+            }),
+        );
+        seId = voucher.seId;
+      } catch (err) {
+        failed.push({ voucherId, reason: errorReason(err) });
         continue;
       }
-      if (voucher.status !== 'APPROVED') {
-        skipped.push({ voucherId, status: voucher.status });
-        continue;
-      }
-      await this.audit.withAudit(
-        {
-          ...auditActor(actor),
-          action: 'VOUCHER_MARKED_PAID',
-          entityType: 'expense_vouchers',
-          entityId: voucherId,
-          metadata: { paidBatchRef: batchRef },
-        },
-        (tx) =>
-          tx.expenseVoucher.update({
-            where: { voucherId },
-            data: { status: 'PAID', paidAt: now, paidBatchRef: batchRef },
-          }),
-      );
-      await this.notifier.paid({ voucherId, seId: voucher.seId, paidBatchRef: batchRef });
+
       paid.push(voucherId);
+      // The payment has committed. A notifier that throws must not re-report the row as failed — the
+      // money moved either way, and the SE notice is a separate, retryable concern.
+      try {
+        await this.notifier.paid({ voucherId, seId, paidBatchRef: batchRef });
+      } catch {
+        /* notice-only failure — the PAID row and its audit are already durable */
+      }
     }
 
-    return { result: 'OK', paid, skipped };
+    return { result: 'OK', paid, skipped, failed };
   }
 
   /**
@@ -429,7 +544,7 @@ export class VouchersService {
 
   private toQueueRow(
     r: Prisma.ExpenseVoucherGetPayload<{ include: { items: true; engineer: { include: { user: true } } } }>,
-    foundTickets: Set<string>,
+    facts: Map<string, TicketMatchFacts>,
   ): VoucherQueueRow {
     const items: VoucherItemView[] = r.items.map((i) => {
       const limit = CATEGORY_LIMITS[i.category];
@@ -446,7 +561,7 @@ export class VouchersService {
       };
     });
 
-    const activityCheck = this.activityCheck(r.ticketId, r.plantId, foundTickets);
+    const activityCheck = this.activityCheck(r.seId, r.ticketId, r.plantId, facts);
 
     return {
       voucherId: r.voucherId,
@@ -466,23 +581,77 @@ export class VouchersService {
     };
   }
 
-  private activityCheck(ticketId: string | null, plantId: bigint | null, foundTickets: Set<string>): VoucherActivityCheck {
-    if (ticketId) {
-      const ticketFound = foundTickets.has(ticketId);
+  /**
+   * The ZM's verification cue: does this claim line up with the work record it names? Three questions,
+   * in order — does the ticket exist, was it this SE's work, and was it at the plant claimed. Each
+   * failure is a *warning*, never a refusal (#359): the reviewer decides what a mismatch means, and
+   * blocking submission would only push the claim onto an untracked channel.
+   */
+  private activityCheck(
+    seId: string,
+    ticketId: string | null,
+    plantId: bigint | null,
+    facts: Map<string, TicketMatchFacts>,
+  ): VoucherActivityCheck {
+    const linkedPlantId = plantId != null ? Number(plantId) : null;
+
+    if (!ticketId) {
+      // No ticket at all: a bare plant is still an anchor the ZM can verify; nothing at all is not.
       return {
-        linkedTicketId: ticketId,
-        linkedPlantId: plantId != null ? Number(plantId) : null,
-        ticketFound,
-        warning: ticketFound ? null : 'LINKED_TICKET_NOT_FOUND',
+        linkedTicketId: null,
+        linkedPlantId,
+        ticketFound: false,
+        ticketAssignedSeId: null,
+        ticketPlantId: null,
+        warning: plantId != null ? null : 'NO_ACTIVITY_LINK',
+        warnings: plantId != null ? [] : ['NO_ACTIVITY_LINK'],
       };
     }
+
+    const ticket = facts.get(ticketId);
+    if (!ticket) {
+      return {
+        linkedTicketId: ticketId,
+        linkedPlantId,
+        ticketFound: false,
+        ticketAssignedSeId: null,
+        ticketPlantId: null,
+        warning: 'LINKED_TICKET_NOT_FOUND',
+        warnings: ['LINKED_TICKET_NOT_FOUND'],
+      };
+    }
+
+    const warnings: VoucherActivityWarning[] = [];
+    if (!ticket.assignedSeIds.includes(seId)) warnings.push('TICKET_NOT_ASSIGNED_TO_SE');
+    if (linkedPlantId != null && linkedPlantId !== Number(ticket.plantId)) warnings.push('TICKET_PLANT_MISMATCH');
+
     return {
-      linkedTicketId: null,
-      linkedPlantId: plantId != null ? Number(plantId) : null,
-      ticketFound: false,
-      warning: plantId != null ? null : 'NO_ACTIVITY_LINK',
+      linkedTicketId: ticketId,
+      linkedPlantId,
+      ticketFound: true,
+      // The claiming SE first when they are on it, so the queue shows "yes, this SE" rather than an
+      // arbitrary co-assignee on a shared stop.
+      ticketAssignedSeId: ticket.assignedSeIds.includes(seId) ? seId : (ticket.assignedSeIds[0] ?? null),
+      ticketPlantId: Number(ticket.plantId),
+      warning: warnings[0] ?? null,
+      warnings,
     };
   }
+}
+
+/**
+ * A short, safe reason string for a `failed[]` row — never the raw error object. Prisma frames its
+ * message with the failing invocation and puts the actual cause on the last line, which is the part an
+ * Operations Head can act on ("invalid input syntax for type uuid"), so that line is what is kept,
+ * prefixed with the error code when there is one.
+ */
+function errorReason(err: unknown): string {
+  const code = err && typeof err === 'object' && typeof (err as { code?: unknown }).code === 'string'
+    ? (err as { code: string }).code
+    : null;
+  const message = err instanceof Error ? err.message : String(err);
+  const detail = message.split('\n').map((l) => l.trim()).filter((l) => l !== '').at(-1) ?? 'UNKNOWN_ERROR';
+  return (code ? `${code}: ${detail}` : detail).slice(0, 200);
 }
 
 /** [start, end) for a YYYY-MM month in UTC. */

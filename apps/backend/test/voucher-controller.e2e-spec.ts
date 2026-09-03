@@ -170,4 +170,111 @@ describe('Issue 38 — VouchersController (e2e)', () => {
     expect(row.status).toBe('PAID');
     expect(row.paidBatchRef).toBe('FIN-TEST');
   });
+
+  // ---- Issue 359 — money-path controls over the HTTP surface -----------------
+  it('separation of duties: the Operations Head who approved a voucher is skipped SAME_APPROVER when paying it', async () => {
+    const se = await login('se.north@fsm.test');
+    const oh = await login('ops.head@fsm.test');
+
+    const sub = await request(app.getHttpServer())
+      .post('/api/vouchers')
+      .set('Authorization', `Bearer ${se}`)
+      .send({ clientSubmissionId: randomUUID(), items: itemsBody() })
+      .expect(201);
+    const id = sub.body.voucher.voucherId as string;
+    created.push(id);
+
+    await request(app.getHttpServer())
+      .post(`/api/vouchers/${id}/review`)
+      .set('Authorization', `Bearer ${oh}`)
+      .send({ action: 'APPROVE' })
+      .expect(200);
+
+    const res = await request(app.getHttpServer())
+      .post('/api/vouchers/mark-paid')
+      .set('Authorization', `Bearer ${oh}`)
+      .send({ voucherIds: [id], batchRef: 'FIN-SOD' })
+      .expect(200);
+    expect(res.body.paid).toEqual([]);
+    expect(res.body.skipped).toEqual([{ voucherId: id, status: 'APPROVED', reason: 'SAME_APPROVER' }]);
+    expect(res.body.failed).toEqual([]);
+
+    const row = await prisma.expenseVoucher.findUniqueOrThrow({ where: { voucherId: id } });
+    expect(row.status).toBe('APPROVED');
+  });
+
+  it('a bad id in a mark-paid batch returns 200 with failed[] — it never 500s and never blocks the good ids', async () => {
+    const se = await login('se.north@fsm.test');
+    const zm = await login('zm.north@fsm.test');
+    const oh = await login('ops.head@fsm.test');
+
+    const sub = await request(app.getHttpServer())
+      .post('/api/vouchers')
+      .set('Authorization', `Bearer ${se}`)
+      .send({ clientSubmissionId: randomUUID(), items: itemsBody() })
+      .expect(201);
+    const id = sub.body.voucher.voucherId as string;
+    created.push(id);
+    await request(app.getHttpServer())
+      .post(`/api/vouchers/${id}/review`)
+      .set('Authorization', `Bearer ${zm}`)
+      .send({ action: 'APPROVE' })
+      .expect(200);
+
+    const missing = randomUUID();
+    const res = await request(app.getHttpServer())
+      .post('/api/vouchers/mark-paid')
+      .set('Authorization', `Bearer ${oh}`)
+      .send({ voucherIds: ['not-a-uuid', id, missing], batchRef: 'FIN-BATCH' })
+      .expect(200);
+
+    expect(res.body.paid).toEqual([id]);
+    expect(res.body.skipped).toEqual([{ voucherId: missing, status: 'NOT_FOUND', reason: 'NOT_FOUND' }]);
+    expect(res.body.failed.map((f: { voucherId: string }) => f.voucherId)).toEqual(['not-a-uuid']);
+    expect((await prisma.expenseVoucher.findUniqueOrThrow({ where: { voucherId: id } })).status).toBe('PAID');
+  });
+
+  it('the queue carries the ticket-match warnings for the review page', async () => {
+    const se = await login('se.north@fsm.test');
+    const zm = await login('zm.north@fsm.test');
+
+    const sub = await request(app.getHttpServer())
+      .post('/api/vouchers')
+      .set('Authorization', `Bearer ${se}`)
+      .send({ clientSubmissionId: randomUUID(), ticketId: randomUUID(), items: itemsBody() })
+      .expect(201);
+    const id = sub.body.voucher.voucherId as string;
+    created.push(id);
+
+    const queue = await request(app.getHttpServer()).get('/api/vouchers').set('Authorization', `Bearer ${zm}`).expect(200);
+    const row = queue.body.find((r: { voucherId: string }) => r.voucherId === id);
+    expect(row.activityCheck.warnings).toEqual(['LINKED_TICKET_NOT_FOUND']);
+    expect(row.activityCheck).toHaveProperty('ticketAssignedSeId');
+    expect(row.activityCheck).toHaveProperty('ticketPlantId');
+  });
+
+  it('the reject-reason gate is unchanged', async () => {
+    const se = await login('se.north@fsm.test');
+    const zm = await login('zm.north@fsm.test');
+    const sub = await request(app.getHttpServer())
+      .post('/api/vouchers')
+      .set('Authorization', `Bearer ${se}`)
+      .send({ clientSubmissionId: randomUUID(), items: itemsBody() })
+      .expect(201);
+    const id = sub.body.voucher.voucherId as string;
+    created.push(id);
+
+    const noReason = await request(app.getHttpServer())
+      .post(`/api/vouchers/${id}/review`)
+      .set('Authorization', `Bearer ${zm}`)
+      .send({ action: 'NEEDS_CLARIFICATION' })
+      .expect(400);
+    expect(noReason.body.code).toBe('REASON_REQUIRED');
+
+    await request(app.getHttpServer())
+      .post(`/api/vouchers/${id}/review`)
+      .set('Authorization', `Bearer ${zm}`)
+      .send({ action: 'REJECT', notes: 'Duplicate claim' })
+      .expect(200);
+  });
 });

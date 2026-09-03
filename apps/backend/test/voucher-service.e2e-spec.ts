@@ -13,6 +13,11 @@ import type { VoucherNotifier, VoucherPaidEvent, VoucherReviewedEvent } from '..
  *  - SE resubmit after NEEDS_CLARIFICATION → back to ZONAL_MANAGER_REVIEW
  *  - OH Mark PAID (multi-select, APPROVED→PAID) + SE notification
  *  - OH monthly Finance export (CSV of APPROVED)
+ *
+ * Issue 359 — the money-path controls layered on top of that lifecycle:
+ *  - separation of duties: the reviewer of a voucher cannot also mark it paid (SAME_APPROVER skip, audited)
+ *  - batch safety: every id lands in exactly one of paid / skipped / failed; a bad id never throws
+ *  - ticket match: the activity check joins ticket → assignment SE + plant and warns rather than refusing
  */
 
 class FakeNotifier implements VoucherNotifier {
@@ -35,9 +40,13 @@ describe('Issue 38 — VouchersService', () => {
   let zoneB: bigint;
   let companyId: bigint;
   let plantA: bigint;
+  let plantB: bigint;
   let seA: string; // SE in zoneA
   let seB: string; // SE in zoneB
-  let ticketId: string;
+  let ticketId: string; // at plantA, assigned to nobody
+  let assignedTicketId: string; // at plantA, live batch row for seA
+  let scheduleId: bigint;
+  let batchId: bigint;
   const createdVoucherIds: string[] = [];
 
   const NOW = new Date(Date.UTC(2026, 5, 28, 9, 0, 0));
@@ -84,6 +93,7 @@ describe('Issue 38 — VouchersService', () => {
       })
     ).companyId;
     plantA = (await prisma.plant.create({ data: { name: 'P-vch-A', zoneId: zoneA } })).plantId;
+    plantB = (await prisma.plant.create({ data: { name: 'P-vch-B', zoneId: zoneA } })).plantId;
 
     seA = await makeSe(zoneA, 'A');
     seB = await makeSe(zoneB, 'B');
@@ -103,6 +113,36 @@ describe('Issue 38 — VouchersService', () => {
         },
       })
     ).ticketId;
+
+    // #359 — a second ticket at plantA that IS on seA's Day Plan (live batch row), so the ticket-match
+    // check has both shapes to read: assigned-to-this-SE and assigned-to-nobody.
+    await prisma.device.create({ data: { deviceId: '9380002', deviceType: 'GPS-X' } });
+    assignedTicketId = (
+      await prisma.ticket.create({
+        data: {
+          workType: 'INSTALL',
+          status: 'REQUESTED',
+          deviceId: '9380002',
+          plantId: plantA,
+          companyId,
+          companyTier: 'GOLD',
+          lastStateChangedAt: NOW,
+        },
+      })
+    ).ticketId;
+    scheduleId = (
+      await prisma.workSchedule.create({
+        data: { seId: seA, zoneId: zoneA, dateFrom: NOW, dateTo: NOW },
+      })
+    ).scheduleId;
+    batchId = (
+      await prisma.plantBatchAssignment.create({
+        data: { scheduleId, plantId: plantA, seId: seA, stopSequence: 1 },
+      })
+    ).batchId;
+    await prisma.batchAssignmentTicket.create({
+      data: { batchId, ticketId: assignedTicketId, sortOrder: 1 },
+    });
   });
 
   afterAll(async () => {
@@ -111,11 +151,14 @@ describe('Issue 38 — VouchersService', () => {
       await prisma.expenseVoucherItem.deleteMany({ where: { voucherId: { in: createdVoucherIds } } });
       await prisma.expenseVoucher.deleteMany({ where: { voucherId: { in: createdVoucherIds } } });
     }
-    await prisma.ticket.deleteMany({ where: { ticketId } });
-    await prisma.device.deleteMany({ where: { deviceId: '9380001' } });
+    await prisma.batchAssignmentTicket.deleteMany({ where: { batchId } });
+    await prisma.plantBatchAssignment.deleteMany({ where: { batchId } });
+    await prisma.workSchedule.deleteMany({ where: { scheduleId } });
+    await prisma.ticket.deleteMany({ where: { ticketId: { in: [ticketId, assignedTicketId] } } });
+    await prisma.device.deleteMany({ where: { deviceId: { in: ['9380001', '9380002'] } } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: { in: [seA, seB] } } });
     await prisma.user.deleteMany({ where: { userId: { in: [seA, seB] } } });
-    await prisma.plant.deleteMany({ where: { plantId: plantA } });
+    await prisma.plant.deleteMany({ where: { plantId: { in: [plantA, plantB] } } });
     await prisma.company.deleteMany({ where: { companyId } });
     await prisma.zone.deleteMany({ where: { zoneId: { in: [zoneA, zoneB] } } });
     await prisma.onModuleDestroy();
@@ -247,6 +290,85 @@ describe('Issue 38 — VouchersService', () => {
       const review = await service.reviewQueue({ role: 'OPERATIONS_HEAD', zoneId: null });
       expect(review.some((r) => r.voucherId === id)).toBe(false);
     });
+
+    // ---- #359 ticket match --------------------------------------------------
+    it('warns TICKET_NOT_ASSIGNED_TO_SE when the linked ticket was never assigned to the claiming SE', async () => {
+      const out = await service.create({
+        seId: seA,
+        clientSubmissionId: randomUUID(),
+        ticketId, // exists, but no batch row and no assignedSeId
+        items: baseItems(),
+        now: NOW,
+      });
+      if (out.result !== 'OK') throw new Error('seed failed');
+      createdVoucherIds.push(out.voucher.voucherId);
+
+      const row = (await service.reviewQueue({ role: 'ZONAL_MANAGER', zoneId: Number(zoneA) })).find(
+        (r) => r.voucherId === out.voucher.voucherId,
+      )!;
+      expect(row.activityCheck.ticketFound).toBe(true);
+      expect(row.activityCheck.warnings).toContain('TICKET_NOT_ASSIGNED_TO_SE');
+      expect(row.activityCheck.warning).toBe('TICKET_NOT_ASSIGNED_TO_SE');
+      expect(row.activityCheck.ticketAssignedSeId).toBeNull();
+    });
+
+    it('clears the warning when the linked ticket sits on the SE own live batch row', async () => {
+      const out = await service.create({
+        seId: seA,
+        clientSubmissionId: randomUUID(),
+        ticketId: assignedTicketId,
+        plantId: plantA,
+        items: baseItems(),
+        now: NOW,
+      });
+      if (out.result !== 'OK') throw new Error('seed failed');
+      createdVoucherIds.push(out.voucher.voucherId);
+
+      const row = (await service.reviewQueue({ role: 'ZONAL_MANAGER', zoneId: Number(zoneA) })).find(
+        (r) => r.voucherId === out.voucher.voucherId,
+      )!;
+      expect(row.activityCheck.ticketAssignedSeId).toBe(seA);
+      expect(row.activityCheck.warnings).toEqual([]);
+      expect(row.activityCheck.warning).toBeNull();
+    });
+
+    it('warns TICKET_PLANT_MISMATCH when the claimed plant is not the ticket plant', async () => {
+      const out = await service.create({
+        seId: seA,
+        clientSubmissionId: randomUUID(),
+        ticketId: assignedTicketId, // ticket is at plantA
+        plantId: plantB, // claim says plantB
+        items: baseItems(),
+        now: NOW,
+      });
+      if (out.result !== 'OK') throw new Error('seed failed');
+      createdVoucherIds.push(out.voucher.voucherId);
+
+      const row = (await service.reviewQueue({ role: 'ZONAL_MANAGER', zoneId: Number(zoneA) })).find(
+        (r) => r.voucherId === out.voucher.voucherId,
+      )!;
+      expect(row.activityCheck.warnings).toEqual(['TICKET_PLANT_MISMATCH']);
+      expect(row.activityCheck.ticketPlantId).toBe(Number(plantA));
+      expect(row.activityCheck.linkedPlantId).toBe(Number(plantB));
+    });
+
+    it('still warns LINKED_TICKET_NOT_FOUND, and never refuses the row for a warning', async () => {
+      const out = await service.create({
+        seId: seA,
+        clientSubmissionId: randomUUID(),
+        ticketId: randomUUID(), // no such ticket
+        items: baseItems(),
+        now: NOW,
+      });
+      if (out.result !== 'OK') throw new Error('seed failed');
+      createdVoucherIds.push(out.voucher.voucherId);
+
+      const row = (await service.reviewQueue({ role: 'ZONAL_MANAGER', zoneId: Number(zoneA) })).find(
+        (r) => r.voucherId === out.voucher.voucherId,
+      )!;
+      expect(row.activityCheck.ticketFound).toBe(false);
+      expect(row.activityCheck.warnings).toEqual(['LINKED_TICKET_NOT_FOUND']);
+    });
   });
 
   // ---- ZM review ------------------------------------------------------------
@@ -341,6 +463,84 @@ describe('Issue 38 — VouchersService', () => {
       expect(rowA.paidBatchRef).toBe('FIN-2026-06');
       expect(rowA.paidAt).not.toBeNull();
       expect(notifier.paidEvents.length).toBe(before + 1);
+      expect(out.failed).toEqual([]);
+      expect(out.skipped.find((s) => s.voucherId === b.voucher.voucherId)!.reason).toBe('NOT_APPROVED');
+    });
+
+    // ---- #359 separation of duties -----------------------------------------
+    it('skips SAME_APPROVER: the person who approved a voucher cannot also mark it paid, and the skip is audited', async () => {
+      const v = await service.create({ seId: seA, clientSubmissionId: randomUUID(), items: baseItems(), now: NOW });
+      if (v.result !== 'OK') throw new Error('seed failed');
+      const id = v.voucher.voucherId;
+      createdVoucherIds.push(id);
+
+      // one Operations Head clears BOTH money gates: approve then pay
+      const oh: RequestActor = { userId: randomUUID(), role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
+      await service.review(id, { action: 'APPROVE', notes: null }, { role: 'OPERATIONS_HEAD', zoneId: null }, oh);
+
+      const before = notifier.paidEvents.length;
+      const out = await service.markPaid([id], 'FIN-2026-07', oh, NOW);
+      expect(out.paid).toEqual([]);
+      expect(out.skipped).toEqual([{ voucherId: id, status: 'APPROVED', reason: 'SAME_APPROVER' }]);
+      expect(out.failed).toEqual([]);
+      expect(notifier.paidEvents.length).toBe(before); // no payment, so no SE notice
+
+      const row = await prisma.expenseVoucher.findUniqueOrThrow({ where: { voucherId: id } });
+      expect(row.status).toBe('APPROVED'); // untouched
+      expect(row.paidAt).toBeNull();
+
+      const audit = await prisma.auditLog.findMany({
+        where: { entityType: 'expense_vouchers', entityId: id, action: 'VOUCHER_MARK_PAID_SKIPPED' },
+      });
+      expect(audit).toHaveLength(1);
+      expect(audit[0].metadata).toMatchObject({ reason: 'SAME_APPROVER' });
+      expect(audit[0].actorId).toBe(oh.userId);
+    });
+
+    it('lets a different Operations Head pay a voucher the first one approved', async () => {
+      const v = await service.create({ seId: seA, clientSubmissionId: randomUUID(), items: baseItems(), now: NOW });
+      if (v.result !== 'OK') throw new Error('seed failed');
+      const id = v.voucher.voucherId;
+      createdVoucherIds.push(id);
+
+      const approver: RequestActor = { userId: randomUUID(), role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
+      const payer: RequestActor = { userId: randomUUID(), role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
+      await service.review(id, { action: 'APPROVE', notes: null }, { role: 'OPERATIONS_HEAD', zoneId: null }, approver);
+
+      const out = await service.markPaid([id], 'FIN-2026-07', payer, NOW);
+      expect(out.paid).toEqual([id]);
+      expect((await prisma.expenseVoucher.findUniqueOrThrow({ where: { voucherId: id } })).status).toBe('PAID');
+    });
+
+    // ---- #359 batch safety --------------------------------------------------
+    it('reports every id in exactly one of paid / skipped / failed, and one bad id does not block the batch', async () => {
+      const a = await service.create({ seId: seA, clientSubmissionId: randomUUID(), items: baseItems(), now: NOW });
+      const b = await service.create({ seId: seA, clientSubmissionId: randomUUID(), items: baseItems(), now: NOW });
+      if (a.result !== 'OK' || b.result !== 'OK') throw new Error('seed failed');
+      createdVoucherIds.push(a.voucher.voucherId, b.voucher.voucherId);
+      await service.review(a.voucher.voucherId, { action: 'APPROVE', notes: null }, { role: 'ZONAL_MANAGER', zoneId: Number(zoneA) }, zmAActor());
+      // b stays in ZONAL_MANAGER_REVIEW → skipped NOT_APPROVED
+
+      const missing = randomUUID(); // well-formed, no such row → skipped NOT_FOUND
+      const malformed = 'not-a-uuid'; // blows up in the DB layer → failed, not a 500
+      const oh: RequestActor = { userId: randomUUID(), role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
+
+      // the bad id goes FIRST: a month's batch must survive it
+      const ids = [malformed, a.voucher.voucherId, b.voucher.voucherId, missing];
+      const out = await service.markPaid(ids, 'FIN-2026-08', oh, NOW);
+
+      expect(out.paid).toEqual([a.voucher.voucherId]);
+      expect(out.skipped.map((s) => s.voucherId).sort()).toEqual([b.voucher.voucherId, missing].sort());
+      expect(out.failed.map((f) => f.voucherId)).toEqual([malformed]);
+      expect(out.failed[0].reason).toBeTruthy();
+
+      // every id accounted for exactly once
+      const reported = [...out.paid, ...out.skipped.map((s) => s.voucherId), ...out.failed.map((f) => f.voucherId)];
+      expect(reported.sort()).toEqual([...ids].sort());
+      expect(new Set(reported).size).toBe(ids.length);
+
+      expect((await prisma.expenseVoucher.findUniqueOrThrow({ where: { voucherId: a.voucher.voucherId } })).status).toBe('PAID');
+      expect(out.skipped.find((s) => s.voucherId === missing)!.reason).toBe('NOT_FOUND');
     });
   });
 

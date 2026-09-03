@@ -27,8 +27,58 @@ import { downloadCsv } from '../../lib/csv';
  * APPROVED vouchers) + multi-select Mark PAID (after Finance confirms the batch). No selector contract to
  * preserve — this is the issue's first admin surface; ids are `voucher-row-*` / `voucher-metric-*` for the
  * later FE parity pass. ZM/CSM review own/all zones; export + mark-paid are Operations-Head only.
+ *
+ * Issue 359 adds the money-path controls to this same layout (no reference exists in the v2 set for
+ * vouchers; the page is its own authority, so this extends rather than redraws): the activity cell now
+ * carries the ticket-match warnings, and Mark PAID reports its batch back — which ids were paid, which
+ * were skipped and why, which failed — because the batch is deliberately not all-or-nothing on the
+ * backend and a silent partial result would be unreadable.
  */
 type View = 'review' | 'approved';
+
+/**
+ * The activity-check warning vocabulary (`vouchers.service.ts`). Every one is a review cue, not a
+ * refusal, so they are rendered as flags beside the row rather than as blocking errors.
+ */
+const ACTIVITY_WARNING_LABELS: Record<string, { label: string; tone: 'warning' | 'critical'; title: string }> = {
+  NO_ACTIVITY_LINK: {
+    label: 'No activity link',
+    tone: 'warning',
+    title: 'This claim names neither a ticket nor a plant — there is no work record to verify it against.',
+  },
+  LINKED_TICKET_NOT_FOUND: {
+    label: 'Ticket not found',
+    tone: 'critical',
+    title: 'The linked ticket does not exist. Usually a mis-keyed reference — confirm with the SE.',
+  },
+  TICKET_NOT_ASSIGNED_TO_SE: {
+    label: 'Not this SE’s ticket',
+    tone: 'warning',
+    title: 'The linked ticket was never assigned to this Service Engineer. Check who actually did the work.',
+  },
+  TICKET_PLANT_MISMATCH: {
+    label: 'Plant mismatch',
+    tone: 'warning',
+    title: 'The claimed plant is not the plant the linked ticket belongs to.',
+  },
+};
+
+const MARK_PAID_SKIP_LABELS: Record<string, string> = {
+  SAME_APPROVER: 'you approved this voucher — a second person must mark it paid',
+  NOT_APPROVED: 'not approved yet',
+  NOT_FOUND: 'no such voucher',
+};
+
+/**
+ * The mark-PAID batch result. Widened locally over the client's declared return type: the backend
+ * reports `reason` on each skip and a `failed[]` channel (#359), and `apps/admin/src/api/vouchers.ts`
+ * is owned by another slice this cycle — the optional fields keep this page honest without editing it.
+ */
+interface MarkPaidOutcome {
+  paid: string[];
+  skipped: { voucherId: string; status: string; reason?: string }[];
+  failed?: { voucherId: string; reason: string }[];
+}
 
 const currentMonth = () => {
   const d = new Date();
@@ -56,6 +106,7 @@ export function VoucherReviewPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchRef, setBatchRef] = useState('');
   const [month, setMonth] = useState(currentMonth());
+  const [markPaidOutcome, setMarkPaidOutcome] = useState<MarkPaidOutcome | null>(null);
 
   // photo lightbox
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -72,6 +123,7 @@ export function VoucherReviewPage() {
     setSelected(new Set());
     setReasonFor(null);
     setReason('');
+    setMarkPaidOutcome(null);
     load();
   }, [load]);
 
@@ -100,8 +152,11 @@ export function VoucherReviewPage() {
 
   const markPaid = async () => {
     if (selected.size === 0) return;
-    await apiMarkVouchersPaid([...selected], batchRef.trim() || undefined);
-    setSelected(new Set());
+    const outcome: MarkPaidOutcome = await apiMarkVouchersPaid([...selected], batchRef.trim() || undefined);
+    setMarkPaidOutcome(outcome);
+    // Only the ids that actually moved leave the selection: a skipped or failed voucher stays picked so
+    // the operator can act on it (hand a SAME_APPROVER row to a second approver, retry a failed one).
+    setSelected((prev) => new Set([...prev].filter((id) => !outcome.paid.includes(id))));
     setBatchRef('');
     load();
   };
@@ -136,24 +191,40 @@ export function VoucherReviewPage() {
     </div>
   );
 
-  const activityCell = (row: VoucherRow) => (
-    <div data-testid={`voucher-activity-${row.voucherId}`} className="text-xs">
-      {row.activityCheck.linkedTicketId ? (
-        <button
-          type="button"
-          onClick={() => navigate(`/tickets/${row.activityCheck.linkedTicketId}`)}
-          className="font-mono text-link hover:underline"
-        >
-          {row.activityCheck.linkedTicketId.slice(0, 8)}
-        </button>
-      ) : (
-        <span className="text-warning">⚠ No activity link</span>
-      )}
-      {row.activityCheck.linkedTicketId && !row.activityCheck.ticketFound && (
-        <span className="ml-1 text-critical">ticket missing</span>
-      )}
-    </div>
-  );
+  const activityCell = (row: VoucherRow) => {
+    // `warnings` is the #359 list; `warning` is the single headline code the queue has always sent.
+    // Read the list when it is there and fall back to the headline so an older payload still renders.
+    const check = row.activityCheck as typeof row.activityCheck & { warnings?: string[] };
+    const warnings = check.warnings ?? (check.warning ? [check.warning] : []);
+    return (
+      <div data-testid={`voucher-activity-${row.voucherId}`} className="flex flex-col gap-0.5 text-xs">
+        {check.linkedTicketId ? (
+          <button
+            type="button"
+            onClick={() => navigate(`/tickets/${check.linkedTicketId}`)}
+            className="self-start font-mono text-link hover:underline"
+          >
+            {check.linkedTicketId.slice(0, 8)}
+          </button>
+        ) : (
+          <span className="text-ink-muted">No ticket linked</span>
+        )}
+        {warnings.map((code) => {
+          const w = ACTIVITY_WARNING_LABELS[code];
+          return (
+            <span
+              key={code}
+              data-testid={`voucher-activity-warning-${row.voucherId}-${code}`}
+              title={w?.title ?? code}
+              className={w?.tone === 'critical' ? 'text-critical' : 'text-warning'}
+            >
+              ⚠ {w?.label ?? code}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
 
   const reviewActions = (row: VoucherRow) => {
     if (reasonFor && reasonFor.id === row.voucherId) {
@@ -260,6 +331,41 @@ export function VoucherReviewPage() {
               </Button>
             </>
           )}
+        </div>
+      )}
+
+      {markPaidOutcome && (
+        <div
+          role="status"
+          data-testid="voucher-markpaid-outcome"
+          className="mb-4 rounded-md border border-line bg-surface-sunken p-3 text-xs"
+        >
+          <p className="font-semibold text-ink-strong">
+            Marked PAID: {markPaidOutcome.paid.length} of{' '}
+            {markPaidOutcome.paid.length + markPaidOutcome.skipped.length + (markPaidOutcome.failed?.length ?? 0)}
+          </p>
+          <ul className="mt-1 flex flex-col gap-0.5">
+            {markPaidOutcome.skipped.map((s) => (
+              <li key={s.voucherId} data-testid={`voucher-markpaid-skipped-${s.voucherId}`} className="text-warning">
+                <span className="font-mono">{s.voucherId.slice(0, 8)}</span> skipped —{' '}
+                {s.reason ? (MARK_PAID_SKIP_LABELS[s.reason] ?? s.reason) : `status ${s.status}`}
+              </li>
+            ))}
+            {(markPaidOutcome.failed ?? []).map((f) => (
+              <li key={f.voucherId} data-testid={`voucher-markpaid-failed-${f.voucherId}`} className="text-critical">
+                <span className="font-mono">{f.voucherId.slice(0, 8)}</span> failed — {f.reason}
+              </li>
+            ))}
+          </ul>
+          {(markPaidOutcome.skipped.length > 0 || (markPaidOutcome.failed?.length ?? 0) > 0) && (
+            <p className="mt-1 text-ink-muted">
+              The rest of the batch was paid. Skipped and failed vouchers stay selected so they can be retried
+              or handed to a second approver.
+            </p>
+          )}
+          <button type="button" onClick={() => setMarkPaidOutcome(null)} className="mt-1 text-link hover:underline">
+            Dismiss
+          </button>
         </div>
       )}
 

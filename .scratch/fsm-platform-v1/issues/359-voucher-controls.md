@@ -1,5 +1,5 @@
 # 359 — Expense voucher controls: separation of duties, atomic mark-paid, ticket match
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/359-voucher-controls.md
 Type: AFK
 Wave: 3 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -42,13 +42,25 @@ Three control gaps on the money path.
 - Not built: VCH-08 (un-pay / reversal) — recorded as a decision item below.
 
 ## Acceptance criteria
-- [ ] AC1 — the reviewer of a voucher cannot mark it paid: it is skipped with reason
+- [x] AC1 — the reviewer of a voucher cannot mark it paid: it is skipped with reason
       `SAME_APPROVER` and the skip is audited.
-- [ ] AC2 — a batch reports every id in exactly one of `paid` / `skipped` / `failed` and never
+- [x] AC2 — a batch reports every id in exactly one of `paid` / `skipped` / `failed` and never
       returns 500 on a bad id.
-- [ ] AC3 — ticket-match warnings (`TICKET_NOT_ASSIGNED_TO_SE`, `TICKET_PLANT_MISMATCH`) appear in
+- [x] AC3 — ticket-match warnings (`TICKET_NOT_ASSIGNED_TO_SE`, `TICKET_PLANT_MISMATCH`) appear in
       the review queue.
-- [ ] AC4 — the reject-reason gate is unchanged.
+- [x] AC4 — the reject-reason gate is unchanged.
+
+## Outcome
+
+Done 2026-09-03 — report `docs/progress/359-voucher-controls.md`. Separation of duties is enforced on
+the voucher (`reviewedBy === actor.userId` → `SAME_APPROVER`, audited) rather than by removing OH from
+`REVIEW_ROLES`, so `vouchers.controller.ts` needed no change. The batch stays deliberately non-atomic
+(per-row catch → `failed[]`) so one bad id cannot block a month's run, and `MarkPaidOutcome` became
+total: `{ paid[], skipped[], failed[] }`, every skip carrying a reason. `activityCheck` joins live
+batch assignment + plant and warns. VCH-08 (un-pay) not built — still an open operator decision.
+
+Premise correction: `skipped[]` already existed (for `NOT_FOUND` / non-APPROVED); what was missing was
+the `SAME_APPROVER` case, a `reason` on each skip, and `failed[]`.
 
 ## Verification
 
