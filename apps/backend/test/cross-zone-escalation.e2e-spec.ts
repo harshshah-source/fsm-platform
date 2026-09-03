@@ -5,6 +5,14 @@ import { NotificationService } from '../src/notifications/notification.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { LoggingDayPlanNotifier } from '../src/scheduling/day-plan-notifier';
 import { OverrideService } from '../src/scheduling/override.service';
+import { NOTIFY_EVENT_TYPE, drainRows } from '../src/scheduling/day-plan-notification-outbox';
+import type { NotifyInput } from '../src/notifications/notification.service';
+import {
+  EnqueueFailed,
+  failingNotifyEnqueue,
+  inertDayPlanNotifier,
+  throwingNotifications,
+} from './fixtures/outbox-crash-injection';
 
 /**
  * Issue 32 — cross-zone Platinum auto-escalation + ZM manual flag → CSM cross-zone queue. The auto-sweep,
@@ -268,5 +276,100 @@ describe('Issue 32 — cross-zone escalation (auto + manual flag + decisions)', 
     await svc.flag(t, 'manual', ZM, NOW);
     const esc = await escFor(t);
     expect((await svc.reEscalateToOps(esc.escalationId, ZM, NOW)).result).toBe('NOT_DENIED_AUTO');
+  });
+
+  /**
+   * #338 — the cross-zone notices are durable, and they commit with the escalation they announce.
+   *
+   * This file's three notify helpers were the last of the twelve post-commit sites, and they were
+   * the worst placed: `create` → `audit` → `notify` as three bare awaits (survey CZ-02), so a crash
+   * between them left a PENDING cross-zone escalation that no CSM or OH had been told about — a
+   * Platinum ticket waiting in a queue nobody was asked to look at. A *throw* in the push abandoned
+   * the rest of the sweep's zone.
+   *
+   * The earlier reading — that AC1 here had to wait for #354 — was too pessimistic. What #354 owns is
+   * CZ-01: `approve` writing its escalation update *outside* `assignTicket`'s transaction, which is a
+   * cross-service atomicity problem and is untouched here. Each of these doors' own writes are local,
+   * and a local transaction is exactly what CZ-02 asks for.
+   */
+  describe('#338 — the cross-zone notices are written in the escalation transaction', () => {
+    const svcOn = (client: PrismaService, notifications = new NotificationService(client)) =>
+      new CrossZoneEscalationService(
+        client,
+        new OverrideService(client, new AuditService(client), inertDayPlanNotifier),
+        notifications,
+        new AuditService(client),
+      );
+
+    const payloadOf = (row: { payload: unknown }): NotifyInput => (row.payload ?? {}) as unknown as NotifyInput;
+
+    const noticesFor = async (ticketId: string) => {
+      const rows = await prisma.dayPlanNotificationOutbox.findMany({
+        where: { eventType: NOTIFY_EVENT_TYPE },
+        orderBy: { id: 'asc' },
+      });
+      return rows.filter((r) => payloadOf(r).entityId === ticketId);
+    };
+
+    it('a notifier that throws leaves the escalation raised and the queue notice retryable', async () => {
+      const t = await makeTicket({ tier: 'PLATINUM', bucket: 'CRITICAL', ageMin: 90 });
+
+      // This used to reject, abandoning every later ticket in the zone because one push failed.
+      expect((await svcOn(prisma, throwingNotifications()).sweepAutoEscalations(NOW, homeZoneId)).escalated).toBe(1);
+
+      const esc = await escFor(t);
+      expect(esc.status).toBe('PENDING');
+      expect(await prisma.auditLog.count({ where: { entityId: String(esc.escalationId), action: 'CROSS_ZONE_AUTO_ESCALATION' } })).toBe(1);
+
+      const rows = await noticesFor(t);
+      expect(rows).toHaveLength(1);
+      const row = rows[0]!;
+      expect(payloadOf(row).type).toBe('CROSS_ZONE_AUTO_ESCALATION');
+      expect(payloadOf(row).recipients.map((r) => r.userId)).toEqual(expect.arrayContaining([csmUserId, ohUserId]));
+      expect(row.sentAt).toBeNull();
+      expect(await prisma.notification.count({ where: { recipientUserId: csmUserId, entityId: t } })).toBe(0);
+
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], NOW, { notify: new NotificationService(prisma) });
+      expect(await prisma.notification.count({ where: { recipientUserId: csmUserId, entityId: t } })).toBe(1);
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], NOW, { notify: new NotificationService(prisma) });
+      expect(await prisma.notification.count({ where: { recipientUserId: csmUserId, entityId: t } })).toBe(1);
+      await prisma.dayPlanNotificationOutbox.deleteMany({ where: { id: row.id } });
+    });
+
+    it('AC1 — a failed enqueue rolls the auto-escalation back, audit row included', async () => {
+      const t = await makeTicket({ tier: 'PLATINUM', bucket: 'CRITICAL', ageMin: 90 });
+
+      await expect(svcOn(failingNotifyEnqueue(prisma)).sweepAutoEscalations(NOW, homeZoneId)).rejects.toThrow(
+        EnqueueFailed,
+      );
+
+      expect(await prisma.crossZoneEscalation.count({ where: { ticketId: t } })).toBe(0);
+      expect(await noticesFor(t)).toHaveLength(0);
+    });
+
+    it("AC1 — the ZM's manual flag and its queue notice commit together", async () => {
+      const t = await makeTicket({ tier: 'GOLD', bucket: 'CRITICAL', ageMin: 30 });
+
+      await expect(svcOn(failingNotifyEnqueue(prisma)).flag(t, 'manual', ZM, NOW)).rejects.toThrow(EnqueueFailed);
+
+      expect(await prisma.crossZoneEscalation.count({ where: { ticketId: t } })).toBe(0);
+      expect(await noticesFor(t)).toHaveLength(0);
+    });
+
+    it("AC1 — a decision and the home ZM's notice commit together", async () => {
+      const t = await makeTicket({ tier: 'GOLD', bucket: 'CRITICAL', ageMin: 30 });
+      await svc.flag(t, 'manual', ZM, NOW);
+      const esc = await escFor(t);
+
+      await expect(svcOn(failingNotifyEnqueue(prisma)).deny(esc.escalationId, 'no capacity', CSM, NOW)).rejects.toThrow(
+        EnqueueFailed,
+      );
+
+      // The escalation is still PENDING: a decision the home ZM was never told about is the state
+      // this door must not be able to leave behind.
+      const after = await prisma.crossZoneEscalation.findUniqueOrThrow({ where: { escalationId: esc.escalationId } });
+      expect(after.status).toBe('PENDING');
+      expect(after.decidedAt).toBeNull();
+    });
   });
 });

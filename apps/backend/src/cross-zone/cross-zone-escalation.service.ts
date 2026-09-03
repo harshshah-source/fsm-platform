@@ -6,6 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { Prisma } from '../generated/prisma/client';
 import { type CompanyTier, type SlaBucket } from '../generated/prisma/enums';
 import { NotificationService } from '../notifications/notification.service';
+import { drainProducerRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
 import { ActorContext, OverrideService } from '../scheduling/override.service';
 import { ZmScope } from '../scheduling/zm-schedule-query.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -96,22 +97,30 @@ export class CrossZoneEscalationService {
         ageMin >= AUTO_OPEN_UNASSIGNED_MIN;
       if (!qualifies) continue;
 
-      const esc = await this.prisma.crossZoneEscalation.create({
-        data: {
-          ticketId: t.ticketId,
-          homeZoneId: t.plant.zoneId,
-          companyTier: 'PLATINUM',
-          escalationType: 'AUTO_PLATINUM',
-          status: 'PENDING',
+      // #338 (survey CZ-02) — the escalation, its audit row and the notice that the queue has a new
+      // item were three bare awaits. A crash between them left a PENDING Platinum escalation nobody
+      // had been told about: a ticket waiting in a queue no CSM or OH was asked to look at.
+      const outboxId = await this.prisma.$transaction(async (tx) => {
+        const esc = await tx.crossZoneEscalation.create({
+          data: {
+            ticketId: t.ticketId,
+            homeZoneId: t.plant.zoneId,
+            companyTier: 'PLATINUM',
+            escalationType: 'AUTO_PLATINUM',
+            status: 'PENDING',
+            triggerBucket: bucket,
+            raisedByRole: 'SYSTEM',
+          },
+        });
+        await this.auditEscalation(tx, 'CROSS_ZONE_AUTO_ESCALATION', esc.escalationId, t.ticketId, {
+          homeZoneId: String(t.plant.zoneId),
           triggerBucket: bucket,
-          raisedByRole: 'SYSTEM',
-        },
+        });
+        return this.notifyCrossZoneQueue(tx, t.ticketId, esc.escalationId, 'AUTO_PLATINUM', t.plant.zoneId);
       });
-      await this.auditEscalation('CROSS_ZONE_AUTO_ESCALATION', esc.escalationId, t.ticketId, {
-        homeZoneId: String(t.plant.zoneId),
-        triggerBucket: bucket,
-      });
-      await this.notifyCrossZoneQueue(t.ticketId, esc.escalationId, 'AUTO_PLATINUM', t.plant.zoneId);
+      // Per ticket, not per sweep: a push that fails must not hold up the zone's remaining work, and
+      // `drainProducerRows` swallows its own failures for exactly that reason.
+      await this.deliver(outboxId, now);
       escalated++;
     }
     return { escalated };
@@ -129,21 +138,25 @@ export class CrossZoneEscalationService {
     });
     if (active) return { result: 'ALREADY_ESCALATED' };
 
-    const esc = await this.prisma.crossZoneEscalation.create({
-      data: {
-        ticketId,
-        homeZoneId: ticket.plant.zoneId,
-        companyTier: ticket.companyTier,
-        escalationType: 'MANUAL_FLAG',
-        status: 'PENDING',
-        flagReason: reason,
-        raisedByUserId: actor.userId,
-        raisedByRole: actor.role,
-      },
+    const flagged = await this.prisma.$transaction(async (tx) => {
+      const esc = await tx.crossZoneEscalation.create({
+        data: {
+          ticketId,
+          homeZoneId: ticket.plant.zoneId,
+          companyTier: ticket.companyTier,
+          escalationType: 'MANUAL_FLAG',
+          status: 'PENDING',
+          flagReason: reason,
+          raisedByUserId: actor.userId,
+          raisedByRole: actor.role,
+        },
+      });
+      await this.auditEscalation(tx, 'CROSS_ZONE_MANUAL_FLAG', esc.escalationId, ticketId, { reason }, actor, now);
+      const outboxId = await this.notifyCrossZoneQueue(tx, ticketId, esc.escalationId, 'MANUAL_FLAG', ticket.plant.zoneId);
+      return { escalationId: esc.escalationId, outboxId };
     });
-    await this.auditEscalation('CROSS_ZONE_MANUAL_FLAG', esc.escalationId, ticketId, { reason }, actor, now);
-    await this.notifyCrossZoneQueue(ticketId, esc.escalationId, 'MANUAL_FLAG', ticket.plant.zoneId);
-    return { result: 'OK', escalationId: String(esc.escalationId) };
+    await this.deliver(flagged.outboxId, now);
+    return { result: 'OK', escalationId: String(flagged.escalationId) };
   }
 
   /** CSM/OH approves — commits a cross-zone Formal Assignment to the chosen target-zone SE. */
@@ -163,21 +176,35 @@ export class CrossZoneEscalationService {
     if (assigned.result === 'ALREADY_ASSIGNED') return { result: 'ALREADY_ASSIGNED' };
     if (assigned.result !== 'OK') return { result: 'NOT_FOUND' };
 
-    await this.prisma.crossZoneEscalation.update({
-      where: { escalationId },
-      data: {
-        status: 'APPROVED',
-        targetZoneId: BigInt(targetZoneId),
-        assignedSeId: seId,
-        assignedScheduleId: BigInt(assigned.scheduleId),
-        assignedBatchId: BigInt(assigned.batchId),
-        decidedByUserId: actor.userId,
-        decidedByRole: actor.role,
-        decidedAt: now,
-      },
+    // #338 — this door's OWN writes (the escalation update, its audit row and the home ZM's notice)
+    // now commit together. What is deliberately NOT fixed here is CZ-01: `assignTicket` above ran in
+    // its own transaction, so an approval can still leave an assigned ticket beside an un-updated
+    // escalation. That is a cross-service atomicity problem and it belongs to #354.
+    const outboxId = await this.prisma.$transaction(async (tx) => {
+      await tx.crossZoneEscalation.update({
+        where: { escalationId },
+        data: {
+          status: 'APPROVED',
+          targetZoneId: BigInt(targetZoneId),
+          assignedSeId: seId,
+          assignedScheduleId: BigInt(assigned.scheduleId),
+          assignedBatchId: BigInt(assigned.batchId),
+          decidedByUserId: actor.userId,
+          decidedByRole: actor.role,
+          decidedAt: now,
+        },
+      });
+      await this.auditEscalation(tx, 'CROSS_ZONE_APPROVE', escalationId, esc.ticketId, { targetZoneId, seId }, actor, now);
+      return this.notifyHomeZm(
+        tx,
+        esc.homeZoneId,
+        esc.ticketId,
+        escalationId,
+        'APPROVED',
+        `Assigned cross-zone to SE in zone ${targetZoneId}.`,
+      );
     });
-    await this.auditEscalation('CROSS_ZONE_APPROVE', escalationId, esc.ticketId, { targetZoneId, seId }, actor, now);
-    await this.notifyHomeZm(esc.homeZoneId, esc.ticketId, escalationId, 'APPROVED', `Assigned cross-zone to SE in zone ${targetZoneId}.`);
+    await this.deliver(outboxId, now);
     return { result: 'OK', escalationId: String(escalationId), status: 'APPROVED' };
   }
 
@@ -204,18 +231,21 @@ export class CrossZoneEscalationService {
     if (esc.status !== 'DENIED' || esc.escalationType !== 'AUTO_PLATINUM') return { result: 'NOT_DENIED_AUTO' };
     if (!this.zmOwnsZone(esc.homeZoneId, actor)) return { result: 'FORBIDDEN_SCOPE' };
 
-    await this.prisma.crossZoneEscalation.update({
-      where: { escalationId },
-      data: { status: 'ESCALATED_TO_OPS', decidedByUserId: actor.userId, decidedByRole: actor.role, decidedAt: now },
+    const outboxId = await this.prisma.$transaction(async (tx) => {
+      await tx.crossZoneEscalation.update({
+        where: { escalationId },
+        data: { status: 'ESCALATED_TO_OPS', decidedByUserId: actor.userId, decidedByRole: actor.role, decidedAt: now },
+      });
+      await this.auditEscalation(tx, 'CROSS_ZONE_RE_ESCALATE_OPS', escalationId, esc.ticketId, {}, actor, now);
+      return this.notifyRole(tx, 'OPERATIONS_HEAD', {
+        type: 'CROSS_ZONE_RE_ESCALATED',
+        title: 'Cross-zone escalation raised to you',
+        body: `Denied Platinum cross-zone escalation for ticket ${esc.ticketId} re-escalated by the home ZM.`,
+        ticketId: esc.ticketId,
+        metadata: { escalationId: String(escalationId), ticketId: esc.ticketId },
+      });
     });
-    await this.auditEscalation('CROSS_ZONE_RE_ESCALATE_OPS', escalationId, esc.ticketId, {}, actor, now);
-    await this.notifyRole('OPERATIONS_HEAD', {
-      type: 'CROSS_ZONE_RE_ESCALATED',
-      title: 'Cross-zone escalation raised to you',
-      body: `Denied Platinum cross-zone escalation for ticket ${esc.ticketId} re-escalated by the home ZM.`,
-      ticketId: esc.ticketId,
-      metadata: { escalationId: String(escalationId), ticketId: esc.ticketId },
-    });
+    await this.deliver(outboxId, now);
     return { result: 'OK', escalationId: String(escalationId), status: 'ESCALATED_TO_OPS' };
   }
 
@@ -263,19 +293,24 @@ export class CrossZoneEscalationService {
     if (!esc) return { result: 'NOT_FOUND' };
     if (!this.isOpen(esc.status)) return { result: 'NOT_PENDING', status: esc.status };
 
-    await this.prisma.crossZoneEscalation.update({
-      where: { escalationId },
-      data: {
-        status,
-        decisionReason: reason,
-        reviewDate: reviewDate ?? null,
-        decidedByUserId: actor.userId,
-        decidedByRole: actor.role,
-        decidedAt: now,
-      },
+    // #338 — a decision the home ZM was never told about is the state this door must not be able to
+    // leave behind: the escalation reads DENIED to everyone but the person whose queue it came from.
+    const outboxId = await this.prisma.$transaction(async (tx) => {
+      await tx.crossZoneEscalation.update({
+        where: { escalationId },
+        data: {
+          status,
+          decisionReason: reason,
+          reviewDate: reviewDate ?? null,
+          decidedByUserId: actor.userId,
+          decidedByRole: actor.role,
+          decidedAt: now,
+        },
+      });
+      await this.auditEscalation(tx, `CROSS_ZONE_${status}`, escalationId, esc.ticketId, { reason }, actor, now);
+      return this.notifyHomeZm(tx, esc.homeZoneId, esc.ticketId, escalationId, status, reason);
     });
-    await this.auditEscalation(`CROSS_ZONE_${status}`, escalationId, esc.ticketId, { reason }, actor, now);
-    await this.notifyHomeZm(esc.homeZoneId, esc.ticketId, escalationId, status, reason);
+    await this.deliver(outboxId, now);
     return { result: 'OK', escalationId: String(escalationId), status };
   }
 
@@ -289,15 +324,24 @@ export class CrossZoneEscalationService {
     return actor.zoneId != null && BigInt(actor.zoneId) === homeZoneId;
   }
 
+  /**
+   * #338 — queued inside the caller's transaction, so the queue item and the notice that it exists
+   * cannot disagree. Returns the outbox row id, or null when there is nobody in the roles to tell.
+   *
+   * The recipients are resolved HERE, in the producing transaction, and recorded in the row. That is
+   * the point of the resolved-payload shape: a row that says who it was for can answer "who was
+   * told" afterwards, which a row that re-derives its recipients at delivery time cannot.
+   */
   private async notifyCrossZoneQueue(
+    tx: Prisma.TransactionClient,
     ticketId: string,
     escalationId: bigint,
     type: 'AUTO_PLATINUM' | 'MANUAL_FLAG',
     homeZoneId: bigint,
-  ): Promise<void> {
-    const recipients = await this.usersInRoles(['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']);
-    if (recipients.length === 0) return;
-    await this.notifications.notify({
+  ): Promise<bigint | null> {
+    const recipients = await this.usersInRoles(['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'], tx);
+    if (recipients.length === 0) return null;
+    return queueNotification(tx, {
       recipients,
       type: type === 'AUTO_PLATINUM' ? 'CROSS_ZONE_AUTO_ESCALATION' : 'CROSS_ZONE_MANUAL_FLAG',
       title: type === 'AUTO_PLATINUM' ? 'Platinum cross-zone escalation' : 'Cross-zone flag raised',
@@ -309,16 +353,18 @@ export class CrossZoneEscalationService {
     });
   }
 
+  /** #338 — queued in the caller's transaction; null when the home zone has no ZM to tell. */
   private async notifyHomeZm(
+    tx: Prisma.TransactionClient,
     homeZoneId: bigint,
     ticketId: string,
     escalationId: bigint,
     decision: string,
     reason: string,
-  ): Promise<void> {
-    const zone = await this.prisma.zone.findUnique({ where: { zoneId: homeZoneId } });
-    if (!zone?.zonalManagerUserId) return;
-    await this.notifications.notify({
+  ): Promise<bigint | null> {
+    const zone = await tx.zone.findUnique({ where: { zoneId: homeZoneId } });
+    if (!zone?.zonalManagerUserId) return null;
+    return queueNotification(tx, {
       recipients: [{ userId: zone.zonalManagerUserId, role: 'ZONAL_MANAGER' }],
       type: 'CROSS_ZONE_DECISION',
       title: `Cross-zone escalation ${decision.toLowerCase()}`,
@@ -330,13 +376,15 @@ export class CrossZoneEscalationService {
     });
   }
 
+  /** #338 — queued in the caller's transaction; null when nobody holds the role. */
   private async notifyRole(
+    tx: Prisma.TransactionClient,
     role: 'OPERATIONS_HEAD' | 'CENTRAL_SERVICE_MANAGER',
     n: { type: string; title: string; body: string; ticketId: string; metadata: Record<string, unknown> },
-  ): Promise<void> {
-    const recipients = await this.usersInRoles([role]);
-    if (recipients.length === 0) return;
-    await this.notifications.notify({
+  ): Promise<bigint | null> {
+    const recipients = await this.usersInRoles([role], tx);
+    if (recipients.length === 0) return null;
+    return queueNotification(tx, {
       recipients,
       type: n.type,
       title: n.title,
@@ -348,15 +396,30 @@ export class CrossZoneEscalationService {
     });
   }
 
-  private async usersInRoles(roles: ('CENTRAL_SERVICE_MANAGER' | 'OPERATIONS_HEAD')[]) {
-    const users = await this.prisma.user.findMany({
+  /**
+   * The post-commit half (#338): attempt delivery of the row this door just wrote, if it wrote one.
+   * A failure never reaches the caller — {@link drainProducerRows} un-claims the row for the sweep,
+   * which is what stops one unreachable manager from aborting a decision that already committed.
+   */
+  private deliver(outboxId: bigint | null, now: Date): Promise<void> {
+    return drainProducerRows(this.prisma, { notify: this.notifications }, outboxId === null ? [] : [outboxId], now);
+  }
+
+  private async usersInRoles(
+    roles: ('CENTRAL_SERVICE_MANAGER' | 'OPERATIONS_HEAD')[],
+    client: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    const users = await client.user.findMany({
       where: { role: { in: roles }, status: 'ACTIVE' },
       select: { userId: true, role: true },
     });
     return users.map((u) => ({ userId: u.userId, role: u.role }));
   }
 
+  /** #338 — writes on the caller's transaction, so the audit row and the escalation it describes
+   *  can no longer be two separate commits with a crash in between. */
   private async auditEscalation(
+    tx: Prisma.TransactionClient,
     action: string,
     escalationId: bigint,
     ticketId: string,
@@ -364,7 +427,7 @@ export class CrossZoneEscalationService {
     actor?: CrossZoneActor,
     _now?: Date,
   ): Promise<void> {
-    await this.prisma.auditLog.create({
+    await tx.auditLog.create({
       data: {
         actorId: actor?.userId ?? '00000000-0000-0000-0000-000000000000',
         actorRole: actor?.role ?? 'SYSTEM',
