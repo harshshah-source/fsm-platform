@@ -1,9 +1,24 @@
-# HANDOFF — module-gaps backlog, Round 2 ready to launch — 2026-09-03
+# HANDOFF — module-gaps backlog, Round 2 — COMPLETE 2026-09-03
 
-Auto-handoff: **ARMED**. Disarm with `/autohandoff off` when the run finishes, and rename this file
-`HANDOFF-<issue>-<date>.md` in place — that folder is the audit trail, nothing moves to `docs/archive/`.
+**CLOSED. This file is audit trail, not a brief — do not execute it.** Round 2 landed all six slices
+(#343 `0f45c99`, #347 `ddc2e05`, #353 `989ba44`, #355 `5ce3699`, #356 `59c2096`, #360 `042aa0b`) plus
+two verification fixes (`735a0b6`, `2130d43`). Both suites green — backend 465 files / 2708 tests,
+admin 132 / 971, zero test failures. The current state is `docs/SYSTEM-STATE-2026-07.md` and
+`.scratch/fsm-platform-v1/INDEX.md` §P12; **read those, not this.**
 
-Status: active
+**What the next session should know that is not in the slices' own reports:**
+
+- **`dispatch-crashed-zone-recovery` was never flaky** — it failed after 18:00 IST because three call
+  sites did not pin the recovery cutoff their ten siblings pin. Fixed in `test/setup-env.ts`
+  (`735a0b6`). The "known-flaky" label below is **wrong** and is left only as the record of what was
+  believed. `global-guard-validation` (#184) is still genuinely flaky under parallel load.
+- **Round 3 is planned and unblocked** — see the "Round 3" section below, still accurate: **#337**
+  (needs FCM credentials, external), **#357** (owns `schema.prisma` that round), **#349**, then
+  **#351** once #349 frees `api/snapshots.ts`.
+- **#367 was filed** for the mobile surfacing gap #360 left; **INV-G2 is still unanswered** and #353
+  built its assumed default.
+
+Status: closed
 Branch: `feat/autoplant-integration` · working tree **clean**
 Last commit: `3d74eff`
 
@@ -32,11 +47,27 @@ its defaults and its follow-ups. Do not re-derive them from the diff.
 
 ---
 
-## Next step — launch Round 2
+## Next step — Round 2 is RUNNING (launched 2026-09-03)
 
-**Start here. The operator's first message is the go-ahead, not a brief — it may be one word.** Do not
-ask what to do next and do not summarise this file back at them.
+**Launched.** The mutex was recreated at `.scratch/locks/backend-test.sh` and round-tripped
+(`backend-test.sh echo ok` → `ok`, lock released clean). The brief was written to
+`.scratch/PARALLEL-BRIEF.md` from `docs/agents/parallel-agent-brief.md` with this round's specifics.
+**Six agents launched in one message**, file-disjoint: **#343 #347 #353 #355 #356 #360**.
 
+**If you are a fresh session reading this while the round is still running:** do not relaunch them.
+Check `git status --porcelain` for uncommitted work in the six file lists below and pick up at
+step 4 of "How to launch Round 2" (inspect, commit by explicit path, then the three bookkeeping files).
+
+**Path corrections found while verifying the six lists against the tree** (plan §4 was wrong or vague):
+
+- `src/cross-zone/` holds `cross-zone.controller.ts`, `cross-zone.dtos.ts`, `cross-zone.module.ts`,
+  **`cross-zone-escalation.service.ts`** — there is no `cross-zone.service.ts`.
+- `business-sweep-scheduler.service.ts` and `stranded-work-escalation.service.ts` live under
+  `src/scheduling/` and `src/intraday/` respectively, not where §4 implies.
+- #360's query service is **`me-tickets-query.service.ts`**.
+- #353's "ZM dispute surface" is **`apps/admin/src/pages/inventory/ShadowUseQueuePage.tsx`**
+  (+ `api/shadowUse.ts`) — those are the only two files mentioning disputes in the admin app.
+- Every other path in the six lists exists as written.
 
 Six agents, file-disjoint, all dependencies satisfied. This grouping is already computed from
 plan §4's "Code areas"; **spot-check each list against the tree before launching**, because the plan
