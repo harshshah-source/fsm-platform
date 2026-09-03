@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReportsPage } from '../src/pages/reports/ReportsPage';
 
@@ -88,7 +89,7 @@ afterEach(() => {
 
 describe('Reports landing (FE-21)', () => {
   it('renders the Fleet Uptime KPI and the zone-breakdown table from real endpoints', async () => {
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
 
     // Zone-breakdown table from /reports/fleet-uptime + /dashboard/zone-overview
     await screen.findByRole('table', { name: /zone breakdown/i });
@@ -108,7 +109,7 @@ describe('Reports landing (FE-21)', () => {
   });
 
   it('renders the Work-type mix and Verification outcomes panels from the Issue-90 endpoints', async () => {
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
 
     // Work-type mix rows (labels + counts), no longer a gated placeholder.
     const mix = within(await screen.findByTestId('work-type-mix'));
@@ -132,7 +133,7 @@ describe('Reports landing (FE-21)', () => {
     const revokeObjectURL = vi.fn();
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }));
 
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
     await screen.findByTestId('report-zone-1');
 
     // Meta strip: scoped zone chip + data-as-of stamp (reference header band).
@@ -159,7 +160,7 @@ describe('Reports landing (FE-21)', () => {
    * fetch resolved, so the strip always agreed with the wall clock and a dead cube cron was invisible.
    */
   it('prints the cube’s dataAsOf, not the client clock', async () => {
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
     const stamp = await screen.findByTestId('reports-data-as-of');
     expect(stamp).toHaveAttribute('data-freshness', 'fresh');
     // The rendered stamp is the cube's own instant — the same minute, not "now".
@@ -170,7 +171,7 @@ describe('Reports landing (FE-21)', () => {
 
   it('flags a cube older than the staleness threshold as stale', async () => {
     fetchMock.mockImplementationOnce(async () => json({ ...fleet, dataAsOf: new Date(Date.now() - 5 * 86_400_000).toISOString() }));
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
     const stamp = await screen.findByTestId('reports-data-as-of');
     expect(stamp).toHaveAttribute('data-freshness', 'stale');
     expect(stamp).toHaveTextContent(/stale/i);
@@ -179,14 +180,14 @@ describe('Reports landing (FE-21)', () => {
 
   it('says "No cube computed yet" when the report carries no dataAsOf', async () => {
     fetchMock.mockImplementationOnce(async () => json({ ...fleet, dataAsOf: null }));
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
     const stamp = await screen.findByTestId('reports-data-as-of');
     expect(stamp).toHaveAttribute('data-freshness', 'missing');
     expect(stamp).toHaveTextContent(/no cube computed yet/i);
   });
 
   it('queries the Fleet Uptime and Soft-Inactive endpoints', async () => {
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
     await screen.findByTestId('report-zone-1');
     const urls = fetchMock.mock.calls.map((c) => String(c[0]));
     expect(urls.some((u) => u.includes('/reports/fleet-uptime'))).toBe(true);

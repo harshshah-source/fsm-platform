@@ -32,6 +32,81 @@ export interface DataAsOf {
 
 export type ReportFreshnessState = 'fresh' | 'stale' | 'missing';
 
+// ---- Report filters (#364) ------------------------------------------------------
+
+/**
+ * The dimensions the five filterable report endpoints accept. Not every endpoint takes every one —
+ * see the `REPORT_FILTER_FIELDS` table below — so each `api*` function names its own subset rather
+ * than forwarding whatever it is handed. A parameter an endpoint does not read is not harmless: it
+ * silently produces the unfiltered number under a filtered-looking control.
+ *
+ * #364. Before this, every one of these calls went out bare. The backend has accepted
+ * from/to/zone/company/plant/deviceType/SE since Issues 41–43 and 90 and the clients asked for none
+ * of it, so a manager who wanted last month, or one zone, or one device type had no way to say so:
+ * they read around the default window, or exported and filtered in Excel.
+ *
+ * **`from`/`to` are not one format.** `/reports/root-cause` and `/reports/zm-scorecard` read months
+ * (`YYYY-MM`, `parseMonth`) and `/reports/efficiency`, `/reports/work-type-mix` and
+ * `/reports/verification-outcomes` read days (`YYYY-MM-DD`, `parseDay`); the wrong granularity is a
+ * 400, not a coerced value. The granularity therefore belongs to the *page*, which is why
+ * {@link ReportRangeGranularity} is threaded through the filter bar rather than guessed here.
+ */
+export interface ReportFilterParams {
+  /** `YYYY-MM` for the month-ranged reports, `YYYY-MM-DD` for the day-ranged ones. */
+  from?: string | null;
+  to?: string | null;
+  zoneId?: number | string | null;
+  companyId?: number | string | null;
+  plantId?: number | string | null;
+  deviceType?: string | null;
+  seId?: string | null;
+}
+
+export type ReportRangeGranularity = 'day' | 'month';
+
+export type ReportFilterField = keyof ReportFilterParams;
+
+/**
+ * Which dimensions each endpoint actually reads, taken from `reports.controller.ts`. Keeping it as
+ * data rather than five hand-written query builders is what stops a filter being *offered* on a page
+ * whose endpoint ignores it — the filter bar renders its controls from the same table.
+ */
+export const REPORT_FILTER_FIELDS = {
+  rootCause: ['from', 'to', 'zoneId', 'companyId', 'plantId', 'deviceType', 'seId'],
+  efficiency: ['from', 'to', 'zoneId', 'companyId', 'plantId', 'deviceType', 'seId'],
+  /** Operations-Head only, and zone is a drill-down rather than a clamp — no company/plant/SE dims. */
+  zmScorecard: ['from', 'to', 'zoneId'],
+  distribution: ['from', 'to', 'zoneId', 'companyId', 'plantId'],
+} as const satisfies Record<string, readonly ReportFilterField[]>;
+
+/**
+ * Serialise the subset of `params` an endpoint reads. Empty string, `null` and `undefined` all mean
+ * "not filtered" and are dropped, so an untouched filter bar produces the bare URL it always did and
+ * every endpoint keeps its own documented default window.
+ */
+export function reportQuery(params: ReportFilterParams, fields: readonly ReportFilterField[]): string {
+  const q = new URLSearchParams();
+  for (const field of fields) {
+    const value = params[field];
+    if (value === undefined || value === null || value === '') continue;
+    q.set(field, String(value));
+  }
+  const qs = q.toString();
+  return qs ? `?${qs}` : '';
+}
+
+/** The first and last day of `YYYY-MM`, for a page whose month picker feeds a day-ranged endpoint. */
+export function monthDayRange(month: string): { from: string; to: string } {
+  const [y, m] = month.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { from: `${month}-01`, to: `${month}-${String(last).padStart(2, '0')}` };
+}
+
+/** `YYYY-MM` of `now` (UTC) — the month every month-ranged report defaults to server-side. */
+export function currentMonth(now: Date = new Date()): string {
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
 /**
  * Every cube behind a report is rebuilt by a **daily** sweep — `business-system-efficiency` (01:30),
  * `business-fleet-uptime` (03:00), `business-root-cause` (03:15), `business-zm-performance` (03:30),
@@ -236,9 +311,15 @@ export interface VerificationOutcomesReport extends DataAsOf {
   rows: { outcome: VerifyOutcomeKey; count: number; pct: number }[];
 }
 
-/** Both endpoints default to the trailing 30-day window when `from`/`to` are omitted. */
-export const apiWorkTypeMix = () => get<WorkTypeMixReport>('/reports/work-type-mix');
-export const apiVerificationOutcomes = () => get<VerificationOutcomesReport>('/reports/verification-outcomes');
+/**
+ * Both endpoints default to the trailing 30-day window when `from`/`to` are omitted, and both read
+ * DAYS. They take zone/company/plant only — no device type, no SE — because they aggregate `tickets`
+ * and `verification_runs` directly rather than a cube carrying those dimensions.
+ */
+export const apiWorkTypeMix = (params: ReportFilterParams = {}) =>
+  get<WorkTypeMixReport>(`/reports/work-type-mix${reportQuery(params, REPORT_FILTER_FIELDS.distribution)}`);
+export const apiVerificationOutcomes = (params: ReportFilterParams = {}) =>
+  get<VerificationOutcomesReport>(`/reports/verification-outcomes${reportQuery(params, REPORT_FILTER_FIELDS.distribution)}`);
 
 // ---- Root Cause Analytics (Issue 41, FE-23) ------------------------------------
 
@@ -254,7 +335,9 @@ export interface RootCauseReport extends DataAsOf {
   filters: { zoneId: number | null; companyId: number | null; plantId: number | null; deviceType: string | null; seId: string | null };
   distribution: RootCauseSlice[];
 }
-export const apiRootCause = () => get<RootCauseReport>('/reports/root-cause');
+/** `from`/`to` are MONTHS (`YYYY-MM`); this endpoint reads `root_cause_summary_monthly`. */
+export const apiRootCause = (params: ReportFilterParams = {}) =>
+  get<RootCauseReport>(`/reports/root-cause${reportQuery(params, REPORT_FILTER_FIELDS.rootCause)}`);
 
 // ---- System Efficiency (Issue 42, FE-24) ---------------------------------------
 
@@ -289,7 +372,9 @@ export interface SystemEfficiencyReport extends DataAsOf {
   fleet: EfficiencyMetrics;
   byZone: (EfficiencyMetrics & { zoneId: string | null; zoneName: string | null })[];
 }
-export const apiSystemEfficiency = () => get<SystemEfficiencyReport>('/reports/efficiency');
+/** `from`/`to` are DAYS (`YYYY-MM-DD`); this endpoint reads `system_efficiency_summary_daily`. */
+export const apiSystemEfficiency = (params: ReportFilterParams = {}) =>
+  get<SystemEfficiencyReport>(`/reports/efficiency${reportQuery(params, REPORT_FILTER_FIELDS.efficiency)}`);
 
 // ---- ZM Performance Scorecard (Issue 43, FE-25, Operations-Head only) -----------
 
@@ -312,14 +397,40 @@ export interface ZmScorecardRow {
   /** Zone Fleet-Uptime compliance — `null` when the zone had no eligible device-time (#346). */
   zoneSlaCompliancePct: number | null;
 }
+/**
+ * One month of one ZM's decision activity. Mirrors `ZmScorecardTrendPoint` in `reports.service.ts`.
+ *
+ * #364 — the backend has computed this since Issue 43 (`reports.service.ts:540`) and the client typed
+ * the whole array `unknown[]`, which is how a computed series stayed undrawn for four months: nothing
+ * could consume it without an assertion, so nothing did. The scorecard ranks *people*; a rank without
+ * a direction of travel cannot distinguish a ZM whose override rate is high and falling from one
+ * whose is high and climbing, and only one of those is a problem.
+ */
+export interface ZmScorecardTrendPoint {
+  /** The month's first day, ISO (`2026-06-01`) — the cube's `month` column, not a `YYYY-MM`. */
+  month: string;
+  overrides: number;
+  overrideAfterOnsite: number;
+  manualAssignments: number;
+  overrideRatePct: number;
+  /** `null` for a month with no eligible device-time — a GAP on the trend, never a plotted 100 (#346). */
+  zoneSlaCompliancePct: number | null;
+}
+export interface ZmScorecardSeries {
+  zmId: string;
+  zmName: string;
+  points: ZmScorecardTrendPoint[];
+}
 export interface ZmScorecardReport extends DataAsOf {
   fromMonth: string;
   toMonth: string;
   zoneId: number | null;
   rows: ZmScorecardRow[];
-  trend: unknown[];
+  trend: ZmScorecardSeries[];
 }
-export const apiZmScorecard = () => get<ZmScorecardReport>('/reports/zm-scorecard');
+/** `from`/`to` are MONTHS (`YYYY-MM`). `zoneId` is a drill-down, not a clamp — this report is OH-only. */
+export const apiZmScorecard = (params: ReportFilterParams = {}) =>
+  get<ZmScorecardReport>(`/reports/zm-scorecard${reportQuery(params, REPORT_FILTER_FIELDS.zmScorecard)}`);
 
 // ---- Commissioning cohort & install quality (#232 / #233 / #234) ----------------
 

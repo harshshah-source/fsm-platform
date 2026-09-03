@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemEfficiencyPage } from '../src/pages/reports/SystemEfficiencyPage';
 
@@ -39,7 +40,7 @@ afterEach(() => {
 
 describe('System Efficiency (FE-24)', () => {
   it('renders the KPI grid and the per-zone efficiency table from the endpoint', async () => {
-    render(<SystemEfficiencyPage />);
+    render(<MemoryRouter><SystemEfficiencyPage /></MemoryRouter>);
     expect(await screen.findByRole('heading', { name: /system efficiency/i })).toBeInTheDocument();
     // Auto-dispatch KPI (fleet auto-assignment rate)
     expect(await screen.findByText('82.5%')).toBeInTheDocument();
@@ -51,21 +52,21 @@ describe('System Efficiency (FE-24)', () => {
   });
 
   it('queries the efficiency endpoint', async () => {
-    render(<SystemEfficiencyPage />);
+    render(<MemoryRouter><SystemEfficiencyPage /></MemoryRouter>);
     await screen.findByTestId('eff-row-1');
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/reports/efficiency'))).toBe(true);
   });
 
   /** #347 AC2 — the daily cube's own stamp, with a real threshold behind it (ref 24's band). */
   it('prints the cube’s data-as-of stamp and flags a stale cube', async () => {
-    const fresh = render(<SystemEfficiencyPage />);
+    const fresh = render(<MemoryRouter><SystemEfficiencyPage /></MemoryRouter>);
     const stamp = await screen.findByTestId('efficiency-data-as-of');
     expect(stamp).toHaveAttribute('data-freshness', 'fresh');
     expect(stamp).toHaveTextContent(/data as of/i);
     fresh.unmount();
 
     fetchMock.mockImplementationOnce(async () => json({ ...report, dataAsOf: new Date(Date.now() - 4 * 86_400_000).toISOString() }));
-    render(<SystemEfficiencyPage />);
+    render(<MemoryRouter><SystemEfficiencyPage /></MemoryRouter>);
     const stale = await screen.findByTestId('efficiency-data-as-of');
     expect(stale).toHaveAttribute('data-freshness', 'stale');
     expect(stale).toHaveTextContent(/stale/i);

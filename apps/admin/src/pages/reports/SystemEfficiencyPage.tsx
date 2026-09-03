@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { apiSystemEfficiency, type SystemEfficiencyReport } from '../../api/reports';
+import { Link } from 'react-router-dom';
+import { apiSystemEfficiency, REPORT_FILTER_FIELDS, type SystemEfficiencyReport } from '../../api/reports';
 import { BarChartCard, ChartCard, ReportGrid, type BarDatum } from '../../components/charts';
 import { DataTable, EmptyState, MetricStrip, PageHeader, type Column, type Metric } from '../../components/data';
 import { ReportMetaStrip } from './DataAsOfStamp';
+import { ReportFilterBar, ReportScope, useReportFilterOptions, useReportFilters } from './ReportFilterBar';
 
 type ZoneRow = SystemEfficiencyReport['byZone'][number];
+
+const FIELDS = REPORT_FILTER_FIELDS.efficiency;
 
 /**
  * FE-24 — System Efficiency (ref 24). A dense KPI grid (auto-dispatch %, override %, first-time-fix %,
@@ -12,16 +16,40 @@ type ZoneRow = SystemEfficiencyReport['byZone'][number];
  * and a per-zone metrics `DataTable` — all from the Issue 42 `/reports/efficiency` endpoint. The
  * reference's "SE active load vs capacity" and "recent overrides & audit" panels have no aggregation
  * source in this endpoint; they render as gated placeholders rather than fabricated data (FE-21 pattern).
+ *
+ * #364 — filterable by zone / company / plant / device type / SE over a **day** range
+ * (`system_efficiency_summary_daily`, `parseDay`), and each zone row now links to the devices behind it.
  */
 export function SystemEfficiencyPage() {
   const [report, setReport] = useState<SystemEfficiencyReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { filters, set, clear, active } = useReportFilters();
+
+  const params = useMemo(
+    () => ({
+      from: filters.from,
+      to: filters.to,
+      zoneId: filters.zoneId,
+      companyId: filters.companyId,
+      plantId: filters.plantId,
+      deviceType: filters.deviceType,
+      seId: filters.seId,
+    }),
+    [filters],
+  );
 
   useEffect(() => {
-    apiSystemEfficiency()
-      .then(setReport)
-      .catch(() => setError('Failed to load the System Efficiency report'));
-  }, []);
+    let live = true;
+    setError(null);
+    apiSystemEfficiency(params)
+      .then((r) => live && setReport(r))
+      .catch(() => live && setError('Failed to load the System Efficiency report'));
+    return () => {
+      live = false;
+    };
+  }, [params]);
+
+  const options = useReportFilterOptions(FIELDS);
 
   const loading = report === null && error === null;
   const f = report?.fleet;
@@ -42,7 +70,25 @@ export function SystemEfficiencyPage() {
   );
 
   const columns: Column<ZoneRow>[] = [
-    { key: 'zone', header: 'Zone', render: (r) => r.zoneName ?? String(r.zoneId) },
+    {
+      key: 'zone',
+      header: 'Zone',
+      // #364 AC3 — the rows behind an efficiency number are that zone's devices, and the device list
+      // reads `zoneId` from the query string already (`DeviceDetailPage.tsx:83`). The zone id is the
+      // report's OWN `zoneId`, so a clamped ZM's link cannot point outside their scope either.
+      render: (r) =>
+        r.zoneId === null ? (
+          <span className="text-ink-muted">{r.zoneName ?? 'Unzoned'}</span>
+        ) : (
+          <Link
+            to={`/reports/device?zoneId=${encodeURIComponent(r.zoneId)}`}
+            className="font-medium text-brand-700 underline-offset-2 hover:underline focus-ring"
+            title="Devices in this zone"
+          >
+            {r.zoneName ?? `Zone ${r.zoneId}`}
+          </Link>
+        ),
+    },
     { key: 'tickets', header: 'Tickets', align: 'right', render: (r) => r.ticketsCreated },
     { key: 'auto', header: 'Auto-dispatch', align: 'right', render: (r) => `${r.autoAssignmentRatePct}%` },
     { key: 'override', header: 'Override', align: 'right', render: (r) => `${r.overrideRatePct}%` },
@@ -57,8 +103,33 @@ export function SystemEfficiencyPage() {
       />
 
       {/* #347 — ref 24's header band. This page is served entirely from a DAILY cube, so a stopped
-          `business-system-efficiency` sweep is exactly what the stamp has to be able to show. */}
-      <ReportMetaStrip dataAsOf={report?.dataAsOf} loading={loading} stampTestId="efficiency-data-as-of" />
+          `business-system-efficiency` sweep is exactly what the stamp has to be able to show.
+          #364 — the filter row joins it, and the scope chip echoes the server's zone. */}
+      <ReportMetaStrip
+        testId="efficiency-meta"
+        dataAsOf={report?.dataAsOf}
+        loading={loading}
+        stampTestId="efficiency-data-as-of"
+        filters={
+          <ReportFilterBar
+            testId="efficiency-filters"
+            fields={FIELDS}
+            filters={filters}
+            set={set}
+            clear={clear}
+            active={active}
+            options={options}
+            granularity="day"
+          />
+        }
+      >
+        <ReportScope
+          testId="efficiency-scope"
+          requestedZoneId={filters.zoneId}
+          echoedZoneId={report?.filters?.zoneId}
+          zones={options.zones}
+        />
+      </ReportMetaStrip>
 
       {error && (
         <div role="alert" className="mb-4 rounded-md border border-critical/30 bg-critical-bg px-3 py-2 text-sm text-critical">

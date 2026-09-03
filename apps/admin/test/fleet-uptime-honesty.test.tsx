@@ -1,4 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFleetUptimeTrend } from '../src/api/reports';
 import { ReportsPage } from '../src/pages/reports/ReportsPage';
@@ -124,7 +125,7 @@ describe('#346 — the Reports page renders "no data" rather than a number', () 
       return json({});
     });
     vi.stubGlobal('fetch', fetchMock);
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
   };
 
   it('shows an em dash and a "no data" hint on the Fleet Uptime KPI for an empty month', async () => {
@@ -167,7 +168,7 @@ describe('#346 — the Reports page renders "no data" rather than a number', () 
       return json({});
     });
     vi.stubGlobal('fetch', fetchMock);
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
 
     const chart = await screen.findByTestId('trend-chart');
     const series = JSON.parse(chart.getAttribute('data-series') ?? '[]') as { label: string; value: number | null }[];
@@ -209,7 +210,7 @@ describe('#346 — a row with no data never reaches a chart as a number', () => 
       return json({});
     });
     vi.stubGlobal('fetch', fetchMock);
-    render(<ReportsPage />);
+    render(<MemoryRouter><ReportsPage /></MemoryRouter>);
 
     await screen.findByTestId('kpi-fleet-uptime');
     // The panel exists (West has real data) but East is absent rather than drawn as a zero-height bar.
@@ -232,7 +233,7 @@ describe('#346 — the ZM scorecard reads the same uptime, so it needs the same 
   const mount = async (compliance: [number | null, number | null]) => {
     vi.stubGlobal('fetch', vi.fn(async () => json(scorecard(compliance))));
     const { ZmScorecardPage } = await import('../src/pages/reports/ZmScorecardPage');
-    render(<ZmScorecardPage />);
+    render(<MemoryRouter><ZmScorecardPage /></MemoryRouter>);
   };
 
   it('renders an em dash in the Zone SLA column for a ZM whose zone has no eligible device-time', async () => {

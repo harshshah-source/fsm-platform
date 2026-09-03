@@ -79,20 +79,28 @@ export function ReportMetaStrip({
   stampTestId,
   testId,
   children,
+  filters,
 }: {
   dataAsOf: string | null | undefined;
   loading?: boolean;
   stampTestId: string;
   testId?: string;
   children?: ReactNode;
+  /**
+   * #364 — the report filter controls, on a second line of the SAME band. They belong here rather
+   * than in a toolbar of their own because the band is what states the scope of the numbers below
+   * it: the chip that says which zone, the stamp that says how old, and the controls that changed
+   * both. Splitting them puts the question and the answer in two different boxes.
+   */
+  filters?: ReactNode;
 }) {
   return (
-    <div
-      data-testid={testId}
-      className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-card px-3 py-2 text-xs"
-    >
-      {children}
-      <DataAsOfStamp dataAsOf={dataAsOf} loading={loading} testId={stampTestId} />
+    <div data-testid={testId} className="mb-4 rounded-md border border-line bg-surface-card px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        {children}
+        <DataAsOfStamp dataAsOf={dataAsOf} loading={loading} testId={stampTestId} />
+      </div>
+      {filters && <div className="mt-2 border-t border-line pt-2">{filters}</div>}
     </div>
   );
 }

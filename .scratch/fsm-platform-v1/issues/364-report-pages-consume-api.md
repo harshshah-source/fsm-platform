@@ -1,5 +1,5 @@
 # 364 — Report pages consume what the API already offers
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/364-report-pages-consume-api.md
 Type: AFK
 Wave: 4 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -37,10 +37,25 @@ Wave: 4 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified aga
 - Admin tests.
 
 ## Acceptance criteria
-- [ ] AC1 — every filter round-trips to the API and the ZM clamp is echoed back.
-- [ ] AC2 — the scorecard trend is drawn.
-- [ ] AC3 — each report table row links to a filtered source list.
-- [ ] AC4 — the Exports hub shows the voucher batch card with the row count for the month.
+- [x] AC1 — every filter round-trips to the API and the ZM clamp is echoed back. The scope chip
+  renders the server's echoed `filters.zoneId`, not the local pick, and carries `data-clamped`.
+- [x] AC2 — the scorecard trend is drawn. `unknown[]` → `ZmScorecardSeries[]`; four switchable
+  metrics, `null` months drawn as gaps.
+- [x] AC3 — each report table row links to a filtered source list — on three of the four tables.
+  **The Root Cause breakdown deliberately has no link:** the plan's `/tickets?rootCause=` target does
+  not exist (`GET /tickets` has no such param; Ops Explorer has no submissions dataset), and a link
+  to a list that ignores the filter shows a different population under the number clicked. The page
+  states the gap; the backend filter is a follow-up.
+- [x] AC4 — the Exports hub shows the voucher batch card with the row count for the month, counted
+  from the same predicate the export itself uses. No backend endpoint added.
+
+## Premise corrections (verified in current code)
+
+- `/reports/fleet?zone=` is ignored by the Fleet Directory (`FleetDirectoryPage.tsx:40-41` reads only
+  `tab` and `companyId`) — zone rows link to `/reports/device?zoneId=` instead, which is read.
+- `/tickets?rootCause=` does not exist (`ticketing/tickets.controller.ts:46-56`).
+- The scorecard's rows are Zonal Managers, not engineers, so `/engineers/:id` has no row to hang on.
+- `device_type` has no option source anywhere in the tree — the control is a text box, not a dropdown.
 
 ## Verification
 

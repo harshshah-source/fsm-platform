@@ -49,9 +49,25 @@ describe('Exports nav gating (Issue 120)', () => {
   });
 });
 
+/** APPROVED vouchers, two of them submitted in the month under test and one in the month before. */
+const approvedVouchers = [
+  { voucherId: 'v-1', status: 'APPROVED', submittedAt: '2026-07-03T06:00:00.000Z', totalAmount: 1200, items: [] },
+  { voucherId: 'v-2', status: 'APPROVED', submittedAt: '2026-07-28T11:30:00.000Z', totalAmount: 800, items: [] },
+  { voucherId: 'v-3', status: 'APPROVED', submittedAt: '2026-06-30T18:00:00.000Z', totalAmount: 500, items: [] },
+];
+
+/** Routes every call this page makes; anything unrecognised answers an empty object. */
+const route = (url: string) => {
+  if (url.includes('/exports/entity-mapping/summary')) return json({ rowCount: 18942, dataAsOf: '2026-07-14T04:00:00.000Z' });
+  if (url.includes('/exports/entity-mapping')) return csv('device_id\n123\n');
+  if (url.includes('/vouchers/export')) return new Response('voucher_id\nv-1\n', { status: 200 });
+  if (url.includes('/vouchers')) return json(approvedVouchers);
+  return json({});
+};
+
 describe('Exports page (Issue 120)', () => {
   it('renders the entity-mapping card with the row-count/freshness hint', async () => {
-    fetchMock.mockImplementation(async () => json({ rowCount: 18942, dataAsOf: '2026-07-14T04:00:00.000Z' }));
+    fetchMock.mockImplementation(async (url: string) => route(String(url)));
     render(<ExportsPage />);
     expect(screen.getByText('Entity mapping (CSV)')).toBeInTheDocument();
     await waitFor(() =>
@@ -60,9 +76,7 @@ describe('Exports page (Issue 120)', () => {
   });
 
   it('downloads the CSV via an auth-fetch of the export endpoint', async () => {
-    fetchMock.mockImplementation(async (url: string) =>
-      url.includes('/summary') ? json({ rowCount: 1, dataAsOf: null }) : csv('device_id\n123\n'),
-    );
+    fetchMock.mockImplementation(async (url: string) => route(String(url)));
     render(<ExportsPage />);
     await userEvent.click(screen.getByTestId('download-entity-mapping'));
     await waitFor(() =>
@@ -71,5 +85,54 @@ describe('Exports page (Issue 120)', () => {
       ).toBe(true),
     );
     expect(await screen.findByText(/Last downloaded/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * #364 AC4 — the finance voucher batch card.
+ *
+ * `GET /vouchers/export?month=` has existed since Issue 59/60 and lived only on the Vouchers page,
+ * behind the review queue. The Operations Head who runs the monthly finance pull is not reviewing
+ * vouchers; they are on the Exports hub, which showed one card and gave no hint the export existed
+ * (§1 correction RPT-08 — a hub card, not an integration).
+ *
+ * The row count is derived from the APPROVED queue rather than a new endpoint, and that is a real
+ * decision rather than a shortcut: the export's own predicate is `status = 'APPROVED' AND
+ * submitted_at ∈ month` (`vouchers.service.ts:475-479`), and `GET /vouchers?status=APPROVED` returns
+ * exactly that population unpaged. The count and the file therefore cannot disagree — a separate
+ * summary endpoint would be a second implementation of the same predicate, free to drift from it.
+ */
+describe('Exports page — finance voucher batch (#364)', () => {
+  it('shows the approved-voucher row count for the picked month, counting only that month', async () => {
+    fetchMock.mockImplementation(async (url: string) => route(String(url)));
+    render(<ExportsPage />);
+    expect(screen.getByText(/finance voucher batch/i)).toBeInTheDocument();
+
+    await userEvent.clear(screen.getByLabelText(/voucher month/i));
+    await userEvent.type(screen.getByLabelText(/voucher month/i), '2026-07');
+
+    // v-1 and v-2 are July; v-3 is June and must not be counted.
+    await waitFor(() => expect(screen.getByTestId('voucher-batch-hint')).toHaveTextContent('2 approved vouchers'));
+    expect(screen.getByTestId('voucher-batch-hint')).toHaveTextContent('₹2,000');
+  });
+
+  it('downloads the month’s finance CSV from the existing export endpoint', async () => {
+    fetchMock.mockImplementation(async (url: string) => route(String(url)));
+    render(<ExportsPage />);
+    await userEvent.clear(screen.getByLabelText(/voucher month/i));
+    await userEvent.type(screen.getByLabelText(/voucher month/i), '2026-07');
+    await userEvent.click(screen.getByTestId('download-voucher-batch'));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/vouchers/export?month=2026-07'))).toBe(true),
+    );
+  });
+
+  it('says the month is empty rather than offering a download of nothing', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes('/vouchers') && !String(url).includes('/export') ? json([]) : route(String(url)),
+    );
+    render(<ExportsPage />);
+    await waitFor(() => expect(screen.getByTestId('voucher-batch-hint')).toHaveTextContent(/no approved vouchers/i));
+    expect(screen.getByTestId('download-voucher-batch')).toBeDisabled();
   });
 });

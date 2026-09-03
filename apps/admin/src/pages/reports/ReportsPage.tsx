@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   apiFleetUptime,
   apiFleetUptimeTrend,
   apiSoftInactiveTrend,
   apiVerificationOutcomes,
   apiWorkTypeMix,
+  currentMonth,
   fleetUptimeOrGap,
+  monthDayRange,
+  REPORT_FILTER_FIELDS,
   type FleetUptimeReport,
   type FleetUptimeTrendPoint,
   type SoftInactiveTrend,
@@ -14,6 +18,7 @@ import {
   type WorkTypeKey,
   type WorkTypeMixReport,
 } from '../../api/reports';
+import { ReportFilterBar, ReportScope, useReportFilterOptions, useReportFilters } from './ReportFilterBar';
 import { apiZoneOverview, type ZoneOverviewRow } from '../../api/dashboard';
 import {
   DataTable,
@@ -67,12 +72,38 @@ export function ReportsPage() {
   const [outcomes, setOutcomes] = useState<VerificationOutcomesReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const { filters, set, clear, active } = useReportFilters();
+
+  /**
+   * #364 — this page is the one with two granularities under one control, so it gets ONE month
+   * picker rather than a range.
+   *
+   * `/reports/fleet-uptime` — the hero KPI, the per-zone bars and the breakdown's uptime column — is
+   * single-month by construction (`month=YYYY-MM`). The two live distributions below take a **day**
+   * range. A from/to pair would therefore have to be silently collapsed to a month for the KPI, so
+   * the reader would set a range and get an answer over a different window. One month, expanded to
+   * its first and last day for the distributions, is the only shape where every number on the page
+   * covers the window named at the top of it.
+   */
+  const month = filters.month || currentMonth();
+  const days = useMemo(() => monthDayRange(month), [month]);
+  const distributionParams = useMemo(
+    () => ({
+      from: days.from,
+      to: days.to,
+      zoneId: filters.zoneId,
+      companyId: filters.companyId,
+      plantId: filters.plantId,
+    }),
+    [days, filters.zoneId, filters.companyId, filters.plantId],
+  );
+
   const load = useCallback(() => {
     setError(null);
     // #347 — no client-clock stamp is taken here any more. The page's "Data as of" comes from the
     // report's own `dataAsOf`; a timestamp minted when the fetch resolved described the fetch, not
     // the data, and could never go stale however dead the cube cron was.
-    apiFleetUptime({ groupBy: 'zone' })
+    apiFleetUptime({ month, groupBy: 'zone' })
       .then(setFleet)
       .catch(() => setError('Failed to load the Fleet Uptime report'));
     apiFleetUptimeTrend(6)
@@ -84,17 +115,19 @@ export function ReportsPage() {
     apiSoftInactiveTrend({ days: 14 })
       .then(setSoftInactive)
       .catch(() => setSoftInactiveGated(true));
-    apiWorkTypeMix()
+    apiWorkTypeMix(distributionParams)
       .then(setWorkMix)
       .catch(() => {});
-    apiVerificationOutcomes()
+    apiVerificationOutcomes(distributionParams)
       .then(setOutcomes)
       .catch(() => {});
-  }, []);
+  }, [month, distributionParams]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const options = useReportFilterOptions(REPORT_FILTER_FIELDS.distribution);
 
   const loading = fleet === null && zones === null && error === null;
 
@@ -217,7 +250,27 @@ export function ReportsPage() {
   };
 
   const columns: Column<ZoneBreakdownRow>[] = [
-    { key: 'zone', header: 'Zone', render: (r) => r.zoneName },
+    {
+      key: 'zone',
+      header: 'Zone',
+      /*
+        #364 AC3 — the rows behind these four numbers are that zone's devices, and Device Detail
+        already reads `zoneId` and `status` from the query string (`DeviceDetailPage.tsx:83`,`:65`).
+        NOT `/reports/fleet?zone=` as the plan proposed: the Fleet Directory reads only `tab` and
+        `companyId` (`FleetDirectoryPage.tsx:40-41`), so that link would land on an UNFILTERED list
+        of every company in scope — a drill-down that quietly changes the population is how a figure
+        that looks wrong gets "confirmed" against the wrong rows.
+      */
+      render: (r) => (
+        <Link
+          to={`/reports/device?zoneId=${encodeURIComponent(r.zoneId)}&status=INACTIVE`}
+          className="font-medium text-brand-700 underline-offset-2 hover:underline focus-ring"
+          title="Inactive devices in this zone"
+        >
+          {r.zoneName}
+        </Link>
+      ),
+    },
     { key: 'inactive', header: 'Inactive w/ work', align: 'right', render: (r) => r.inactive },
     { key: 'critical', header: 'Critical+', align: 'right', render: (r) => r.criticalPlus },
     {
@@ -259,17 +312,46 @@ export function ReportsPage() {
         dataAsOf={fleet?.dataAsOf}
         loading={fleet === null && error === null}
         stampTestId="reports-data-as-of"
+        filters={
+          <ReportFilterBar
+            testId="reports-filters"
+            fields={REPORT_FILTER_FIELDS.distribution}
+            filters={filters}
+            set={set}
+            clear={clear}
+            active={active}
+            options={options}
+            granularity="day"
+            singleMonth
+          />
+        }
       >
         <span className="font-semibold uppercase tracking-wider text-ink-caps">Scope</span>
-        {(zones ?? []).map((z) => (
-          <span
-            key={z.zoneId}
-            className="rounded-full border border-info/30 bg-info-bg px-2 py-0.5 font-medium uppercase tracking-wide text-info"
-          >
-            {z.zoneName}
-          </span>
-        ))}
-        {zones !== null && zones.length === 0 && <span className="text-ink-muted">No zones in scope</span>}
+        {/*
+          #364 — the chip is the zone the SERVER answered with (`work-type-mix`'s echoed
+          `filters.zoneId`), not the one the dropdown holds: `reports.service.ts:628` pins a ZM to
+          their own zone whatever was asked for. With no zone filter applied the echo is `null` and
+          the page keeps its own richer summary — the list of zones actually in scope.
+        */}
+        <ReportScope
+          testId="reports-scope"
+          requestedZoneId={filters.zoneId}
+          echoedZoneId={workMix?.filters?.zoneId}
+          zones={options.zones}
+          fallback={
+            <>
+              {(zones ?? []).map((z) => (
+                <span
+                  key={z.zoneId}
+                  className="rounded-full border border-info/30 bg-info-bg px-2 py-0.5 font-medium uppercase tracking-wide text-info"
+                >
+                  {z.zoneName}
+                </span>
+              ))}
+              {zones !== null && zones.length === 0 && <span className="text-ink-muted">No zones in scope</span>}
+            </>
+          }
+        />
       </ReportMetaStrip>
 
       {error && (

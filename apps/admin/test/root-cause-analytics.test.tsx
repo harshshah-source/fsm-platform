@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RootCauseAnalyticsPage } from '../src/pages/reports/RootCauseAnalyticsPage';
 
@@ -37,7 +38,7 @@ afterEach(() => {
 
 describe('Root-Cause Analytics (FE-23)', () => {
   it('renders the breakdown table with each cause and its share from the endpoint', async () => {
-    render(<RootCauseAnalyticsPage />);
+    render(<MemoryRouter><RootCauseAnalyticsPage /></MemoryRouter>);
     expect(await screen.findByRole('heading', { name: /root-cause analytics/i })).toBeInTheDocument();
     const table = await screen.findByRole('table', { name: /root cause breakdown/i });
     const row = within(table).getByTestId('rc-row-GPS_ANTENNA_ISSUE');
@@ -46,21 +47,21 @@ describe('Root-Cause Analytics (FE-23)', () => {
   });
 
   it('queries the root-cause endpoint', async () => {
-    render(<RootCauseAnalyticsPage />);
+    render(<MemoryRouter><RootCauseAnalyticsPage /></MemoryRouter>);
     await screen.findByTestId('rc-row-GPS_ANTENNA_ISSUE');
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/reports/root-cause'))).toBe(true);
   });
 
   /** #347 AC2 — this page had no freshness stamp at all; the reference band (ref 23) draws one. */
   it('prints the cube’s data-as-of stamp, and "No cube computed yet" when there is none', async () => {
-    const fresh = render(<RootCauseAnalyticsPage />);
+    const fresh = render(<MemoryRouter><RootCauseAnalyticsPage /></MemoryRouter>);
     const stamp = await screen.findByTestId('root-cause-data-as-of');
     expect(stamp).toHaveAttribute('data-freshness', 'fresh');
     expect(stamp).toHaveTextContent(/data as of/i);
     fresh.unmount();
 
     fetchMock.mockImplementationOnce(async () => json({ ...report, dataAsOf: null }));
-    render(<RootCauseAnalyticsPage />);
+    render(<MemoryRouter><RootCauseAnalyticsPage /></MemoryRouter>);
     const empty = await screen.findByTestId('root-cause-data-as-of');
     expect(empty).toHaveAttribute('data-freshness', 'missing');
     expect(empty).toHaveTextContent(/no cube computed yet/i);

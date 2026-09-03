@@ -48,7 +48,7 @@ afterEach(() => {
 
 describe('ZM Performance Scorecard (FE-25)', () => {
   it('renders the leader card and the scorecard table from the endpoint', async () => {
-    render(<ZmScorecardPage />);
+    render(<MemoryRouter><ZmScorecardPage /></MemoryRouter>);
     expect(await screen.findByRole('heading', { name: /zm performance scorecard/i })).toBeInTheDocument();
     // Leader = the ZM with the highest zone SLA compliance (Asha, 97.5%).
     expect(await screen.findByTestId('zm-leader')).toHaveTextContent(/Asha/);
@@ -61,14 +61,14 @@ describe('ZM Performance Scorecard (FE-25)', () => {
 
   /** #347 AC2 — a scorecard people are measured on says how old the cube behind it is (ref 25's band). */
   it('prints the cube’s data-as-of stamp, and "No cube computed yet" when there is none', async () => {
-    const fresh = render(<ZmScorecardPage />);
+    const fresh = render(<MemoryRouter><ZmScorecardPage /></MemoryRouter>);
     const stamp = await screen.findByTestId('zm-scorecard-data-as-of');
     expect(stamp).toHaveAttribute('data-freshness', 'fresh');
     expect(stamp).toHaveTextContent(/data as of/i);
     fresh.unmount();
 
     fetchMock.mockImplementationOnce(async () => json({ ...report, dataAsOf: null }));
-    render(<ZmScorecardPage />);
+    render(<MemoryRouter><ZmScorecardPage /></MemoryRouter>);
     const empty = await screen.findByTestId('zm-scorecard-data-as-of');
     expect(empty).toHaveAttribute('data-freshness', 'missing');
     expect(empty).toHaveTextContent(/no cube computed yet/i);
