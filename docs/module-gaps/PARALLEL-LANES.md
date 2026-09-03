@@ -75,6 +75,35 @@ Later, once these drain, five independent chains fan out as wide as you have ses
 
 ---
 
+## Test infrastructure — the constraint that actually bounds parallelism
+
+The file graph is not the binding limit. The test harness is.
+
+- **One shared Postgres.** Every suite runs against a single `fsm_test` database (derived from
+  `DATABASE_URL` by `test/global-setup.ts`, overridable with `TEST_DATABASE_URL`).
+  `vitest.config.ts` sets `fileParallelism: false` *because* the suite has global invariants —
+  the single in-flight snapshot-run guard, and the `runtime_lock` row. **Two lanes running
+  backend e2e at the same time will corrupt each other no matter how disjoint their source
+  files are.** Either give each lane its own `TEST_DATABASE_URL`, or serialise backend runs
+  across lanes.
+- **Run the suites the repo's way.** `cd apps/backend && npm test` (→ `scripts/run-tests.mjs`),
+  `cd apps/admin && npm test`. Never `npx vitest run` on the backend.
+- **`Worker exited unexpectedly` is known and not yours.** Issue #184 (done 2026-08-02)
+  diagnosed it as a Windows-native per-child fault, predominantly NTSTATUS `0xC0000409`
+  `STATUS_STACK_BUFFER_OVERRUN` — no JS exception, no signal, independent of which file runs and
+  of fork count. It cannot be fixed in `src/` or `test/`. `run-tests.mjs` ships *mitigation*:
+  it detects the files a crash dropped and retries only those.
+- **Budget for the retry.** A crash landing early drops most of the suite — one observed run
+  had to re-run **346 of 465 files**. A full backend verification is ~15 min clean and can
+  exceed 30 min with a retry. Do not cap the run below that; a half-killed run leaves state behind.
+- **The cascade to recognise.** `test/runtime-lock-boot.spec.ts:48` writes
+  `version = 9999999999, fingerprint = 'future1'` into the shared `runtime_lock` and cleans up in
+  `afterEach`/`afterAll`. If the native crash kills that worker first, the orphaned high mark makes
+  every later Prisma boot fail `FATAL stale-build refused` — one observed run turned into ~30
+  phantom failures across 21 files this way. Recovery: `npm run test:reset`, or
+  `DELETE FROM runtime_lock` in the test DB.
+- **Both suites exit 0 while dropping files.** Read the summary line, never the exit code.
+
 ## Paste-ready session prompts
 
 Each is self-sufficient: open a session in that lane's worktree and paste it whole.
