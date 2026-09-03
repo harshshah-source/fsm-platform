@@ -67,3 +67,6 @@ audit/autoplant-reconciliation/standdown-live-batches.csv
 # carry real plant, transporter and vehicle rows. The analysis is kept on disk and shared directly,
 # out of band. Do not re-add it because `git status` looks untidy.
 audit/installer-quality-2026-08/
+
+# package manager store (local cache, not source)
+.pnpm-store/

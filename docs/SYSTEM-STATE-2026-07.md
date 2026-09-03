@@ -216,7 +216,7 @@ silently public).
 | Module | Responsibility | Notable exports / notes |
 |---|---|---|
 | `prisma` | PrismaService singleton | imported everywhere |
-| `auth` | Login/refresh/JWT (HS256 `{user_id, role, zone_id}`), scrypt hashes, 15-min access / 30-day rotating refresh | in-memory stores (→ #91); `acting-context.ts` acting-role attribution |
+| `auth` | Login/refresh/JWT (HS256 `{user_id, role, zone_id}`), scrypt hashes, 15-min access / 30-day rotating refresh | in-memory stores (→ #91); acting is **gated** once per request by `common/guards/acting-context.guard.ts` (#339), not parsed per call site |
 | `settings` | `system_settings` audited key-value (incl. `eligibility_mode`) | `SettingsService` |
 | `audit` | `audit_logs` writer + `/api/audit-trail/tickets/:id` viewer | `AuditService` |
 | `org` | Org graph CRUD: zones, plants, companies, users, engineers, SE coverage/territory, SLA rules, scoring weights, common kit, geography (PostGIS), zone-mapping | 14 admin controllers; `plant-eligible-floating-se.service.ts` MV refresh |
@@ -239,7 +239,7 @@ dual-confirm, recovery lifecycle, install create+lifecycle | 8 controllers |
 | `inventory` | Van stock, ledger, shadow-use, zone warehouse stock | #21/#24/#73 |
 | `component-request` | Request flow, WAITING_COMPONENT, WM queue, oversight | #22/#23 |
 | `engineers` | SE directory/admin CRUD (Phase 4), availability, leave | `EngineerAdminService` |
-| `roles` | Role-backup cascade + CSM acting scope | #27 |
+| `roles` | Role-backup cascade + CSM acting scope; unavailability windows are listed and **ended** (never deleted) from Settings, and `currentActingRoleForZone` is what the acting gate asks (#339) | #27 |
 | `notifications` | In-app spine + channel-gateway seam (no real external adapters — #76) | `NotificationService` |
 | `vouchers` | Expense vouchers SE→ZM→OH finance | #38 |
 | `me`, `zones` | Thin identity + zone-list controllers (AppModule-level, no module) | `me.controller.ts`, `zones.controller.ts` |
@@ -305,7 +305,7 @@ migrations for everything Prisma can't express (partial uniques, CHECKs, partiti
 | Table | Purpose | Constraints |
 |---|---|---|
 | `failure_cycles` | Immutable inactivity episode; SLA primary-clock anchor; pause bookkeeping (`sla_accumulated_pause_seconds`) | **I1**: partial unique `failure_cycles_one_active_per_device WHERE state IN (OPEN, WAITING_COMPONENT, SUBMITTED, REPEAT, ESCALATED)` (widened in `20260621011500`); CHECKs `valid_close`, `pause_coupling (sla_paused = (sla_pause_reason IS NOT NULL))`; optimistic `version` |
-| `tickets` | Unified work item, `work_type` ∈ TROUBLESHOOT/INSTALL/RECOVERY discriminates column families (install fitment cols, recovery collection cols) | **I2**: `failure_cycle_id` UNIQUE; raw CHECK TROUBLESHOOT ⇒ cycle NOT NULL; partial index `(plant_id) WHERE OPEN+UNASSIGNED` (shared pool, `20260621190000`); optimistic `version`. **No index on `device_id`/`vehicle_id`** (#103 open) |
+| `tickets` | Unified work item, `work_type` ∈ TROUBLESHOOT/INSTALL/RECOVERY discriminates column families (install fitment cols, recovery collection cols) | **I2**: `failure_cycle_id` UNIQUE; raw CHECK TROUBLESHOOT ⇒ cycle NOT NULL; raw CHECK `tickets_work_type_status` couples `status` to `work_type` (**#309**, `20260902120000` — the constraint `schema.prisma` had documented since Issue 05 and no migration ever created; probe found 0 violations in 30,460 dev rows before it landed). It is a **coupling, not a ladder**: `CLOSED` and `CLOSED_NON_OPERATIONAL` are legal on all three work types, and `SUBMITTED`/`FITTED`/`RECEIVED_AT_WAREHOUSE` stay legal on their own ladder although **no writer persists them** — install and recovery write those to `ticket_events` and move the row on in the same transaction. Swept both directions over the live `pg_enum` by `test/work-type-status-invariant.e2e-spec.ts`; partial index `(plant_id) WHERE OPEN+UNASSIGNED` (shared pool, `20260621190000`); optimistic `version`. **No index on `device_id`/`vehicle_id`** (#103 open) |
 | `ticket_events` | Append-only lifecycle timeline (narrower than audit_logs) | append-only by construction only — no DB trigger (schema:1812) |
 | `vehicle_unavailability_reports` | SE-filed VU → SLA pause + dual clocks (#28); since **#245** the system of record for the return-date decision — immutable `proposed_from` vs authoritative `expected_from`, decision columns (`decided_by`/`_role`/`_at`, `decision`, `override_reason`), `SUPERSEDED` status | `(status, expected_from)` index; **partial unique `(ticket_id) WHERE status = 'OPEN'`** (one live report per ticket, #245); CHECKs: decision is who+when+what or nothing, vocabulary `APPROVED\|OVERRIDDEN`, override states a reason |
 | `non_operational_markings` | Dual-confirmation Non-Op lifecycle + customer token + recovery-ticket back-ref | **I13**: partial unique one-active-per-device `WHERE state IN (CONFIRMED, ACTIVE)`; `customer_token` unique |
@@ -456,6 +456,8 @@ finalize SUCCESS/PARTIAL/FAILED.
   reaper's FAILED — advancing the snapshot display watermark on a run nobody was tracking, and nulling
   `ORPHANED_RUN_ERROR` on the master-sync side, erasing the only record of what happened. First writer
   wins; a late finish logs and writes nothing.
+- **Row-level containment + the wedge alert (#299/#300, 2026-09-02).** One bad source row used to freeze the whole pipeline for ever: an unparseable `latest_gps_datetime` threw out of `readChunk`, the worker read it as a source-read failure and stopped draining, and because the scan is deterministic (`ORDER BY device_id`, cursor reset each run) every device sorting after it was never ingested again. A single out-of-range value did the same to its 90-row chunk, atomically, through all 3 retries, every 30 min. Both are now contained per row: a bad GPS instant **drops that row** (`rejected`), an out-of-range value **nulls that field and keeps the row** (`repaired`) — the operator ruling, because dropping a live device over a bad voltage reading climbs `inactivity_hours` and manufactures a Troubleshoot Ticket. The run then finalizes SUCCESS and the #230 gate stays open.
+  **#300 makes the containment visible**, which is what makes it safe to rely on: the per-run tallies are persisted to `snapshot_runs.chunk_stats` (an existing JSONB column, no migration), and one derivation (`ingestion/ingestion-alert.ts`) counts consecutive non-SUCCESS **finalized** runs (RUNNING is skipped — an in-flight retry must not read as recovery), names the failing chunk + its error, and flags an error repeating on every run of the streak. Threshold `INGESTION_PARTIAL_STREAK_RUNS` (default 3 ≈ 1.5 h at the 30-min cadence), or immediately on a repeat. Both the OH Build Health card and the every-page freshness banner read that one derivation, so a gated pipeline can no longer render as the ordinary grey "data as of" line. **F10 settled:** `data_as_of` IS written on PARTIAL (the resume floor and integration-health freshness read it) and is now reported as `partialDataAsOf` / "Partial data through …"; the plain "data as of" figure stays SUCCESS-only, so a partial read can never advance the number an operator reads as covering the fleet.
 - **Partitioning**: daily partitions + 3-day create-ahead + settings-driven retention, gated
   `PARTITION_MAINTENANCE_ENABLED` (§2.9).
 - **UTC normalization**: `AUTOPLANT_SOURCE_UTC_OFFSET_MIN` env feeds the reader
@@ -757,10 +759,11 @@ and on a 3-minute `business-dispatch-reaper` cron. What matters about the shape:
   (`zm-schedule-query.reasoningByTicket`, `dispatch-transparency-query`'s batch detail) exclude
   `RETIRED` so they keep answering exactly as they did when the row was deleted.
 
-**Same-day bounded re-dispatch of a crashed zone (#286, 2026-08-25; ruling #282 R3).** The half #261
-deliberately left open. `dispatch_zone_recoveries` holds one row per **(zone, operating day)** —
-`state PENDING | RECOVERED | EXHAUSTED | EXPIRED`, `attempts`, `marked_by_run_id`, `last_error` —
-written by the reaper and collected by `business-dispatch-recovery` (`*/5 * * * *` IST, master switch +
+**Same-day bounded re-dispatch of a zone that lost its dispatch (#286, 2026-08-25; ruling #282 R3;
+widened by #319, 2026-09-02).** The half #261 deliberately left open. `dispatch_zone_recoveries` holds
+one row per **(zone, operating day)** — `state PENDING | RECOVERED | EXHAUSTED | EXPIRED`, `attempts`,
+`marked_by_run_id`, `last_error` — written by the reaper **and, since #319, by the two contained-loss
+paths as well**, and collected by `business-dispatch-recovery` (`*/5 * * * *` IST, master switch +
 its own #263 tick claim). `DispatchRunService.recoverMarkedZones` re-dispatches each marked zone
 through `runForActiveZones` **with no privileges**: same admission, same per-zone claim, same per-SE
 transactions, same idempotency guards, so G1–G8 hold without anything being restated. What matters
@@ -784,6 +787,22 @@ about the shape:
 - **`DISPATCH_RECOVERY_MAX_ATTEMPTS=0` is the documented rollback**: marks are still written (they are
   the evidence a zone lost its day) and retired EXHAUSTED without dispatching, degrading to exactly
   #261's behaviour plus a record.
+- **What marks is a claim finalizing ERROR, not a crash (#319, AR-13).** Recovery used to be scoped to
+  the reaper, which pointed it the wrong way round: kill the process and the zone was marked,
+  re-dispatched and reported; let a zone throw *inside* a live run and the ledger recorded ERROR and
+  nothing asked for that zone again until 05:00 tomorrow — the worse failure had the better recovery.
+  Both losses end at the same `dispatch_run_zones` row in the same state, so that state is the trigger.
+  Two writers gained the mark: `processZone` (a contained per-zone throw, or a whole-zone `skipReason`)
+  and `releaseStrandedClaims` (a claim still open as the run unwinds — the half the reaper structurally
+  cannot reach, because the process is alive and finalizing itself). Both mark **before** freeing or
+  finalizing, the reaper's own ordering rule: a death in the gap leaves the claim RUNNING, which is
+  exactly the population the next reap pass finds. `markZonesForRecovery` is reused verbatim, so there
+  is one row, one budget and one cutoff per (zone, day) however many ways the zone was lost — a zone
+  that both crashed and errored today draws from a single three-attempt allowance. DONE zones are never
+  marked, and CONTENDED rows are written by `admit` and never pass through either writer, so #286's
+  "busy is not broken" holds by construction. **The cockpit copy changed with it:** the notice said
+  "this zone's dispatch run died", which is false for both new cases (the run finished and reported the
+  loss), so it now says the zone *lost its dispatch run* and leaves the cause to `last_error`.
 
 **The assign board's visual grammar (#290, 2026-08-25; #272's non-negotiable table).** One colour,
 one meaning, across the whole admin: **amber** = over capacity, **crimson** = critical work,
@@ -953,7 +972,7 @@ cron-name set (20, as of #264) against the real `AppModule`, so a job that stops
 | `business-fleet-uptime` | `0 3 1 * *` | … | 〃 | previous-month cube |
 | `business-root-cause` | `15 3 1 * *` | … | 〃 | previous-month cube |
 | `business-zm-performance` | `30 3 1 * *` | … | 〃 | previous-month cube |
-| `business-notification-outbox` **(#264, 2026-08-24)** | `*/2 * * * *` | `BUSINESS_SWEEP_NOTIFICATION_OUTBOX_CRON` | 〃 | re-drain backstop for `day_plan_notification_outbox` — retries rows the immediate post-commit drain missed (crash) or lost a duplicate-drain race on; bounded `attempts`, retention rides `partition-maintenance` |
+| `business-notification-outbox` **(#264, 2026-08-24; widened by #338, 2026-09-03)** | `*/2 * * * *` | `BUSINESS_SWEEP_NOTIFICATION_OUTBOX_CRON` | 〃 | re-drain backstop for `day_plan_notification_outbox` — retries rows the immediate post-commit drain missed (crash) or lost a duplicate-drain race on; bounded `attempts`, retention rides `partition-maintenance`. **Since #338 the table is no longer day-plan-only**: all twelve former post-commit `notify()` sites write their notice inside their own mutation transaction, as a `NOTIFY` row (a resolved `NotifyInput`, recipients resolved in the producing transaction) or as a port event (`INSTALL_*`/`RECOVERY_*`, delivered through `InstallNotifier`/`RecoveryNotifier` the way day-plan rows go through `DayPlanNotifier`). This sweep is the only drain that sees every producer's rows and therefore the one place carrying all three deliverers — a gap #338 found in its own part 1, where the module factory stopped one argument short of the notify deliverer and the sweep could retry day-plan rows only |
 
 (Defaults: `business-sweep-scheduler.service.ts:27-36`, `dispatch-cron.ts:16-19`,
 `schedule-closure-scheduler.service.ts:18`, `plant-eligibility-refresh-scheduler.service.ts:10`,
@@ -1066,6 +1085,56 @@ POSTs) drive identical code paths with no cron.
   defer/reorder) commits immediately, flips batch + schedule to OVERRIDDEN with mandatory reason +
   overrider, audits in-transaction, fires a push. No approval gate. Overriding work an SE is ON_SITE
   on goes through the conflict seam (`soft-state-conflict.ts`).
+- **One acquisition order across the manual write paths** (#327, 2026-09-02): every write in
+  `override.service.ts` takes its rows in one documented order —
+  `tickets → work_schedules → plant_batch_assignments → batch_assignment_tickets` — stated above the
+  class. `assignTicket` used to be the inverse of `assignLane` (batch-ticket row, then the ticket), so
+  two managers on one ticket held each other's next row and Postgres broke the cycle with a 40P01: a
+  500 on one door, and on the other a `LANE_FAILED` with an empty skip list, which is the same error
+  wearing a friendlier name. `assignTicket` moved to match the lane — the order the dispatch run
+  already writes in (#306) — and opens its transaction with a **blocking** `FOR UPDATE` re-check
+  (deliberately not the lane's `SKIP LOCKED`: a lane skips because siblings are waiting behind the
+  ticket, while a single-ticket assign can afford to wait for the true answer). Losing throws
+  `LostRaceError` → `ALREADY_ASSIGNED`; #265's P2002 recovery stays as the backstop.
+  Stop numbers are minted under `lockSchedule` (the `work_schedules` row, taken by `ensureSchedule`,
+  both `max + 1` mints, both renumbering paths and `flagOverridden`; `nextSortOrder` takes the batch
+  row) instead of raced for, and `reorder` reads the plan it renumbers **inside** its transaction under
+  that lock. **No unique index and no migration:** `scripts/probe-stop-sequence-duplicates.cjs` shows
+  zero existing duplicates, so #155's rule would have allowed one, but renumbering writes transient
+  duplicates by construction and Prisma cannot express `DEFERRABLE`. A residual 40P01 — cross-schedule
+  moves have no order between source and destination, and `dispatchForSe` writes `work_schedules`
+  before `tickets` (#334) — maps to each door's existing conflict via `isDeadlock` in
+  `common/lost-race.ts`: `ALREADY_ASSIGNED` (409), `NOT_FOUND`, or `assignPlants`' empty summary.
+  A 40P01 arrives here as a `DriverAdapterError` with no Prisma `code` and the SQLSTATE on `cause`
+  alone — measured, like the P2002 shape beside it.
+- **Intraday ledger atomicity** (#325, 2026-09-02): `assignTicket` takes a final optional
+  `inTransaction` callback (`AssignInTransaction`), invoked last inside its transaction with the
+  `{ scheduleId, batchId }` it just minted, and both `IntradayInsertionService` doors now write their
+  `intraday_insertions` row through it instead of after the commit. That row is the **only** record
+  the Intra-day Queue reads to know an insertion happened, and the efficiency cube counts these rows,
+  so the pre-#325 gap left an assigned CRITICAL ticket that no operations view could see. A callback
+  rather than an exported `tx`: the boundary already carries #265's P2002 recovery, #249's deferral
+  spend and #298's escalation close, and a hook given only the ids can do one thing. Notifications
+  stay **outside** — `drainRows` and the SE push both fire post-commit, which is what keeps "never
+  push for a rolled-back assignment" true by construction. Re-scoped against #298: that issue already
+  closes an `ESCALATION_REQUIRED` row in this transaction, so only the id stamp remained on the manual
+  door. A ledger failure still aborts the rest of the zone sweep — each iteration is atomic, the loop
+  is not fault-tolerant, and that distinction is deliberate.
+- **Mutation-door input validation** (#310, 2026-09-02): the override body is now
+  `scheduling/dto/override-command.dto.ts`, a **class**, so the global `ValidationPipe` actually sees
+  it — it is typed as a TypeScript union, and the pipe skips interface-typed bodies by design, so
+  until this the one door whose contract says "mandatory reason" validated nothing and wrote NULL
+  reasons onto the #275/#282 accountability record. The DTO checks shape only and deliberately does
+  **not** enumerate `action`: an unimplemented action is an admin bundle deployed ahead of the API, and
+  `OverrideService`'s own `UNSUPPORTED_ACTION` names that. Uuids are checked as Postgres accepts them
+  (8-4-4-4-12 hex), not as RFC 4122 defines them. `common/parse-id.ts` (`toBigIntId`) replaces five
+  bare `BigInt(id)` calls that answered **500** to malformed input — each caller keeps its own
+  404-vs-400 answer, because that is a question about the resource. Both date writers now refuse a
+  date that would hold nothing (`INVALID_DATE`, 400): `notDeferredOn` is **inclusive**, so a defer or
+  hold naming today is dispatched again by the very next run — a bare remove wearing the word "defer".
+  Distinct from `TARGET_DATE_IN_PAST`, because a `MOVE_TICKET` onto today is an ordinary same-day
+  reassignment. `SchedulerPreviewService.placeHold` gained an injected clock (`opts.now`) — it had
+  none, which is how seven spec files came to be holding and deferring into the past while passing.
 - **Override impact preview** (#289/P11, `POST /api/batches/:id/override/preview` +
   `OverrideProjectionService`): the approved flow is inspect → understand → override → **preview
   impact** → confirm, and only the preview was missing — every override committed immediately, so the
@@ -1252,14 +1321,36 @@ explicit `BODY_LIMIT_JSON` (1mb) + `INSTALL_CSV_MAX_ROWS` (1000) cap payloads.
 ZONE_SCOPE_VIOLATION); **deeper zone clamping is service-level and uneven** — e.g. install scope
 was only closed by #102; cross-zone/CSM acting scope threads through `acting-context.ts` +
 `RequestActor` (#47).
-**Acting-as-ZM has two halves and only the audit half is complete** (corrected 2026-08-17): `RequestActor`
-stamps `acted_as_role`/`acting_zone` on audited writes, but manager **reads** built their scope as
-`{ role: user.role, zoneId: user.zone_id }` off the claims — a shape that cannot carry acting — so an
-acting CSM/OH received pan-India rows while the UI rendered the Zone Operations view. Read scope now
-resolves through `common/manager-scope.ts` (`resolveManagerScope` + `@CurrentScope()`), which collapses
-an acting caller to `{ role: 'ZONAL_MANAGER', zoneId: actingZone }`; **converted so far: the 9
-`/api/dashboard/*` reads and `reports/fleet-uptime`** (proof: `test/dashboard-acting-scope.e2e-spec.ts`).
-**61 claims-only scopes remain across ~20 controllers → #239**, and the frontend half is per-client —
+**Acting-as-ZM is now gated, attributed and surfaced; what remains is write-door scope** (rewritten
+2026-09-03, #339 + #340). Until #339 the header was a **parse, not a gate**: `resolveActingContext`
+granted acting to any CSM or Operations Head whose `X-Acting-As-Zone` contained a number,
+`role_unavailability` was never consulted at all (CONTEXT.md §15's cascade sat in
+`RoleBackupService.currentActingRoleForZone` with **no callers**), an unknown zone id was accepted, and
+a non-numeric one became `NaN` → null → **pan-India** — the widest scope in the system, reachable by
+typing nonsense into a header. **`common/guards/acting-context.guard.ts`** (global `APP_GUARD`, after
+`AuthGuard`, before `RoleGuard`) now resolves the header **once per request** into `request.acting` and
+gates it: the zone must exist; a **CSM** is allowed only while the cascade names them (so a CSM who is
+themselves out is refused — the duty has passed to Operations Head); an **OH** may act anywhere, that
+authority being theirs by role; a ZM/WM header stays ignored rather than refused. `@CurrentScope()` and
+`@CurrentActor()` read the proven context and **fall back to non-acting, never a re-parse**.
+Windows are opened and **ended** (never deleted) from the admin **Manager availability** section —
+`POST /role-unavailability` had existed since Issue 27 with no screen calling it, which is why the gate
+could not be switched on before — and entering/leaving acting writes `ACTING_STARTED`/`ACTING_ENDED`.
+The banner names the zone and the sidebar becomes the ZM's while acting.
+**Attribution was separately broken and is fixed** (#340): `acted_as_role` was non-null on **1 of
+34,758** audit rows because eleven controllers hand-built `{ …, actedAsRole: null }`; they now take
+`@CurrentActor()`. Two writers were also overloading `audit_logs.acting_zone` with something that is
+not an acting zone — bulk unassign wrote the rebalance's **target** zone, vehicle-unavailability wrote
+the caller's **home** zone — so both fed the CSM-backup-share report's denominator with no acting role
+to match. Both fixed (bulk unassign's target zone reads back from `entity_id`, where it was always
+written, so nothing is backfilled), and `csmBackupShareByZone` additionally filters
+`acted_as_role IS NOT NULL`.
+**Read** scope resolves through `common/manager-scope.ts` (`resolveManagerScope` + `@CurrentScope()`),
+which collapses an acting caller to `{ role: 'ZONAL_MANAGER', zoneId: actingZone }`; **converted so far:
+the 9 `/api/dashboard/*` reads and `reports/fleet-uptime`** (proof:
+`test/dashboard-acting-scope.e2e-spec.ts`).
+**~60 claims-only write-door scopes remain across ~20 controllers → #341** (which supersedes #239), and
+the frontend half is per-client —
 only clients using `api/authHeaders.ts` send `X-Acting-As-Zone` at all (`api/dashboard.ts` and
 `api/reports.ts` were switched to it; `api/devices.ts` / `api/client.ts` still hand-roll a bearer). No rate limiting anywhere (#110): `/auth/login` scrypt is a CPU-DoS vector.
 **Admin FE session** (#109, done): single-flight rotating refresh on 401 with one retry
@@ -1306,18 +1397,46 @@ the Scheduler Console product we agreed to build") and rebuilt the same day per
 RBAC clamps and honesty rules, on the composition of a workforce-scheduling product. The shape now:
 a compact **top bar** (zone picker with remembered last zone for CSM/OH — a ZM gets none; day
 navigation; find; run badge; next-run pill; Run Now; the attention strip; run-facts and grammar
-popovers), the **ENGINEER × DAY board as the dominant canvas** (`console/BoardGrid.tsx`), the People
-rail left, one right-rail **slot with two occupants** (Work Pool by default, the Attention list on
-demand), and a **contextual Inspector** as the bottom band that renders only while something is
-selected. **The day axis replaced the Plan/Live/Replay mode nav (D9):** a past column answers from
+popovers), the **ENGINEER × DAY board as the dominant canvas** (`console/BoardGrid.tsx`), one
+right-rail **slot with two occupants** (Work Pool by default, the Attention list on demand), and a
+**contextual Inspector** as the bottom band that renders only while something is selected. **The
+separate People rail was deleted by #295 (2026-09-01)** — it rendered the same `engineers[]` array
+the board's first column renders, so the board is now two regions plus the Inspector; see the #295
+entry below. **The day axis replaced the Plan/Live/Replay mode nav (D9):** a past column answers from
 `GET /schedules?date=` at count fidelity, today from the **one lifted `GET /dispatch/today`**
 (`console/useConsoleData.ts` — never given a date; every mutation still invalidates it), a future
 column from `GET /schedules/preview?date=` as non-selectable ghost chips (fetched only for the
 focused day — it runs the real recommender), with committed schedules beating the projection on any
 future date. The run's decision replay is an inspectable object (`?sel=run:<id>`) reached from the
 today column. **Drag and drop shipped as a dialog initiator only (D10):** a legal drop opens the
-authoritative action dialog prefilled (reassign / defer / assign / swap / remove) and nothing
-commits on release; past and projected columns refuse drops by construction. **The chip grammar has
+authoritative action dialog prefilled (reassign / move-to-day / assign / swap / remove) and nothing
+commits on release; past columns refuse drops by construction. **A drop on a future day means
+`MOVE_TICKET`, not `DEFER_TICKET` (corrected 2026-09-01).** It shipped mapped to defer, which
+*unassigns* — so the gesture "this engineer, that day" was answered by "take it off everybody and
+reconsider it on that date", and because a deferred ticket belongs to nobody it could not be drawn in
+the cell it was dropped on: the operator saw the ticket leave today, an `adjusted` badge on the stop
+behind it, and nothing on the day they aimed at. `MOVE_TICKET` is the seventh override command and
+adds **no new scheduling authority**: it is `moveTickets` — the existing REASSIGN/SPLIT mover, which
+was always a general cross-*schedule* mover — given the one argument it lacked, a target day, so the
+destination `ensureSchedule` resolves a `(se, zone, targetDate)` row instead of inheriting the
+source's range. The ticket stays `FORMALLY_ASSIGNED` throughout (both rows in one transaction, so it
+is never unowned), `batch_assignment_tickets_one_active_per_ticket` makes a both-days duplicate
+impossible at the database, and the target day's run leaves it alone for a structural reason rather
+than a flag: the recommender selects `assignment_state = 'UNASSIGNED'`. Provenance is its own
+`add_source` (`MANUAL_DAY_MOVE`); the source row keeps `REASSIGNED`, so the changes ledger still
+counts a move once. The **diagonal** (another engineer *and* another day) is one command; a whole
+**stop** across days stays refused. **`DEFER_TICKET` is unchanged and still reachable** as a typed
+Inspector action — the two are genuinely different decisions (defer names neither owner nor plan;
+move names both) and are now rendered side by side so the difference is legible. Two honesty defects
+were fixed with it: the future column badge read `projected` **unconditionally** although only the
+focused day ever runs a projection (now `committed` / `projected` / `not projected`), and a committed
+future day could answer only in counts — `GET /schedules?date=` gained an opt-in `&detail=stops`
+(a wider select on rows the count path already walked; no extra query, and omitting it is
+byte-identical) so the focused future column draws real chips, `⇥`-marked when the operator moved
+them. A successful move focuses the target day. `adjusted` was investigated and **kept unchanged**:
+`OVERRIDDEN` truthfully means a person changed that stop today, and the moved ticket's chip is
+genuinely gone — it only read as "still here, modified" because under the old wiring it was the
+operation's only visible trace. **The chip grammar has
 four channels (D11):** border = provenance, inline tokens = urgency/`RET`/`CHR ×n` (critical is the
 `CRIT` token — it travels with the ticket whoever assigned it, fixing the field-ops P0), cell
 treatment = capacity, and chip fill is **reserved for operational state pending the day-scoped board
@@ -1327,9 +1446,135 @@ implementation); Assign mode (`?assign=1`, today-scoped) replaces the board, rai
 the A–E build order never carried a stage for), see the #273 entry below. Specification: the slice doc
 `docs/audits/scheduler-console-implementation-slice-2026-08-27.md` for phases/decisions D1–D8, the
 correction doc for the composition and D9–D13. Open: **D7** (route retirement —
-`/intraday`'s live escalation modal must be relocated first) and **D13** (the day-scoped board read
-that would light past-day chips, operational-state fill, carry-forward markers and device ids on
-chips).
+`/intraday`'s live escalation modal must be relocated first). **D13 is partly answered by #295**:
+device ids and a day-scoped read for committed future columns shipped; past-day chips did not.
+**The fill is no longer reserved:** the action status took the rail on 2026-09-01 and then the card's
+own background in the same day's density correction, so D13's "operational state as fill" is answered
+for today's column — by the server's verdict, not by a client-side reading of state (see below).
+
+**#295 the dispatch board — cards, one personnel column, and a status a dispatcher can act on
+(done, 2026-09-01):** the Console became dispatcher-readable rather than a technical assignment
+table. Three changes, each with a rule behind it.
+
+**One engineer representation.** `PeopleRail` is deleted. It and `BoardGrid.EngineerRow` rendered the
+*same* `view.engineers[]` array — one array, one fetch — so the duplication was purely presentational
+and removing it could not desynchronise anything. What it *could* have dropped, and did not, is the
+two things the rail alone carried: the coverage pill / `n stops · n devices` line, and the **drop
+target** added on 2026-08-31 because operators drag a device onto the engineer's *name*, not onto a
+grid cell (reported then as "I can't drag and drop a device"). Both moved into the board's first
+column, which now carries a deterministic initials avatar
+(no photo column exists in the schema and none was added for a decorative circle — the `TopBar`
+precedent), the name, the `LoadBadge` (still from `committedDayPlan` by way of the payload, never
+re-summed from visible stops), the coverage pill across all three real values
+(`DEDICATED` / `MULTI_PLANT` / **`FLOATING`**), workload and availability. The drop handlers call the
+**same `dropAction`** the cells call — one predicate, never a copy.
+
+That column first shipped **horizontal and `13–18rem` wide**, and was corrected the same day (see the
+density correction below): the same five facts stacked — avatar, name, `n stops · n devices`, then the
+coverage and load pills — need `8.5–10rem`, and the width it was hoarding is width the focused day
+column needs for a work card.
+
+**Work cards instead of hashes.** The board's unit was `ticketId.slice(0, 8)`. `console/WorkCard.tsx`
+names the device, vehicle, plant (from its stop), company, transporter and device inactivity.
+`GET /dispatch/today` was widened with those fields plus `assignedAt`, filled by **one batched
+identity pass** over the payload's ticket ids in the existing `bucketByTicket` idiom — the join is
+the one `ticket-query.service.ts` has always used. `ticketId` remains the domain identity: the drag
+payload, `DRAG_MIME`, `dropAction`, `intentFor`, the Inspector and every override are untouched by
+construction, and the device number is a label, never a key. `WorkChip` stays for the Work Pool.
+
+**A tri-state action status, decided on the server.** `actionStatus` is
+`IN_PROGRESS | NOT_STARTED | AGING_UNTOUCHED` from `scheduling/ticket-action-status.ts` — a pure
+function, derived at read time and never stored, a sibling in posture to ADR-0023's
+`deriveActivityStatus` (which is the *engineer's* label and could not answer a per-ticket question).
+`IN_PROGRESS` ⟺ an **unresolved `TROUBLESHOOT_STARTED`**, read through a new
+`activeTroubleshootStartedTicketIds` on the soft-state port. That is deliberately narrower than the
+existing `activeOnSiteTicketIds`, which unions ON_SITE for override-conflict purposes: an engineer
+who has arrived and not begun has not started the work, and assignment is not troubleshooting.
+**Aging is measured from the assignment, not from device silence** — now − `batch_assignment_tickets.created_at`
+against a new `assigned_untouched_aging_hours` settings key (ladder-validated, default 4, a filed
+guess awaiting the operator's number). `inactivityHours` stays a *displayed* metric and null still
+means "never recomputed", rendered as an em-dash rather than `0h`. Reusing
+`se_assignment_threshold_hours` would have been the closest-looking fit and was refused: its clock
+starts when the device goes quiet, long before anyone was assigned, so on the default nearly every
+untouched card would have been aged from birth.
+
+**Colour.** The traffic light takes its own palette (`--color-action-*`) and its own **channel** — a
+work card's left rail, its word, and (from the same day's correction) the card's own background fill
+— so crimson still means critical SLA, amber still means at/over
+capacity, violet still means a crossed coverage tier and border style still means provenance. #290
+was a whole slice spent separating the first two; the rule and its amendment are stated in
+`index.css`. The state is never hue-only: `Started` / `Untouched` / `Aged` always print.
+
+**Per-column honesty, unchanged in principle.** Past stays counts (enriching history with today's
+live inactivity would fabricate operational state for a day that has happened); the focused
+**committed future** column enriches its cards through **one batched** `POST /dispatch/card-summaries`
+(zone-clamped, 500-id cap, no `actionStatus` — nobody has started work whose day has not begun), and
+falls back to the compact committed chip when that read fails rather than drawing a card frame with
+blank rows; projected work stays ghosted. `ADJUSTED` stays a **stop** fact on the stop header and was
+not moved onto cards.
+
+**Two pre-existing defects fixed in the same slice.** `chronicThreshold` was declared *required* by
+the admin client since Phase 3.4 and never sent by the backend, so `failureCycles >= undefined` was
+permanently false and the `CHR ×n` token could not light for any ticket in production — green only
+because six fixtures hand-wrote the number and no backend test asserted it. And `failureCycles` was
+hardcoded `null` at both payload sites beside a comment naming an `attachFailureCycles` that never
+existed. Both are now published/filled (board and both rails) with backend assertions. The chronic
+threshold is its own constant (`ticketing/chronic-device.ts`), numerically equal to ADR-0021's
+`REPEAT_THRESHOLD` but not shared with it: that rule is 3 repeats in a rolling 7 days and *acts*
+(escalates); this is a lifetime count that only *says* something.
+
+**#295b the density correction (done, 2026-09-01, same day):** the board shipped legible and *loose*,
+and the operator's report on the running app was three specific things — the engineer column "too
+wide", its avatar "too small", and the status colour "not present". At real scale (15 engineers, 104
+devices, cards eight deep in a cell) that is a screen you scroll rather than read. Three changes, no
+new data:
+
+- **The personnel column became a card.** Read top to bottom — avatar (`h-10`, up from `h-7`), name,
+  `n stops · n devices`, then the coverage and load pills side by side — and the column narrowed from
+  `minmax(13rem, 18rem)` to `minmax(8.5rem, 10rem)`. Nothing it carried was dropped; the load badge
+  moved off the far right, where it read as a property of the row rather than of the person.
+- **The work card became a block, and then a tile.** The five identity facts were one per line, then
+  briefly a labelled 2×2 at 63px. **Plant and company came straight back off** (second operator pass,
+  same day): the plant is the stop header the cards already sit under and the tickets at one plant
+  share a company, so the pair printed the same two strings on every card in the cell and charged the
+  cell's width for it. What is left is the three facts that differ card to card — **device, vehicle,
+  transporter**, one per row, each row ending in one piece of metadata (tokens, the status word, the
+  inactivity clock). **46px tall and ~177px wide**, so the cell tiles **three across** on a 1440px
+  laptop instead of one, and a 25-device engineer fits on one screen.
+  - Which row carries which piece of metadata is load-bearing: at tile width exactly one value per row
+    can afford to be cut, and it must always be the same one. The device number and the plate are what
+    an operator matches against the Work Pool and the unit in the field, so the two short right-hand
+    items sit on their rows and the long one (`Inactive 7455h`) sits on the transporter's.
+  - **The transporter is drawn without its label**, named in its tooltip instead: `TRANSPORTER` costs
+    42px of a 177px card and the inactivity beside it costs 61, which left the name about ten
+    characters — `RIMJHI…`. Device and vehicle keep their labels; they have the room, and a 15-digit
+    number and a plate are worth naming.
+  - The inactivity clock **rounds to whole hours past a day** (`7430.04` → `7430h`): a tenth of an hour
+    is meaningful under a day and noise above it, and the two glyphs were being paid for out of the
+    transporter's width.
+  - The opaque hash is now only the fallback for a device the read could not name, never the headline.
+- **The action status became a fill.** A 3px rail is a signal only to a reader who already knows where
+  to look, which is why the traffic light read as absent. The card's own background now carries it,
+  with the rail kept as its edge and the word kept beside it. This is a **channel amendment, not a new
+  colour**: the amended rule is written into `index.css`, the cell still carries capacity, the border
+  still carries provenance, the tokens still carry urgency, and an absent verdict still draws an
+  absent fill.
+- **The palette was retuned, then cut to two hues.** The first fills were mint / pink / peach at full
+  chroma — a highlighter set, which the operator named as "the AI colour"; they were walked toward
+  sage and clay: lower chroma, warmer, all at one lightness. Then the **yellow was retired
+  altogether** (operator ruling, same day): the light answers one question — *is anybody on this?* —
+  so it gets two answers. Green where troubleshooting has begun, red everywhere it has not. **Aged is
+  not a third answer**; it is untouched work with a clock on it, and the clock is carried by the word
+  (`Untouched` → `Aged`), which is why the word was never optional. `--color-action-aged*` is gone
+  from both themes, and a test asserts no card renders it as a fill, a rail or a foreground. It also
+  settles half of #296: the third hue was the one competing with the amber over-capacity cell.
+
+**Found while validating, not fixed:** `bg-warning-soft` is used in three places
+(`BoardGrid` over-capacity cell, `ActionsBand` move conflict, `WorkChip`'s legend swatch) and
+`--color-warning-soft` **does not exist in either theme**, so all three emit nothing — the capacity
+channel has never actually painted a cell. Filed as [#296](../.scratch/fsm-platform-v1/issues/296-warning-soft-token-undefined.md);
+left alone here because the obvious repair (`warning-bg`) is a pale yellow that would sit directly
+behind the new pale-yellow *aged* card, and which colour capacity should take is the operator's call.
 
 **#273 the Assign Work Console — slice 1 (done, 2026-08-20):** `/assign` exists, gated to manager
 roles, and the top-bar **Assign SE** button opens it — it called `navigate('/')` for its entire life,
