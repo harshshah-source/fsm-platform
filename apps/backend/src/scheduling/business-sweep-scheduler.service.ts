@@ -1,9 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import type { TickClaimant } from './cron-tick-claim';
 import { CrossZoneEscalationService } from '../cross-zone/cross-zone-escalation.service';
+import { DAY_PLAN_NOTIFIER, type DayPlanNotifier } from './day-plan-notifier';
+import { drainUnsent } from './day-plan-notification-outbox';
+import { NotificationService } from '../notifications/notification.service';
 import { IntradayInsertionService } from '../intraday/intraday-insertion.service';
 import { TierOverrideExpiryService } from '../org/tier-override-expiry.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { FleetUptimeAggregationService } from '../reports/fleet-uptime-aggregation.service';
 import { RootCauseAnalyticsAggregationService } from '../reports/root-cause-aggregation.service';
 import { SoftInactiveCountService } from '../reports/soft-inactive-count.service';
@@ -48,6 +52,8 @@ export const BUSINESS_SWEEP_JOBS = {
   fleetUptime: 'business-fleet-uptime',
   rootCause: 'business-root-cause',
   zmPerformance: 'business-zm-performance',
+  // #264 — the day-plan notification outbox re-drain sweep.
+  notificationOutbox: 'business-notification-outbox',
 } as const;
 
 export const DEFAULT_VERIFICATION_CRON = '*/5 * * * *';
@@ -61,6 +67,9 @@ export const DEFAULT_SYSTEM_EFFICIENCY_CRON = '30 1 * * *';
 export const DEFAULT_FLEET_UPTIME_CRON = '0 3 1 * *';
 export const DEFAULT_ROOT_CAUSE_CRON = '15 3 1 * *';
 export const DEFAULT_ZM_PERFORMANCE_CRON = '30 3 1 * *';
+// #264 — minute-cadence family (the immediate post-commit drain already delivers the common case;
+// this is the crash-between-commit-and-drain backstop, not the primary path).
+export const DEFAULT_NOTIFICATION_OUTBOX_CRON = '*/2 * * * *';
 
 export interface BusinessSweepSchedulerConfig {
   /** Master switch — `BUSINESS_SWEEPS_ENABLED === 'true'`. Default OFF (enabling is an ops step). */
@@ -76,6 +85,7 @@ export interface BusinessSweepSchedulerConfig {
   fleetUptimeCron: string;
   rootCauseCron: string;
   zmPerformanceCron: string;
+  notificationOutboxCron: string;
 }
 
 /** Resolve the master switch + every cron in one place; anything but the literal 'true' stays OFF. */
@@ -95,6 +105,7 @@ export function readBusinessSweepSchedulerConfig(
     fleetUptimeCron: env.BUSINESS_SWEEP_FLEET_UPTIME_CRON?.trim() || DEFAULT_FLEET_UPTIME_CRON,
     rootCauseCron: env.BUSINESS_SWEEP_ROOT_CAUSE_CRON?.trim() || DEFAULT_ROOT_CAUSE_CRON,
     zmPerformanceCron: env.BUSINESS_SWEEP_ZM_PERFORMANCE_CRON?.trim() || DEFAULT_ZM_PERFORMANCE_CRON,
+    notificationOutboxCron: env.BUSINESS_SWEEP_NOTIFICATION_OUTBOX_CRON?.trim() || DEFAULT_NOTIFICATION_OUTBOX_CRON,
   };
 }
 
@@ -153,6 +164,17 @@ export class BusinessSweepSchedulerService {
     private readonly systemEfficiency: SystemEfficiencyAggregationService,
     private readonly claims: TickClaimant,
     config?: Partial<BusinessSweepSchedulerConfig>,
+    // #264 — appended AFTER the pre-existing `config` param (rather than inserted before it)
+    // deliberately: several specs construct this class positionally, ending the argument list at
+    // `config`, and inserting earlier would silently shift their `config` object into a different
+    // parameter instead of failing to compile. Both optional: a spec that never calls
+    // `notificationOutboxTick` needs neither.
+    private readonly prisma?: PrismaService,
+    @Inject(DAY_PLAN_NOTIFIER) private readonly dayPlanNotifier?: DayPlanNotifier,
+    // #338 — the generic half of the drain. Optional for the same reason as the two above: a spec
+    // that hand-builds this class and never touches the outbox tick must not have to supply it.
+    // Without it, NOTIFY rows are left un-claimed and retried rather than silently marked sent.
+    @Optional() private readonly notifications?: NotificationService,
   ) {
     this.config = { ...readBusinessSweepSchedulerConfig(), ...config };
   }
@@ -253,5 +275,21 @@ export class BusinessSweepSchedulerService {
   @Cron(readBusinessSweepSchedulerConfig().zmPerformanceCron, { name: BUSINESS_SWEEP_JOBS.zmPerformance })
   zmPerformanceTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
     return this.runGuarded(BUSINESS_SWEEP_JOBS.zmPerformance, now, () => this.zmPerformance.computeMonth(previousUtcMonthStart(now), now));
+  }
+
+  // #264 — the day-plan notification outbox re-drain sweep: retries rows the immediate post-commit
+  // drain missed (a crash between commit and drain) or lost the race on (a duplicate-drain conflict,
+  // which resolves to exactly one delivery via `drainRow`'s guarded claim). Bounded `attempts`
+  // (`MAX_OUTBOX_ATTEMPTS`) — an exhausted row stays visible via `lastError`, never retried forever.
+  @Cron(readBusinessSweepSchedulerConfig().notificationOutboxCron, { name: BUSINESS_SWEEP_JOBS.notificationOutbox })
+  notificationOutboxTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.notificationOutbox, now, () => {
+      // `prisma`/`dayPlanNotifier` are optional constructor params (see the constructor's own
+      // comment) — real wiring (`business-sweep-scheduler.module.ts`) always supplies both; a spec
+      // that hand-builds this class without them and then calls this specific tick gets a clean ERROR
+      // outcome from `runGuarded` rather than a crash.
+      if (!this.prisma || !this.dayPlanNotifier) throw new Error('notification outbox sweep: prisma/dayPlanNotifier not wired');
+      return drainUnsent(this.prisma, this.dayPlanNotifier, now, undefined, this.notifications);
+    });
   }
 }

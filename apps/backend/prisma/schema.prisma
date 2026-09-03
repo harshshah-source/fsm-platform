@@ -723,6 +723,11 @@ model BatchAssignmentTicket {
   /// `REMOVAL_REASONS` (`scheduling/removal-reason.ts`). TEXT rather than an enum so #242/#243/#246
   /// add members without a schema migration — the closed set is enforced in TypeScript.
   removalReason  String?   @map("removal_reason")
+  /// The human reason for the removal, where the door required one — symmetric with `addReason`.
+  /// `removalReason` stays the closed predicate vocabulary (#241/#244 read it as one); this carries
+  /// the operator's own sentence. NULL = no reason recorded: system removals, and all history from
+  /// before this column, which is unknown rather than absent. Never invented by a reader.
+  removalNote    String?   @map("removal_note")
   /// Who added the row (#283). NULL for engine writes by construction — the run placed the work, no
   /// person added it — and NULL for pre-#283 history, which is unknown, not system. Same posture as
   /// `removed_by` being NULL on terminal closure.
@@ -1640,6 +1645,13 @@ model SnapshotRun {
   /// NULL for every run written before the column existed; the reaper falls back to `started_at` there.
   heartbeatAt DateTime?     @map("heartbeat_at") @db.Timestamptz(6)
   status     SnapshotStatus @default(RUNNING)
+  /// #324 (F4) — **no longer written; historical rows only.** This held an optimistic cross-run
+  /// re-read floor for a resume that `AutoPlantSourceReader` deliberately does not do (it restarts
+  /// from a null cursor and keyset-scans every device every run, so correctness never depends on a
+  /// persisted watermark). Nothing in production ever read it back. Kept as a nullable column
+  /// rather than dropped: removing it needs a migration for no behavioural gain, and the values
+  /// already stored are honest history of the design that once wrote them. Freshness reads
+  /// `data_as_of`; per-run containment tallies read `chunk_stats` (both live, both written).
   cursor     String?
   dataAsOf   DateTime?      @map("data_as_of") @db.Timestamptz(6)
   chunkStats Json?          @map("chunk_stats") @db.JsonB
@@ -1907,9 +1919,14 @@ enum WorkType {
   @@map("work_type")
 }
 
-/// Full `ticket_status` union (schema D6). Coupled to `work_type` by a CHECK + service guard. Issue
-/// 05 uses only the TROUBLESHOOT subset (`OPEN`); defined complete so later work-type issues never
-/// `ALTER TYPE`.
+/// Full `ticket_status` union (schema D6). Defined complete up-front so later work-type issues never
+/// `ALTER TYPE`. Coupled to `work_type` by the `tickets_work_type_status` CHECK
+/// (`migrations/20260902120000_ticket_work_type_status_check`, #309) — TROUBLESHOOT holds
+/// OPEN/SUBMITTED/VERIFICATION_PENDING/ESCALATED/FAILED_VERIFICATION/CLOSED_AUTO_RECOVERY, INSTALL
+/// holds REQUESTED/SCHEDULED/ON_SITE/FITTED/ACTIVATED/FAILED_ACTIVATION, RECOVERY holds
+/// REQUESTED/SCHEDULED/ON_SITE/COLLECTED/RECEIVED_AT_WAREHOUSE/FAILED_RECOVERY, and CLOSED +
+/// CLOSED_NON_OPERATIONAL are legal on all three. The CHECK is a backstop under the service guards,
+/// not a substitute for them; `test/work-type-status-invariant.e2e-spec.ts` sweeps every pair.
 enum TicketStatus {
   OPEN
   SUBMITTED
@@ -2888,11 +2905,16 @@ model MvRefreshState {
 /// schema DSL, added as raw SQL in the migration — the generated client has no idea it exists.
 model DayPlanNotificationOutbox {
   id         BigInt    @id @default(autoincrement())
-  /// 'DAY_PLAN_DISPATCHED' | 'DAY_PLAN_OVERRIDDEN' — the two `DayPlanNotifier` methods.
+  /// The discriminator the drain switches on. 'DAY_PLAN_DISPATCHED' | 'DAY_PLAN_OVERRIDDEN' are the
+  /// two `DayPlanNotifier` methods; 'NOTIFY' (#338) is a general notification whose `payload` is a
+  /// resolved `NotifyInput` the drain replays through `NotificationService.notify`.
   eventType  String    @map("event_type")
-  seId       String    @map("se_id") @db.Uuid
-  scheduleId BigInt    @map("schedule_id")
-  /// Null for DAY_PLAN_OVERRIDDEN — `DayPlanOverriddenEvent` carries no zoneId.
+  /// #338 — nullable since 'NOTIFY'. A general notice belongs to no engineer and no schedule; these
+  /// two columns are what confined this table to day-plan events. Still NOT NULL in practice for the
+  /// two day-plan event types, which is enforced by their writers rather than by the column.
+  seId       String?   @map("se_id") @db.Uuid
+  scheduleId BigInt?   @map("schedule_id")
+  /// Null for DAY_PLAN_OVERRIDDEN — `DayPlanOverriddenEvent` carries no zoneId — and for NOTIFY.
   zoneId     BigInt?   @map("zone_id")
   /// The rest of the event's own fields (stops/tickets, or batchId/action) — additive, no new column
   /// per field the two event shapes don't share.

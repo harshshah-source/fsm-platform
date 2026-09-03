@@ -21,13 +21,70 @@ Branch: `feat/autoplant-integration` · base commit: `a6c87c7`.
 
 ## Next step
 
-**#336 is DONE** (`docs/progress/336-dev-seed-fixtures.md`) — all six ACs, 9 tests, `tsc` clean.
+**#336 is DONE and COMMITTED** (`abb0f0f`, 43 explicit paths — `docs/progress/336-dev-seed-fixtures.md`).
 
-**Start wave 1.** Nothing in it is blocked. Recommended order, and why:
+**#338 — the infrastructure half is BUILT, GREEN and COMMITTED; the 12 producer conversions are not
+started.** That is the whole of what remains, and it is the larger half.
 
-1. **#338 — one durable outbox for the 12 post-commit notify sites.** Take it before #337: it is what
-   makes the push exit worth having, and #354 (cross-zone atomicity) depends on it. The 12 sites are
-   listed in the issue and in plan §4.
+**Done (committed, see `git log`):** schema `seId`/`scheduleId` nullable + migration
+`20260903120000_notification_outbox_generic_rows` (applied cleanly, 97 migrations found);
+`queueNotification(tx, NotifyInput)` and `NOTIFY_EVENT_TYPE` in
+`scheduling/day-plan-notification-outbox.ts`; a `NOTIFY` branch in `deliver` that **throws** when no
+deliverer was supplied (never skips — the row is claimed before delivery, so a quiet skip would burn
+it); an optional trailing `notifications?: OutboxNotifyDeliverer` threaded through
+`drainRow`/`drainRows`/`drainUnsent`, which is what keeps all **12 existing call sites untouched**;
+`NotificationService` injected `@Optional()` into `BusinessSweepSchedulerService` and passed to
+`drainUnsent`. New spec `test/notification-outbox-generic.e2e-spec.ts` (2 tests). Regression: the
+outbox, notifier-adoption and scheduler-wiring specs all still pass (17 tests) — AC4 holds.
+
+**Not done — the 12 sites.** Each needs its `notify()` moved inside its own mutation transaction and
+its own crash-injection test, which is why this is not a mechanical sweep:
+`cross-zone-escalation.service.ts:300,321,339` · `intraday-insertion.service.ts:343,465,498` (via
+#325's `inTransaction` hook) · `intraday/stranded-work-escalation.service.ts:121` ·
+`scheduling/bulk-unassign.service.ts:322` · `ticketing/install-notifier.ts:52,64` ·
+`ticketing/recovery-notifier.ts:76,93`.
+**The notifiers are ports, not transaction owners** — `install-notifier` and `recovery-notifier` are
+called from `install-lifecycle.service.ts` / the recovery service, so the conversion happens in the
+*service* that owns the transaction, replacing the post-commit notifier call with
+`queueNotification(tx, …)`. Do them one file at a time, cheapest first, each with its own crash test.
+**AC2 and AC5 are not yet demonstrated** — no crash-injection test exists for a converted producer,
+because no producer is converted.
+
+**The drift gate was NOT run** (operator's call, 2026-09-03): the local Postgres role cannot
+`CREATE DATABASE`, so `scripts/check-schema-drift.mjs` cannot build its comparison database. The
+migration was hand-written to match the schema edit exactly and introduces no new drift by
+construction; the suite applying it on boot is the check that was available.
+**Do not regenerate `drift-baseline.txt`.**
+
+Design notes, all verified in the current tree:
+
+- **`NotifyInput` (`notifications/notification.service.ts:21`) is a plain serialisable object** —
+  `recipients[]`, `type`, `title`, `body?`, `entityType?`, `entityId?`, `metadata?`. That is the whole
+  design: **enqueue the resolved `NotifyInput` as the payload and let the drain replay `notify()`**.
+  Recipients get resolved inside the producing transaction (cross-zone resolves by role via
+  `usersInRoles`), which makes the row deterministic and auditable rather than re-resolving later.
+- **Generalise the existing table, per the issue's "prefer one table".** `DayPlanNotificationOutbox`
+  (`schema.prisma:2906`) has `seId` and `scheduleId` **NOT NULL** and day-plan-shaped; a cross-zone
+  notice has neither. So: add `kind` (`'DAY_PLAN' | 'NOTIFY'`, default `'DAY_PLAN'` so existing rows
+  keep meaning), make `seId`/`scheduleId` nullable, keep `payload`/`sentAt`/`attempts`/`lastError`.
+  `queueNotification(tx, input: NotifyInput)` writes `kind='NOTIFY'`; the drain switches on `kind` and
+  sends day-plan rows down the existing `DayPlanNotifier` path untouched (AC4).
+- **A migration is unavoidable and cannot be drift-verified on this box.** `scripts/check-schema-drift.mjs`
+  builds a database with `migrate deploy` and diffs it against `schema.prisma`, but the local Postgres
+  role has no `CREATE DATABASE` right, so the gate cannot run here (the other run hit the same wall and
+  simply needed no migration). **Hand-write `prisma/migrations/<ts>_notification_outbox_generalised/migration.sql`
+  to match the schema edit exactly** — `ALTER COLUMN … DROP NOT NULL` ×2 plus `ADD COLUMN kind text NOT
+  NULL DEFAULT 'DAY_PLAN'` — and it introduces no new drift by construction. The test harness applies
+  migrations on boot (`No pending migrations to apply` in vitest output), so the suite is the check.
+  **Do not regenerate `drift-baseline.txt`** (99 lines, must not grow).
+- **Do not rename the Prisma model.** `notification_outbox` is the honest name, but renaming churns
+  every `prisma.dayPlanNotificationOutbox` call site and its tests for no behavioural gain, against an
+  AC that says day-plan events keep their tests. Rename later if it ever earns it.
+- Order within the slice: schema + migration → `queueNotification` + drain switch (red-first on a
+  generic round-trip) → the 12 sites, cheapest first (`install-notifier`, `recovery-notifier`), leaving
+  the three intraday sites for last since they go through #325's `inTransaction` hook.
+
+**Then the rest of wave 1**, in this order and for these reasons:
 2. **#339 — the acting-scope gate.** Independent of #338, so it can run beside it if two sessions are
    available. Its one architectural assumption (a request-scoped guard, because the two decorators are
    synchronous and the unavailability lookup is async) is recorded in the issue and still unanswered by

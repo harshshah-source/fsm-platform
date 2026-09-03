@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { transitionOrConflict } from '../common/transition-or-conflict';
+import type { NotifyInput } from '../notifications/notification.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { DayPlanDispatchedEvent, DayPlanNotifier, DayPlanOverriddenEvent } from './day-plan-notifier';
 
@@ -58,22 +59,67 @@ export async function queueDayPlanOverridden(
   return row.id;
 }
 
+/** The discriminator for a general notification row (#338). */
+export const NOTIFY_EVENT_TYPE = 'NOTIFY';
+
+/**
+ * Write a general notification's intent INSIDE the caller's own writing transaction (#338), so the
+ * notice commits with the change it announces or not at all.
+ *
+ * Twelve `notify()` sites used to fire post-commit with nothing durable behind them: a crash between
+ * the commit and the call lost the notice with no trace, and a *throw* in the call could take the
+ * caller's own outcome with it. Both stop being possible once the row is written in the transaction.
+ *
+ * The payload is the **resolved** `NotifyInput` — recipients included. Resolving them here rather
+ * than at drain time is deliberate: the producing service knows who the notice is for (cross-zone
+ * resolves managers by role), and a row that records its own recipients can be read afterwards to
+ * answer "who was told", which a row that re-derives them at delivery cannot.
+ */
+export async function queueNotification(tx: OutboxWriteClient, input: NotifyInput): Promise<bigint> {
+  const row = await tx.dayPlanNotificationOutbox.create({
+    data: {
+      eventType: NOTIFY_EVENT_TYPE,
+      // A general notice belongs to no engineer and no schedule. These are the two columns #338's
+      // migration made nullable, and leaving them null is the point.
+      seId: null,
+      scheduleId: null,
+      zoneId: null,
+      payload: input as unknown as object,
+    },
+    select: { id: true },
+  });
+  return row.id;
+}
+
 /** The bits of one outbox row `drainRow` needs — a subset of the generated model type. */
 interface OutboxRow {
   id: bigint;
   eventType: string;
-  seId: string;
-  scheduleId: bigint;
+  seId: string | null;
+  scheduleId: bigint | null;
   zoneId: bigint | null;
   payload: unknown;
 }
 
-async function deliver(notifier: DayPlanNotifier, row: OutboxRow): Promise<void> {
+/**
+ * The generic half of the drain (#338). Only the sweep supplies one — the post-commit `drainRows`
+ * calls in `override.service` and `batch-assignment` exist to flush the day-plan rows they just
+ * wrote and have no business resolving a general notice.
+ */
+export interface OutboxNotifyDeliverer {
+  notify(input: NotifyInput): Promise<unknown>;
+}
+
+async function deliver(
+  notifier: DayPlanNotifier,
+  row: OutboxRow,
+  notifications?: OutboxNotifyDeliverer,
+): Promise<void> {
   const payload = (row.payload ?? {}) as Record<string, unknown>;
   if (row.eventType === 'DAY_PLAN_DISPATCHED') {
     await notifier.dayPlanDispatched({
-      seId: row.seId,
-      scheduleId: row.scheduleId,
+      seId: row.seId!,
+      scheduleId: row.scheduleId!,
       zoneId: row.zoneId!,
       stops: Number(payload.stops ?? 0),
       tickets: Number(payload.tickets ?? 0),
@@ -82,11 +128,23 @@ async function deliver(notifier: DayPlanNotifier, row: OutboxRow): Promise<void>
   }
   if (row.eventType === 'DAY_PLAN_OVERRIDDEN') {
     await notifier.dayPlanOverridden({
-      seId: row.seId,
-      scheduleId: row.scheduleId,
+      seId: row.seId!,
+      scheduleId: row.scheduleId!,
       batchId: BigInt(String(payload.batchId ?? '0')),
       action: String(payload.action ?? ''),
     });
+    return;
+  }
+  if (row.eventType === NOTIFY_EVENT_TYPE) {
+    if (!notifications) {
+      // THROWN, never skipped. `drainRow` claims the row before delivering, so returning quietly here
+      // would mark a notice sent that nobody ever sent. Throwing un-claims it, and the sweep — which
+      // does carry a deliverer — picks it up on the next tick.
+      throw new Error(
+        `outbox row ${row.id} is a ${NOTIFY_EVENT_TYPE} row and this drain was given no notify deliverer`,
+      );
+    }
+    await notifications.notify(payload as unknown as NotifyInput);
     return;
   }
   // Unreachable under the two writers above — logged, not thrown, so one malformed row can never wedge
@@ -108,6 +166,7 @@ export async function drainRow(
   notifier: DayPlanNotifier,
   row: OutboxRow,
   now: Date,
+  notifications?: OutboxNotifyDeliverer,
 ): Promise<void> {
   const claim = await transitionOrConflict(
     prisma.dayPlanNotificationOutbox,
@@ -117,7 +176,7 @@ export async function drainRow(
   if (!claim.won) return; // already sent, or another drain just claimed it
 
   try {
-    await deliver(notifier, row);
+    await deliver(notifier, row, notifications);
   } catch (e) {
     // The dispatch/override this row belongs to has ALREADY committed — a delivery failure here must
     // never propagate into that outcome (#264's core guarantee). Un-claim so the sweep retries it.
@@ -136,10 +195,11 @@ export async function drainRows(
   notifier: DayPlanNotifier,
   rowIds: bigint[],
   now: Date = new Date(),
+  notifications?: OutboxNotifyDeliverer,
 ): Promise<void> {
   if (rowIds.length === 0) return;
   const rows = await prisma.dayPlanNotificationOutbox.findMany({ where: { id: { in: rowIds } } });
-  for (const row of rows) await drainRow(prisma, notifier, row, now);
+  for (const row of rows) await drainRow(prisma, notifier, row, now, notifications);
 }
 
 /**
@@ -152,13 +212,14 @@ export async function drainUnsent(
   notifier: DayPlanNotifier,
   now: Date = new Date(),
   limit = 200,
+  notifications?: OutboxNotifyDeliverer,
 ): Promise<{ drained: number }> {
   const rows = await prisma.dayPlanNotificationOutbox.findMany({
     where: { sentAt: null, attempts: { lt: MAX_OUTBOX_ATTEMPTS } },
     orderBy: { createdAt: 'asc' },
     take: limit,
   });
-  for (const row of rows) await drainRow(prisma, notifier, row, now);
+  for (const row of rows) await drainRow(prisma, notifier, row, now, notifications);
   return { drained: rows.length };
 }
 
