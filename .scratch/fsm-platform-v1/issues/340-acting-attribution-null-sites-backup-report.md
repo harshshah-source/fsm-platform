@@ -1,5 +1,5 @@
 # 340 — Acting attribution: 11 null sites, bulk-unassign column overload, backup-share report
-Status: ready-for-agent
+Status: done 2026-09-03 — report `docs/progress/340-acting-attribution.md`
 Type: AFK
 Wave: 1 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -45,11 +45,16 @@ Column overload:
 
 ## Acceptance criteria
 
-- [ ] AC1 — zero literal `actedAsRole: null` remains in `apps/backend/src` (a grep-based test pins
-      it)
-- [ ] AC2 — paired e2e: the same write as CSM acting vs OH acting → both rows stamped
-- [ ] AC3 — bulk-unassign rows no longer appear in the backup-share report
-- [ ] AC4 — report per zone equals acting-approvals ÷ approvals for a seeded month
+- [x] AC1 — zero literal `actedAsRole: null` remains in `apps/backend/src` (a grep-based test pins
+      it) — **met as pinned, with the AC's wording narrowed on purpose:** two occurrences are
+      legitimate and must stay (`auth/acting-context.ts` and `common/guards/acting-context.guard.ts`
+      build the **non-acting** context, where the literal is the meaning, not an omission). The pin
+      therefore asserts *zero in any controller* and *exactly those two elsewhere*, named rather than
+      pattern-excluded so a third cannot hide behind the exclusion. It matches comment-stripped
+      source, since several of the fixed files now discuss the literal in prose.
+- [x] AC2 — paired e2e: the same write as CSM acting vs OH acting → both rows stamped
+- [x] AC3 — bulk-unassign rows no longer appear in the backup-share report
+- [x] AC4 — report per zone equals acting-approvals ÷ approvals for a seeded month
 
 ## Verification
 

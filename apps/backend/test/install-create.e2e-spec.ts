@@ -18,12 +18,14 @@ const zmActor: RequestActor = {
   role: 'ZONAL_MANAGER',
   actedAsRole: null,
   actingZone: null,
+  zoneId: null,
 };
 const ohActor: RequestActor = {
   userId: '33333333-3333-3333-3333-333333333333',
   role: 'OPERATIONS_HEAD',
   actedAsRole: null,
   actingZone: null,
+  zoneId: null,
 };
 
 describe('Issue 33 slice 1 — InstallService.createSingle', () => {

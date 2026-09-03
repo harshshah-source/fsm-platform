@@ -284,6 +284,9 @@ describe('Schedules route matching (e2e)', () => {
           role: 'ZONAL_MANAGER',
           actedAsRole: null,
           actingZone: null,
+          // #340 — the caller's own zone from their claims, distinct from `actingZone` above: this ZM
+          // belongs to zone 1 and is not acting for anyone.
+          zoneId: 1,
         },
       );
     });

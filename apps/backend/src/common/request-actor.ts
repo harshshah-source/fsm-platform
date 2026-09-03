@@ -13,6 +13,19 @@ export interface RequestActor {
   role: string;
   actedAsRole: string | null;
   actingZone: number | null;
+  /**
+   * The caller's **own** zone from their claims — not the zone they are acting in. The two are
+   * genuinely different questions and both are asked: `actingZone` is attribution ("which zone's ZM
+   * duty is this write being made under"), `zoneId` is the caller's home scope, which several write
+   * doors still use to decide what they may touch.
+   *
+   * #340 carries it here so a controller can hand one object to an audited service instead of
+   * hand-building a near-copy — which is how the `actedAsRole: null` literal spread to eleven doors
+   * in the first place. It is the claims value **verbatim**: whether acting should *narrow* a write
+   * door's scope is #341's question, and answering it here would change permissions under cover of
+   * an attribution fix.
+   */
+  zoneId: number | null;
 }
 
 /** Resolve the request's actor from verified claims + the acting context `ActingContextGuard` proved
@@ -23,5 +36,6 @@ export function resolveRequestActor(user: AccessTokenClaims, acting: ActingConte
     role: acting.actorRole,
     actedAsRole: acting.actedAsRole,
     actingZone: acting.actingZone,
+    zoneId: user.zone_id,
   };
 }

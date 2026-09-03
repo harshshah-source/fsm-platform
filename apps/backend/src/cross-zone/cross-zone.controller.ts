@@ -12,12 +12,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import {
-  CrossZoneActor,
   CrossZoneEscalationRow,
   CrossZoneEscalationService,
   DecisionOutcome,
@@ -54,11 +55,11 @@ export class CrossZoneController {
   @Post('flag')
   @HttpCode(200)
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER')
-  async flag(@CurrentUser() user: AccessTokenClaims, @Body() body: FlagBody) {
+  async flag(@CurrentActor() actor: RequestActor, @Body() body: FlagBody) {
     const { ticketId, reason } = body;
     if (!ticketId) throw new BadRequestException({ code: 'TICKET_REQUIRED' });
     if (!reason) throw new BadRequestException({ code: 'REASON_REQUIRED' });
-    const out = await this.svc.flag(ticketId, reason, this.actor(user));
+    const out = await this.svc.flag(ticketId, reason, actor);
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     if (out.result === 'FORBIDDEN_SCOPE') throw new ForbiddenException({ code: 'TICKET_OUT_OF_ZONE' });
     if (out.result === 'FORBIDDEN_TIER') throw new BadRequestException({ code: 'PLATINUM_USES_AUTO_ESCALATION' });
@@ -70,47 +71,43 @@ export class CrossZoneController {
   @HttpCode(200)
   @Roles(...CROSS_ZONE_DECIDERS)
   approve(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
     @Body() body: ApproveBody,
   ) {
     if (body.targetZoneId == null || !body.seId) throw new BadRequestException({ code: 'TARGET_ZONE_AND_SE_REQUIRED' });
-    return this.map(this.svc.approve(BigInt(id), body.targetZoneId, body.seId, this.actor(user)));
+    return this.map(this.svc.approve(BigInt(id), body.targetZoneId, body.seId, actor));
   }
 
   @Post(':id/deny')
   @HttpCode(200)
   @Roles(...CROSS_ZONE_DECIDERS)
-  deny(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string, @Body() body: DenyBody) {
+  deny(@CurrentActor() actor: RequestActor, @Param('id') id: string, @Body() body: DenyBody) {
     if (!body.reason) throw new BadRequestException({ code: 'REASON_REQUIRED' });
-    return this.map(this.svc.deny(BigInt(id), body.reason, this.actor(user)));
+    return this.map(this.svc.deny(BigInt(id), body.reason, actor));
   }
 
   @Post(':id/defer')
   @HttpCode(200)
   @Roles(...CROSS_ZONE_DECIDERS)
   defer(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
     @Body() body: DeferBody,
   ) {
     if (!body.reviewDate || !body.reason) throw new BadRequestException({ code: 'REVIEW_DATE_AND_REASON_REQUIRED' });
-    return this.map(this.svc.defer(BigInt(id), new Date(body.reviewDate), body.reason, this.actor(user)));
+    return this.map(this.svc.defer(BigInt(id), new Date(body.reviewDate), body.reason, actor));
   }
 
   @Post(':id/re-escalate')
   @HttpCode(200)
   @Roles('ZONAL_MANAGER')
-  async reEscalate(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string) {
-    const out = await this.svc.reEscalateToOps(BigInt(id), this.actor(user));
+  async reEscalate(@CurrentActor() actor: RequestActor, @Param('id') id: string) {
+    const out = await this.svc.reEscalateToOps(BigInt(id), actor);
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'ESCALATION_NOT_FOUND' });
     if (out.result === 'NOT_DENIED_AUTO') throw new ConflictException({ code: 'NOT_A_DENIED_AUTO_ESCALATION' });
     if (out.result === 'FORBIDDEN_SCOPE') throw new ForbiddenException({ code: 'NOT_HOME_ZONE_ZM' });
     return out;
-  }
-
-  private actor(user: AccessTokenClaims): CrossZoneActor {
-    return { userId: user.user_id, role: user.role, zoneId: user.zone_id, actedAsRole: null };
   }
 
   private async map(p: Promise<DecisionOutcome>): Promise<DecisionOutcome> {

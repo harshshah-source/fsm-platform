@@ -16,7 +16,7 @@ const DEV_ONE_TIME = String(9_352_002n); // ONE_TIME → no recovery ticket
 const DEV_RECUR_NONQUAL = String(9_352_003n); // RECURRING but COMPLIANCE_HOLD → no recovery ticket
 const ALL = [DEV_RECURRING, DEV_ONE_TIME, DEV_RECUR_NONQUAL];
 
-const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
+const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
 
 describe('Issue 35 slice 3 — CONFIRMED side-effects', () => {
   let prisma: PrismaService;

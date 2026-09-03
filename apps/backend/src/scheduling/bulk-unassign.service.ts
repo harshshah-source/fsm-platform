@@ -43,9 +43,25 @@ export interface BulkUnassignRequest {
   previewToken?: string;
 }
 
+/**
+ * A `BULK_UNASSIGN_ZONE` row's `entity_id` is its target zone id (#340). Parsed defensively rather
+ * than cast: `entity_id` is a free-text column shared by every entity type in the table, and a
+ * history list is not the place to throw over one unexpected row.
+ */
+function parseZoneEntityId(entityId: string): bigint | null {
+  if (!/^\d+$/.test(entityId)) return null;
+  return BigInt(entityId);
+}
+
 export interface BulkUnassignActor {
   userId: string;
   role: string;
+  actedAsRole?: string | null;
+  /**
+   * The zone whose ZM duty this write is being made under, when the caller is acting (#340).
+   * Attribution, not scope: it names who was covering, never what the caller may touch.
+   */
+  actingZone?: number | null;
 }
 
 export interface ExecuteZoneResult {
@@ -151,7 +167,9 @@ export class BulkUnassignService {
       take: limit,
     });
 
-    const zoneIds = [...new Set(rows.map((r) => r.actingZone).filter((z): z is bigint => z != null))];
+    // #340 — the zone comes from `entityId` (`entity_type = 'zones'`), not from `acting_zone`. That
+    // is where it has always been written, so this read is unchanged for rows predating the fix.
+    const zoneIds = [...new Set(rows.map((r) => parseZoneEntityId(r.entityId)).filter((z): z is bigint => z != null))];
     const zones = await this.prisma.zone.findMany({ where: { zoneId: { in: zoneIds } }, select: { zoneId: true, name: true } });
     const zoneNameById = new Map(zones.map((z) => [z.zoneId.toString(), z.name]));
 
@@ -159,7 +177,7 @@ export class BulkUnassignService {
       const meta = (r.metadata ?? {}) as Record<string, unknown>;
       const counts = (meta.counts as ZoneClassCounts | undefined) ?? null;
       const skipped = meta.skipped === true;
-      const zoneId = r.actingZone != null ? r.actingZone.toString() : '';
+      const zoneId = parseZoneEntityId(r.entityId)?.toString() ?? '';
       return {
         id: r.id.toString(),
         operationId: typeof meta.operationId === 'string' ? meta.operationId : null,
@@ -287,7 +305,14 @@ export class BulkUnassignService {
         data: {
           actorId: actor.userId,
           actorRole: actor.role,
-          actingZone: zoneId,
+          // #340 — `acting_zone` means "whose ZM duty this write was made under", and it has exactly
+          // one reader: the CSM-backup-share report. Writing the *target* zone of a rebalance into it
+          // put every pan-India run into that report's denominator with no acting role to match,
+          // dragging the reported CSM share down in precisely the zones an Operations Head works
+          // hardest. The zone this row is about was never homeless — `entity_type = 'zones'` /
+          // `entity_id` already said it, on every row ever written, which is why nothing is backfilled.
+          actedAsRole: actor.actedAsRole ?? null,
+          actingZone: actor.actingZone != null ? BigInt(actor.actingZone) : null,
           action: 'BULK_UNASSIGN_ZONE',
           entityType: 'zones',
           entityId: zoneId.toString(),
@@ -375,7 +400,9 @@ export class BulkUnassignService {
     await this.audit.record({
       actorId: actor.userId,
       actorRole: actor.role,
-      actingZone: Number(zoneId),
+      // #340 — attribution only; the zone this skip is about is `entityId`, as above.
+      actedAsRole: actor.actedAsRole ?? null,
+      actingZone: actor.actingZone ?? null,
       action: 'BULK_UNASSIGN_ZONE',
       entityType: 'zones',
       entityId: zoneId.toString(),

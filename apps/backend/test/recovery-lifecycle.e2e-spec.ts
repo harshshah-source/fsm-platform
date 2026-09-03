@@ -13,9 +13,9 @@ const DEV = String(9_360_001n);
 const SE_ID = '11111111-1111-1111-1111-111111111111';
 const OTHER_SE = '22222222-2222-2222-2222-222222222222';
 
-const zm: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
-const se: RequestActor = { userId: SE_ID, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
-const otherSe: RequestActor = { userId: OTHER_SE, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
+const zm: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
+const se: RequestActor = { userId: SE_ID, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
+const otherSe: RequestActor = { userId: OTHER_SE, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
 
 describe('Issue 36 slice 1 — Recovery lifecycle schedule→on-site→collected', () => {
   let prisma: PrismaService;

@@ -14,10 +14,10 @@ const DEV = String(9_370_001n);
 const SE_ID = '11111111-1111-1111-1111-111111111111';
 const SE2 = '99999999-9999-9999-9999-999999999999';
 
-const zm: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
-const oh: RequestActor = { userId: '44444444-4444-4444-4444-444444444444', role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null };
-const csm: RequestActor = { userId: '55555555-5555-5555-5555-555555555555', role: 'CENTRAL_SERVICE_MANAGER', actedAsRole: 'CENTRAL_SERVICE_MANAGER', actingZone: 1 };
-const se: RequestActor = { userId: SE_ID, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
+const zm: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
+const oh: RequestActor = { userId: '44444444-4444-4444-4444-444444444444', role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
+const csm: RequestActor = { userId: '55555555-5555-5555-5555-555555555555', role: 'CENTRAL_SERVICE_MANAGER', actedAsRole: 'CENTRAL_SERVICE_MANAGER', actingZone: 1, zoneId: null };
+const se: RequestActor = { userId: SE_ID, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
 
 describe('Issue 37 slice 1 — decision-queue actions + manual close', () => {
   let prisma: PrismaService;

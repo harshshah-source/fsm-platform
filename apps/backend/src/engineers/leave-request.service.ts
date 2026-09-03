@@ -9,6 +9,11 @@ export interface LeaveActor {
   role: string;
   zoneId: number | null;
   actedAsRole?: string | null;
+  /**
+   * The zone whose ZM duty this write is being made under, when the caller is acting (#340).
+   * Attribution, not scope: it names who was covering, never what the caller may touch.
+   */
+  actingZone?: number | null;
 }
 
 export interface SubmitLeaveInput {

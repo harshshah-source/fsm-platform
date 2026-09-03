@@ -19,6 +19,7 @@ const zm: RequestActor = {
   role: 'ZONAL_MANAGER',
   actedAsRole: null,
   actingZone: null,
+  zoneId: null,
 };
 
 describe('Issue 35 slice 1 — NonOperationalService request + queue', () => {

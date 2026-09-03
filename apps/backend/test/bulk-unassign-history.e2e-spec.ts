@@ -75,6 +75,26 @@ describe('BulkUnassignService.history (#179 slice 4)', () => {
       expect(mine!.operationId).toBe(outcome.operationId);
       expect(mine!.createdAt).toEqual(expect.any(String));
 
+      // #340 AC3 — the target zone is `entity_id`, and `acting_zone` is left alone.
+      //
+      // A rebalance is not an acting session. Writing its target zone into `acting_zone` overloaded a
+      // column whose one reader — the CSM-backup-share report — takes any non-null value there as "a
+      // manager was standing in for this zone's ZM", so every pan-India run quietly inflated the
+      // denominator of a number Operations Head uses to decide whether a zone's ZM needs help.
+      //
+      // The zone did not need a new home: `entity_type = 'zones'` / `entity_id` already said which
+      // zone this row is about, for this row and for every row written before the fix — which is why
+      // `history()` above still finds and names the zone, on old and new rows alike, with nothing
+      // backfilled.
+      const written = await prisma.auditLog.findMany({
+        where: { action: 'BULK_UNASSIGN_ZONE', entityId: zoneId.toString() },
+      });
+      expect(written.length).toBeGreaterThan(0);
+      for (const row of written) {
+        expect(row.actingZone).toBeNull();
+        expect(row.entityType).toBe('zones');
+      }
+
       // A second, lock-contended run for the same zone — the skip must appear in history too.
       const holder = new PrismaService();
       await holder.onModuleInit();
@@ -96,7 +116,7 @@ describe('BulkUnassignService.history (#179 slice 4)', () => {
     } finally {
       await prisma.notificationDelivery.deleteMany({ where: { notification: { entityId: zoneId.toString() } } });
       await prisma.notification.deleteMany({ where: { entityId: zoneId.toString() } });
-      await prisma.auditLog.deleteMany({ where: { actingZone: zoneId } });
+      await prisma.auditLog.deleteMany({ where: { action: 'BULK_UNASSIGN_ZONE', entityId: zoneId.toString() } });
       await prisma.ticketEvent.deleteMany({ where: { ticketId: ticket.ticketId } });
       await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: batch.batchId } });
       await prisma.plantBatchAssignment.deleteMany({ where: { batchId: batch.batchId } });

@@ -37,7 +37,7 @@ describe('#241 — cancellation stamps, the removed-row invariant, and the histo
   const userIds: string[] = [];
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
-  const OH = { userId: '22222222-2222-2222-2222-222222222222', role: 'OPERATIONS_HEAD', actedAsRole: null };
+  const OH = { userId: '22222222-2222-2222-2222-222222222222', role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
 
   /** A ticket that is live on an SE's day plan: schedule → batch → live `batch_assignment_tickets` row. */
   const makeAssignedTicket = async (): Promise<{ ticketId: string; cycleId: string }> => {

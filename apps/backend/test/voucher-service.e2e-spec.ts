@@ -47,6 +47,7 @@ describe('Issue 38 — VouchersService', () => {
     role: 'ZONAL_MANAGER',
     actedAsRole: null,
     actingZone: null,
+    zoneId: null,
   });
 
   async function makeSe(zoneId: bigint, label: string): Promise<string> {
@@ -307,11 +308,11 @@ describe('Issue 38 — VouchersService', () => {
       createdVoucherIds.push(id);
       await service.review(id, { action: 'NEEDS_CLARIFICATION', notes: 'Please attach the toll receipt' }, { role: 'ZONAL_MANAGER', zoneId: Number(zoneA) }, zmAActor());
 
-      const wrongSe: RequestActor = { userId: seB, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
+      const wrongSe: RequestActor = { userId: seB, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
       const forbidden = await service.resubmit(id, wrongSe, NOW);
       expect(forbidden).toEqual({ result: 'FORBIDDEN' });
 
-      const owner: RequestActor = { userId: seA, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
+      const owner: RequestActor = { userId: seA, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
       const ok = await service.resubmit(id, owner, NOW);
       expect(ok.result).toBe('OK');
       const row = await prisma.expenseVoucher.findUniqueOrThrow({ where: { voucherId: id } });
@@ -329,7 +330,7 @@ describe('Issue 38 — VouchersService', () => {
       await service.review(a.voucher.voucherId, { action: 'APPROVE', notes: null }, { role: 'ZONAL_MANAGER', zoneId: Number(zoneA) }, zmAActor());
       // b stays in ZONAL_MANAGER_REVIEW (not approved) → must be skipped
 
-      const ohActor: RequestActor = { userId: randomUUID(), role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null };
+      const ohActor: RequestActor = { userId: randomUUID(), role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
       const before = notifier.paidEvents.length;
       const out = await service.markPaid([a.voucher.voucherId, b.voucher.voucherId], 'FIN-2026-06', ohActor, NOW);
       expect(out.paid).toEqual([a.voucher.voucherId]);

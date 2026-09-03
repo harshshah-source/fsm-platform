@@ -114,7 +114,7 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
     const teardown = async () => {
       await prisma.notificationDelivery.deleteMany({ where: { notification: { entityId: zoneId.toString() } } });
       await prisma.notification.deleteMany({ where: { entityId: zoneId.toString() } });
-      await prisma.auditLog.deleteMany({ where: { actingZone: zoneId } });
+      await prisma.auditLog.deleteMany({ where: { action: 'BULK_UNASSIGN_ZONE', entityId: zoneId.toString() } });
       await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
       await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
       await prisma.recommendation.deleteMany({ where: { ticketId: { in: ticketIds } } });
@@ -172,7 +172,7 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
       expect(bat.removedAt).toBeNull();
 
       // The skip is still reported in the audit trail — Pan-India history stays legible per zone.
-      const auditRows = await prisma.auditLog.findMany({ where: { actingZone: f.zoneId, action: 'BULK_UNASSIGN_ZONE' } });
+      const auditRows = await prisma.auditLog.findMany({ where: { entityId: f.zoneId.toString(), action: 'BULK_UNASSIGN_ZONE' } });
       expect(auditRows).toHaveLength(1);
       const meta = auditRows[0].metadata as Record<string, unknown>;
       expect(meta.skipped).toBe(true);
@@ -366,7 +366,7 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
 
       // The audit row states the date scope explicitly, so history stays interpretable across the
       // D1 reversal (rows written before it were implicitly today-only).
-      const auditRows = await prisma.auditLog.findMany({ where: { actingZone: f.zoneId, action: 'BULK_UNASSIGN_ZONE' } });
+      const auditRows = await prisma.auditLog.findMany({ where: { entityId: f.zoneId.toString(), action: 'BULK_UNASSIGN_ZONE' } });
       expect(auditRows).toHaveLength(1);
       expect((auditRows[0].metadata as Record<string, unknown>).dateScope).toBe('ALL_LIVE');
     } finally {
@@ -387,7 +387,7 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
       const outcome = await svc.execute({ scope: 'ZONE', zoneId: f.zoneId, reasonCode: 'ROUTINE_REBALANCE' }, OH_ACTOR, NOW);
       if (outcome.result !== 'OK') throw new Error(`expected OK, got ${outcome.result}`);
 
-      const auditRows = await prisma.auditLog.findMany({ where: { actingZone: f.zoneId, action: 'BULK_UNASSIGN_ZONE' } });
+      const auditRows = await prisma.auditLog.findMany({ where: { entityId: f.zoneId.toString(), action: 'BULK_UNASSIGN_ZONE' } });
       expect(auditRows).toHaveLength(1);
       const meta = auditRows[0].metadata as Record<string, unknown>;
       expect(meta.operationId).toBe(outcome.operationId);
@@ -502,7 +502,7 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
       expect(freshBatches[0].stopSequence).toBe(maxStopBefore + 1);
     } finally {
       await prisma.dispatchDecisionTrace.deleteMany({ where: { ticketId: { in: ticketIds } } });
-      await prisma.auditLog.deleteMany({ where: { actingZone: zoneId } });
+      await prisma.auditLog.deleteMany({ where: { action: 'BULK_UNASSIGN_ZONE', entityId: zoneId.toString() } });
       const schedules = await prisma.workSchedule.findMany({ where: { zoneId }, select: { scheduleId: true } });
       const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } }, select: { batchId: true } });
       await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
@@ -591,7 +591,7 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
 
       // The audit row must record the ACTUAL scope of the operation ('PAN_INDIA'), not the literal
       // 'ZONE' every prior test happened to pass with by coincidence (all of them used scope: 'ZONE').
-      const auditRows = await prisma.auditLog.findMany({ where: { actingZone: f.zoneId, action: 'BULK_UNASSIGN_ZONE' } });
+      const auditRows = await prisma.auditLog.findMany({ where: { entityId: f.zoneId.toString(), action: 'BULK_UNASSIGN_ZONE' } });
       expect(auditRows).toHaveLength(1);
       expect((auditRows[0].metadata as Record<string, unknown>).scope).toBe('PAN_INDIA');
     } finally {
@@ -686,7 +686,7 @@ describe('BulkUnassignService.execute (#179 slice 1)', () => {
         const bat = await prisma.batchAssignmentTicket.findFirstOrThrow({ where: { batchId, ticketId: eligible } });
         expect(bat.removedAt).toBeNull();
         // The audit row lives in the same transaction, so it goes too — the operation did not happen.
-        expect(await prisma.auditLog.count({ where: { actingZone: f.zoneId, action: 'BULK_UNASSIGN_ZONE' } })).toBe(0);
+        expect(await prisma.auditLog.count({ where: { entityId: f.zoneId.toString(), action: 'BULK_UNASSIGN_ZONE' } })).toBe(0);
         expect(await noticesForZone(f.zoneId)).toHaveLength(0);
       } finally {
         await f.teardown();

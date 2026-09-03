@@ -33,9 +33,9 @@ describe('Issue 102 — install lifecycle zone scoping', () => {
   const oh = randomUUID();
   const wm = randomUUID();
 
-  const zmActorA: RequestActor = { userId: zmA, role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
-  const csmActor: RequestActor = { userId: csm, role: 'CENTRAL_SERVICE_MANAGER', actedAsRole: null, actingZone: null };
-  const ohActor: RequestActor = { userId: oh, role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null };
+  const zmActorA: RequestActor = { userId: zmA, role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
+  const csmActor: RequestActor = { userId: csm, role: 'CENTRAL_SERVICE_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
+  const ohActor: RequestActor = { userId: oh, role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
 
   const scopeZmA: InstallScope = { role: 'ZONAL_MANAGER', zoneId: 0, userId: zmA }; // zoneId filled in beforeAll
   const scopeCsm: InstallScope = { role: 'CENTRAL_SERVICE_MANAGER', zoneId: null, userId: csm };

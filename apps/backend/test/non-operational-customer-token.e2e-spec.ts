@@ -16,7 +16,7 @@ const DEV = String(9_353_001n);
 const DEV2 = String(9_353_002n);
 const ALL = [DEV, DEV2];
 
-const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
+const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
 
 describe('Issue 35 slice 4 — customer token confirmation', () => {
   let prisma: PrismaService;

@@ -100,7 +100,12 @@ describe('#336 walkable dev fixtures (e2e)', () => {
     const observed = await prisma
       .$transaction(async (tx) => {
         // The state the survey actually found on the dev database: a `users` row and nothing else.
+        // #215's guard forbids re-zoning the shared identity for the specs that run afterwards.
+        // Nothing here survives: the delete is on `tx` and this transaction is ALWAYS rolled back
+        // (the `ROLLBACK` throw below), so there is nothing to re-zone — and removing the row is the
+        // precondition under test, not a restatement of the seed.
         await tx.seCoverage.deleteMany({ where: { seId: SHARED_AUTH_SE_ID } });
+        // shared-auth-se-guard-ok: rolled-back transaction, see above.
         await tx.engineerMaster.deleteMany({ where: { engineerId: SHARED_AUTH_SE_ID } });
         expect(await tx.engineerMaster.findUnique({ where: { engineerId: SHARED_AUTH_SE_ID } })).toBeNull();
 
@@ -406,6 +411,8 @@ describe('#336 walkable dev fixtures (e2e)', () => {
     const observed = await prisma
       .$transaction(async (tx) => {
         await tx.seCoverage.deleteMany({ where: { seId: SHARED_AUTH_SE_ID } });
+        // shared-auth-se-guard-ok: `tx`, always rolled back — the shared row is untouched by the
+        // time any other spec reads it.
         await tx.engineerMaster.deleteMany({ where: { engineerId: SHARED_AUTH_SE_ID } });
         // Enough tickets that every ticket-derived block has something to do on the FIRST pass —
         // otherwise "created nothing twice" is true for the wrong reason.

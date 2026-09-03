@@ -29,7 +29,7 @@ describe('R6 — MappingTableZoneResolver + ZoneMappingService', () => {
   const KEY_FAMILY = 'testonia';
   const KEY_JUNK = 'sdf';
 
-  const actor: RequestActor = { userId: '00000000-0000-0000-0000-000000000001', role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null };
+  const actor: RequestActor = { userId: '00000000-0000-0000-0000-000000000001', role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
 
   const plant = (over: Partial<MstPlantRow>): MstPlantRow => ({
     plant_id: 0,

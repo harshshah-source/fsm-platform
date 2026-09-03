@@ -432,6 +432,7 @@ export class CrossZoneEscalationService {
         actorId: actor?.userId ?? '00000000-0000-0000-0000-000000000000',
         actorRole: actor?.role ?? 'SYSTEM',
         actedAsRole: actor?.actedAsRole ?? null,
+        actingZone: actor?.actingZone != null ? BigInt(actor.actingZone) : null,
         action,
         entityType: 'cross_zone_escalation',
         entityId: String(escalationId),

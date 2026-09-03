@@ -16,9 +16,9 @@ const NS = Date.now();
 
 const seId = randomUUID();
 const otherSeId = randomUUID();
-const zmActor: RequestActor = { userId: randomUUID(), role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
-const seActor: RequestActor = { userId: seId, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
-const otherSeActor: RequestActor = { userId: otherSeId, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
+const zmActor: RequestActor = { userId: randomUUID(), role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
+const seActor: RequestActor = { userId: seId, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
+const otherSeActor: RequestActor = { userId: otherSeId, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
 
 describe('Issue 34 — InstallLifecycleService transitions', () => {
   let prisma: PrismaService;

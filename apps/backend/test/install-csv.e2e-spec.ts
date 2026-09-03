@@ -17,6 +17,7 @@ const ohActor: RequestActor = {
   role: 'OPERATIONS_HEAD',
   actedAsRole: null,
   actingZone: null,
+  zoneId: null,
 };
 const ohScope = { role: 'OPERATIONS_HEAD', zoneId: null };
 

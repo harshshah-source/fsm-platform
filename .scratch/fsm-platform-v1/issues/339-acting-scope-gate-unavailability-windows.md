@@ -1,5 +1,5 @@
 # 339 — Acting-scope gate, manager-unavailability windows, audited enter/exit
-Status: in-progress (code complete + tested 2026-09-03 `a1270ad`; ACs not yet ticked, report not yet written — see `docs/audits/handoffs/HANDOFF-ACTIVE.md`)
+Status: done 2026-09-03 (`a1270ad`) — report `docs/progress/339-acting-scope-gate.md`
 Type: AFK
 Wave: 1 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -45,15 +45,15 @@ sidebar keeps the real role's menu (`Sidebar.tsx:28-29`).
 
 ## Acceptance criteria
 
-- [ ] AC1 — CSM + header for a zone with no open window → 403 `ACTING_NOT_PERMITTED`; with a window
+- [x] AC1 — CSM + header for a zone with no open window → 403 `ACTING_NOT_PERMITTED`; with a window
       → scoped as today
-- [ ] AC2 — OH + header → allowed, attributed
-- [ ] AC3 — unknown or non-numeric zone → 400 `ACTING_ZONE_INVALID` (never silent pan-India)
-- [ ] AC4 — OH/CSM can open and end an unavailability window for a ZM from Settings; the list is
+- [x] AC2 — OH + header → allowed, attributed
+- [x] AC3 — unknown or non-numeric zone → 400 `ACTING_ZONE_INVALID` (never silent pan-India)
+- [x] AC4 — OH/CSM can open and end an unavailability window for a ZM from Settings; the list is
       visible
-- [ ] AC5 — enter/exit writes `ACTING_STARTED` / `ACTING_ENDED` audit rows with zone
-- [ ] AC6 — banner shows the zone **name**; sidebar shows the ZM menu while acting
-- [ ] AC7 — ZM and WM sending the header remain clamped/refused as today
+- [x] AC5 — enter/exit writes `ACTING_STARTED` / `ACTING_ENDED` audit rows with zone
+- [x] AC6 — banner shows the zone **name**; sidebar shows the ZM menu while acting
+- [x] AC7 — ZM and WM sending the header remain clamped/refused as today
 
 ## Verification
 

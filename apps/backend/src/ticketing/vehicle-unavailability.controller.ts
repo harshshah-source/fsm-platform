@@ -146,12 +146,7 @@ export class VehicleUnavailabilityController {
     @Param('id') id: string,
   ): Promise<VuOutcome> {
     return this.map(
-      await this.vu.approve(id, {
-        userId: user.user_id,
-        role: user.role,
-        zoneId: user.zone_id,
-        actedAsRole: actor.actedAsRole,
-      }),
+      await this.vu.approve(id, actor),
     );
   }
 
@@ -170,7 +165,7 @@ export class VehicleUnavailabilityController {
       await this.vu.override(
         id,
         { expectedFrom, reason: body?.reason ?? '' },
-        { userId: user.user_id, role: user.role, zoneId: user.zone_id, actedAsRole: actor.actedAsRole },
+        actor,
       ),
     );
   }

@@ -29,6 +29,7 @@ describe('#158 — plant zone override audit trail', () => {
     role: 'OPERATIONS_HEAD',
     actedAsRole: null,
     actingZone: null,
+    zoneId: null,
   };
 
   const auditRows = async (action: string) =>

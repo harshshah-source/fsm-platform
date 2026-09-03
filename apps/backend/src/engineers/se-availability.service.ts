@@ -23,6 +23,11 @@ export interface AvailabilityActor {
   role: string;
   zoneId: number | null;
   actedAsRole?: string | null;
+  /**
+   * The zone whose ZM duty this write is being made under, when the caller is acting (#340).
+   * Attribution, not scope: it names who was covering, never what the caller may touch.
+   */
+  actingZone?: number | null;
 }
 
 export type SetAvailabilityOutcome = { result: 'OK'; id: string } | { result: 'FORBIDDEN' } | { result: 'NOT_FOUND' };
@@ -150,6 +155,7 @@ export class SeAvailabilityService {
           actorId: actor.userId,
           actorRole: actor.role,
           actedAsRole: actor.actedAsRole ?? null,
+          actingZone: actor.actingZone != null ? BigInt(actor.actingZone) : null,
           action: 'SE_AVAILABILITY_SET',
           entityType: 'se_availability',
           entityId: String(row.id),

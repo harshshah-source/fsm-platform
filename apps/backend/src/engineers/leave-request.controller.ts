@@ -12,7 +12,9 @@ import {
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { istWindowEnd, istWindowStart } from '../common/ist-day';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -47,7 +49,7 @@ export class LeaveRequestController {
 
   @Post()
   @Roles('SERVICE_ENGINEER', 'ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER')
-  async submit(@CurrentUser() user: AccessTokenClaims, @Body() body: SubmitBody): Promise<LeaveOutcome> {
+  async submit(@CurrentActor() actor: RequestActor, @Body() body: SubmitBody): Promise<LeaveOutcome> {
     if (!body.seId) throw new BadRequestException({ code: 'SE_REQUIRED' });
     if (!LEAVE_TYPES.includes(body.type)) throw new BadRequestException({ code: 'INVALID_LEAVE_TYPE' });
     // #204 / B8 — a bare `YYYY-MM-DD` (what the mobile form sends) names an **IST calendar day**, so
@@ -66,7 +68,7 @@ export class LeaveRequestController {
 
     const outcome = await this.leave.submit(
       { seId: body.seId, type: body.type, windowStart, windowEnd, reason: body.reason ?? null },
-      { userId: user.user_id, role: user.role, zoneId: user.zone_id, actedAsRole: null },
+      actor,
     );
     return this.mapOutcome(outcome);
   }
@@ -80,29 +82,20 @@ export class LeaveRequestController {
   @Post(':id/approve')
   @HttpCode(200)
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER')
-  async approve(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string): Promise<LeaveOutcome> {
-    return this.mapOutcome(
-      await this.leave.approve(id, { userId: user.user_id, role: user.role, zoneId: user.zone_id, actedAsRole: null }),
-    );
+  async approve(@CurrentActor() actor: RequestActor, @Param('id') id: string): Promise<LeaveOutcome> {
+    return this.mapOutcome(await this.leave.approve(id, actor));
   }
 
   @Post(':id/reject')
   @HttpCode(200)
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER')
   async reject(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
     @Body() body: { reason?: string },
   ): Promise<LeaveOutcome> {
     if (!body.reason?.trim()) throw new BadRequestException({ code: 'REASON_REQUIRED' });
-    return this.mapOutcome(
-      await this.leave.reject(id, body.reason.trim(), {
-        userId: user.user_id,
-        role: user.role,
-        zoneId: user.zone_id,
-        actedAsRole: null,
-      }),
-    );
+    return this.mapOutcome(await this.leave.reject(id, body.reason.trim(), actor));
   }
 
   private mapOutcome(outcome: LeaveOutcome): LeaveOutcome {

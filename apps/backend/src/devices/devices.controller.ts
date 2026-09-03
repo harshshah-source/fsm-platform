@@ -10,7 +10,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -120,16 +122,12 @@ export class DevicesController {
   @Patch(':deviceId/deal-type')
   @Roles('OPERATIONS_HEAD')
   async tagDealType(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Param('deviceId') deviceId: string,
     @Body() body: { dealType: DealType },
   ): Promise<DeviceView> {
     if (!DEAL_TYPES.includes(body.dealType)) throw new BadRequestException({ code: 'INVALID_DEAL_TYPE' });
-    const out = await this.devices.setDealType(this.parseId(deviceId), body.dealType, {
-      userId: user.user_id,
-      role: user.role,
-      actedAsRole: null,
-    });
+    const out = await this.devices.setDealType(this.parseId(deviceId), body.dealType, actor);
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'DEVICE_NOT_FOUND' });
     return out.device;
   }

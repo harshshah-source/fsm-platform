@@ -19,9 +19,9 @@ import { EnqueueFailed, failingNotifyEnqueue, inertDayPlanNotifier } from './fix
 const DEV = String(9_361_001n);
 const SE_ID = '11111111-1111-1111-1111-111111111111';
 
-const zm: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
-const se: RequestActor = { userId: SE_ID, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
-const wm: RequestActor = { userId: '44444444-4444-4444-4444-444444444444', role: 'WAREHOUSE_MANAGER', actedAsRole: null, actingZone: null };
+const zm: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
+const se: RequestActor = { userId: SE_ID, role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
+const wm: RequestActor = { userId: '44444444-4444-4444-4444-444444444444', role: 'WAREHOUSE_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
 
 describe('Issue 36 slice 2 — receipt auto-close + unable-to-collect', () => {
   let prisma: PrismaService;

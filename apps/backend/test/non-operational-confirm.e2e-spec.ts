@@ -13,9 +13,9 @@ const DEV_REVERSE = String(9_351_002n);
 const DEV_OVERRIDE = String(9_351_003n);
 const ALL = [DEV_DUAL, DEV_REVERSE, DEV_OVERRIDE];
 
-const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null };
-const se: RequestActor = { userId: '22222222-2222-2222-2222-222222222222', role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null };
-const oh: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null };
+const zm: RequestActor = { userId: '11111111-1111-1111-1111-111111111111', role: 'ZONAL_MANAGER', actedAsRole: null, actingZone: null, zoneId: null };
+const se: RequestActor = { userId: '22222222-2222-2222-2222-222222222222', role: 'SERVICE_ENGINEER', actedAsRole: null, actingZone: null, zoneId: null };
+const oh: RequestActor = { userId: '33333333-3333-3333-3333-333333333333', role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
 
 describe('Issue 35 slice 2 — dual confirmation + override', () => {
   let prisma: PrismaService;

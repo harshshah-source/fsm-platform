@@ -12,6 +12,11 @@ export interface VuActor {
   role: string;
   zoneId: number | null;
   actedAsRole?: string | null;
+  /**
+   * The zone whose ZM duty this write is being made under, when the caller is acting (#340).
+   * Attribution, not scope: it names who was covering, never what the caller may touch.
+   */
+  actingZone?: number | null;
 }
 
 export interface FileReportInput {
@@ -376,7 +381,12 @@ export class VehicleUnavailabilityService {
         actorId: actor.userId,
         actorRole: actor.role,
         actedAsRole: actor.actedAsRole ?? null,
-        actingZone: actor.zoneId,
+        // #340 — the zone the caller was **acting** in, not the zone they belong to. `actor.zoneId`
+        // was written here, which put every ordinary manager's VU decision into the CSM-backup-share
+        // report's denominator under their own home zone: the same column overload bulk unassign had,
+        // and the reason the report's number was never trustworthy. A non-acting decision now leaves
+        // it null, which is what the column means.
+        actingZone: actor.actingZone ?? null,
         action: decision === 'APPROVED' ? 'VU_DATE_APPROVED' : 'VU_DATE_OVERRIDDEN',
         entityType: 'vehicle_unavailability_reports',
         entityId: reportId,

@@ -41,6 +41,7 @@ describe('#158 — downstream effects of a plant zone change', () => {
     role: 'OPERATIONS_HEAD',
     actedAsRole: null,
     actingZone: null,
+    zoneId: null,
   };
 
   /** The real read a Zonal Manager's dashboard performs for their own zone. */

@@ -158,7 +158,16 @@ export class RoleBackupService {
   async csmBackupShareByZone(periodStart: Date, periodEnd: Date): Promise<CsmBackupZoneRow[]> {
     const grouped = await this.prisma.auditLog.groupBy({
       by: ['actingZone', 'actedAsRole'],
-      where: { actingZone: { not: null }, createdAt: { gte: periodStart, lt: periodEnd } },
+      // #340 — a row is a backup action because it names the role that **acted**, not because it
+      // happens to name a zone. `acting_zone` had been overloaded (bulk unassign wrote its target
+      // zone there with no acting role), so every rebalance landed in this denominator and nowhere
+      // else, understating the CSM share in exactly the zones an Operations Head touches most. The
+      // producer is fixed too; this filter is what stops the next overloader corrupting the number.
+      where: {
+        actingZone: { not: null },
+        actedAsRole: { not: null },
+        createdAt: { gte: periodStart, lt: periodEnd },
+      },
       _count: { _all: true },
     });
     const byZone = new Map<string, { csm: number; total: number }>();

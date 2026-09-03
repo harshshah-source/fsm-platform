@@ -144,7 +144,7 @@ describe('BulkUnassignService (#179 slice 1)', () => {
     const allCompanyIds = [companyId, companyId2, companyId3];
     await prisma.notificationDelivery.deleteMany({ where: { notification: { entityId: { in: ticketIds } } } });
     await prisma.notification.deleteMany({ where: { entityId: { in: ticketIds } } });
-    await prisma.auditLog.deleteMany({ where: { actingZone: { in: allZoneIds } } });
+    await prisma.auditLog.deleteMany({ where: { action: 'BULK_UNASSIGN_ZONE', entityId: { in: allZoneIds.map(String) } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
     const schedules = await prisma.workSchedule.findMany({ where: { zoneId: { in: allZoneIds } }, select: { scheduleId: true } });
