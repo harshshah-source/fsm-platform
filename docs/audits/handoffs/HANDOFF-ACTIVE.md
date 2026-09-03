@@ -1,13 +1,13 @@
-# HANDOFF — #340 acting attribution — 2026-09-03
+# HANDOFF — #341 acting scope on write doors — 2026-09-03
 
-Auto-handoff: **ARMED** (note "wave 1 - #339 acting-scope gate"). Refreshed after #339 closed and
-#340's code went green. Disarm with `/autohandoff off` when the run finishes, and rename this file
+Auto-handoff: **ARMED** (note "wave 1 - #339 acting-scope gate"). Refreshed after #339 and #340
+both closed and were verified against one clean full-suite run. Disarm with `/autohandoff off` when the run finishes, and rename this file
 `HANDOFF-<issue>-<date>.md` in place — that folder is the audit trail, nothing moves to `docs/archive/`.
 
 Status: active
-Issue: `.scratch/fsm-platform-v1/issues/340-acting-attribution-null-sites-backup-report.md`
+Issue: `.scratch/fsm-platform-v1/issues/341-acting-scope-on-write-doors.md`
 Branch: `feat/autoplant-integration` · this run's commits: `abb0f0f` `1f20620` `fa11c55` `35bca9e`
-`543e986` `d080433` `806bb7a` `deca11d` `ea155b3` `0001f9b` `aa0eaba` `a1270ad`
+`543e986` `d080433` `806bb7a` `deca11d` `ea155b3` `0001f9b` `aa0eaba` `a1270ad` `f686e23`
 
 ## The job
 
@@ -20,28 +20,31 @@ slice assumes. `INDEX.md` section **P12** carries the same table with links.
 One slice at a time, red-first (`/tdd`), each with a `docs/progress/<issue>.md` report, an INDEX row
 update and a session-log line.
 
-**#336, #338 and #339 are DONE and reported. #340 is code complete and green in its neighbourhood**;
-what remains is the full-suite result and the bookkeeping.
+**#336, #338, #339 and #340 are DONE, verified against a clean full-suite run, and reported.** #341 is
+unstarted and is the next slice.
 
 ## Next step
 
-**Finish #340, in this order:**
+**Start #341 — acting scope narrows every manager write door.** Its two blockers (#339, #340) are
+both closed, and `request.acting` is now the proven source both decorators read.
 
-1. **Read `.scratch/backend-suite-340.log`** (repo root) — one clean `npm test` from `apps/backend`,
-   started 13:07 after every #339 and #340 edit was in the tree. It is the verification for **both**
-   slices. Expect ~23 min and possibly one `#184` worker-crash retry. If it is missing or was cut
-   off, re-run it — **and see the hard rule below about running only one suite at a time.**
-2. **Write `docs/progress/340-acting-attribution.md`.** #339's
-   (`docs/progress/339-acting-scope-gate.md`) is the shape to copy; the INDEX session-log line for
-   #340 already carries the reasoning, including the second column overload the issue did not name.
-3. **Tick the four ACs** in the issue file and set `Status: done …`.
-4. **Fill in the full-suite number** in `docs/progress/339-acting-scope-gate.md` (its "Tests,
-   verbatim" section currently points at the INDEX session log rather than naming a figure) and in
-   the #339/#340 INDEX rows.
-5. **Commit #340** — explicit paths only, never `git add -A`, and never the six files listed under
+1. **Re-verify the finding before building it** (standing instruction). The issue claims ~60
+   hand-built `{ role: user.role, zoneId: user.zone_id }` sites across 20 controllers, with
+   `schedules.controller.ts:81-85 scopeFor` and `batches.controller.ts:113` the only writes that
+   honour acting. #340 left a `// The scope stays the caller's own — #341 owns whether acting narrows
+   a write door.` comment at each site it passed through — those are a starting index, not the whole
+   set. Count them yourself; the survey has been wrong before in both directions.
+2. **AC1 is a route-enumeration contract test**, not per-door cases: it must fail when someone adds a
+   new unscoped manager write route. That is the hard part of the slice and is worth writing first.
+3. **The narrowing rule already recorded on #239:** narrowing a write can only *reduce* reach. AC4
+   (no behaviour change for ZM/WM/SE) is the other half of the same statement and is what stops the
+   conversion from becoming a permissions change.
+4. **AC3 is the admin half** — `dispatch-runs.ts`, `intradayInsertions.ts`, `intradayUpdates.ts`
+   build bearer-only headers, so the acting header never reaches those routes at all. One
+   `authHeaders()` builder, plus `apps/admin/test/acting-zone-scope.test.tsx`.
+5. Report, ACs, INDEX row + session-log line, commit — explicit paths only, and never the files under
    "State of the tree".
-6. Then continue the wave: **#341** (acting scope narrows every manager write door, ~60 sites / 20
-   controllers), which depends on #339 and #340 and is now unblocked.
+6. **Close #239 into this slice when it lands.**
 
 ## Standing instructions from the user
 
@@ -68,56 +71,52 @@ Quoted, not paraphrased:
 
 ## State of the tree
 
-- **Committed through `a1270ad`**, explicit paths only.
-- **#340's code and tests are UNCOMMITTED** (step 5 above). The files it touches:
-  - *Seam*: `src/common/request-actor.ts` (+`zoneId`).
-  - *Controllers, the eleven doors*: `cross-zone/cross-zone.controller.ts`,
-    `devices/devices.controller.ts`, `engineers/engineers.controller.ts`,
-    `engineers/leave-request.controller.ts`, `intraday/intraday-insertion.controller.ts`,
-    `scheduling/intraday-updates.controller.ts`, `ticketing/tickets.controller.ts`.
-  - *Actor types + audit writes*: `scheduling/override.service.ts` (`ActorContext`),
-    `devices/device.service.ts`, `engineers/leave-request.service.ts`,
-    `engineers/se-availability.service.ts`, `ticketing/auto-recovery.service.ts`,
-    `cross-zone/cross-zone-escalation.service.ts`, `ticketing/vehicle-unavailability.service.ts`,
-    `scheduling/bulk-unassign.service.ts`, `roles/role-backup.service.ts`.
-  - *Doors that re-copied the actor and lost `actingZone`*: `scheduling/batches.controller.ts`,
-    `ticketing/vehicle-unavailability.controller.ts`.
-  - *Tests*: new `test/acting-attribution-pin.spec.ts`, `test/acting-attribution.e2e-spec.ts`;
-    extended `csm-backup-report`, `bulk-unassign-history`; updated queries in
-    `bulk-unassign-execute`, `bulk-unassign`; `zoneId` added to ~20 `RequestActor` fixtures across
-    `test/` (mechanical — the field is now required).
-- **SIX FILES ARE DELIBERATELY UNCOMMITTED** because their diffs interleave the parallel
-  scheduler-forensics run's work with mine in the same hunks. **Do not stage them, do not revert
-  them — #339's tests do not pass without the first four:**
+- **This run's work is committed through `f686e23`**, explicit paths only, never `git add -A`.
+- **TEN FILES ARE DELIBERATELY UNCOMMITTED** because their diffs interleave the parallel
+  scheduler-forensics run's work with mine in the same hunks. Committing them would carry that run's
+  code. **Do not stage them, and do not revert them — #339's and #340's tests do not pass without
+  them:**
   - `apps/admin/src/components/shell/TopBar.tsx` — mine is 3 lines in `enterActing`.
   - `apps/admin/src/pages/settings/SettingsPage.tsx` — mine is one `GROUPS` entry.
   - `apps/admin/test/acting-banner.test.tsx` — mine are the three `#339` assertions + the `calls[]` stub.
   - `apps/backend/test/dashboard-acting-scope.e2e-spec.ts` — untracked, the other run's file; mine is
     the `zmOutWindowId` fixture.
-  - `.scratch/fsm-platform-v1/INDEX.md` and `docs/SYSTEM-STATE-2026-07.md` — same reason. #338's and
-    #339's content is written and correct; #340's P12 row and both session-log lines are written too.
+  - `apps/backend/src/devices/device.service.ts` (theirs: #308), `engineers/engineers.controller.ts`
+    (#267), `intraday/intraday-insertion.controller.ts` and `scheduling/intraday-updates.controller.ts`
+    (#310), `scheduling/batches.controller.ts`, `scheduling/override.service.ts`,
+    `ticketing/auto-recovery.service.ts` — each carries one to seven lines of **#340** (the
+    `@CurrentActor()` conversion and the `actingZone` stamp) inside their hunks.
+  - `apps/backend/test/engineer-admin.e2e-spec.ts`, `test/recovery-compliance-stalled.e2e-spec.ts`,
+    `test/terminal-status-no-reclose.e2e-spec.ts` — same.
+  - `.scratch/fsm-platform-v1/INDEX.md` and `docs/SYSTEM-STATE-2026-07.md` — same reason. Their
+    #338/#339/#340 content is written and correct, including both session-log lines, the P12 rows,
+    and SYSTEM-STATE §3j's acting paragraph rewritten in place.
+- **`f686e23` is therefore a WIP commit**: on its own the tree it describes does not compile, because
+  seven of #340's source files are in the list above. That is the same trade `a1270ad` made and is
+  deliberate — see the commit message, which names every one.
 - **Uncommitted and NOT this run's: ~246 further paths** under `apps/` and `packages/` — the
   scheduler-forensics run's #297–#334.
-- **Tests, verbatim, after the last code change:**
-  - **#340's own**: `acting-attribution-pin` 2 + `acting-attribution` 3 + `csm-backup-report` 4 +
-    `bulk-unassign-history` 1 → **4 files, 10 passed** (the pin was red first: 7 controller files).
-  - **Neighbourhood**: cross-zone / auto-recovery / leave-request / bulk-unassign / role-backup /
-    request-actor-attribution → 13 files; intraday / batch-override / devices / vehicle-unavailability
-    / se-availability / engineers / tickets → 17 files; acting-context / dashboard-acting-scope /
-    assign-batch-acting-scope / audit-trail / schedules-route-conflicts / removal-reason /
-    terminal-status / engineer-admin / install-lifecycle / recovery-lifecycle / voucher → 11 files.
-    **All green.**
-  - `npx tsc --noEmit` (backend) → exit 0. `tsc -p tsconfig.test.json` has ~50 **pre-existing**
-    errors unrelated to this work; the `RequestActor` ones this slice introduced are all fixed.
-  - **Full backend suite: RUNNING** into `.scratch/backend-suite-340.log`. See step 1.
+- **Verification, verbatim:**
+  - **Full backend suite, one clean run after every #339/#340 edit** (`.scratch/backend-suite-340.log`,
+    818 s): **463 files / 2494 tests — 458 files passed, 3 skipped, 2 failed.** Both failures were
+    this run's own and both are fixed in **test files only, no source change**, and re-run green:
+    `manager-scope.spec.ts` (still on #339's pre-guard signature) and `shared-auth-se-fixture-guard`
+    (flagging #336's rolled-back `engineerMaster.deleteMany`).
+  - **Full admin suite: 120 files / 838 tests, all passing** (the 1 reported error is the pre-existing
+    #335 drawer crash). #340 changed no admin code.
+  - `npx tsc --noEmit` (backend) and `npx tsc -b` (admin) → exit 0. `tsc -p tsconfig.test.json` has
+    ~50 **pre-existing** errors unrelated to this work and is **not** a green gate — grep it for the
+    error class you care about rather than reading the list.
 - **Half-done / stubbed:** nothing.
 
 ## Done so far
 
 - **#336 — DONE** (`abb0f0f`). Report: `docs/progress/336-dev-seed-fixtures.md`.
 - **#338 — DONE** (eight commits + `aa0eaba`). Report: `docs/progress/338-durable-notification-outbox.md`.
-- **#339 — DONE** (`a1270ad`). Report: `docs/progress/339-acting-scope-gate.md`; all 7 ACs ticked.
-- **#340 — code complete**, green in its neighbourhood, uncommitted.
+- **#339 — DONE** (`a1270ad`, bookkeeping in `f686e23`). Report: `docs/progress/339-acting-scope-gate.md`;
+  all 7 ACs ticked.
+- **#340 — DONE** (`f686e23`). Report: `docs/progress/340-acting-attribution.md`; all 4 ACs ticked,
+  with AC1's wording deliberately narrowed and the reason recorded in the issue file.
 
 ## Decisions taken (not recoverable from the diff)
 
@@ -153,6 +152,10 @@ Quoted, not paraphrased:
 
 ## Dead ends — do not retry
 
+- **Converting every caller of a function does not exercise a unit spec of the function itself.**
+  #339 changed `resolveManagerScope`'s signature, converted both decorators, and left
+  `manager-scope.spec.ts` calling the old shape — five tests throwing, invisible to every acting e2e.
+  When you change a signature, grep `test/` for the **symbol**, not just for its call sites.
 - **NEVER run two backend suites at once.** There is one `fsm_test` database and `globalSetup`
   migrates and re-seeds it, so a second run pulls the ground out from under the first: 46 files
   "failed" on `401 Unauthorized` at login and none of it was real. Both runs were discarded. Check
@@ -194,11 +197,10 @@ Quoted, not paraphrased:
 
 ## Remaining acceptance criteria
 
-**#340** — all four are **built and tested**; none ticked yet (step 3). AC1 by
-`acting-attribution-pin.spec.ts`; AC2 by `acting-attribution.e2e-spec.ts`; AC3 by
-`bulk-unassign-history` (the write) and `csm-backup-report` (the read); AC4 by `csm-backup-report`.
-**#336, #338, #339** — none; all closed and reported.
-Every other slice #337, #341–#366 is unstarted.
+**#341** — all four are unstarted. AC1 (route-enumeration contract test) is the slice's real content;
+AC2/AC4 are the "narrowing only reduces reach" guarantee; AC3 is the admin `authHeaders()` builder.
+**#336, #338, #339, #340** — none; all four closed and reported.
+Every other slice #337, #342–#366 is unstarted.
 
 ## Open questions / HITL
 
