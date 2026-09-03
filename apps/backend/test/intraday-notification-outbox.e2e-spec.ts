@@ -8,9 +8,10 @@ import { CandidateSelectionService } from '../src/recommender/candidate-selectio
 import { NOTIFY_EVENT_TYPE, drainRows } from '../src/scheduling/day-plan-notification-outbox';
 import type { DayPlanNotifier } from '../src/scheduling/day-plan-notifier';
 import { OverrideService } from '../src/scheduling/override.service';
+import { StrandedWorkEscalationService } from '../src/intraday/stranded-work-escalation.service';
 
 /**
- * #338 — the three intraday `notify()` sites become durable outbox rows.
+ * #338 — the intraday module's `notify()` sites become durable outbox rows.
  *
  * **The gap.** `IntradayInsertionService` pushes three notices *after* its transaction commits with
  * nothing durable behind them: the SE's "CRITICAL ticket added to your Day Plan" (direct assign), the
@@ -36,6 +37,11 @@ import { OverrideService } from '../src/scheduling/override.service';
  * The fixture is #325's (`intraday-ledger-atomicity.e2e-spec.ts`) — same zone/plant/SE shape, same
  * real Q-B escalation — because these are the same three doors and re-deriving the setup would only
  * risk testing a different one.
+ *
+ * The fourth door is `StrandedWorkEscalationService` (#288), the module's other producer: it writes
+ * one ledger row per stranded ticket and **one** alert per zone. It owned no transaction at all, so
+ * the atomicity property there is the stronger claim — all of its rows and its alert commit together,
+ * where before a crash mid-loop left some tickets escalated, some not, and nobody told about any.
  */
 const NS = Date.now();
 /** 11:30 IST on the operating day the fixture builds. */
@@ -150,8 +156,11 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
     });
     return rows.filter((r) => {
       const p = payloadOf(r);
-      const metaTicket = (p.metadata as Record<string, unknown> | null | undefined)?.ticketId;
-      return p.entityId === ticketId || String(metaTicket ?? '') === ticketId;
+      const meta = p.metadata as Record<string, unknown> | null | undefined;
+      // Three shapes, because the four doors name their ticket in three places: the entity itself,
+      // a single `ticketId`, or — for the one alert that stands for a whole stranded day — a list.
+      const listed = Array.isArray(meta?.ticketIds) && (meta.ticketIds as unknown[]).includes(ticketId);
+      return p.entityId === ticketId || String(meta?.ticketId ?? '') === ticketId || listed;
     });
   };
 
@@ -227,6 +236,21 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
     });
     expect(ins.status).toBe('ESCALATION_REQUIRED');
     return { ticketId, insertionId: ins.insertionId };
+  };
+
+  /** One live day plan for today — the shape dispatch leaves behind (#288's own fixture). */
+  const givePlan = async (seId: string, tickets: string[]): Promise<void> => {
+    const schedule = await prisma.workSchedule.create({
+      data: { seId, zoneId, dateFrom: DAY, dateTo: DAY, status: 'ACTIVE', dispatchedAt: BASE },
+    });
+    const batch = await prisma.plantBatchAssignment.create({
+      data: { scheduleId: schedule.scheduleId, plantId, seId, stopSequence: 1, status: 'AUTO_ASSIGNED' },
+    });
+    let sortOrder = 1;
+    for (const ticketId of tickets) {
+      await prisma.batchAssignmentTicket.create({ data: { batchId: batch.batchId, ticketId, sortOrder: sortOrder++ } });
+      await prisma.ticket.update({ where: { ticketId }, data: { assignmentState: 'FORMALLY_ASSIGNED' } });
+    }
   };
 
   const liveRowsFor = (ticketId: string) =>
@@ -436,6 +460,53 @@ describe('#338 — the intraday notices are durable outbox rows', () => {
       // the notice was simply lost. A queue row nobody was told about is the gap NOTIF-02 names.
       expect(await prisma.intradayInsertion.count({ where: { ticketId } })).toBe(0);
       expect(await notifyRowsFor(ticketId)).toHaveLength(0);
+    });
+  });
+
+  describe("the unavailable engineer's stranded work (#288)", () => {
+    it('AC2/AC5 — a notifier that throws leaves every escalation committed and the one alert retryable', async () => {
+      const stranded = new StrandedWorkEscalationService(prisma, throwingNotifications());
+      const seId = await makeSe();
+      const t1 = await makeCriticalTicket();
+      const t2 = await makeCriticalTicket();
+      await givePlan(seId, [t1, t2]);
+
+      const out = await stranded.escalateStrandedWork(seId, BASE);
+      expect(out.escalated).toBe(2);
+
+      // One ledger row per ticket — the Intra-day Queue's contents — and they survive the failed push.
+      expect(await prisma.intradayInsertion.count({ where: { ticketId: { in: [t1, t2] } } })).toBe(2);
+
+      // …but ONE alert, which is #288's own rule: the decision is single even though the rows are not.
+      const rows = await notifyRowsFor(t1);
+      expect(rows).toHaveLength(1);
+      const row = rows[0]!;
+      expect(payloadOf(row).type).toBe('INTRADAY_ESCALATION_REQUIRED');
+      expect(payloadOf(row).recipients[0]!.userId).toBe(zmUserId);
+      expect(payloadOf(row).entityId).toBe(seId);
+      expect(row.sentAt).toBeNull();
+      expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(0);
+
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(1);
+      await drainRows(prisma, inertDayPlanNotifier, [row.id], BASE, new NotificationService(prisma));
+      expect(await deliveredCount(zmUserId, 'INTRADAY_ESCALATION_REQUIRED')).toBe(1);
+    });
+
+    it('AC1 — every ledger row and the alert commit together, or none of them do', async () => {
+      const stranded = new StrandedWorkEscalationService(failingNotifyEnqueue(prisma));
+      const seId = await makeSe();
+      const t1 = await makeCriticalTicket();
+      const t2 = await makeCriticalTicket();
+      await givePlan(seId, [t1, t2]);
+
+      await expect(stranded.escalateStrandedWork(seId, BASE)).rejects.toThrow(EnqueueFailed);
+
+      // This door wrote its rows one bare `create` at a time and then alerted, so a crash mid-loop
+      // left an engineer's day half-escalated with nobody told — the partial state #288's re-escalation
+      // guard then *suppresses*, because a live row is its "a human already knows" marker.
+      expect(await prisma.intradayInsertion.count({ where: { ticketId: { in: [t1, t2] } } })).toBe(0);
+      expect(await notifyRowsFor(t1)).toHaveLength(0);
     });
   });
 });

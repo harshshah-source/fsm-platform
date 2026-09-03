@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { istDate } from '../common/ist-day';
+import { Prisma } from '../generated/prisma/client';
 import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { drainNotificationRows, queueNotification } from '../scheduling/day-plan-notification-outbox';
 import { liveScheduleFilter } from '../scheduling/schedule-status';
 
 /** What one unavailability did to one engineer's day. */
@@ -75,31 +77,48 @@ export class StrandedWorkEscalationService {
     });
     if (rows.length === 0) return { escalated: 0, ticketIds: [] };
 
-    const byZone = new Map<bigint, string[]>();
-    for (const row of rows) {
-      const zoneId = row.batch.schedule.zoneId;
-      await this.prisma.intradayInsertion.create({
-        data: {
-          ticketId: row.ticketId,
-          zoneId,
-          insertionType: SE_UNAVAILABLE_INSERTION_TYPE,
-          slaBucket: row.ticket.device?.state?.slaBucket ?? null,
-          // No SE was offered this work — the engineer named below is the one it is being taken *from*.
-          // Writing them here would say the opposite of what happened (#268's own reason for the null).
-          offeredSeId: null,
-          offeredAt: now,
-          acceptanceDeadline: null,
-          respondedAt: now,
-          status: 'ESCALATION_REQUIRED',
-        },
-      });
-      byZone.set(zoneId, [...(byZone.get(zoneId) ?? []), row.ticketId]);
-    }
-
     const seName = (
       await this.prisma.user.findUnique({ where: { userId: seId }, select: { name: true } })
     )?.name;
-    for (const [zoneId, ticketIds] of byZone) await this.alertZm(zoneId, seId, seName ?? null, ticketIds);
+
+    // #338 — one transaction over the whole unavailability: every ledger row, and the alert that says
+    // they exist. This path had none, and the partial state that allowed is the one #288's own
+    // re-escalation guard then *hides* — a live `ESCALATION_REQUIRED` row is its "a human already
+    // knows" marker, so a crash after row three left the rest of the day unescalated AND unescalatable
+    // on the next availability write, with nobody having been told about the three.
+    const queuedNotices = await this.prisma.$transaction(async (tx) => {
+      const byZone = new Map<bigint, string[]>();
+      for (const row of rows) {
+        const zoneId = row.batch.schedule.zoneId;
+        await tx.intradayInsertion.create({
+          data: {
+            ticketId: row.ticketId,
+            zoneId,
+            insertionType: SE_UNAVAILABLE_INSERTION_TYPE,
+            slaBucket: row.ticket.device?.state?.slaBucket ?? null,
+            // No SE was offered this work — the engineer named below is the one it is being taken
+            // *from*. Writing them here would say the opposite of what happened (#268's own reason
+            // for the null).
+            offeredSeId: null,
+            offeredAt: now,
+            acceptanceDeadline: null,
+            respondedAt: now,
+            status: 'ESCALATION_REQUIRED',
+          },
+        });
+        byZone.set(zoneId, [...(byZone.get(zoneId) ?? []), row.ticketId]);
+      }
+
+      const queued: bigint[] = [];
+      for (const [zoneId, ticketIds] of byZone) {
+        const outboxId = await this.alertZm(tx, zoneId, seId, seName ?? null, ticketIds);
+        if (outboxId !== null) queued.push(outboxId);
+      }
+      return queued;
+    });
+
+    // Delivered post-commit: the escalations are the durable fact, the push is an attempt at it.
+    await drainNotificationRows(this.prisma, this.notifications, queuedNotices, now);
 
     return { escalated: rows.length, ticketIds: rows.map((r) => r.ticketId) };
   }
@@ -114,11 +133,17 @@ export class StrandedWorkEscalationService {
    * "manual assignment needed" channel, and a new type would land in whatever a client's `default`
    * branch does with an unknown one.
    */
-  private async alertZm(zoneId: bigint, seId: string, seName: string | null, ticketIds: string[]): Promise<void> {
-    const zone = await this.prisma.zone.findUnique({ where: { zoneId } });
-    if (!zone?.zonalManagerUserId) return;
+  private async alertZm(
+    tx: Prisma.TransactionClient,
+    zoneId: bigint,
+    seId: string,
+    seName: string | null,
+    ticketIds: string[],
+  ): Promise<bigint | null> {
+    const zone = await tx.zone.findUnique({ where: { zoneId } });
+    if (!zone?.zonalManagerUserId) return null;
     const who = seName ?? seId;
-    await this.notifications.notify({
+    return queueNotification(tx, {
       recipients: [{ userId: zone.zonalManagerUserId, role: 'ZONAL_MANAGER' }],
       type: 'INTRADAY_ESCALATION_REQUIRED',
       title: 'Engineer unavailable — work needs reassignment',
