@@ -86,3 +86,14 @@ One line, imperative, with provenance. Later modules MUST read the last 15 lines
 - `se.north@fsm.test` (user `2222…2222`) has NO `engineer_master` row, so every SE-self path in engineers 404s and `/me/availability` returns 0 items. An empty SE availability or leave list is a FIXTURE artefact, never evidence about the feature — O4  [engineers, standing law]
 - availability precedence is OLDEST-WINS, not last-write-wins: `currentStatusMany`/`currentStatus` (`se-availability.service.ts:60,88-94`) order by `windowStart desc` with NO tie-break, so two windows sharing a `windowStart` resolve in physical order and a manager's later clearing `AVAILABLE` write silently loses (reproduced 3/3). Any module reasoning about "the SE's current status" must assume the table can hold contradictions  [engineers, standing law, E4 2026-09-02]
 - a bare `YYYY-MM-DD` on the leave and availability forms means an IST calendar day and lands as `18:30Z` of the previous day (`common/ist-day.ts`); `se_planner.plannedDate` is `@db.Date` and the Recommender keys it with the same `istDate()` helper. The IST-vs-UTC mismatch hypothesis is REFUTED — never price a "planner/leave date keying is broken" fix  [engineers, standing law]
+
+## Corrections after code verification — 2026-09-03 (see `IMPLEMENTATION-PLAN.md` §1)
+
+- RETRACTED: "the ops-explorer dataset registry projects no `metadata` column for `auditLogs`". It does — `ops-explorer/dataset-registry.ts:2628-2640` projects `a.metadata::text`, committed `ba6053c` (2026-08-06) and present at `beea7d2`. AC-04 is the settings-service writer only; V-05's reason is readable there for an OH with the flag on.
+- CORRECTED: SCH-05 — cross-zone approve DOES write the target SE's day-plan outbox row (`override.service.ts:850`, action `CROSS_ZONE_ASSIGN`). The party never told is the target zone's ZM (CZ-11).
+- CORRECTED: DASH-G01 / DASH-G11 — the ZM critical queue was removed on purpose by #277 (2026-08-24); `/assign` is the single manual-assignment surface (#272 R1). Do not rebuild a dashboard queue with assign controls.
+- CORRECTED: RPT-08 — the finance voucher export exists (`GET /vouchers/export`); the gap is a hub card, not an integration.
+- CORRECTED: ING-01 — departure auto-close IS audited (`device-departure.service.ts:373,411`); the gap is surfacing and notice.
+- CORRECTED: INV-G4 — the >7-day waiting-component escalation IS surfaced (`waiting_component_overdue` card); missing only the pushed notice. INV-G6 — the GPS serial IS checked (`install-lifecycle.service.ts:129`); only SIM lacks an expected value.
+- NOT A GAP: AC-13 (threshold read per run, #238). DEAD CODE, not a gap: NOTIF-05 (`SE_ACCEPTANCE` branch, retired by §21).
+- VCH-10 restated: a partial mark-PAID batch commits 1..N-1 then throws 500; nothing "reports success" — the defect is the missing `failed[]` channel plus the partial commit.

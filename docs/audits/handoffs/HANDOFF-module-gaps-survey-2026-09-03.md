@@ -170,3 +170,14 @@ The survey has none outstanding. Coverage limits, per policy P18, are named rath
 - A build skill, handed `docs/module-gaps/ROADMAP.md` Wave 1 — **not this skill**.
 - `/field-ops-director` on `EXEC-SUMMARY.md` — a domain-reality review of the five headline findings
   before anyone commits to the order.
+
+## Continuation — 2026-09-03: plan written, slices filed (planning session, no code changed)
+
+The "act on findings" branch of *Next step* was taken. Every survey finding was re-verified against the
+working tree (HEAD `a6c87c7` + the uncommitted #295–#334 files) by six read-only passes; 21 corrections
+are recorded in `docs/module-gaps/IMPLEMENTATION-PLAN.md` §1 and `standing-rules.md` (bottom). Result:
+**31 implementation slices, issues #336–#366**, indexed as **P12** in `.scratch/fsm-platform-v1/INDEX.md`
+with a session-log row. Wave 0/1 to start with: #336 fixtures → #337 push exit + #338 durable outbox →
+#339/#340/#341 acting chain → #342 audit ledger. Preconditions: the scheduler-forensics session commits
+its tree (P0-a) and the dev backend restarts on HEAD (P0-b). Operator decisions needed are in plan §7.
+This handoff stays a survey record; the plan is the brief for a build session.

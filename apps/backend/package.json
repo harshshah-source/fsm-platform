@@ -7,6 +7,7 @@
     "start": "node -r dotenv/config dist/main.js dotenv_config_path=.env",
     "seed": "node -r dotenv/config dist/seed.js dotenv_config_path=.env",
     "seed:dev": "node -r dotenv/config dist/seed-dev.js dotenv_config_path=.env",
+    "seed:dev-fixtures": "node -r dotenv/config dist/seed-dev-fixtures.js dotenv_config_path=.env",
     "autoplant:ping": "node -r dotenv/config dist/ingestion/autoplant/autoplant-ping.js dotenv_config_path=.env",
     "autoplant:sync": "node -r dotenv/config dist/ingestion/autoplant/autoplant-sync.js dotenv_config_path=.env",
     "autoplant:departure-dryrun": "node -r dotenv/config dist/ingestion/autoplant/autoplant-departure-dryrun.js dotenv_config_path=.env",

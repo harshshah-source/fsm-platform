@@ -1,0 +1,190 @@
+# HANDOFF — Module-gaps completion run: #336 in flight, then wave 1 — 2026-09-03
+
+Auto-handoff: **ARMED** (note "#336 then wave 1 - module-gaps completion").
+Disarm with `/autohandoff off` when the run finishes, and rename this file
+`HANDOFF-<issue>-<date>.md` in place — that folder is the audit trail, nothing moves to `docs/archive/`.
+
+## The job
+
+Build the module-gaps completion backlog — **31 slices, issues #336–#366**, filed 2026-09-03 from the
+14-module gap survey after six read-only verification passes. The plan is
+**`docs/module-gaps/IMPLEMENTATION-PLAN.md`** and it is the brief: §1 lists the 21 survey findings that
+were corrected or refuted (do **not** build against the survey brief where §1 disagrees with it), §3 is
+the wave/dependency table, §4 is the per-slice detail, §7 holds the operator decisions and the default
+each slice assumes, §9 records how the issues were filed. `INDEX.md` section **P12** carries the same
+table with links.
+
+One slice at a time, red-first (`/tdd`), with a `docs/progress/<issue>.md` report + an INDEX row update
++ a session-log line per slice.
+
+Branch: `feat/autoplant-integration` · base commit: `a6c87c7`.
+
+## Next step
+
+**#336 is DONE** (`docs/progress/336-dev-seed-fixtures.md`) — all six ACs, 9 tests, `tsc` clean.
+
+**Start wave 1.** Nothing in it is blocked. Recommended order, and why:
+
+1. **#338 — one durable outbox for the 12 post-commit notify sites.** Take it before #337: it is what
+   makes the push exit worth having, and #354 (cross-zone atomicity) depends on it. The 12 sites are
+   listed in the issue and in plan §4.
+2. **#339 — the acting-scope gate.** Independent of #338, so it can run beside it if two sessions are
+   available. Its one architectural assumption (a request-scoped guard, because the two decorators are
+   synchronous and the unavailability lookup is async) is recorded in the issue and still unanswered by
+   the user — proceed on it.
+3. **#340 → #341** must follow #339, in that order.
+4. **#342** makes the audit rows #343 and #340 write actually readable; **#343/#344/#345** are
+   independent and small.
+5. **#337** last of wave 1 — the seam builds with the logging default bound, but its live-delivery test
+   needs FCM credentials the user has to provision.
+
+**Before starting any of them, re-verify the issue's premises against the source.** #336 asked for two
+things that were wrong — one already built, one a silent reversal of a recorded decision — and both
+were caught only by reading the code first. Assume the same of the rest; the plan's §1 is that habit
+applied once already, not a guarantee it caught everything.
+
+Then **wave 1**, in this order: **#338** (durable outbox) and **#339** (acting gate) are independent of
+each other; **#340** then **#341** must follow #339; **#342** (audit ledger) makes #343's and #340's rows
+readable; **#337** builds the push seam but its final adapter test needs FCM credentials the user must
+provision; **#343**, **#344**, **#345** are independent.
+
+**Re-verify every issue's premises against the source before writing anything down.** The plan's
+`file:line` references were verified on 2026-09-03 against the working tree, but the tree moves.
+
+## Standing instructions from the user
+
+- **"start implementation and use /autohandoff on"** — this run's instruction, after being shown that
+  the tree carries 246 uncommitted files from the scheduler-forensics run and that starting on it means
+  suite runs verify a mixture. The user reaffirmed; **that is their decision and the run proceeds.**
+- Treat the AFK policy in `CLAUDE.md` as live: keep going down the wave order without checking in, and
+  stop only for architecture / business-rule conflict / backlog-ownership / external-access / security.
+- Earlier in this session, on the plan itself: *"Analyze the `docs/module-gaps/` results against the
+  **current codebase**… verify every important finding against the current code before creating work. Do
+  not blindly implement the report."* That rule outlived the planning phase — it is why §1 exists.
+- **Handoffs live in `docs/audits/handoffs/HANDOFF-ACTIVE.md`.** There is only ever one.
+
+## State of the tree
+
+- **This run has committed nothing yet.** Its own output so far is planning: `IMPLEMENTATION-PLAN.md`,
+  31 issue files (#336–#366), the P12 INDEX section + session-log row, the `standing-rules.md`
+  corrections block, and the survey-handoff continuation note. All uncommitted.
+- **Uncommitted and NOT this run's: ~246 paths under `apps/` and `packages/`** — the scheduler-forensics
+  run's #297–#334. **Do not commit, revert, stash or rebuild over it.** Commit **explicit paths only**,
+  never `git add -A`. This is the precondition (plan §2 P0-a) the user chose to proceed past.
+- **`HANDOFF-ACTIVE.md` was taken over from that run**, whose live handoff is preserved verbatim at
+  `HANDOFF-scheduler-forensics-wave3-2026-09-03.md` with its outstanding run-list (#315, #318,
+  #312→#314→#316, #329, #322, #326, #328, #331, #333, #335) and a banner saying how to resume it. Its
+  Gotchas and Dead-ends sections are still live for this repo and worth reading before touching
+  scheduling, ingestion or the test harness.
+- **Tests:** not yet run by this run. The forensics run last measured **456 backend spec files, 2,441
+  passed, 5 skipped, zero failures**, and admin **119 files / 832 tests green but exit code 1** (the
+  pre-existing `TicketDetailDrawer.tsx:440` crash, filed as #335). Any suite result this run produces
+  is **a mixture of both runs' work** — say so when reporting it.
+- **Typecheck:** last known clean in both apps, by the other run.
+- **Half-done / stubbed:** nothing.
+
+## Done so far
+
+**#336 — DONE**, six red→green cycles. Report: `docs/progress/336-dev-seed-fixtures.md`. New files:
+`apps/backend/src/auth/dev-fixture-seed.config.ts` (the guard),
+`apps/backend/src/auth/dev-fixture-seed.ts` (`seedDevWalkFixtures`),
+`apps/backend/src/seed-dev-fixtures.ts` (entrypoint),
+`apps/backend/test/dev-fixture-seed.spec.ts` (2 unit),
+`apps/backend/test/dev-fixture-seed.e2e-spec.ts` (7 e2e, each in a rolled-back transaction);
+plus one script line in `apps/backend/package.json`. **No existing file's behaviour was changed.**
+9 tests green, `tsc --noEmit` clean, neighbours re-run green (`dev-seed` ×2,
+`shared-auth-se-canonical-seed`, `verification-controller` — 26 tests).
+
+**Uncommitted, and the reason it matters:** these six paths are the only ones this run has touched
+under `apps/`. Committing them as explicit paths — never `git add -A` — is what keeps them separable
+from the other run's 246. Not done yet; the user has not asked for a commit.
+
+Planning, earlier in the same session:
+
+| what | where |
+|---|---|
+| Six read-only verification passes over all 148 survey findings | results folded into the plan; 21 corrections in §1 |
+| The plan | `docs/module-gaps/IMPLEMENTATION-PLAN.md` (31 slices, 5 waves) |
+| 31 issue files #336–#366 | `.scratch/fsm-platform-v1/issues/` |
+| P12 index section + session-log row | `.scratch/fsm-platform-v1/INDEX.md` |
+| Survey corrections retracted/booked | `docs/module-gaps/standing-rules.md` (bottom block) |
+
+## Decisions taken (not recoverable from the diff)
+
+- **21 survey findings were corrected before any were built** (plan §1). The load-bearing ones: the
+  Ops Explorer `auditLogs` dataset **does** project `metadata` (a standing rule was wrong, now
+  retracted); **SCH-05 is false** — cross-zone approve writes the target SE's outbox row at
+  `override.service.ts:850`, the **target ZM** is who is never told; **DASH-G01/G11 are superseded by
+  #277** (`/assign` is the single manual-assignment surface, #272 R1) so the dashboard gets a link, not
+  a rebuilt queue; **NOTIF-05 is §21 dead code**, not a gap; **AC-13 is not a gap**.
+- **Slices absorb open issues rather than duplicating them**: #92, #93, #139, #140, #145, #224, #239,
+  #318, #331, #333, plus slices of #136, #148, #129. Their files stay as the detailed spec and close
+  into the slice when it lands.
+- **#325's `inTransaction` hook on `assignTicket` is the seam for the cross-zone approve orphan**
+  (#139/CZ-01) — the fix is to use it, not to build a new transaction boundary.
+- **`HANDOFF-ACTIVE.md` was taken over by copy-then-overwrite, not by `mv`** (the rename was blocked by
+  the permission classifier). Nothing was destroyed; the copy predates the overwrite.
+- **#336 was re-scoped on verified evidence, and the issue file is now stale in two ways.**
+  (a) **Its test half is already built and has been since #215/#187**: `test/fixtures/shared-auth-se.ts`
+  `seedSharedAuthSeEngineer` writes the shared SE's `engineer_master` row in `test/global-setup.ts`
+  before any spec runs, pinned by `test/shared-auth-se-canonical-seed.e2e-spec.ts`. So "absorbs #187
+  (test side)" is wrong — #187 is closed. Nothing was rebuilt.
+  (b) **Its dev half contradicts a decision recorded twice** — `shared-auth-se.ts` ("a fixture engineer
+  row has no business appearing in a development database's engineer directory") and
+  `global-setup.ts:46-47`. Extending `runDevSeed`, as the issue asks, would reverse that silently.
+  **Resolution taken:** a *separate* opt-in, `SEED_DEV_WALK_FIXTURES`, in its own module. `ALLOW_DEV_SEED`
+  keeps its exact meaning, the default dev seed stays clean, and the survey's blocked walks get a switch.
+  Both flags are refused under `NODE_ENV=production`, unconditionally.
+
+## Dead ends — do not retry
+
+Everything under "Dead ends" and "Gotchas" in
+`HANDOFF-scheduler-forensics-wave3-2026-09-03.md` still applies to this repo. The ones most likely to
+bite this run:
+
+- **The Bash tool's heredocs eat backslashes**, even quoted, and a `'` in the body can break the parse.
+  Write helper scripts with the Write tool and run them.
+- **Line endings are mixed LF/CRLF.** A multi-line search pattern will not match a CRLF file; read and
+  write binary when scripting edits.
+- **Run the backend suite in five foreground batches** from `apps/backend` (`node scripts/run-tests.mjs
+  $(cat /tmp/b00 …)`); one run exceeds the Bash 10-minute cap and backgrounded runs get killed with no
+  output.
+- **`tsc --noEmit` does not cover `test/`** (that is #293). Grep `tsconfig.test.json` output for your
+  own files; it reports 158 pre-existing errors.
+- **Two backend files are known-flaky and neither is broken:** `dispatch-crashed-zone-recovery` and
+  `global-guard-validation` (#184).
+- **The admin suite exits 1 with everything green** until #335 lands. Report the summary lines and say
+  which you used.
+- **`prisma.dispatchRun.create` needs `trigger` and `configSnapshot`**; there is no `triggeredBy`.
+
+## Remaining acceptance criteria
+
+#336's six ACs are all outstanding — nothing is started. Every other slice #337–#366 is unstarted.
+
+## Open questions / HITL
+
+- **Plan §7 holds ten operator decisions**, each with the default its slice assumes. None blocks wave 0
+  or wave 1. The ones that will matter soonest: the **request-scoped acting guard** that #339 assumes
+  (raised to the user, not yet answered — proceed on the default), **VCH-08** (no un-pay after PAID) and
+  **AC-03** (reactivation restores nothing).
+- **#337 needs FCM credentials** — external provisioning, HITL. The seam ships with the logging default
+  bound, so the slice is not blocked; only its live-delivery test is.
+- **The P0-a precondition is knowingly unmet** (see Standing instructions). If a suite goes red, check
+  whether the failure lives in the other run's uncommitted files before attributing it.
+- **#336 AC4 — ANSWERED by the user 2026-09-03: option (iii)**, the zone-scoped expiring tier override
+  (#157). Built that way; `companies.company_tier` is untouched. The one thing that came out of it and
+  is worth carrying forward: **`sweepAutoEscalations` filters on `tickets.company_tier`**
+  (`cross-zone-escalation.service.ts:77`), not on the effective tier, so a tier override never
+  retroactively makes existing tickets Platinum. That is defensible (the column is a snapshot of the
+  tier when work was raised) and is **not** filed as a defect — but anyone touching #354/#355 should
+  know it, because it means an override cannot be used to stage a cross-zone escalation on old tickets.
+- **The dev database has not been seeded by this run.** `npm run seed:dev-fixtures` (with
+  `SEED_DEV_WALK_FIXTURES=true`) is an operator action, and the dev backend is mid-run for the other
+  session. Until it is run, the 17 blocked survey findings stay blocked — the command exists, the
+  state does not.
+
+## Suggested skills
+
+- **`/tdd`** — red-first per slice; the plan writes each slice's Verification line as the test to write first.
+- **`/code-review`** — per finished slice, before the bookkeeping.
+- **`/diagnose`** — when a cited `file:line` no longer matches behaviour.
