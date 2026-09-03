@@ -50,6 +50,29 @@ called from `install-lifecycle.service.ts` / the recovery service, so the conver
 **AC2 and AC5 are not yet demonstrated** — no crash-injection test exists for a converted producer,
 because no producer is converted.
 
+**READ THIS BEFORE CONVERTING — AC1 is only half-satisfiable today, and the reason is structural.**
+AC1 says each site must enqueue *inside its mutation transaction*. Several sites **have no mutation
+transaction to enqueue into**, and creating them is **#354's** job, not this slice's:
+
+| site | transaction today? | so #338 can… |
+|---|---|---|
+| `cross-zone-escalation.service.ts:300` (sweep, via `:114`) | **no** — `create` → `audit` → `notify` are three bare awaits (that absence *is* CZ-02/#140) | enqueue on `this.prisma`: durable + retried, not yet atomic |
+| `cross-zone-escalation.service.ts:321` (`notifyHomeZm`, via `:180` approve / `:278` deny) | **no** — approve's second write is already outside `assignTicket`'s tx (CZ-01/#139) | same |
+| `cross-zone-escalation.service.ts:339` (`notifyRole`, re-escalate) | **no** | same |
+| `intraday-insertion.service.ts:343,465,498` | **yes** — #325's `inTransaction` hook on `assignTicket` | fully transactional |
+| `stranded-work-escalation.service.ts:121` | check before converting | — |
+| `bulk-unassign.service.ts:322` | check before converting | — |
+| `install-lifecycle.service.ts` (for `install-notifier:52,64`) | check before converting | — |
+| recovery service (for `recovery-notifier:76,93`) | check before converting | — |
+
+**The split to take:** convert every site to `queueNotification`, passing a transaction client where
+one exists **today** and `this.prisma` where one does not. Even the non-transactional form is a real
+gain and closes AC2 for that site — the enqueue is one insert that fails fast, so a *throwing
+notifier* can no longer damage its caller's outcome, and delivery moves to the retrying sweep. Then
+**#354 threads its new transaction through the three cross-zone calls**, which is what finally closes
+AC1 for them. Record per site, in the progress report, which of the two forms it got — a table that
+claims "inside its mutation tx" for all twelve would be false.
+
 **The drift gate was NOT run** (operator's call, 2026-09-03): the local Postgres role cannot
 `CREATE DATABASE`, so `scripts/check-schema-drift.mjs` cannot build its comparison database. The
 migration was hand-written to match the schema edit exactly and introduces no new drift by
