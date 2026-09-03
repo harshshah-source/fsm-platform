@@ -406,9 +406,14 @@ export class VerificationService {
             where: { ticketId: ticket.ticketId, status: 'PRE_VERIFICATION' },
           });
           for (const txn of pre) {
+            // #353 made `se_id` / `component_id` nullable for device-keyed receipt rows. A
+            // PRE_VERIFICATION row is a component consumption and always carries both; this narrows
+            // the types and states that, rather than asserting it away.
+            const { seId, componentId } = txn;
+            if (seId === null || componentId === null) continue;
             await tx.seVanStock.upsert({
-              where: { seId_componentId: { seId: txn.seId, componentId: txn.componentId } },
-              create: { seId: txn.seId, componentId: txn.componentId, qty: txn.qty },
+              where: { seId_componentId: { seId, componentId } },
+              create: { seId, componentId, qty: txn.qty },
               update: { qty: { increment: txn.qty } },
             });
             await tx.inventoryTransaction.update({ where: { id: txn.id }, data: { status: 'ROLLED_BACK' } });

@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { incrementWarehouseStock } from '../src/inventory/warehouse-stock.service';
 
 /**
  * Issue 73 — zone-warehouse stock read + WM-managed set/adjust (`/api/inventory/warehouse-stock`) and
@@ -82,6 +83,43 @@ describe('Warehouse stock (Issue 73, e2e)', () => {
     const zm = await login('zm.north@fsm.test'); // zone 1, not the seeded zone
     const res = await request(app.getHttpServer()).get('/api/inventory/warehouse-stock').set('Authorization', `Bearer ${zm}`).expect(200);
     expect((res.body as { componentId: string }[]).some((r) => r.componentId === String(componentId))).toBe(false);
+  });
+
+  /**
+   * #353 — the ledger's only increment door. `setStock` writes an absolute count, which is the wrong
+   * shape for something arriving: two receipts landing on one level must add, not overwrite, and the
+   * first arrival for a SKU a zone has never held must create the row rather than fail. It takes a
+   * transaction client on purpose — the caller (a recovery receipt) has its own commit to join.
+   */
+  it('increments zone stock from zero and adds to an existing level, inside the caller transaction', async () => {
+    const fresh = (await prisma.componentMaster.create({ data: { name: 'Recovery SKU ' + NS } })).componentId;
+    try {
+      await prisma.$transaction(async (tx) => {
+        await incrementWarehouseStock(tx, zoneId, fresh, 1);
+      });
+      const created = await prisma.zoneWarehouseStock.findUniqueOrThrow({ where: { zoneId_componentId: { zoneId, componentId: fresh } } });
+      expect(created.onHand).toBe(1);
+      expect(created.reserved).toBe(0);
+
+      await prisma.$transaction(async (tx) => {
+        await incrementWarehouseStock(tx, zoneId, fresh, 3);
+      });
+      const grown = await prisma.zoneWarehouseStock.findUniqueOrThrow({ where: { zoneId_componentId: { zoneId, componentId: fresh } } });
+      expect(grown.onHand).toBe(4);
+
+      // a caller that rolls back leaves the level exactly where it was
+      await expect(
+        prisma.$transaction(async (tx) => {
+          await incrementWarehouseStock(tx, zoneId, fresh, 10);
+          throw new Error('caller rolled back');
+        }),
+      ).rejects.toThrow('caller rolled back');
+      const unchanged = await prisma.zoneWarehouseStock.findUniqueOrThrow({ where: { zoneId_componentId: { zoneId, componentId: fresh } } });
+      expect(unchanged.onHand).toBe(4);
+    } finally {
+      await prisma.zoneWarehouseStock.deleteMany({ where: { componentId: fresh } });
+      await prisma.componentMaster.deleteMany({ where: { componentId: fresh } });
+    }
   });
 
   it('forbids a Service Engineer from reading warehouse stock', async () => {

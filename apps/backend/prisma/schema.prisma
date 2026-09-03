@@ -1444,9 +1444,16 @@ model ComponentRequest {
 /// at submit and resolves to DEDUCTED / ROLLED_BACK on the verification outcome; a 409-loser's
 /// consumption is written SHADOW_USE and reconciled by the Warehouse Manager (RECONCILED | DISPUTED).
 model InventoryTransaction {
-  id           BigInt             @id @default(autoincrement())
-  seId         String             @map("se_id") @db.Uuid
-  componentId  BigInt             @map("component_id")
+  id BigInt @id @default(autoincrement())
+  /// Nullable since #353: a RECOVERY_RECEIPT is keyed by device, and a device arriving at the
+  /// warehouse belongs to no engineer's van. Every consumption row still carries one.
+  seId String? @map("se_id") @db.Uuid
+  /// Nullable since #353: a recovered device maps to a catalogued component only when one is named
+  /// for its `device_type` (INV-G2). Unmapped, the row records the movement and nothing else.
+  componentId  BigInt?            @map("component_id")
+  /// The recovered device this row accounts for (#353) — the RECOVERY_RECEIPT key. Null on every
+  /// component-grain row; the `inventory_transactions_keyed` CHECK requires one of the two.
+  deviceId     String?            @map("device_id")
   qty          Int
   ticketId     String?            @map("ticket_id") @db.Uuid
   submissionId String?            @map("submission_id") @db.Uuid
@@ -1457,14 +1464,16 @@ model InventoryTransaction {
   createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  engineer   EngineerMaster             @relation(fields: [seId], references: [engineerId])
-  component  ComponentMaster            @relation(fields: [componentId], references: [componentId])
+  engineer   EngineerMaster?            @relation(fields: [seId], references: [engineerId])
+  component  ComponentMaster?           @relation(fields: [componentId], references: [componentId])
+  device     Device?                    @relation(fields: [deviceId], references: [deviceId])
   ticket     Ticket?                    @relation(fields: [ticketId], references: [ticketId])
   submission TroubleshootingSubmission? @relation(fields: [submissionId], references: [submissionId])
 
   @@index([status])
   @@index([ticketId])
   @@index([seId])
+  @@index([deviceId])
   @@map("inventory_transactions")
 }
 
@@ -1912,6 +1921,13 @@ enum InventoryTxnStatus {
   SHADOW_USE
   RECONCILED
   DISPUTED
+  /// #353 — the compensating half of a dispute. The DISPUTED row stays as the WM's decision; this
+  /// row is the restore that put the part back in the losing SE's van, so the correction is a
+  /// readable ledger fact rather than an unexplained `se_van_stock` increment.
+  SHADOW_USE_DISPUTE_RESTORE
+  /// #353 — a recovered device confirmed physically received at the zone warehouse. Device-keyed
+  /// (`device_id`); moves `zone_warehouse_stock` only when the device maps to a component (INV-G2).
+  RECOVERY_RECEIPT
 
   @@map("inventory_txn_status")
 }
@@ -2051,13 +2067,14 @@ model Device {
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  currentVehicle Vehicle?                @relation(fields: [currentVehicleId], references: [vehicleId])
-  state          DeviceState?
-  failureCycles  FailureCycle[]
-  tickets        Ticket[]
-  pgiHistory     PgiHistory[]
-  nonOpMarkings  NonOperationalMarking[]
-  departures     DeviceDeparture[]
+  currentVehicle        Vehicle?                @relation(fields: [currentVehicleId], references: [vehicleId])
+  state                 DeviceState?
+  failureCycles         FailureCycle[]
+  tickets               Ticket[]
+  pgiHistory            PgiHistory[]
+  nonOpMarkings         NonOperationalMarking[]
+  departures            DeviceDeparture[]
+  inventoryTransactions InventoryTransaction[]
 
   @@index([currentVehicleId])
   @@index([dealType])

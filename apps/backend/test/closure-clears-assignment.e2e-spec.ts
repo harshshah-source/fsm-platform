@@ -180,6 +180,9 @@ describe('#178 — terminal closure clears the assignment', () => {
     await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.nonOperationalMarking.deleteMany({ where: { markingId: { in: markingIds } } });
     await prisma.auditLog.deleteMany({ where: { entityId: { in: ticketIds } } });
+    // #353 — the warehouse-receipt case leaves a RECOVERY_RECEIPT ledger row keyed by ticket and
+    // device, both FKs RESTRICT: it goes before the ticket and the device deletes.
+    await prisma.inventoryTransaction.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });

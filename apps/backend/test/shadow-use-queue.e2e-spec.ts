@@ -53,6 +53,7 @@ describe('Issue 24 slice 4 — shadow use queue (WM reconciliation)', () => {
   });
 
   afterAll(async () => {
+    await prisma.seVanStock.deleteMany({ where: { componentId } });
     await prisma.inventoryTransaction.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'inventory_transactions' } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
@@ -95,6 +96,58 @@ describe('Issue 24 slice 4 — shadow use queue (WM reconciliation)', () => {
     expect(row.status).toBe('DISPUTED');
     const flag = await prisma.ticketEvent.findFirst({ where: { ticketId, reasonCode: 'INVENTORY_DISPUTE' } });
     expect(flag).toBeTruthy();
+  });
+
+  /**
+   * #353 AC1 — a dispute is a two-sided fact. Before this, `markDisputed` flipped the status and told
+   * the ZM, and the part the losing SE physically put in the machine stayed charged against their van
+   * forever: the ledger and the shelf disagreed permanently and nobody found out until a count.
+   * `verification.service.ts` already compensates a failed verification the same way — this is that
+   * pattern, plus a ledger row so the restore is itself readable rather than an invisible arithmetic.
+   */
+  it('restores the losing SE van stock on dispute and records a compensating ledger row', async () => {
+    const { id, ticketId } = await seedShadow();
+    await prisma.seVanStock.upsert({
+      where: { seId_componentId: { seId: se, componentId } },
+      create: { seId: se, componentId, qty: 0 },
+      update: { qty: 0 },
+    });
+
+    const out = await svc.markDisputed(id, 'winning SE reported using this part', wmActor());
+    expect(out.result).toBe('OK');
+
+    const stock = await prisma.seVanStock.findUniqueOrThrow({ where: { seId_componentId: { seId: se, componentId } } });
+    expect(stock.qty).toBe(1); // exactly the decremented qty, no more
+
+    const restore = await prisma.inventoryTransaction.findFirst({
+      where: { ticketId, status: 'SHADOW_USE_DISPUTE_RESTORE' },
+    });
+    expect(restore).toBeTruthy();
+    expect(restore!.qty).toBe(1);
+    expect(restore!.seId).toBe(se);
+    expect(String(restore!.componentId)).toBe(String(componentId));
+
+    // the restore row is bookkeeping, not new work — it must never appear in the WM's queue
+    const queue = await svc.queue();
+    expect(queue.some((r) => r.id === String(restore!.id))).toBe(false);
+  });
+
+  /** #353 AC3 — the ZM a dispute is escalated to can read it, clamped to their own zone. */
+  it('lists own-zone disputes for a ZM with reason and escalation metadata', async () => {
+    const { id } = await seedShadow();
+    await svc.markDisputed(id, 'qty does not match the winner report', wmActor());
+
+    const mine = await svc.queue({ status: 'DISPUTED', scope: { role: 'ZONAL_MANAGER', zoneId: Number(zoneId) } });
+    const row = mine.find((r) => r.id === id)!;
+    expect(row).toBeTruthy();
+    expect(row.status).toBe('DISPUTED');
+    expect(row.reason).toBe('qty does not match the winner report');
+    expect(row.escalatedTo).toBe('ZONAL_MANAGER');
+    expect(row.escalatedAt).not.toBeNull();
+    expect(row.escalatedBy).toBe(wm);
+
+    const otherZone = await svc.queue({ status: 'DISPUTED', scope: { role: 'ZONAL_MANAGER', zoneId: Number(zoneId) + 100000 } });
+    expect(otherZone.some((r) => r.id === id)).toBe(false);
   });
 
   it('refuses to reconcile a row that is not SHADOW_USE', async () => {

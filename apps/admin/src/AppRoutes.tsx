@@ -469,11 +469,14 @@ export function AppRoutes() {
               </RoleRoute>
             }
           />
-          {/* Shadow Use Queue — Warehouse Manager reconciliation of 409-loser consumption (Issue 24). */}
+          {/* Shadow Use Queue — Warehouse Manager reconciliation of 409-loser consumption (Issue 24).
+              #353 opens the read to the manager roles: a dispute escalates to the Zonal Manager, and
+              the page's Disputes section is where they adjudicate it (zone-clamped server-side). The
+              WM actions on the page stay WM-only, guarded by the API. */}
           <Route
             path="/warehouse/shadow-use"
             element={
-              <RoleRoute roles={['WAREHOUSE_MANAGER']}>
+              <RoleRoute roles={['WAREHOUSE_MANAGER', 'ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <ShadowUseQueuePage />
               </RoleRoute>
             }

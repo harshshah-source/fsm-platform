@@ -175,6 +175,10 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
       items: [
         { label: 'Component Blocked', to: '/component-blocked', icon: IconBoxAlert },
         { label: 'Component Requests', to: '/component-requests', icon: IconPackage },
+        // #353 — the manager's half of the Shadow Use Queue: the disputes a Warehouse Manager
+        // escalated to them. Same route as the WM's queue, which renders the Disputes section alone
+        // for a manager; without a link the escalation had no destination.
+        { label: 'Shadow Use Disputes', to: '/warehouse/shadow-use', icon: IconShuffle },
       ],
     });
   }

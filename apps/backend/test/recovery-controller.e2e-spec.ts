@@ -35,6 +35,10 @@ describe('Issue 36 slice 3 — /api/recovery (e2e)', () => {
   });
 
   afterAll(async () => {
+    // #353 — a warehouse receipt now writes an `inventory_transactions` row against the ticket and
+    // the device, and both FKs are RESTRICT. Teardown deletes the ledger row first or the ticket
+    // delete below throws.
+    await prisma.inventoryTransaction.deleteMany({ where: { deviceId: DEV } });
     await prisma.ticketEvent.deleteMany({ where: { ticket: { deviceId: DEV } } });
     await prisma.ticket.deleteMany({ where: { deviceId: DEV } });
     await prisma.device.deleteMany({ where: { deviceId: DEV } });

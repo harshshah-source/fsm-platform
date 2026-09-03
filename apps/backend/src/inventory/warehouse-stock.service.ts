@@ -66,6 +66,36 @@ function toRow(s: StockWithRelations): WarehouseStockRow {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
+ * Add `qty` to a zone's on-hand level for one component, creating the row when the zone has never
+ * held that SKU (#353).
+ *
+ * The only increment door on this table. `setStock` writes an **absolute** count, which is the wrong
+ * shape for something arriving: two receipts landing on one level must add rather than overwrite, and
+ * the first arrival of a SKU a zone has never stocked must open the row rather than 404.
+ *
+ * It takes a transaction client rather than living on the service because its caller — a warehouse
+ * receipt — already has a commit that the stock movement belongs inside: the device is received, the
+ * ticket closes and the level rises as one fact or as none. Audit rides on the caller's own audited
+ * write (`RECOVERY_RECEIVED_AND_CLOSED` carries the increment in its metadata), so this stays a pure
+ * arithmetic primitive with no opinion about who called it.
+ */
+export async function incrementWarehouseStock(
+  tx: Prisma.TransactionClient,
+  zoneId: bigint,
+  componentId: bigint,
+  qty: number,
+): Promise<void> {
+  if (!Number.isInteger(qty) || qty <= 0) {
+    throw new Error(`incrementWarehouseStock: qty must be a positive integer, got ${qty}`);
+  }
+  await tx.zoneWarehouseStock.upsert({
+    where: { zoneId_componentId: { zoneId, componentId } },
+    create: { zoneId, componentId, onHand: qty, reserved: 0, lowStockThreshold: 0 },
+    update: { onHand: { increment: qty } },
+  });
+}
+
+/**
  * Zone-warehouse stock (Issue 73). WM-managed per-zone SKU levels (on-hand / reserved / low-stock
  * threshold) with an audited manual set/adjust, plus the Component-Request Fulfilment-SLA KPI derived
  * from the `component_request` timestamps. Zone-scoped like the other manager reads. The automated

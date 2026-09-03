@@ -49,6 +49,7 @@ describe('Shadow Use Queue HTTP surface (e2e)', () => {
   });
 
   afterAll(async () => {
+    await prisma.seVanStock.deleteMany({ where: { componentId } });
     await prisma.inventoryTransaction.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.auditLog.deleteMany({ where: { entityType: 'inventory_transactions' } });
     await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: ticketIds } } });
@@ -83,5 +84,42 @@ describe('Shadow Use Queue HTTP surface (e2e)', () => {
     await request(app.getHttpServer()).post(`/api/warehouse/shadow-use/${id}/reconcile`).set('Authorization', `Bearer ${wm}`).expect(201);
     // reconciling again → 409 (no longer SHADOW_USE)
     await request(app.getHttpServer()).post(`/api/warehouse/shadow-use/${id}/reconcile`).set('Authorization', `Bearer ${wm}`).expect(409);
+  });
+
+  /**
+   * #353 AC3/AC4 — the ZM a dispute escalates TO can now read the disputes in their own zone, and
+   * still cannot take a Warehouse Manager's action on one. The read is the new door; the write guard
+   * is deliberately untouched.
+   */
+  it('lets a ZM read own-zone disputes and still refuses every WM write', async () => {
+    const id = await seedShadow();
+    const wm = await login('wm@fsm.test');
+    await request(app.getHttpServer())
+      .post(`/api/warehouse/shadow-use/${id}/dispute`)
+      .set('Authorization', `Bearer ${wm}`)
+      .send({ reason: 'the winner reported this part' })
+      .expect(201);
+
+    const zm = await login('zm.north@fsm.test'); // zone 1 — the zone this spec seeds into
+    const list = await request(app.getHttpServer())
+      .get('/api/warehouse/shadow-use?status=DISPUTED')
+      .set('Authorization', `Bearer ${zm}`)
+      .expect(200);
+    const row = (list.body as Array<{ id: string; reason: string | null; escalatedTo: string | null }>).find((r) => r.id === id);
+    expect(row).toBeDefined();
+    expect(row!.reason).toBe('the winner reported this part');
+    expect(row!.escalatedTo).toBe('ZONAL_MANAGER');
+
+    // AC4 — the WM guard is unchanged.
+    const other = await seedShadow();
+    await request(app.getHttpServer()).post(`/api/warehouse/shadow-use/${other}/reconcile`).set('Authorization', `Bearer ${zm}`).expect(403);
+    await request(app.getHttpServer()).post(`/api/warehouse/shadow-use/${other}/dispute`).set('Authorization', `Bearer ${zm}`).send({ reason: 'x' }).expect(403);
+    const se = await login('se.north@fsm.test');
+    await request(app.getHttpServer()).get('/api/warehouse/shadow-use?status=DISPUTED').set('Authorization', `Bearer ${se}`).expect(403);
+  });
+
+  it('rejects an unknown status filter rather than silently listing everything', async () => {
+    const wm = await login('wm@fsm.test');
+    await request(app.getHttpServer()).get('/api/warehouse/shadow-use?status=NONSENSE').set('Authorization', `Bearer ${wm}`).expect(400);
   });
 });

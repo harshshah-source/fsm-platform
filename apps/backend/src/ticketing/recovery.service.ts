@@ -1,7 +1,8 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
-import { $Enums } from '../generated/prisma/client';
+import { $Enums, Prisma } from '../generated/prisma/client';
+import { incrementWarehouseStock } from '../inventory/warehouse-stock.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
 import {
@@ -60,6 +61,8 @@ type TicketRow = {
   assignedSeId: string | null;
   unableToCollectReason: $Enums.UnableToCollectReason | null;
   collectedDeviceSerial: string | null;
+  /** What the SE wrote on the Collection Form — carried onto the #353 receipt's ledger row. */
+  collectionConditionNotes: string | null;
 };
 
 /** Recovery statuses past which no decision-queue action or manual close applies. */
@@ -139,6 +142,10 @@ export class RecoveryService {
    * Warehouse Manager confirms physical receipt of a COLLECTED device: COLLECTED →
    * RECEIVED_AT_WAREHOUSE → CLOSED (`AUTO_CLOSED_ON_WAREHOUSE_RECEIPT`, no ZM approval). SE + ZM are
    * notified (AC#3/#4).
+   *
+   * #353 — and the device is written into the inventory ledger. Until now a recovery closed with no
+   * receipt anywhere: "the device is back" was a ticket status and nothing inventory could see, so a
+   * recovered device and a lost one looked identical to every stock reader.
    */
   async confirmWarehouseReceipt(ticketId: string, actor: RequestActor): Promise<RecoveryOutcome> {
     if (actor.role !== 'WAREHOUSE_MANAGER') return { result: 'FORBIDDEN' };
@@ -147,13 +154,16 @@ export class RecoveryService {
     if (ticket.status !== 'COLLECTED') return { result: 'WRONG_STATE' };
 
     const now = new Date();
+    const receipt: Prisma.JsonObject = { componentId: null, stockIncremented: false };
     const updated = await this.audit.withAudit(
       {
         ...auditActor(actor),
         action: 'RECOVERY_RECEIVED_AND_CLOSED',
         entityType: 'tickets',
         entityId: ticketId,
-        metadata: { closureType: 'AUTO_CLOSED_ON_WAREHOUSE_RECEIPT' },
+        // The receipt's ledger consequences are filled in by the callback below, before `withAudit`
+        // writes the audit row — so the audit says what the ledger actually did, not what it planned.
+        metadata: { closureType: 'AUTO_CLOSED_ON_WAREHOUSE_RECEIPT', receipt },
       },
       async (tx) => {
         // RECEIVED_AT_WAREHOUSE then the auto-close to CLOSED — both legs recorded in one tx.
@@ -166,6 +176,9 @@ export class RecoveryService {
         // #178 — the device is physically back in the warehouse; there is nothing left to collect, so
         // the assignment ends with the ticket rather than outliving it as a phantom stop.
         await retireAssignmentOnClosure(tx, [ticketId], now);
+        // #353 — the ledger entry for the thing that just arrived, in the same commit as the closure
+        // that claims it arrived.
+        Object.assign(receipt, await writeRecoveryReceipt(tx, ticket));
         // #338 — the SE's notice commits with the closure it announces. It used to fire after this
         // transaction, so a crash in the gap closed a recovery ticket and told nobody, and a throwing
         // port turned a committed close into a 500 for the WM who had already done the thing.
@@ -333,6 +346,7 @@ export class RecoveryService {
       assignedSeId: t.assignedSeId,
       unableToCollectReason: t.unableToCollectReason,
       collectedDeviceSerial: t.collectedDeviceSerial,
+      collectionConditionNotes: t.collectionConditionNotes,
     };
   }
 
@@ -412,6 +426,66 @@ export class RecoveryService {
     );
     return { result: 'OK', ticket: toView(updated) };
   }
+}
+
+/**
+ * Write the inventory ledger row for a device that has physically come back (#353), and move zone
+ * stock when — and only when — the device maps to a component.
+ *
+ * **Keyed by device, not by component.** A recovered device is a device: it is not necessarily a
+ * catalogued SKU, and forcing one on it would put a fictional component in the ledger. So the row
+ * carries `device_id`, `qty` 1, and the collecting SE for attribution, with `component_id` null in
+ * the ordinary case.
+ *
+ * **INV-G2 — what a recovered device increments.** The default this slice assumes is *transaction row
+ * only*: no stock moves. The one exception is a device whose `device_type` names a component in the
+ * catalogue, which is the only device→component mapping this data model has — there is no mapping
+ * table. Today's catalogue names none, so in practice a receipt writes a row and moves nothing; the
+ * mapped branch exists so that a zone which *does* stock the recovered device as a SKU gets a level
+ * that matches its shelf. If the operator decides a recovery must never touch warehouse stock, this
+ * function is the whole reversal: delete the lookup and the increment.
+ */
+async function writeRecoveryReceipt(
+  tx: Prisma.TransactionClient,
+  ticket: TicketRow,
+): Promise<{ componentId: string | null; stockIncremented: boolean }> {
+  const device = await tx.device.findUnique({
+    where: { deviceId: ticket.deviceId },
+    select: { deviceType: true },
+  });
+  const component = device?.deviceType
+    ? await tx.componentMaster.findUnique({ where: { name: device.deviceType }, select: { componentId: true } })
+    : null;
+  // `tickets.assigned_se_id` is a bare uuid with no FK, and this column has one. Attribution is worth
+  // recording but not worth 500-ing a receipt the Warehouse Manager has already physically performed,
+  // so an assignee who is not an engineer_master row leaves the column null and the device keys it.
+  const collector = ticket.assignedSeId
+    ? await tx.engineerMaster.findUnique({ where: { engineerId: ticket.assignedSeId }, select: { engineerId: true } })
+    : null;
+
+  await tx.inventoryTransaction.create({
+    data: {
+      deviceId: ticket.deviceId,
+      seId: collector?.engineerId ?? null,
+      componentId: component?.componentId ?? null,
+      qty: 1,
+      ticketId: ticket.ticketId,
+      type: 'FAULTY_COMPONENT_RETURNED',
+      status: 'RECOVERY_RECEIPT',
+      reason: ticket.collectionConditionNotes,
+    },
+  });
+
+  if (!component) return { componentId: null, stockIncremented: false };
+
+  // The zone that receives it is the zone the ticket belongs to — its plant's.
+  const zone = await tx.ticket.findUnique({
+    where: { ticketId: ticket.ticketId },
+    select: { plant: { select: { zoneId: true } } },
+  });
+  if (!zone) return { componentId: String(component.componentId), stockIncremented: false };
+  await incrementWarehouseStock(tx, zone.plant.zoneId, component.componentId, 1);
+  return { componentId: String(component.componentId), stockIncremented: true };
 }
 
 function isUuid(value: string): boolean {
