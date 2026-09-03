@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import type { DayPlanView, MeTicketRow, MeWorkHistoryDay } from '@fsm/shared';
+import type { DayPlanPlantStop, DayPlanView, MeTicketRow, MeWorkHistoryDay } from '@fsm/shared';
 import { apiGetDayPlan, apiGetMyTickets, apiGetNotifications, apiGetWorkHistory } from '../../api/client';
 import { getConnectivityState } from '../../api/connectivity';
 import { useAuth } from '../../auth/AuthProvider';
@@ -121,19 +121,27 @@ export function HomeScreen() {
 
   const kpis = computeHomeKpis(state.tickets);
   const poolCount = state.tickets.filter((t) => !t.assigned).length;
-  const firstStop = state.dayPlan?.stops[0] ?? null;
+  // #366 — the day plan may now carry a Zone Warehouse pickup at stop 0. Rendering it on mobile is
+  // explicitly out of scope for that slice, so Home keeps looking at plant stops only and behaves
+  // exactly as it did: "Next Visit" is the first PLANT, and a warehouse contributes no workload card.
+  // The narrowing is the point of the discriminated `kind` — a pickup row has no `plantName` to read.
+  const plantStops: DayPlanPlantStop[] = useMemo(
+    () => (state.dayPlan?.stops ?? []).filter((s): s is DayPlanPlantStop => s.kind === 'PLANT'),
+    [state.dayPlan],
+  );
+  const firstStop = plantStops[0] ?? null;
 
   // One pass over the day plan's stops, cross-referenced against the ticket rows already fetched, for
   // both the Next Visit subline and every Plant Workload card.
   const summaries = useMemo(() => {
     const byPlant = new Map<string, PlantSummary & { plantName: string; plantId: string }>();
-    for (const stop of state.dayPlan?.stops ?? []) {
+    for (const stop of plantStops) {
       const stopTicketIds = new Set(stop.tickets.map((t) => t.ticketId));
       const rows = state.tickets.filter((t) => stopTicketIds.has(t.ticketId));
       byPlant.set(stop.plantId, { ...summarisePlant(rows), plantId: stop.plantId, plantName: stop.plantName });
     }
     return byPlant;
-  }, [state.dayPlan, state.tickets]);
+  }, [plantStops, state.tickets]);
 
   const workloads: PlantWorkload[] = [...summaries.values()].map((s) => ({
     plantId: s.plantId,

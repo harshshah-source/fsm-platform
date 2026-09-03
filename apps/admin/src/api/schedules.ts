@@ -109,6 +109,31 @@ export interface ScheduleStop {
   tickets: ScheduleStopTicket[];
 }
 
+/** One part waiting for this SE at the Zone Warehouse (#366) — a component request that is SHIPPED
+ *  and not yet RECEIVED for a ticket on this plan. The row names them so a dispatcher never has to
+ *  open the component requests to see what their engineer is carrying. */
+export interface SchedulePickupPart {
+  requestId: string;
+  ticketId: string;
+  componentId: string | null;
+  componentName: string | null;
+  trackingRef: string | null;
+}
+
+/**
+ * The Zone Warehouse pickup stop (#366), mirroring `DayPlanWarehousePickupStop` in `@fsm/shared`.
+ * `null` when nothing is waiting — and then the page renders exactly as it did before this shipped.
+ *
+ * Its own field rather than a member of `stops` because a pickup is not a batch: it has no
+ * `batchId`, and every override control on a stop acts on one. It renders at sequence 0, first.
+ */
+export interface SchedulePickup {
+  kind: 'WAREHOUSE_PICKUP';
+  stopSequence: 0;
+  warehouseName: string;
+  parts: SchedulePickupPart[];
+}
+
 export interface ScheduleDetail {
   scheduleId: string;
   seId: string;
@@ -117,6 +142,8 @@ export interface ScheduleDetail {
   dateFrom: string;
   dateTo: string;
   stops: ScheduleStop[];
+  /** Optional on the client so a cached or pre-#366 payload degrades to no pickup, not `undefined`. */
+  pickup?: SchedulePickup | null;
 }
 
 export const apiScheduleDetail = (engineerId: string) =>

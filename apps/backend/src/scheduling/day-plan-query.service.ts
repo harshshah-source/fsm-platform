@@ -3,6 +3,7 @@ import type { DayPlanStop, DayPlanStopTicket, DayPlanView } from '@fsm/shared';
 import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { liveBatchFilter, liveScheduleFilter } from './schedule-status';
+import { warehousePickupStop } from './warehouse-pickup';
 
 export type { DayPlanStop, DayPlanStopTicket, DayPlanView } from '@fsm/shared';
 
@@ -12,8 +13,14 @@ const EMPTY: DayPlanView = { dispatched: false, scheduleId: null, dateFrom: null
  * The SE Day Plan read model (Issue 11 AC#5). Resolves an SE's current dispatched Work Schedule into
  * ordered, plant-clustered stops — stop sequence, plant name, device count per stop, and the stop's
  * tickets in sort order. Pre-dispatch (no live schedule) returns the empty-state so the mobile Home
- * can show "your plan is being prepared." (The Zone Warehouse pickup step in AC#5 needs component data
- * from Issues 21/22 and is added when that lands.)
+ * can show "your plan is being prepared."
+ *
+ * **#366 — the Zone Warehouse pickup step (AC#5) now lands here**, as stop 0 ahead of the plant
+ * stops, when a ticket on this plan has a component request that is SHIPPED and not yet RECEIVED.
+ * It is a stop rather than a note above the list because the day is one ordered sequence and the
+ * engineer cannot work stop 1 without the part; `warehouse-pickup.ts` owns the rule and explains why
+ * it is derived at read time instead of stamped on the schedule. A plan with nothing waiting is the
+ * plan this read has always returned, one field wider: every stop now names its `kind`.
  */
 @Injectable()
 export class DayPlanQueryService {
@@ -36,6 +43,8 @@ export class DayPlanQueryService {
       // breaks ties among schedules that all genuinely cover today.
       where: { seId, dateFrom: { lte: today }, dateTo: { gte: today }, ...liveScheduleFilter() },
       orderBy: { dispatchedAt: 'desc' },
+      // #366 — the zone names the warehouse the SE collects from; there is no warehouse row to read.
+      include: { zone: { select: { name: true } } },
     });
     if (!schedule) return EMPTY;
 
@@ -56,23 +65,31 @@ export class DayPlanQueryService {
     // #179 slice 3 — a batch every one of whose tickets has been removed (a bulk unassign or an
     // override) is a hollow stop: it would render above the SE's real remaining work with
     // deviceCount 0. It carries no live work, so it is never shown, not just shown empty.
-    const stops: DayPlanStop[] = batches
-      .filter((b) => b.tickets.length > 0)
-      .map((b) => ({
-        batchId: String(b.batchId),
-        stopSequence: b.stopSequence,
-        plantId: String(b.plantId),
-        plantName: b.plant.name,
-        deviceCount: b.tickets.length,
-        tickets: b.tickets.map((t) => ({ ticketId: t.ticketId, sortOrder: t.sortOrder })),
-      }));
+    const liveBatches = batches.filter((b) => b.tickets.length > 0);
+    const stops: DayPlanStop[] = liveBatches.map((b) => ({
+      kind: 'PLANT',
+      batchId: String(b.batchId),
+      stopSequence: b.stopSequence,
+      plantId: String(b.plantId),
+      plantName: b.plant.name,
+      deviceCount: b.tickets.length,
+      tickets: b.tickets.map((t) => ({ ticketId: t.ticketId, sortOrder: t.sortOrder })),
+    }));
+
+    // #366 — derived from the plan's LIVE tickets, so a part for a ticket a bulk unassign took off
+    // the plan this morning does not send the engineer to the warehouse for it.
+    const pickup = await warehousePickupStop(this.prisma, {
+      ticketIds: liveBatches.flatMap((b) => b.tickets.map((t) => t.ticketId)),
+      zoneName: schedule.zone.name,
+    });
 
     return {
       dispatched: true,
       scheduleId: String(schedule.scheduleId),
       dateFrom: schedule.dateFrom.toISOString().slice(0, 10),
       dateTo: schedule.dateTo.toISOString().slice(0, 10),
-      stops,
+      // Stop 0 first, and only when it exists: with nothing waiting this is the array it always was.
+      stops: pickup === null ? stops : [pickup, ...stops],
     };
   }
 }

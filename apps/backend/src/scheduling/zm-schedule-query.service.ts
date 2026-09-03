@@ -5,6 +5,7 @@ import { SUPERSEDED_RECOMMENDATION_STATUSES } from '../recommender/recommendatio
 import { isSystemAddSource } from './add-source';
 import { committedDayLoad } from './committed-day-load';
 import { LIVE_SCHEDULE_STATUSES } from './schedule-status';
+import { type DayPlanWarehousePickupStop, warehousePickupStop } from './warehouse-pickup';
 
 export interface ZmScope {
   role: string;
@@ -130,6 +131,17 @@ export interface ZmScheduleDetail {
   dateFrom: string;
   dateTo: string;
   stops: ZmDetailStop[];
+  /**
+   * #366 — the Zone Warehouse pickup the SE makes before their first plant, or `null` when nothing
+   * is waiting. Its own field rather than a member of `stops`, deliberately: `ZmDetailStop` is read
+   * by the Console board and the override surfaces as *the batch a stop is*, and a pickup is not a
+   * batch — it has no `batchId` to reorder, remove or reassign. The page renders it at sequence 0
+   * ahead of the plant stops, which is what the approved design pins
+   * (`docs/ui/desktop/approved-designs/warehouse-pickup-stop.html`). The SE-facing read
+   * (`DayPlanQueryService`) puts it in `stops` as a discriminated `kind`, because there nothing
+   * treats a stop as a batch.
+   */
+  pickup: DayPlanWarehousePickupStop | null;
 }
 
 /**
@@ -239,6 +251,8 @@ export class ZmScheduleQueryService {
       orderBy: { dispatchedAt: 'desc' },
       include: {
         engineer: { select: { user: { select: { name: true } } } },
+        // #366 — the zone names the warehouse the SE collects from; there is no warehouse row to read.
+        zone: { select: { name: true } },
         batches: {
           where: { status: { in: ['AUTO_ASSIGNED', 'OVERRIDDEN'] } },
           orderBy: { stopSequence: 'asc' },
@@ -279,6 +293,13 @@ export class ZmScheduleQueryService {
         })),
       }));
 
+    // #366 — the same derivation the SE's own plan uses, over the same live tickets, so the
+    // dispatcher checking the plan and the engineer working it are told the same thing.
+    const pickup = await warehousePickupStop(this.prisma, {
+      ticketIds: stops.flatMap((s) => s.tickets.map((t) => t.ticketId)),
+      zoneName: schedule.zone.name,
+    });
+
     return {
       scheduleId: String(schedule.scheduleId),
       seId: schedule.seId,
@@ -287,6 +308,7 @@ export class ZmScheduleQueryService {
       dateFrom: schedule.dateFrom.toISOString().slice(0, 10),
       dateTo: schedule.dateTo.toISOString().slice(0, 10),
       stops,
+      pickup,
     };
   }
 

@@ -109,6 +109,15 @@ export interface TicketSkip {
  * consumption was one zone-wide flip at the end, so a concurrent claimer collided instead of simply
  * not seeing the rows. Now each SE gets its own transaction, which claims **that SE's** recommendation
  * rows with `SELECT … FOR UPDATE SKIP LOCKED`, and one SE's failure costs that SE only.
+ *
+ * **#366 — the Zone Warehouse pickup stop is NOT emitted here, and that is the decision.** The plan
+ * that filed the slice expected this run to write a stop 0 (or a pickup flag on the schedule) when a
+ * ticket it placed had a SHIPPED component request. It does not, because the pickup is not a fact
+ * about the dispatch: a part shipped an hour after this run has to appear on the plan, and the
+ * moment the SE confirms receipt the stop has to go. Anything stamped here would be wrong in both
+ * directions by mid-morning. `warehouse-pickup.ts` derives it at read time for both day-plan reads;
+ * this run is unchanged, and so are its `stops`/`tickets` notification counts below, which count the
+ * plant stops that are the SE's actual work.
  */
 @Injectable()
 export class BatchAssignmentService {

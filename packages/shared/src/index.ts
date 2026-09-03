@@ -674,7 +674,29 @@ export interface DayPlanStopTicket {
   sortOrder: number;
 }
 
-export interface DayPlanStop {
+/**
+ * #366 — one part waiting for this SE at the Zone Warehouse: a component request that is SHIPPED
+ * and not yet RECEIVED for a ticket on this plan.
+ *
+ * The row **names** the parts rather than counting them (approved design
+ * `docs/ui/desktop/approved-designs/warehouse-pickup-stop.html`): a dispatcher checking a plan
+ * should not have to open the component requests to learn what their engineer is carrying.
+ * `componentId`/`componentName` are nullable because `component_request.component_id` is — a
+ * request may name no catalogued component.
+ */
+export interface DayPlanPickupPart {
+  requestId: string;
+  /** The ticket this part is for — the reason the pickup is on *this* plan. */
+  ticketId: string;
+  componentId: string | null;
+  componentName: string | null;
+  /** The shipment reference the WM recorded at SHIPPED, when there is one. */
+  trackingRef: string | null;
+}
+
+/** A plant visit: the stop the day plan has always had. */
+export interface DayPlanPlantStop {
+  kind: 'PLANT';
   batchId: string;
   stopSequence: number;
   plantId: string;
@@ -682,6 +704,30 @@ export interface DayPlanStop {
   deviceCount: number;
   tickets: DayPlanStopTicket[];
 }
+
+/**
+ * #366 — the Zone Warehouse pickup, first in the day.
+ *
+ * At most one per plan however many parts wait there (an engineer makes a single warehouse visit),
+ * and present only when at least one part is genuinely waiting — never an empty pickup stop.
+ * Sequence 0 so the existing stop numbering is untouched: the engineer cannot do stop 1 without
+ * the part, so the pickup is literally before it rather than a note floating above the list.
+ */
+export interface DayPlanWarehousePickupStop {
+  kind: 'WAREHOUSE_PICKUP';
+  stopSequence: 0;
+  warehouseName: string;
+  parts: DayPlanPickupPart[];
+}
+
+/**
+ * A stop on the day plan — **a discriminated `kind`, not a boolean flag** (#366 decision record
+ * `.scratch/fsm-platform-v1/issues/369-decision-warehouse-pickup-stop.md`). The two shapes
+ * genuinely differ: a pickup has parts and no tickets, no device count and no SLA, because a
+ * warehouse has none of those. A boolean would invite a renderer to read plant fields off a row
+ * that has none; narrowing on `kind` makes that a compile error instead.
+ */
+export type DayPlanStop = DayPlanPlantStop | DayPlanWarehousePickupStop;
 
 /** `dispatched: false` (pre-dispatch, no live schedule) renders the mobile Home "your plan is
  *  being prepared" empty state — `stops` is always `[]` in that case, never a stale prior day's

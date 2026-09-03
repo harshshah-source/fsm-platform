@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import {
   apiScheduleDetail,
   type ScheduleDetail,
+  type SchedulePickup,
   type ScheduleStop,
   type ScheduleStopTicket,
 } from '../../api/schedules';
@@ -107,6 +108,9 @@ export function ScheduleDetailPage() {
       </p>
 
       <ol className="flex flex-col gap-3">
+        {/* #366 — stop 0, and only when it is real. Inside the ordered list, ahead of stop 1: the
+            engineer cannot work stop 1 without the part, so the pickup genuinely comes first. */}
+        {detail.pickup ? <PickupStop pickup={detail.pickup} /> : null}
         {detail.stops.map((stop) => (
           <Stop
             key={stop.batchId}
@@ -119,6 +123,75 @@ export function ScheduleDetailPage() {
         ))}
       </ol>
     </div>
+  );
+}
+
+/** `REQ-1a2b3c4d` — the request's own id, truncated the way this page already truncates ticket and
+ *  engineer ids. There is no separate human reference on `component_request` to print instead. */
+function requestRef(requestId: string): string {
+  return `REQ-${requestId.slice(0, 8)}`;
+}
+
+/**
+ * The Zone Warehouse pickup stop (#366), per the approved design
+ * `docs/ui/desktop/approved-designs/warehouse-pickup-stop.html`.
+ *
+ * **A stop row of its own kind, not a banner and not a differently-coloured plant.** It sits in the
+ * same ordered list at sequence 0 so the numbering stays literal; a banner above the list would say
+ * "also, collect something" and detach the pickup from the sequence it is part of, which is the
+ * ambiguity stop numbering exists to remove. It carries no ticket list, no device count, no SLA and
+ * none of the override controls, because a warehouse has none of those — the shape differs, which is
+ * why `kind` is discriminated on the wire rather than a boolean beside the plant fields.
+ *
+ * **Colour encodes kind, not severity.** Violet because crimson is already spent on critical and
+ * amber on over-capacity in this product's grammar, and a pickup is neither urgent nor wrong — it is
+ * a different sort of thing. The "Pickup" tag carries that meaning in text, so the row survives
+ * grayscale, colour-blind rendering and a screen reader without depending on the hue at all.
+ *
+ * The parts are **named**: a dispatcher checking a plan should not have to open the component
+ * requests to learn what their engineer is carrying. One component request is one component, so the
+ * per-part quantity is structurally ×1; the shipment reference the WM recorded rides in the row's
+ * `title` rather than taking a column that would push the part names off the line.
+ */
+function PickupStop({ pickup }: { pickup: SchedulePickup }) {
+  const count = pickup.parts.length;
+  return (
+    <li
+      data-testid="schedule-pickup-stop"
+      className="rounded-card border border-line border-l-[3px] border-l-violet-500 bg-violet-50 p-3 shadow-sm dark:border-l-violet-400 dark:bg-violet-950/40"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span data-testid="pickup-stop-sequence" className="font-mono text-xs text-ink-caps">
+              Stop 0
+            </span>
+            <span className="font-semibold text-violet-700 dark:text-violet-300">Zone Warehouse</span>
+            <span
+              data-testid="pickup-kind-tag"
+              className="rounded border border-violet-500 px-1.5 text-[0.62rem] font-bold uppercase tracking-wider text-violet-700 dark:border-violet-400 dark:text-violet-300"
+            >
+              Pickup
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-ink-muted">{pickup.warehouseName} · collect before first plant</p>
+          <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs text-ink-muted">
+            {pickup.parts.map((part) => (
+              <li
+                key={part.requestId}
+                data-testid={`pickup-part-${part.requestId}`}
+                title={part.trackingRef ? `Tracking ${part.trackingRef}` : undefined}
+              >
+                {requestRef(part.requestId)} · {part.componentName ?? 'Unnamed component'} ×1
+              </li>
+            ))}
+          </ul>
+        </div>
+        <span className="whitespace-nowrap text-xs text-ink-muted">
+          {count} {count === 1 ? 'part' : 'parts'}
+        </span>
+      </div>
+    </li>
   );
 }
 

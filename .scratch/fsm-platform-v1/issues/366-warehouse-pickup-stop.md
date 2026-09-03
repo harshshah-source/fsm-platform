@@ -1,6 +1,6 @@
 # 366 — Zone Warehouse pickup stop on the Day Plan
-Status: ready-for-human
-Type: HITL (design stop) then AFK
+Status: done 2026-09-04 — report docs/progress/366-warehouse-pickup-stop.md
+Type: HITL (design stop, cleared 2026-09-03 by #369) then AFK
 Wave: 5 · Severity: P3 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
 ## Problem
@@ -30,8 +30,15 @@ the pickup themselves.
 - Mobile rendering is excluded; the rendering (admin and mobile) is behind the design stop below.
 
 ## Acceptance criteria
-- [ ] AC1 — a plan whose tickets have SHIPPED-not-RECEIVED component requests carries exactly one
+- [x] AC1 — a plan whose tickets have SHIPPED-not-RECEIVED component requests carries exactly one
       pickup stop, first; no pickup stop otherwise; the admin schedule detail shows it.
+
+**No schema change was needed** — the premise of "pickup flag/row on the schedule + migration" was
+wrong. The stop is derived at read time from `component_request.status = 'SHIPPED'` (which already
+means shipped-and-not-yet-received) over the plan's live tickets, because "stop 0 appears only when
+it is real" is a present-tense fact: a part shipped after dispatch must appear, and a confirmed
+receipt must make the stop vanish. `schema.prisma` is untouched and no migration exists. Reasoning
+in full in the report.
 
 ## Verification
 
@@ -44,14 +51,15 @@ Admin: schedule detail (modified — pickup stop rendered). Mobile: excluded.
 
 ## Reference
 
-No v2 image and no approved design exists — the PRD carries flow text only. This is a **design
-stop** for the admin/mobile rendering: per the plan, produce one under
-`docs/ui/desktop/approved-designs/` before building the rendering. The slice flips to
-`ready-for-agent` once that design is approved.
+**Approved 2026-09-03**: `docs/ui/desktop/approved-designs/warehouse-pickup-stop.html` is the
+authoritative reference for the pickup stop, with the same standing as a v2 image;
+`12-batch-schedule-review.png` governs the surrounding schedule-detail chrome. The decision record
+is `369-decision-warehouse-pickup-stop.md`.
 
 ## Blocked by
-- #352 — field component wire contract (the `component_requests` rows this stop is derived from).
-- Design stop — an approved design under `docs/ui/desktop/approved-designs/` (HITL).
+- ~~#352 — field component wire contract~~ (landed; the `component_requests` rows this stop is
+  derived from).
+- ~~Design stop~~ — cleared 2026-09-03 (#369).
 
 ## Absorbs / supersedes
 - survey ids: SCH-03.

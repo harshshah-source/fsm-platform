@@ -91,6 +91,8 @@ const dayPlan: DayPlanView = {
   dateTo: '2026-08-04',
   stops: [
     {
+      // #366 — every day-plan stop now names its kind; mobile still renders plant stops only.
+      kind: 'PLANT',
       batchId: 'b-1',
       stopSequence: 1,
       plantId: 'p-1',

@@ -19,6 +19,7 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
   let dispatch: BatchAssignmentService;
   let dayPlan: DayPlanQueryService;
 
+  const zoneName = 'Z-dp-' + NS;
   let zoneId: bigint;
   let companyId: bigint;
   let plantId: bigint;
@@ -80,7 +81,7 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
     dispatch = new BatchAssignmentService(prisma);
     dayPlan = new DayPlanQueryService(prisma);
 
-    zoneId = (await prisma.zone.create({ data: { name: 'Z-dp-' + NS } })).zoneId;
+    zoneId = (await prisma.zone.create({ data: { name: zoneName } })).zoneId;
     companyId = (
       await prisma.company.create({ data: { name: 'Co-dp-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })
     ).companyId;
@@ -128,11 +129,21 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
     expect(view.dispatched).toBe(true);
     expect(view.stops).toHaveLength(1);
     const stop = view.stops[0];
+    // #366 — every stop now says what kind it is; a plant stop is otherwise byte-for-byte today's.
+    expect(stop.kind).toBe('PLANT');
+    if (stop.kind !== 'PLANT') throw new Error('expected a plant stop');
     expect(stop.stopSequence).toBe(1);
     expect(stop.plantId).toBe(String(plantId));
     expect(stop.plantName).toBe(plantName);
     expect(stop.deviceCount).toBe(2);
     expect(stop.tickets.map((t) => t.ticketId).sort()).toEqual([...ticketIds].sort());
+  });
+
+  // #366 AC1 — a plan with nothing waiting at the warehouse must be exactly the plan it is today.
+  it('carries no pickup stop when no ticket on the plan has a SHIPPED component request', async () => {
+    const view = await dayPlan.getDayPlan(se, { now: NOW });
+    expect(view.stops.some((s) => s.kind === 'WAREHOUSE_PICKUP')).toBe(false);
+    expect(view.stops.map((s) => s.stopSequence)).toEqual([1]);
   });
 
   it('returns the empty-state for an SE with no dispatched schedule', async () => {
@@ -170,8 +181,10 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
       const view = await dayPlan.getDayPlan(hollowSe, { now: NOW });
       expect(view.dispatched).toBe(true);
       expect(view.stops).toHaveLength(1); // the hollow stop is gone, not rendered as deviceCount: 0
-      expect(view.stops[0].plantId).toBe(String(plantLiveId));
-      expect(view.stops[0].tickets.map((t) => t.ticketId)).toEqual([liveTicket]);
+      const [only] = view.stops;
+      if (only.kind !== 'PLANT') throw new Error('expected a plant stop');
+      expect(only.plantId).toBe(String(plantLiveId));
+      expect(only.tickets.map((t) => t.ticketId)).toEqual([liveTicket]);
     } finally {
       const schedules = await prisma.workSchedule.findMany({ where: { zoneId, seId: hollowSe }, select: { scheduleId: true } });
       const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } }, select: { batchId: true } });
@@ -184,6 +197,114 @@ describe('Issue 11 slice 5 — DayPlanQueryService.getDayPlan', () => {
       await prisma.ticket.deleteMany({ where: { ticketId: { in: [liveTicket, hollowTicket] } } });
       await prisma.seCoverage.deleteMany({ where: { plantId: { in: [plantLiveId, plantHollowId] } } });
       await prisma.plant.deleteMany({ where: { plantId: { in: [plantLiveId, plantHollowId] } } });
+    }
+  });
+
+  /**
+   * #366 — the Zone Warehouse pickup stop.
+   *
+   * One fixture, four assertions, because they are one fact: an engineer whose part is waiting at the
+   * zone warehouse gets **one** stop 0 naming the parts, and everything else about the plan is
+   * unchanged. The three requests are deliberately in three different states — two SHIPPED on two
+   * different tickets (so "one visit, however many parts" is actually exercised) and one already
+   * RECEIVED (the part is in the van; there is nothing to collect and it must not appear).
+   */
+  it('puts exactly one pickup stop, first, naming every SHIPPED-not-RECEIVED part on the plan', async () => {
+    const pickupSe = await makeSe();
+    const plantOneId = (await prisma.plant.create({ data: { name: 'P-dp-pick-a-' + NS, zoneId } })).plantId;
+    const plantTwoId = (await prisma.plant.create({ data: { name: 'P-dp-pick-b-' + NS, zoneId } })).plantId;
+    await prisma.seCoverage.create({ data: { seId: pickupSe, plantId: plantOneId, coverageType: 'MULTI_PLANT' } });
+    await prisma.seCoverage.create({ data: { seId: pickupSe, plantId: plantTwoId, coverageType: 'MULTI_PLANT' } });
+
+    const modem = await prisma.componentMaster.create({ data: { name: 'Modem board ' + NS } });
+    const antenna = await prisma.componentMaster.create({ data: { name: 'Antenna assembly ' + NS } });
+    const componentIds = [modem.componentId, antenna.componentId];
+
+    const shippedTicket = await makeTicket(plantOneId, 150);
+    const secondShippedTicket = await makeTicket(plantOneId, 140);
+    const receivedTicket = await makeTicket(plantTwoId, 90);
+    const planTickets = [shippedTicket, secondShippedTicket, receivedTicket];
+    const requestIds: string[] = [];
+    const submissionIds: string[] = [];
+
+    /** A component request on a ticket of this plan, in the state the assertion is about. */
+    const request = async (ticketId: string, componentId: bigint, status: 'SHIPPED' | 'RECEIVED') => {
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { ticketId }, select: { failureCycleId: true } });
+      const submission = await prisma.troubleshootingSubmission.create({
+        data: {
+          ticketId,
+          failureCycleId: ticket.failureCycleId!,
+          submissionType: 'TROUBLESHOOTING_FORM',
+          clientSubmissionId: randomUUID(),
+          seId: pickupSe,
+          presenceSource: 'NONE',
+          componentUnavailable: true,
+          componentUnavailableItem: componentId,
+          rootCauseCategory: 'GPS_ANTENNA_ISSUE',
+          submittedAt: NOW,
+        },
+      });
+      submissionIds.push(submission.submissionId);
+      const req = await prisma.componentRequest.create({
+        data: {
+          ticketId,
+          failureCycleId: ticket.failureCycleId!,
+          submissionId: submission.submissionId,
+          seId: pickupSe,
+          componentId,
+          status,
+          shippedAt: NOW,
+          receivedAt: status === 'RECEIVED' ? NOW : null,
+          trackingRef: 'TRK-' + submission.submissionId.slice(0, 8),
+          deliveryDestination: 'PLANT_WAREHOUSE',
+        },
+      });
+      requestIds.push(req.requestId);
+      return req.requestId;
+    };
+
+    try {
+      await rec.runForZone(zoneId, { now: NOW });
+      await dispatch.dispatchForZone(zoneId, { dateFrom: NOW, dateTo: NOW, now: NOW });
+
+      const modemRequest = await request(shippedTicket, modem.componentId, 'SHIPPED');
+      const antennaRequest = await request(secondShippedTicket, antenna.componentId, 'SHIPPED');
+      await request(receivedTicket, modem.componentId, 'RECEIVED');
+
+      const view = await dayPlan.getDayPlan(pickupSe, { now: NOW });
+
+      // Exactly one pickup, and it is first: the engineer cannot do stop 1 without the part.
+      expect(view.stops.filter((s) => s.kind === 'WAREHOUSE_PICKUP')).toHaveLength(1);
+      const pickup = view.stops[0];
+      if (pickup.kind !== 'WAREHOUSE_PICKUP') throw new Error('expected the pickup stop first');
+      expect(pickup.stopSequence).toBe(0);
+      expect(pickup.warehouseName).toContain(zoneName);
+
+      // Both waiting parts named; the RECEIVED one is already in the van and is not listed.
+      expect([...pickup.parts].map((p) => p.requestId).sort()).toEqual([modemRequest, antennaRequest].sort());
+      expect([...pickup.parts].map((p) => p.componentName).sort()).toEqual(
+        [modem.name, antenna.name].sort(),
+      );
+      expect(pickup.parts.every((p) => p.trackingRef !== null)).toBe(true);
+
+      // Plant stop numbering is untouched — the pickup sits *before* stop 1, it does not renumber.
+      const plantStops = view.stops.filter((s) => s.kind === 'PLANT');
+      expect(plantStops.map((s) => s.stopSequence)).toEqual([1, 2]);
+    } finally {
+      await prisma.componentRequest.deleteMany({ where: { requestId: { in: requestIds } } });
+      await prisma.troubleshootingSubmission.deleteMany({ where: { submissionId: { in: submissionIds } } });
+      await prisma.componentMaster.deleteMany({ where: { componentId: { in: componentIds } } });
+      const schedules = await prisma.workSchedule.findMany({ where: { zoneId, seId: pickupSe }, select: { scheduleId: true } });
+      const batches = await prisma.plantBatchAssignment.findMany({ where: { scheduleId: { in: schedules.map((s) => s.scheduleId) } }, select: { batchId: true } });
+      await prisma.batchAssignmentTicket.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
+      await prisma.plantBatchAssignment.deleteMany({ where: { batchId: { in: batches.map((b) => b.batchId) } } });
+      await prisma.workSchedule.deleteMany({ where: { zoneId, seId: pickupSe } });
+      await prisma.recommendation.deleteMany({ where: { ticketId: { in: planTickets } } });
+      await prisma.dispatchDecisionTrace.deleteMany({ where: { ticketId: { in: planTickets } } });
+      await prisma.ticketEvent.deleteMany({ where: { ticketId: { in: planTickets } } });
+      await prisma.ticket.deleteMany({ where: { ticketId: { in: planTickets } } });
+      await prisma.seCoverage.deleteMany({ where: { plantId: { in: [plantOneId, plantTwoId] } } });
+      await prisma.plant.deleteMany({ where: { plantId: { in: [plantOneId, plantTwoId] } } });
     }
   });
 });
