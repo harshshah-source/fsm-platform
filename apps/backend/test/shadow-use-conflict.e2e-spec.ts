@@ -113,6 +113,39 @@ describe('Issue 24 slice 2 — 409 conflict + shadow use + consumption', () => {
     expect(await stockOf(loser)).toBe(4); // 5 - 1, accurate despite the conflict (AC#6)
   });
 
+  // -----------------------------------------------------------------------------------------------
+  // #352 — where the new component validation sits relative to the conflict branch. Both cases below
+  // are decisions, not incidental behaviour, and they point in opposite directions on purpose.
+  // -----------------------------------------------------------------------------------------------
+
+  it('#352 — an unknown component is refused BEFORE the conflict branch (a shadow row would be an FK 500)', async () => {
+    const { ticketId } = await makeTicket();
+    await svc.submit({ ticketId, seId: winner, clientSubmissionId: randomUUID(), rootCauseCategory: 'WIRING_ISSUE', actor: { userId: winner, role: 'SERVICE_ENGINEER' }, now: NOW });
+    const out = await svc.submit({
+      ticketId, seId: loser, clientSubmissionId: randomUUID(), rootCauseCategory: 'WIRING_ISSUE',
+      consumedComponents: [{ componentId: 999_999_999n, qty: 1 }], actor: { userId: loser, role: 'SERVICE_ENGINEER' }, now: NOW,
+    });
+    expect(out.result).toBe('UNKNOWN_COMPONENT');
+    expect(await prisma.inventoryTransaction.count({ where: { ticketId, status: 'SHADOW_USE' } })).toBe(0);
+  });
+
+  it('#352 — a van short of what the loser claims does NOT pre-empt the conflict: shadow use is still recorded', async () => {
+    // Sufficiency is checked only on the path that books consumption against a live van. Here the
+    // parts are already fitted and the answer the SE needs is who won — so the ledger records
+    // physical reality (floored at zero, as it always has) and the 409 stays TICKET_ALREADY_CLOSED.
+    const shortSe = await seedSe(1);
+    const { ticketId } = await makeTicket();
+    await svc.submit({ ticketId, seId: winner, clientSubmissionId: randomUUID(), rootCauseCategory: 'WIRING_ISSUE', actor: { userId: winner, role: 'SERVICE_ENGINEER' }, now: NOW });
+    const out = await svc.submit({
+      ticketId, seId: shortSe, clientSubmissionId: randomUUID(), rootCauseCategory: 'WIRING_ISSUE',
+      consumedComponents: [{ componentId: cable, qty: 3 }], actor: { userId: shortSe, role: 'SERVICE_ENGINEER' }, now: NOW,
+    });
+    expect(out.result).toBe('CONFLICT');
+    expect(out.result === 'CONFLICT' && out.shadowUseRecorded).toBe(true);
+    expect(await prisma.inventoryTransaction.count({ where: { ticketId, seId: shortSe, status: 'SHADOW_USE' } })).toBe(1);
+    expect(await stockOf(shortSe)).toBe(0); // floored, not negative
+  });
+
   it('keeps an idempotency duplicate distinct from a conflict (no inventory movement)', async () => {
     const { ticketId } = await makeTicket();
     const clientSubmissionId = randomUUID();

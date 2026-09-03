@@ -25,6 +25,7 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
   let companyId: bigint;
   let plantId: bigint;
   let cable: bigint;
+  let untracked: bigint; // #352 — a catalog part with no `se_van_stock` row for this SE at all
   let se: string;
   let snapshotRunId: bigint;
   const deviceIds: string[] = [];
@@ -55,6 +56,7 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
     companyId = (await prisma.company.create({ data: { name: 'Co-ir-' + NS, companyTier: 'GOLD', companyPriorityRank: 'B' } })).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-ir-' + NS, zoneId } })).plantId;
     cable = (await prisma.componentMaster.create({ data: { name: 'cable-ir-' + NS } })).componentId;
+    untracked = (await prisma.componentMaster.create({ data: { name: 'untracked-ir-' + NS } })).componentId;
     snapshotRunId = (await prisma.snapshotRun.create({ data: { status: 'SUCCESS', startedAt: T0 } })).runId;
     const tag = randomUUID().slice(0, 8);
     const u = await prisma.user.create({ data: { name: 'SE ' + tag, role: 'SERVICE_ENGINEER', phone: 'ph-' + tag, email: `${tag}@ir.test`, zoneId } });
@@ -77,7 +79,7 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.seVanStock.deleteMany({ where: { seId: se } });
-    await prisma.componentMaster.deleteMany({ where: { componentId: cable } });
+    await prisma.componentMaster.deleteMany({ where: { componentId: { in: [cable, untracked] } } });
     await prisma.snapshotRun.deleteMany({ where: { runId: snapshotRunId } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: se } });
     await prisma.user.deleteMany({ where: { userId: se } });
@@ -114,5 +116,51 @@ describe('Issue 24 slice 3 — inventory rollback on verification outcome', () =
     const txn = await prisma.inventoryTransaction.findFirstOrThrow({ where: { ticketId } });
     expect(txn.status).toBe('ROLLED_BACK');
     expect(await stock()).toBe(before); // restored
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // #352 — the two edges of the guard that now stands in front of this ledger.
+  // -----------------------------------------------------------------------------------------------
+
+  it('#352 — refuses a claim the van cannot cover, leaving the ledger and the stock untouched', async () => {
+    const before = await stock();
+    const { ticketId } = await makeTicket();
+    const out = await submit.submit({
+      ticketId, seId: se, clientSubmissionId: randomUUID(), rootCauseCategory: 'WIRING_ISSUE',
+      consumedComponents: [{ componentId: cable, qty: before + 1 }],
+      actor: { userId: se, role: 'SERVICE_ENGINEER' }, now: T0,
+    });
+    expect(out.result).toBe('INSUFFICIENT_VAN_STOCK');
+    expect(out.result === 'INSUFFICIENT_VAN_STOCK' && out.shortages).toEqual([
+      { componentId: String(cable), requested: before + 1, available: before },
+    ]);
+    expect(await stock()).toBe(before);
+    expect(await prisma.inventoryTransaction.count({ where: { ticketId } })).toBe(0);
+    expect(await prisma.troubleshootingSubmission.count({ where: { ticketId } })).toBe(0);
+    // …and the guard reads the live balance, so the very next submit at an affordable quantity lands.
+    const ok = await submit.submit({
+      ticketId, seId: se, clientSubmissionId: randomUUID(), rootCauseCategory: 'WIRING_ISSUE',
+      consumedComponents: [{ componentId: cable, qty: before }],
+      actor: { userId: se, role: 'SERVICE_ENGINEER' }, now: T0,
+    });
+    expect(ok.result).toBe('OK');
+    expect(await stock()).toBe(0);
+  });
+
+  it('#352 — a component this van does not track at all still books, and does not ground the visit', async () => {
+    // The seam default `commonKitStatus` already takes: van stock is seeded per zone as the warehouse
+    // rolls out, and losing a real visit's whole record to protect a number nobody is keeping yet is
+    // the worse failure. A *tracked* van short of the claim is the case above; this is not that.
+    const { ticketId } = await makeTicket();
+    const out = await submit.submit({
+      ticketId, seId: se, clientSubmissionId: randomUUID(), rootCauseCategory: 'WIRING_ISSUE',
+      consumedComponents: [{ componentId: untracked, qty: 4 }],
+      actor: { userId: se, role: 'SERVICE_ENGINEER' }, now: T0,
+    });
+    expect(out.result).toBe('OK');
+    const txn = await prisma.inventoryTransaction.findFirstOrThrow({ where: { ticketId, componentId: untracked } });
+    expect(txn.qty).toBe(4);
+    expect(txn.status).toBe('PRE_VERIFICATION');
+    expect(await prisma.seVanStock.count({ where: { seId: se, componentId: untracked } })).toBe(0);
   });
 });

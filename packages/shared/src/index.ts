@@ -417,11 +417,28 @@ export const ROOT_CAUSE_CATEGORIES: RootCauseCategory[] = [
   'UNKNOWN',
 ];
 
+/** One component the SE physically consumed on this visit (#352). `componentId` is a
+ *  `component_master` id, stringified — JSON has no bigint, and these ids are `bigserial`.
+ *  `qty` is a positive integer; the server rejects 0 or a fraction at the pipe. */
+export interface ConsumedComponentInput {
+  componentId: string;
+  qty: number;
+}
+
 /** `POST /api/tickets/:id/troubleshoot` request body. `actionTakenCategory` is still an unvalidated
  *  free string server-side (#172 Decision 8: "becomes an enum" is #169/#174's still-open work) —
  *  the mobile tile picker sends the reference image's own literal labels as plain strings, the only
  *  vocabulary that exists anywhere for this field today. `photoRefs` is deliberately omitted here:
- *  photo capture is blocked on #81 (Media Upload API, unbuilt) and not sent by this build. */
+ *  photo capture is blocked on #81 (Media Upload API, unbuilt) and not sent by this build.
+ *
+ *  **Error vocabulary (#352).** Every refusal on this route answers `{ code }`, so a client renders
+ *  a sentence rather than a validator's field message:
+ *  - 400 `CLIENT_SUBMISSION_ID_REQUIRED`, 400 `ROOT_CAUSE_CATEGORY_REQUIRED`
+ *  - 400 `COMPONENT_ITEM_REQUIRED` — `componentUnavailable: true` with no `componentUnavailableItem`
+ *  - 400 `UNKNOWN_COMPONENT` (`{ componentIds }`) — an id naming no `component_master` row, on
+ *    either field
+ *  - 409 `INSUFFICIENT_VAN_STOCK` (`{ shortages }`) — the van does not carry what was consumed
+ *  - 409 `TICKET_ALREADY_CLOSED` — the Business-409 conflict; see `TroubleshootConflictBody` */
 export interface TroubleshootSubmitRequest {
   clientSubmissionId: string;
   rootCauseCategory: RootCauseCategory;
@@ -432,12 +449,45 @@ export interface TroubleshootSubmitRequest {
   /** Server-internal-only field (never rendered to the SE) — not sent by this build. */
   diagnosisNotes?: string;
   componentUnavailable?: boolean;
-  /** A component catalog id, stringified (the controller `BigInt()`-parses it). Not sent by this
-   *  build — no component catalog/picker is wired yet, only the boolean flag above. */
+  /** A `component_master` id, stringified. **Required whenever `componentUnavailable` is true**
+   *  (`ts_submissions_component_unavailable_item` is a CHECK constraint, not a nicety) — omitting it
+   *  is a 400 `COMPONENT_ITEM_REQUIRED`, and an id that names no catalog row is a 400
+   *  `UNKNOWN_COMPONENT`. Read the ids from `GET /api/components` (#352). */
   componentUnavailableItem?: string;
+  /** Components physically consumed on this visit (#352). They decrement `se_van_stock` and enter
+   *  the ledger as `TICKET_CONSUMPTION` / `PRE_VERIFICATION`, resolving to DEDUCTED or ROLLED_BACK on
+   *  the verification outcome. On the Business-409 path they are still recorded — as SHADOW_USE
+   *  against the losing SE's van, which is why `TroubleshootConflictBody.shadowUseRecorded` can now
+   *  be true. Omitting the field is exactly today's behaviour: nothing moves. */
+  consumedComponents?: ConsumedComponentInput[];
   /** Not sent by this build — photo capture is blocked on #81 (Media Upload API, unbuilt). */
   photoRefs?: string[];
   seGps?: { lat: number; lon: number };
+}
+
+/** `GET /api/components` row — the whole component catalog (`component_master`), readable by every
+ *  authenticated role. The SE's component picker reads it to turn a part into the id that
+ *  `componentUnavailableItem` / `consumedComponents[].componentId` require (#352, the catalog half
+ *  of #173). There is no `active` column on `component_master`: the catalog is the catalog. */
+export interface ComponentCatalogItem {
+  componentId: string;
+  name: string;
+  category: string | null;
+  serialTracked: boolean;
+}
+
+/** 409 `INSUFFICIENT_VAN_STOCK` body (#352) — one entry per component the van cannot cover, so the
+ *  client can name the part and the number instead of "submission failed". */
+export interface InsufficientVanStockBody {
+  code: 'INSUFFICIENT_VAN_STOCK';
+  shortages: { componentId: string; requested: number; available: number }[];
+}
+
+/** 400 `UNKNOWN_COMPONENT` body (#352) — the ids that name no `component_master` row. Almost always
+ *  a stale picker cache: refetch `GET /api/components`. */
+export interface UnknownComponentBody {
+  code: 'UNKNOWN_COMPONENT';
+  componentIds: string[];
 }
 
 export interface TroubleshootSubmissionView {
@@ -464,9 +514,11 @@ export interface TroubleshootSubmitResponse {
  *  `winnerSeId`/`winnerSeName`/`winnerAt` all null; render accordingly, never a lie like "closed
  *  by null"). Distinct from a `DUPLICATE`, which is a 200. `winnerSeName` resolves the winner's
  *  `User.name` server-side (#63) so the client never renders a bare UUID at a field engineer.
- *  `shadowUseRecorded` is still permanently `false` over HTTP today — `TroubleshootSubmitRequest`
- *  carries no `consumedComponents` field yet (structural gap owned by #101) — but the type is
- *  correct for whenever that lands. */
+ *  `shadowUseRecorded` is true when the losing SE sent `consumedComponents` and the server booked
+ *  them against their van as SHADOW_USE for warehouse reconciliation (#352 wired the field that
+ *  used to make this permanently `false` over HTTP). The van is short either way — the SE fitted the
+ *  part before learning they had lost the race — so the ledger records physical reality and the
+ *  refusal is about the ticket, not the parts. */
 export interface TroubleshootConflictBody {
   code: 'TICKET_ALREADY_CLOSED';
   status: string;

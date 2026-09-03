@@ -20,6 +20,7 @@ import { DevicesController } from './devices/devices.controller';
 import { IngestionModule } from './ingestion/ingestion.module';
 import { SnapshotsController } from './ingestion/snapshots.controller';
 import { InventoryModule } from './inventory/inventory.module';
+import { ComponentCatalogController } from './inventory/component-catalog.controller';
 import { ComponentBlockedController, MeInventoryController } from './inventory/inventory.controller';
 import { WarehouseStockController } from './inventory/warehouse-stock.controller';
 import { ShadowUseController } from './inventory/shadow-use.controller';
@@ -190,6 +191,8 @@ import { MediaController } from './media/media.controller';
     VerificationController,
     ComponentBlockedController,
     MeInventoryController,
+    // #352 — GET /api/components, the catalog the SE's component picker reads (catalog half of #173).
+    ComponentCatalogController,
     WarehouseStockController,
     ShadowUseController,
     WarehouseRequestsController,

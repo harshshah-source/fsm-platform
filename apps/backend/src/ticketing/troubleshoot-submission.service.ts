@@ -59,10 +59,25 @@ export interface SubmissionView {
   submittedAt: Date;
 }
 
+/** One component the van cannot cover (#352) — named, so the SE reads a part and a number. */
+export interface VanStockShortage {
+  componentId: string;
+  requested: number;
+  available: number;
+}
+
 export type SubmitOutcome =
   | { result: 'OK'; duplicate: false; submission: SubmissionView }
   | { result: 'DUPLICATE'; duplicate: true; submission: SubmissionView }
   | { result: 'NOT_FOUND' }
+  // #352 — the three named refusals of the component wire contract. They are outcomes rather than
+  // thrown exceptions because every other refusal on this path already is one, and because the
+  // service must answer them the same way to its many direct (spec, resubmit) callers as it does to
+  // the controller. Each replaces a 500: a CHECK-constraint violation, an FK violation, and a
+  // silently floored-at-zero van respectively.
+  | { result: 'COMPONENT_ITEM_REQUIRED' }
+  | { result: 'UNKNOWN_COMPONENT'; componentIds: string[] }
+  | { result: 'INSUFFICIENT_VAN_STOCK'; shortages: VanStockShortage[] }
   | {
       // Business 409 (CONTEXT §Business 409 Conflict): the Ticket is no longer actionable because
       // another SE's submission already won (or auto-recovery closed it). Distinct from a DUPLICATE.
@@ -124,7 +139,30 @@ export class TroubleshootSubmissionService {
     if (!(await this.coverage.isPlantCovered(input.seId, ticket.plantId))) {
       return { result: 'NOT_FOUND' };
     }
+
+    // #352 — the request's own component claims, judged before the status branch.
+    //
+    // `ts_submissions_component_unavailable_item` is a CHECK constraint, not a nicety. Reaching it is
+    // a 500 that tells the SE nothing and leaves the warehouse queue empty; this is the same refusal,
+    // named. Repeated in the controller so the HTTP answer is the code and not a pipe message.
+    if (input.componentUnavailable && input.componentUnavailableItem == null) {
+      return { result: 'COMPONENT_ITEM_REQUIRED' };
+    }
+    // Identity is checked for BOTH paths, hence its position above the status branch: `handleConflict`
+    // writes SHADOW_USE rows against `component_master`, so an id naming no catalog row is an FK
+    // violation (a 500) there just as it is here. A bad id is a client bug — a stale picker cache —
+    // whichever way the race went.
+    const unknown = await this.unknownComponents(input);
+    if (unknown.length > 0) return { result: 'UNKNOWN_COMPONENT', componentIds: unknown };
+
     if (ticket.status !== 'OPEN') return this.handleConflict(ticket.status, input);
+
+    // Sufficiency, in contrast, is checked ONLY on the path that is about to book consumption
+    // against a live van. On the conflict path the parts are already fitted and the answer the SE
+    // needs is who won, not an inventory lecture — so shadow use records physical reality (floored
+    // at zero) and keeps its own 409. See `handleConflict`.
+    const shortages = await this.vanStockShortages(input.seId, input.consumedComponents ?? []);
+    if (shortages.length > 0) return { result: 'INSUFFICIENT_VAN_STOCK', shortages };
 
     const presenceSource: PresenceSource = input.presenceSource ?? (input.seGps ? 'FORM_GPS' : 'NONE');
 
@@ -256,6 +294,13 @@ export class TroubleshootSubmissionService {
             },
           },
         });
+        // #352 — parts consumed on THIS visit are booked here too. "One component was unavailable"
+        // is not "nothing was fitted": the SE routinely replaces two parts and finds the third
+        // missing, and dropping those two would leave the van's book value permanently above its
+        // physical contents. The rows are PRE_VERIFICATION like any other consumption and resolve at
+        // the eventual verification, which keys on the ticket (`verification.service.ts`) — the
+        // resubmit that follows the part's arrival closes the same ticket.
+        await this.recordConsumption(tx, input, created.submissionId);
         return created;
       }
 
@@ -291,22 +336,7 @@ export class TroubleshootSubmissionService {
         },
       });
 
-      // Consumed components enter the ledger as PRE_VERIFICATION and decrement van stock; they resolve
-      // to DEDUCTED / ROLLED_BACK on the verification outcome (Issue 24, slice 3).
-      for (const c of input.consumedComponents ?? []) {
-        await this.decrementStock(tx, input.seId, c.componentId, c.qty);
-        await tx.inventoryTransaction.create({
-          data: {
-            seId: input.seId,
-            componentId: c.componentId,
-            qty: c.qty,
-            ticketId: input.ticketId,
-            submissionId: created.submissionId,
-            type: 'TICKET_CONSUMPTION',
-            status: 'PRE_VERIFICATION',
-          },
-        });
-      }
+      await this.recordConsumption(tx, input, created.submissionId);
       return created;
     });
 
@@ -368,6 +398,87 @@ export class TroubleshootSubmissionService {
       },
       shadowUseRecorded,
     };
+  }
+
+  /**
+   * Consumed components enter the ledger as PRE_VERIFICATION and decrement van stock; they resolve to
+   * DEDUCTED / ROLLED_BACK on the verification outcome (Issue 24, slice 3). Called on both accepted
+   * paths — normal submit and component-unavailable — so the ledger records what was fitted rather
+   * than only what was fitted on visits that happened to go well (#352).
+   */
+  private async recordConsumption(
+    tx: Prisma.TransactionClient,
+    input: SubmitTroubleshootInput,
+    submissionId: string,
+  ): Promise<void> {
+    for (const c of input.consumedComponents ?? []) {
+      await this.decrementStock(tx, input.seId, c.componentId, c.qty);
+      await tx.inventoryTransaction.create({
+        data: {
+          seId: input.seId,
+          componentId: c.componentId,
+          qty: c.qty,
+          ticketId: input.ticketId,
+          submissionId,
+          type: 'TICKET_CONSUMPTION',
+          status: 'PRE_VERIFICATION',
+        },
+      });
+    }
+  }
+
+  /**
+   * The component ids this submission names — the unavailable item and every consumed part — that
+   * exist in no `component_master` row (#352). Returned stringified, in the order the request named
+   * them, because that is what the client has to match back to its picker.
+   */
+  private async unknownComponents(input: SubmitTroubleshootInput): Promise<string[]> {
+    const named: bigint[] = [
+      ...(input.componentUnavailableItem != null ? [input.componentUnavailableItem] : []),
+      ...(input.consumedComponents ?? []).map((c) => c.componentId),
+    ];
+    if (named.length === 0) return [];
+    const rows = await this.prisma.componentMaster.findMany({
+      where: { componentId: { in: named } },
+      select: { componentId: true },
+    });
+    const known = new Set(rows.map((r) => String(r.componentId)));
+    const missing: string[] = [];
+    for (const id of named.map(String)) {
+      if (!known.has(id) && !missing.includes(id)) missing.push(id);
+    }
+    return missing;
+  }
+
+  /**
+   * Components the SE's van cannot cover (#352). Quantities are folded per component first, so two
+   * lines of the same part are judged against one balance rather than each passing on its own.
+   *
+   * **A component with no `se_van_stock` row at all passes.** That is the same seam default
+   * `commonKitStatus` takes ("inventory not yet tracked — don't ground an SE on a data gap"): van
+   * stock is seeded per zone as the warehouse rolls out, and refusing a genuine field submission
+   * because nobody has yet typed the SE's van into the system would lose the visit's whole record to
+   * protect a number that is not being kept. A tracked van short of the claim is a different thing —
+   * that is a mis-pick or a typo, and it is refused.
+   *
+   * Read outside the transaction: the van has exactly one holder, and the mobile client submits one
+   * form at a time, so the read-then-write window is not a race this build needs to close.
+   */
+  private async vanStockShortages(seId: string, consumed: ConsumedComponent[]): Promise<VanStockShortage[]> {
+    if (consumed.length === 0) return [];
+    const wanted = new Map<string, number>();
+    for (const c of consumed) wanted.set(String(c.componentId), (wanted.get(String(c.componentId)) ?? 0) + c.qty);
+    const rows = await this.prisma.seVanStock.findMany({
+      where: { seId, componentId: { in: [...new Set(consumed.map((c) => c.componentId))] } },
+    });
+    const have = new Map(rows.map((r) => [String(r.componentId), r.qty]));
+    const shortages: VanStockShortage[] = [];
+    for (const [componentId, requested] of wanted) {
+      if (!have.has(componentId)) continue; // untracked — see the docstring
+      const available = have.get(componentId)!;
+      if (requested > available) shortages.push({ componentId, requested, available });
+    }
+    return shortages;
   }
 
   /** Decrement an SE's van stock for a consumed component (floored at 0). No-op when untracked. */

@@ -1,5 +1,5 @@
 # 352 — Field component wire contract: component identity + consumed parts
-Status: ready-for-agent
+Status: done 2026-09-03 — report `docs/progress/352-field-component-wire-contract.md`
 Type: AFK
 Wave: 3 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -46,14 +46,14 @@ complete, Component-Blocked never fires, and `shadowUseRecorded` is always false
 
 ## Acceptance criteria
 
-- [ ] AC1 — component-unavailable with an item → 201 and a `component_requests` row carrying the
+- [x] AC1 — component-unavailable with an item → 201 and a `component_requests` row carrying the
       component; without an item → 400, never 500.
-- [ ] AC2 — `consumedComponents` decrements `se_van_stock`, writes `TICKET_CONSUMPTION`
+- [x] AC2 — `consumedComponents` decrements `se_van_stock`, writes `TICKET_CONSUMPTION`
       transactions, and on the business-409 path records SHADOW_USE with `shadowUseRecorded: true`.
-- [ ] AC3 — Common Kit status changes after a consumption that empties a kit item, and the
+- [x] AC3 — Common Kit status changes after a consumption that empties a kit item, and the
       recommender writes `component_blocked_queue`.
-- [ ] AC4 — `GET /api/components` returns the catalog.
-- [ ] AC5 — submissions without the new fields behave exactly as today.
+- [x] AC4 — `GET /api/components` returns the catalog.
+- [x] AC5 — submissions without the new fields behave exactly as today.
 
 ## Verification
 

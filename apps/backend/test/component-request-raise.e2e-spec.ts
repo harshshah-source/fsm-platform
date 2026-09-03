@@ -21,6 +21,7 @@ describe('Issue 22 slice 2 — component-unavailable submit raises a request + p
   let companyId: bigint;
   let plantId: bigint;
   let componentId: bigint;
+  let cableId: bigint; // #352 — a second catalog part, the one the SE actually fitted on this visit
   let se: string;
   const deviceIds: string[] = [];
   const ticketIds: string[] = [];
@@ -58,6 +59,7 @@ describe('Issue 22 slice 2 — component-unavailable submit raises a request + p
     ).companyId;
     plantId = (await prisma.plant.create({ data: { name: 'P-crr-' + NS, zoneId } })).plantId;
     componentId = (await prisma.componentMaster.create({ data: { name: 'antenna-' + NS } })).componentId;
+    cableId = (await prisma.componentMaster.create({ data: { name: 'cable-crr-' + NS } })).componentId;
 
     const tag = randomUUID().slice(0, 8);
     const u = await prisma.user.create({
@@ -66,10 +68,13 @@ describe('Issue 22 slice 2 — component-unavailable submit raises a request + p
     se = u.userId;
     await prisma.engineerMaster.create({ data: { engineerId: se, coverageType: 'DEDICATED', zoneId, dailyCapacity: 10 } });
     await prisma.seCoverage.create({ data: { seId: se, plantId, coverageType: 'DEDICATED' } });
+    await prisma.seVanStock.create({ data: { seId: se, componentId: cableId, qty: 5 } });
   });
 
   afterAll(async () => {
     await prisma.seCoverage.deleteMany({ where: { seId: se } });
+    await prisma.inventoryTransaction.deleteMany({ where: { ticketId: { in: ticketIds } } });
+    await prisma.seVanStock.deleteMany({ where: { seId: se } });
     await prisma.componentRequest.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.troubleshootingSubmission.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
@@ -78,7 +83,7 @@ describe('Issue 22 slice 2 — component-unavailable submit raises a request + p
     await prisma.ticket.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.failureCycle.deleteMany({ where: { deviceId: { in: deviceIds } } });
     await prisma.device.deleteMany({ where: { deviceId: { in: deviceIds } } });
-    await prisma.componentMaster.deleteMany({ where: { componentId } });
+    await prisma.componentMaster.deleteMany({ where: { componentId: { in: [componentId, cableId] } } });
     await prisma.engineerMaster.deleteMany({ where: { engineerId: se } });
     await prisma.user.deleteMany({ where: { userId: se } });
     await prisma.plant.deleteMany({ where: { plantId } });
@@ -171,5 +176,76 @@ describe('Issue 22 slice 2 — component-unavailable submit raises a request + p
     expect(cycle.state).toBe('SUBMITTED');
     expect(cycle.slaPaused).toBe(false);
     expect(await prisma.componentRequest.count({ where: { ticketId } })).toBe(0);
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // #352 — the raise is only reachable if the request can name the component. These are the refusals
+  // that used to be a CHECK-constraint 500 (no submission, no request, an empty warehouse queue and
+  // nothing in the response saying why).
+  // -----------------------------------------------------------------------------------------------
+
+  it('#352 — component-unavailable with no item is COMPONENT_ITEM_REQUIRED, and writes nothing', async () => {
+    const { ticketId, cycleId } = await makeTicket();
+    const outcome = await svc.submit({
+      ticketId,
+      seId: se,
+      clientSubmissionId: randomUUID(),
+      rootCauseCategory: 'GPS_ANTENNA_ISSUE',
+      componentUnavailable: true,
+      actor: actor(),
+      now: NOW,
+    });
+    expect(outcome.result).toBe('COMPONENT_ITEM_REQUIRED');
+    expect(await prisma.troubleshootingSubmission.count({ where: { ticketId } })).toBe(0);
+    expect(await prisma.componentRequest.count({ where: { ticketId } })).toBe(0);
+    // The cycle is untouched: a refused submission must not leave the SLA paused on a raise that
+    // never happened.
+    const cycle = await prisma.failureCycle.findUniqueOrThrow({ where: { cycleId } });
+    expect(cycle.state).toBe('OPEN');
+    expect(cycle.slaPaused).toBe(false);
+  });
+
+  it('#352 — an item naming no catalog row is UNKNOWN_COMPONENT, not an FK failure', async () => {
+    const { ticketId } = await makeTicket();
+    const outcome = await svc.submit({
+      ticketId,
+      seId: se,
+      clientSubmissionId: randomUUID(),
+      rootCauseCategory: 'GPS_ANTENNA_ISSUE',
+      componentUnavailable: true,
+      componentUnavailableItem: 999_999_999n,
+      actor: actor(),
+      now: NOW,
+    });
+    expect(outcome.result).toBe('UNKNOWN_COMPONENT');
+    expect(outcome.result === 'UNKNOWN_COMPONENT' && outcome.componentIds).toEqual(['999999999']);
+    expect(await prisma.troubleshootingSubmission.count({ where: { ticketId } })).toBe(0);
+  });
+
+  it('#352 — parts fitted on a component-unavailable visit still reach the ledger', async () => {
+    // "One component was unavailable" is not "nothing was fitted". Before #352 the consumption loop
+    // ran only on the normal path, so these two cables left the van and never left the books.
+    const { ticketId } = await makeTicket();
+    const before = (await prisma.seVanStock.findUniqueOrThrow({ where: { seId_componentId: { seId: se, componentId: cableId } } })).qty;
+    const outcome = await svc.submit({
+      ticketId,
+      seId: se,
+      clientSubmissionId: randomUUID(),
+      rootCauseCategory: 'WIRING_ISSUE',
+      componentUnavailable: true,
+      componentUnavailableItem: componentId,
+      consumedComponents: [{ componentId: cableId, qty: 2 }],
+      actor: actor(),
+      now: NOW,
+    });
+    expect(outcome.result).toBe('OK');
+
+    expect(await prisma.componentRequest.count({ where: { ticketId } })).toBe(1); // the raise still happens
+    const txns = await prisma.inventoryTransaction.findMany({ where: { ticketId, seId: se } });
+    expect(txns).toHaveLength(1);
+    expect(txns[0].componentId).toBe(cableId);
+    expect(txns[0].status).toBe('PRE_VERIFICATION');
+    const after = (await prisma.seVanStock.findUniqueOrThrow({ where: { seId_componentId: { seId: se, componentId: cableId } } })).qty;
+    expect(after).toBe(before - 2);
   });
 });
