@@ -9,7 +9,13 @@ const FITTED_TICKS = 5;
 
 export interface TrendDatum {
   label: string;
-  value: number;
+  /**
+   * `null` is a **gap**, not a zero (#346). The month (or bucket) keeps its place on the X axis and
+   * the line breaks over it — recharts leaves a null point unplotted, which is the only rendering
+   * that says "we do not know" rather than inventing a value. Dropping the point instead would
+   * silently relabel the axis; plotting a `0` or a `100` would invent a catastrophe or a perfect month.
+   */
+  value: number | null;
 }
 
 /**
@@ -64,7 +70,7 @@ export function TrendChart({
    */
   const domain = useMemo<[number | 'auto', number | 'auto']>(() => {
     if (zeroBaseline) return [0, 'auto'];
-    const values = data.map((d) => d.value).filter((v) => Number.isFinite(v));
+    const values = data.map((d) => d.value).filter((v): v is number => v !== null && Number.isFinite(v));
     if (values.length < 2) return [0, 'auto'];
     const min = Math.min(...values);
     const max = Math.max(...values);
@@ -83,11 +89,23 @@ export function TrendChart({
     return [lo, hi];
   }, [data, zeroBaseline, format]);
 
-  const latest = showLatest && data.length ? data[data.length - 1] : null;
+  /**
+   * The direct label goes on the last point that HAS a value, not the last point. A trailing gap (a
+   * month the cube has not computed yet) would otherwise put a `null` on the ReferenceDot and either
+   * drop the label or draw it at the axis floor.
+   */
+  const latest = useMemo(() => {
+    if (!showLatest) return null;
+    for (let i = data.length - 1; i >= 0; i--) {
+      const d = data[i];
+      if (d && d.value !== null && Number.isFinite(d.value)) return { label: d.label, value: d.value };
+    }
+    return null;
+  }, [data, showLatest]);
 
   // Drives whole-axis compaction, so the ticks cannot switch notation partway down the scale.
   const axisMax = useMemo(
-    () => data.reduce((max, d) => (Number.isFinite(d.value) ? Math.max(max, d.value) : max), 0),
+    () => data.reduce((max, d) => (d.value !== null && Number.isFinite(d.value) ? Math.max(max, d.value) : max), 0),
     [data],
   );
 
@@ -128,6 +146,10 @@ export function TrendChart({
             stroke={color}
             strokeWidth={2}
             dot={false}
+            // #346 — explicit, because this is the behaviour the honesty fix depends on: a `null`
+            // point BREAKS the line. It is already recharts' default, and a default is not a decision
+            // record; someone reaching for `connectNulls` to "tidy up the chart" should see it named.
+            connectNulls={false}
             // A single-point series draws no line segment and so would render as an empty plot.
             activeDot={{ r: 4, strokeWidth: 0 }}
             isAnimationActive={false}

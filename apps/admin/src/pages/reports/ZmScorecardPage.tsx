@@ -23,9 +23,22 @@ export function ZmScorecardPage() {
   const loading = report === null && error === null;
   const rows = report?.rows ?? [];
 
-  // Leader: the ZM with the highest zone Fleet-Uptime compliance over the range.
+  /**
+   * Leader: the ZM with the highest zone Fleet-Uptime compliance over the range.
+   *
+   * #346 — a zone with no eligible device-time has `zoneSlaCompliancePct === null` (it used to be
+   * `100`, which crowned the emptiest zone as the best-run one). Such rows are not candidates at all:
+   * "we have no measurement" is not a score, and with no measured zone in the range there is no top
+   * performer to name and the card does not render.
+   */
   const leader = useMemo(
-    () => rows.reduce<ZmScorecardRow | null>((top, r) => (!top || r.zoneSlaCompliancePct > top.zoneSlaCompliancePct ? r : top), null),
+    () =>
+      rows
+        .filter((r): r is ZmScorecardRow & { zoneSlaCompliancePct: number } => r.zoneSlaCompliancePct !== null)
+        .reduce<(ZmScorecardRow & { zoneSlaCompliancePct: number }) | null>(
+          (top, r) => (!top || r.zoneSlaCompliancePct > top.zoneSlaCompliancePct ? r : top),
+          null,
+        ),
     [rows],
   );
 
@@ -39,7 +52,13 @@ export function ZmScorecardPage() {
       key: 'sla',
       header: 'Zone SLA',
       align: 'right',
-      render: (r) => <span className="font-medium text-ink-strong">{r.zoneSlaCompliancePct}%</span>,
+      // #346 — no eligible device-time means no compliance figure; an em dash, never a fabricated 100.
+      render: (r) =>
+        r.zoneSlaCompliancePct === null ? (
+          <span className="text-ink-muted">—</span>
+        ) : (
+          <span className="font-medium text-ink-strong">{r.zoneSlaCompliancePct}%</span>
+        ),
     },
   ];
 

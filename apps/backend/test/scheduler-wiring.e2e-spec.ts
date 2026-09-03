@@ -5,6 +5,10 @@ import { vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { IntegrationSyncService } from '../src/ingestion/autoplant/integration-sync.service';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { BusinessSweepSchedulerService } from '../src/scheduling/business-sweep-scheduler.service';
+import { FleetUptimeAggregationService } from '../src/reports/fleet-uptime-aggregation.service';
+import { RootCauseAnalyticsAggregationService } from '../src/reports/root-cause-aggregation.service';
+import { ZmPerformanceAggregationService } from '../src/reports/zm-performance-aggregation.service';
 import { AutoRecoveryService } from '../src/ticketing/auto-recovery.service';
 
 /**
@@ -91,6 +95,69 @@ describe('#229 AC-2 — scheduled-work wiring, asserted on the real AppModule', 
 
     expect(registered).toEqual(EXPECTED_CRON_JOBS);
     expect(registered).toHaveLength(21);
+  });
+
+  /**
+   * #346 AC3 — **coverage, asserted on the clock and on the call.**
+   *
+   * The three monthly cubes were pinned to the 1st of the month (`0 3 1 * *`), so on every other day
+   * of the month the current month had no row at all — and the report, asked for the current month by
+   * default, answered `100` for it. Two separate bindings have to hold, and they fail independently:
+   *
+   *  1. the cron has to fire on *every* day, not only day-of-month 1 — read off the registry, which is
+   *     what actually schedules the work, not off the default constant;
+   *  2. a tick has to compute **both** months — the current one so today's report has a row, and the
+   *     previous one so the month just ended is still finalised by the run on the 1st. Dropping the
+   *     previous month would leave every completed month short of its last 21 hours.
+   */
+  describe('#346 — the monthly cubes cover the current month, daily', () => {
+    const CUBE_JOBS = ['business-fleet-uptime', 'business-root-cause', 'business-zm-performance'];
+
+    it('schedules each cube every day, not only on the 1st of the month', () => {
+      const jobs = app.get(SchedulerRegistry).getCronJobs();
+      for (const name of CUBE_JOBS) {
+        const source = String(jobs.get(name)?.cronTime.source);
+        const dayOfMonth = source.split(' ')[2];
+        expect(source).toBeTruthy();
+        // `0 3 1 * *` ran twelve times a year. A daily cadence leaves day-of-month unconstrained.
+        expect(dayOfMonth).toBe('*');
+      }
+    });
+
+    it('each cube tick computes the previous AND the current UTC month', async () => {
+      const now = new Date('2026-07-14T03:00:00.000Z');
+      const june = new Date(Date.UTC(2026, 5, 1));
+      const july = new Date(Date.UTC(2026, 6, 1));
+
+      const scheduler = app.get(BusinessSweepSchedulerService);
+      const spies = {
+        fleetUptime: vi.spyOn(app.get(FleetUptimeAggregationService), 'computeMonth').mockResolvedValue({ month: '2026-07-01', devices: 0 }),
+        rootCause: vi.spyOn(app.get(RootCauseAnalyticsAggregationService), 'computeMonth').mockResolvedValue({ month: '2026-07-01', submissions: 0 }),
+        zmPerformance: vi.spyOn(app.get(ZmPerformanceAggregationService), 'computeMonth').mockResolvedValue({ month: '2026-07-01', zms: 0 }),
+      };
+      // The container's own instance is dormant in test env (`BUSINESS_SWEEPS_ENABLED` unset), and the
+      // dormant gate is the FIRST thing `runGuarded` checks — so drive the handler bodies directly.
+      // This asserts the month arithmetic, not the gate; `business-sweep-scheduler.e2e-spec.ts` owns
+      // the gate and `cron-tick-claim-wiring.e2e-spec.ts` owns the claim.
+      const enabled = scheduler as unknown as { config: { enabled: boolean } };
+      const wasEnabled = enabled.config.enabled;
+      enabled.config.enabled = true;
+      try {
+        await scheduler.fleetUptimeTick(now);
+        await scheduler.rootCauseTick(now);
+        await scheduler.zmPerformanceTick(now);
+      } finally {
+        enabled.config.enabled = wasEnabled;
+        await prisma.cronTickClaim.deleteMany({ where: { windowStart: new Date('2026-07-14T03:00:00.000Z') } });
+      }
+
+      for (const spy of Object.values(spies)) {
+        expect(spy).toHaveBeenCalledWith(june, now);
+        expect(spy).toHaveBeenCalledWith(july, now);
+        expect(spy).toHaveBeenCalledTimes(2);
+        spy.mockRestore();
+      }
+    });
   });
 
   it('reaches the auto-recovery pre-check from the telemetry tick, and surfaces its result', async () => {

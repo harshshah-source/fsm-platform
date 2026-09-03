@@ -1,5 +1,5 @@
 # 346 — Fleet-uptime honesty + monthly cube coverage
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/346-fleet-uptime-honesty-cube-coverage.md
 Type: AFK
 Wave: 2 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -40,12 +40,12 @@ guarded (`ManagerDashboard.tsx:85`). No test covers an empty month.
 
 ## Acceptance criteria
 
-- [ ] AC1 — empty window → `uptimePct: null`, `eligibleDeviceCount: 0`, never 100
-- [ ] AC2 — trend chart shows a gap / "no data" for such months
-- [ ] AC3 — current month is recomputed daily and the previous month is still finalised on the
+- [x] AC1 — empty window → `uptimePct: null`, `eligibleDeviceCount: 0`, never 100
+- [x] AC2 — trend chart shows a gap / "no data" for such months
+- [x] AC3 — current month is recomputed daily and the previous month is still finalised on the
       first of the month
-- [ ] AC4 — e2e for the empty month
-- [ ] AC5 — manual recompute endpoints unchanged
+- [x] AC4 — e2e for the empty month
+- [x] AC5 — manual recompute endpoints unchanged
 
 ## Verification
 
@@ -72,3 +72,18 @@ n/a (no layout change — existing surfaces gain a "no data" state)
 ## Downstream
 
 365 (SE productivity report) depends on this (plan §3).
+
+## Notes on execution (2026-09-03)
+
+- The issue's `api/reports.ts:86,92` line reference for the "zone/plant maps" was off by file: those
+  maps are built in `ManagerDashboard.tsx:86,92` (and again at `:133,:137` in the reload path). Fixed
+  there with a `measuredUptime()` helper that omits unmeasured groups, which keeps
+  `Map<string, number>` intact and left `ScorecardTable`, `CompanyPlantTable`, `ZmDashboard`,
+  `CentralDashboard` and `OpsHeadDashboard` untouched (they already render a missing entry as "—").
+- `fleet-uptime-aggregation.service.ts` was **not** changed. The clamp the plan cites is real:
+  `windowEnd = min(now, monthEnd)` with `windowSeconds` floored at `Math.max(0, …)`.
+- `zoneSlaCompliancePct` (ZM scorecard rows and trend points) shares the same `uptimePct` helper and
+  so became `number | null` too — guarded in `ZmScorecardPage`.
+- Two files outside the slice's declared ownership carried a one-line consequence:
+  `components/charts/TrendChart.tsx` (`TrendDatum.value: number | null`, so a gap can be drawn at all)
+  and `test/cron-tick-claim-wiring.e2e-spec.ts` (a `toHaveBeenCalledTimes(1)` that is 2 now).

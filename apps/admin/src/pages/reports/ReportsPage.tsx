@@ -5,7 +5,9 @@ import {
   apiSoftInactiveTrend,
   apiVerificationOutcomes,
   apiWorkTypeMix,
+  fleetUptimeOrGap,
   type FleetUptimeReport,
+  type FleetUptimeTrendPoint,
   type SoftInactiveTrend,
   type VerificationOutcomesReport,
   type VerifyOutcomeKey,
@@ -56,7 +58,7 @@ const OUTCOME_LABEL: Record<VerifyOutcomeKey, string> = {
  */
 export function ReportsPage() {
   const [fleet, setFleet] = useState<FleetUptimeReport | null>(null);
-  const [uptimeTrend, setUptimeTrend] = useState<TrendDatum[] | null>(null);
+  const [uptimeTrend, setUptimeTrend] = useState<FleetUptimeTrendPoint[] | null>(null);
   const [zones, setZones] = useState<ZoneOverviewRow[] | null>(null);
   const [softInactive, setSoftInactive] = useState<SoftInactiveTrend | null>(null);
   const [softInactiveGated, setSoftInactiveGated] = useState(false);
@@ -108,8 +110,23 @@ export function ReportsPage() {
     [zones],
   );
 
+  /**
+   * #346 — the KPI's ONE source of truth about whether this month has an uptime at all. A month with
+   * no eligible device-time is `null` here and renders as an em dash with a hint that says so: the
+   * page defaults to the CURRENT month, which is exactly the month the cube cron used to skip, so
+   * "no data" is a normal state of this card and not an error.
+   */
+  const fleetUptimeValue = fleetUptimeOrGap(fleet);
+  const fleetUptimeMissing = fleet !== null && fleetUptimeValue === null;
+
   const metrics: Metric[] = [
-    { label: 'Fleet Uptime', value: fleet ? `${fleet.fleet.uptimePct}%` : '—', hint: 'Eligible-device weighted', tone: 'success' },
+    {
+      label: 'Fleet Uptime',
+      value: fleetUptimeValue === null ? '—' : `${fleetUptimeValue}%`,
+      hint: fleetUptimeMissing ? 'No data for this month' : 'Eligible-device weighted',
+      tone: fleetUptimeMissing ? 'neutral' : 'success',
+      testId: 'kpi-fleet-uptime',
+    },
     { label: 'Total Inactive', value: totalInactive, hint: 'Across scoped zones', tone: 'warning' },
     { label: 'Critical+', value: criticalPlus, hint: 'High-severity buckets', tone: 'critical' },
     { label: 'Eligible Devices', value: fleet?.fleet.eligibleDeviceCount ?? '—', hint: 'Active-PGI fleet', tone: 'info' },
@@ -126,8 +143,13 @@ export function ReportsPage() {
     })).filter((b) => b.value > 0);
   }, [zones]);
 
+  // #346 — a zone with no eligible device-time is absent from the bars rather than drawn as a
+  // zero-height (or full-height) bar. A bar chart has no way to say "unknown"; omission does.
   const fleetByZone: BarDatum[] = useMemo(
-    () => (fleet?.rows ?? []).map((r) => ({ name: r.name, value: r.uptimePct })),
+    () =>
+      (fleet?.rows ?? []).flatMap((r) =>
+        r.uptimePct === null || r.eligibleDeviceCount <= 0 ? [] : [{ name: r.name, value: r.uptimePct }],
+      ),
     [fleet],
   );
 
@@ -167,8 +189,12 @@ export function ReportsPage() {
   }
 
   const breakdown: ZoneBreakdownRow[] = useMemo(() => {
-    const uptimeByName = new Map((fleet?.rows ?? []).map((r) => [r.name, r.uptimePct] as const));
-    const uptimeById = new Map((fleet?.rows ?? []).map((r) => [r.id, r.uptimePct] as const));
+    // #346 — a row with no eligible device-time carries no percentage, so it never enters the maps.
+    // A missing entry and a `null` entry then mean the same thing to the lookup below, which is what
+    // lets the `??` chain stay a plain fallback instead of having to distinguish the two.
+    const known = (fleet?.rows ?? []).filter((r) => r.uptimePct !== null && r.eligibleDeviceCount > 0);
+    const uptimeByName = new Map(known.map((r) => [r.name, r.uptimePct] as const));
+    const uptimeById = new Map(known.map((r) => [r.id, r.uptimePct] as const));
     return (zones ?? []).map((z) => ({
       zoneId: z.zoneId,
       zoneName: z.zoneName,
@@ -263,9 +289,13 @@ export function ReportsPage() {
           )}
         </ChartCard>
         <ChartCard title="Fleet Uptime % — last 6 months">
-          {uptimeTrend && uptimeTrend.length ? (
+          {uptimeTrend && uptimeTrend.some((p) => p.value !== null) ? (
             // Uptime clusters in the high 90s, so a zero baseline would draw six months of real
             // movement as a flat line pinned to the top of the plot.
+            //
+            // #346 — months with no cube row are passed through as `null`, so the line BREAKS over
+            // them and the month keeps its label on the axis. Filtering them out instead would draw
+            // an unbroken line through a hole, which is the same lie as plotting a number.
             <TrendChart
               data={uptimeTrend}
               format="percent"

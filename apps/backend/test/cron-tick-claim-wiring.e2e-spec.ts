@@ -122,7 +122,9 @@ describe('#263 — every scheduler claims its tick window (e2e, two pools)', () 
       expect(await makeBusinessSweeps(b, claimsB).fleetUptimeTick(FIRED_B)).toEqual({ ran: true });
 
       expect(a.verification.runVerification).toHaveBeenCalledTimes(1);
-      expect(b.fleetUptime.computeMonth).toHaveBeenCalledTimes(1);
+      // Two months per tick since #346 (previous + current) — still ONE claimed unit of work, which
+      // is what this case is about: the cube ran, under its own claim, in the same minute.
+      expect(b.fleetUptime.computeMonth).toHaveBeenCalledTimes(2);
     });
 
     it('lets the loser win the NEXT window — a refused instance is not a demoted one', async () => {

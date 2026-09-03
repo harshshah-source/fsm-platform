@@ -17,11 +17,17 @@ async function get<T>(path: string): Promise<T> {
 
 export type FleetUptimeGroupBy = 'zone' | 'company' | 'plant';
 
+/**
+ * `uptimePct` is `null` when the group has **no eligible device-time** in the month — an empty cube,
+ * or a month that has not elapsed (#346). It is deliberately not `0` and emphatically not `100`: the
+ * uptime formula `(1 − downtime/window)` is undefined at a zero window, and the old backend answered
+ * `100`, which reads as a perfect fleet. Every consumer must render "no data", not a number.
+ */
 export interface FleetUptimeRow {
   id: string;
   name: string;
   eligibleDeviceCount: number;
-  uptimePct: number;
+  uptimePct: number | null;
   autoRecoveryClosures: number;
   seRepairedClosures: number;
 }
@@ -31,7 +37,7 @@ export interface FleetUptimeReport {
   groupBy: FleetUptimeGroupBy;
   fleet: {
     eligibleDeviceCount: number;
-    uptimePct: number;
+    uptimePct: number | null;
     autoRecoveryClosures: number;
     seRepairedClosures: number;
   };
@@ -56,16 +62,42 @@ export function recentMonths(count: number, now: Date = new Date()): string[] {
   return out;
 }
 
+/** One month on the uptime trend. `null` is a **gap** — the month is on the axis, the line is not. */
+export interface FleetUptimeTrendPoint {
+  label: string;
+  value: number | null;
+}
+
 /**
  * Fleet Uptime % monthly trend (Issue 39). The endpoint is single-month, so the trend is a fan-out of
- * the last `count` months; failures are dropped so a partially-seeded history still renders.
+ * the last `count` months.
+ *
+ * #346 — **every month keeps its place on the axis, whether or not it has a number.** This used to
+ * `flatMap` failures away and plot `fleet.uptimePct` unguarded, which produced the worst of both
+ * errors at once: months with no cube row were drawn at `100` (the backend's answer for a zero
+ * window), and months whose request failed vanished, silently relabelling the axis so the reader
+ * could not tell which six months they were looking at. A real trend read `100, 100, 100, 56.19,
+ * 100, 100` — one real number in six.
+ *
+ * A point is a gap when the month has no eligible device-time (`eligibleDeviceCount === 0`, or a
+ * `null` percentage) or when its request failed. The `eligibleDeviceCount` check is deliberate
+ * belt-and-braces: an older backend still answers `100` here, and a percentage with an empty
+ * denominator underneath it is not a percentage.
  */
-export async function apiFleetUptimeTrend(count = 6, now: Date = new Date()): Promise<{ label: string; value: number }[]> {
+export async function apiFleetUptimeTrend(count = 6, now: Date = new Date()): Promise<FleetUptimeTrendPoint[]> {
   const months = recentMonths(count, now);
   const settled = await Promise.allSettled(months.map((m) => apiFleetUptime({ month: m, groupBy: 'zone' })));
-  return settled.flatMap((r, i) =>
-    r.status === 'fulfilled' ? [{ label: months[i].slice(2), value: r.value.fleet.uptimePct }] : [],
-  );
+  return settled.map((r, i) => ({
+    label: months[i].slice(2),
+    value: r.status === 'fulfilled' ? fleetUptimeOrGap(r.value) : null,
+  }));
+}
+
+/** The one place "does this report actually carry an uptime?" is decided, for KPI, bars and trend. */
+export function fleetUptimeOrGap(report: FleetUptimeReport | null | undefined): number | null {
+  if (!report || !report.fleet) return null;
+  if (report.fleet.eligibleDeviceCount <= 0) return null;
+  return report.fleet.uptimePct;
 }
 
 // ---- Soft Inactive Count trend (Issue 40, Operations Head) ---------------------
@@ -189,7 +221,8 @@ export interface ZmScorecardRow {
   manualAssignments: number;
   autoAssigned: number;
   overrideRatePct: number;
-  zoneSlaCompliancePct: number;
+  /** Zone Fleet-Uptime compliance — `null` when the zone had no eligible device-time (#346). */
+  zoneSlaCompliancePct: number | null;
 }
 export interface ZmScorecardReport {
   fromMonth: string;

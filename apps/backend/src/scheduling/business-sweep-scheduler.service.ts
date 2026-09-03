@@ -32,8 +32,10 @@ import { VerificationService } from '../verification/verification.service';
  *     `status`, so nothing dispatch-relevant depends on this sweep's cadence).
  *   - soft-inactive: twice daily (06:00 / 18:00 UTC) — the Issue 40 snapshot cadence.
  *   - system-efficiency: daily (01:30 UTC) — finalises the day just ended.
- *   - fleet-uptime / root-cause / zm-performance: month-start (03:00-03:30 on the 1st) — finalise the
- *     month just ended; staggered so three heavy recomputes never start the same minute.
+ *   - fleet-uptime / root-cause / zm-performance: daily (03:00-03:30) — each run recomputes the
+ *     previous AND the current month, so the month every report defaults to always has a cube row
+ *     and the month just ended is still finalised by the run on the 1st (#346). Staggered so three
+ *     heavy recomputes never start the same minute.
  */
 /**
  * #263 — the registered cron-job names, in the ONE place the decorator and the tick claim can share
@@ -66,9 +68,13 @@ export const DEFAULT_REPEAT_ESCALATION_CRON = '*/15 * * * *';
 export const DEFAULT_TIER_OVERRIDE_EXPIRY_CRON = '0 * * * *';
 export const DEFAULT_SOFT_INACTIVE_CRON = '0 6,18 * * *';
 export const DEFAULT_SYSTEM_EFFICIENCY_CRON = '30 1 * * *';
-export const DEFAULT_FLEET_UPTIME_CRON = '0 3 1 * *';
-export const DEFAULT_ROOT_CAUSE_CRON = '15 3 1 * *';
-export const DEFAULT_ZM_PERFORMANCE_CRON = '30 3 1 * *';
+// #346 — daily, not month-start. See {@link BusinessSweepSchedulerService.fleetUptimeTick}: pinned to
+// the 1st, these cubes left the CURRENT month with no row for the other ~30 days of it, which is the
+// month every report defaults to. Still staggered so three heavy recomputes never start on the same
+// minute, and still at the same hour, so the month-end finalisation run is unchanged in timing.
+export const DEFAULT_FLEET_UPTIME_CRON = '0 3 * * *';
+export const DEFAULT_ROOT_CAUSE_CRON = '15 3 * * *';
+export const DEFAULT_ZM_PERFORMANCE_CRON = '30 3 * * *';
 // #264 — minute-cadence family (the immediate post-commit drain already delivers the common case;
 // this is the crash-between-commit-and-drain backstop, not the primary path).
 export const DEFAULT_NOTIFICATION_OUTBOX_CRON = '*/2 * * * *';
@@ -126,6 +132,25 @@ export type SchedulerTickOutcome =
 /** Previous UTC month-start relative to `now` — the month a month-start tick finalises. */
 function previousUtcMonthStart(now: Date): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+}
+/** Current UTC month-start relative to `now` — the month a report defaults to, so the one it must have. */
+function currentUtcMonthStart(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+/**
+ * #346 — the two months a daily cube tick recomputes, in order: the previous month first (finalising
+ * it if this is the run on the 1st), then the current one.
+ *
+ * Both, every day, rather than "previous on the 1st, current otherwise". The branch would have been
+ * cheaper and is the wrong trade: a tick that is missed, delayed or crashes on the 1st — the single
+ * busiest recompute of the month — would leave the previous month permanently short of its last 21
+ * hours, with nothing to notice it and no second chance until the following year. Recomputing it
+ * again on the 2nd costs one idempotent pass over a month nobody is writing to any more, and buys a
+ * whole month of self-healing. `computeMonth` is a delete-and-reinsert per month (`upsert` per
+ * device), so the repeat is a no-op in outcome, not an accumulation.
+ */
+function cubeMonths(now: Date): [Date, Date] {
+  return [previousUtcMonthStart(now), currentUtcMonthStart(now)];
 }
 /** Previous UTC day-start relative to `now` — the day a daily tick finalises. */
 function previousUtcDayStart(now: Date): Date {
@@ -268,19 +293,43 @@ export class BusinessSweepSchedulerService {
     return this.runGuarded(BUSINESS_SWEEP_JOBS.systemEfficiency, now, () => this.systemEfficiency.computeDay(previousUtcDayStart(now), now));
   }
 
+  /**
+   * #346 — **the cube has to cover the month the report asks for.**
+   *
+   * This ran at `0 3 1 * *` and computed only the previous month, so for the ~30 days between runs the
+   * *current* month had no `device_downtime_summary_monthly` row at all. The Fleet Uptime report
+   * defaults to the current month, and a month with no rows has a zero window, and a zero window used
+   * to report `100%`. Three separately reasonable decisions composed into a dashboard that showed a
+   * perfect fleet on 30 days out of 31. Slice #346 fixed both halves: the zero window is now `null`
+   * (`reports.service.ts`), and the current month now has a row to read.
+   *
+   * The aggregation needs no change to handle an in-flight month: `computeMonth` already clamps
+   * `windowEnd = min(now, monthEnd)` (`fleet-uptime-aggregation.service.ts`), so a partial month is
+   * scored over the time that has actually elapsed rather than penalised for the future.
+   *
+   * Both months go through ONE `runGuarded` call, not two ticks: the pair is a single unit of work
+   * under a single claim, so a second instance cannot interleave and recompute the same month
+   * underneath this one (#263).
+   */
   @Cron(readBusinessSweepSchedulerConfig().fleetUptimeCron, { name: BUSINESS_SWEEP_JOBS.fleetUptime })
   fleetUptimeTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded(BUSINESS_SWEEP_JOBS.fleetUptime, now, () => this.fleetUptime.computeMonth(previousUtcMonthStart(now), now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.fleetUptime, now, async () => {
+      for (const month of cubeMonths(now)) await this.fleetUptime.computeMonth(month, now);
+    });
   }
 
   @Cron(readBusinessSweepSchedulerConfig().rootCauseCron, { name: BUSINESS_SWEEP_JOBS.rootCause })
   rootCauseTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded(BUSINESS_SWEEP_JOBS.rootCause, now, () => this.rootCause.computeMonth(previousUtcMonthStart(now), now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.rootCause, now, async () => {
+      for (const month of cubeMonths(now)) await this.rootCause.computeMonth(month, now);
+    });
   }
 
   @Cron(readBusinessSweepSchedulerConfig().zmPerformanceCron, { name: BUSINESS_SWEEP_JOBS.zmPerformance })
   zmPerformanceTick(now: Date = new Date()): Promise<SchedulerTickOutcome> {
-    return this.runGuarded(BUSINESS_SWEEP_JOBS.zmPerformance, now, () => this.zmPerformance.computeMonth(previousUtcMonthStart(now), now));
+    return this.runGuarded(BUSINESS_SWEEP_JOBS.zmPerformance, now, async () => {
+      for (const month of cubeMonths(now)) await this.zmPerformance.computeMonth(month, now);
+    });
   }
 
   // #264 — the day-plan notification outbox re-drain sweep: retries rows the immediate post-commit

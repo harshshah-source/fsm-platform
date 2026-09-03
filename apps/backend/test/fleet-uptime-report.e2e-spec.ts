@@ -28,6 +28,21 @@ const MONTH = new Date(Date.UTC(2026, 2, 1)); // March 2026
 const MONTH_PARAM = '2026-03';
 const W = 1000; // window seconds per device (round numbers for easy math)
 
+/**
+ * #346 — two months chosen because **nothing in the tree writes them**, for the same isolation reason
+ * MONTH is March. They carry the two shapes of "no eligible device-time", which are not the same
+ * shape and used to produce the same fabricated `100`:
+ *
+ *  - `EMPTY_MONTH` — not one summary row exists. The report has no groups at all.
+ *  - `ZERO_WINDOW_MONTH` — rows exist and devices are eligible, but the month's window is zero
+ *    seconds (what `computeMonth` writes for a month that has not started: `windowEnd = min(now,
+ *    monthEnd)` clamped at `max(0, …)`). A device with a real row and no elapsed time is the case
+ *    that reads most convincingly as a real 100%.
+ */
+const EMPTY_MONTH_PARAM = '2029-11';
+const ZERO_WINDOW_MONTH = new Date(Date.UTC(2029, 11, 1)); // December 2029
+const ZERO_WINDOW_MONTH_PARAM = '2029-12';
+
 describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
   let prisma: PrismaService;
   let service: ReportsService;
@@ -58,16 +73,28 @@ describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
     await summary(zoneA, plantA, false, 900, 0, 0);
     // zoneB: one eligible device — downtime 500 over 1000 → 50.0% uptime.
     await summary(zoneB, plantB, true, 500, 0, 1);
+
+    // #346 — a month that has not started yet: an eligible device, a real row, a ZERO window. Kept in
+    // its own month so it cannot move March's denominators.
+    await summary(zoneA, plantA, true, 0, 0, 0, { month: ZERO_WINDOW_MONTH, windowSeconds: 0 });
   });
 
-  async function summary(zoneId: bigint, plantId: bigint, eligible: boolean, downtime: number, auto: number, se: number): Promise<void> {
+  async function summary(
+    zoneId: bigint,
+    plantId: bigint,
+    eligible: boolean,
+    downtime: number,
+    auto: number,
+    se: number,
+    override: { month?: Date; windowSeconds?: number } = {},
+  ): Promise<void> {
     const deviceId = String(devSeq++);
     devices.push(deviceId);
     await prisma.device.create({ data: { deviceId, deviceType: 'GPS-X' } });
     await prisma.deviceDowntimeSummaryMonthly.create({
       data: {
-        deviceId, month: MONTH, zoneId, companyId, plantId, eligible,
-        windowSeconds: BigInt(W), downtimeSeconds: BigInt(downtime),
+        deviceId, month: override.month ?? MONTH, zoneId, companyId, plantId, eligible,
+        windowSeconds: BigInt(override.windowSeconds ?? W), downtimeSeconds: BigInt(downtime),
         autoRecoveryClosures: auto, seRepairedClosures: se, computedAt: new Date(),
       },
     });
@@ -116,6 +143,39 @@ describe('Issue 39 slice 2 — ReportsService.fleetUptime', () => {
 
     const byCompany = await service.fleetUptime(ohScope, { month: MONTH_PARAM, groupBy: 'company' });
     expect(byCompany.rows.find((r) => r.id === String(companyId))?.eligibleDeviceCount).toBe(3);
+  });
+
+  /**
+   * #346 AC1 — **the honesty case.** `(1 − downtime/window)` is undefined when the window is zero, and
+   * the old helper answered `100` — the best possible number, indistinguishable from a perfect fleet.
+   * The default Reports view asked for the *current* month while the cron only ever wrote the previous
+   * one, so this was not an edge case: it was the first number the page showed.
+   */
+  describe('#346 — a window of zero is no data, not 100%', () => {
+    it('a month with no summary rows at all: null uptime, zero eligible devices, no groups', async () => {
+      const report = await service.fleetUptime(ohScope, { month: EMPTY_MONTH_PARAM, groupBy: 'zone' });
+      expect(report.fleet.uptimePct).toBeNull();
+      expect(report.fleet.eligibleDeviceCount).toBe(0);
+      expect(report.rows).toEqual([]);
+    });
+
+    it('a month with eligible rows but a zero window: the ROW is null too, not 100', async () => {
+      const report = await service.fleetUptime(ohScope, { month: ZERO_WINDOW_MONTH_PARAM, groupBy: 'zone' });
+      const a = report.rows.find((r) => r.id === String(zoneA));
+      // The row is present — the devices are real and counted — and its uptime is unknown.
+      expect(a?.eligibleDeviceCount).toBe(1);
+      expect(a?.uptimePct).toBeNull();
+      expect(report.fleet.uptimePct).toBeNull();
+      expect(report.fleet.eligibleDeviceCount).toBe(1);
+    });
+
+    it('never reports 100 for a zero window at any grouping', async () => {
+      for (const groupBy of ['zone', 'company', 'plant'] as const) {
+        const report = await service.fleetUptime(ohScope, { month: ZERO_WINDOW_MONTH_PARAM, groupBy });
+        expect(report.fleet.uptimePct).not.toBe(100);
+        expect(report.rows.map((r) => r.uptimePct)).not.toContain(100);
+      }
+    });
   });
 
   it('a ZM is scoped to their own zone only', async () => {

@@ -149,8 +149,13 @@ export interface ZmScorecardRow {
   autoAssigned: number;
   /** overrides ÷ zone auto-assignments over the range, 0–100, 2 decimals. */
   overrideRatePct: number;
-  /** Zone Fleet-Uptime compliance over the range (time-weighted), 0–100, 2 decimals. */
-  zoneSlaCompliancePct: number;
+  /**
+   * Zone Fleet-Uptime compliance over the range (time-weighted), 0–100, 2 decimals — **`null` when the
+   * zone had no eligible device-time in the range** (#346). It is the same {@link uptimePct}
+   * computation the Fleet Uptime report uses, so it inherited the same fabricated `100`: on this page
+   * that crowned the emptiest zone as the best-run one.
+   */
+  zoneSlaCompliancePct: number | null;
 }
 export interface ZmScorecardTrendPoint {
   month: string;
@@ -158,7 +163,8 @@ export interface ZmScorecardTrendPoint {
   overrideAfterOnsite: number;
   manualAssignments: number;
   overrideRatePct: number;
-  zoneSlaCompliancePct: number;
+  /** `null` for a month with no eligible device-time — a gap on the trend, never a plotted 100. */
+  zoneSlaCompliancePct: number | null;
 }
 export interface ZmScorecardSeries {
   zmId: string;
@@ -204,8 +210,14 @@ export interface FleetUptimeRow {
   id: string;
   name: string;
   eligibleDeviceCount: number;
-  /** Time-weighted online % over this group's eligible devices, 0–100, 2 decimals. */
-  uptimePct: number;
+  /**
+   * Time-weighted online % over this group's eligible devices, 0–100, 2 decimals — **`null` when the
+   * group has no eligible device-time in the month** (#346). See {@link uptimePct}: a zero window is
+   * an absence of measurement, and every rendering of this field must say so rather than print a
+   * number. A `null` here does not mean the group is empty: `eligibleDeviceCount` can be non-zero for
+   * a month that simply has not elapsed.
+   */
+  uptimePct: number | null;
   autoRecoveryClosures: number;
   seRepairedClosures: number;
 }
@@ -215,7 +227,8 @@ export interface FleetUptimeReport {
   groupBy: FleetUptimeGroupBy;
   fleet: {
     eligibleDeviceCount: number;
-    uptimePct: number;
+    /** Fleet-wide uptime, or `null` for a month with no eligible device-time — see {@link FleetUptimeRow}. */
+    uptimePct: number | null;
     autoRecoveryClosures: number;
     seRepairedClosures: number;
   };
@@ -699,9 +712,23 @@ export class ReportsService {
   }
 }
 
-/** `(1 − downtime/window) × 100`, 2 decimals. A zero window (no eligible time) reports 100%. */
-function uptimePct(downtime: number, window: number): number {
-  if (window <= 0) return 100;
+/**
+ * `(1 − downtime/window) × 100`, 2 decimals — or **`null` when the window is zero**.
+ *
+ * #346. This used to answer `100`, and that was not a harmless default. `(1 − downtime/window)` is
+ * undefined at a zero window, and of every value it could have picked, `100` is the one that reads as
+ * a *perfect* fleet — the best possible news, indistinguishable from a real month in which nothing
+ * broke. It was also not an edge case: the report defaults to the current month, and the cube crons
+ * only ever wrote the previous one, so the first number the Reports page showed was fabricated.
+ *
+ * `null` is chosen over `0` for the same reason `100` was wrong in the other direction: a zero
+ * denominator is an absence of measurement, not a measurement of zero. Every consumer of this value —
+ * the fleet total, the zone/company/plant rows, the ZM scorecard's zone SLA compliance — is typed
+ * `number | null` so the absence has to be handled at the point it is rendered, rather than silently
+ * formatted into a percentage.
+ */
+function uptimePct(downtime: number, window: number): number | null {
+  if (window <= 0) return null;
   return Math.round((1 - downtime / window) * 100 * 100) / 100;
 }
 

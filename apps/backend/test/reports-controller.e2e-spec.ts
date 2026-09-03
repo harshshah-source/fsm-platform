@@ -115,6 +115,36 @@ describe('Issue 39 slice 3 — /api/reports/fleet-uptime (e2e)', () => {
       .expect(403);
   });
 
+  /**
+   * #346 AC4 — the empty month over HTTP, which is the shape the admin Reports page actually gets.
+   * The page defaults to the CURRENT month (`reports.controller.ts` `currentMonth()`) while the cube
+   * cron only ever wrote the previous one, so "a month with no cube row" was the default view, and it
+   * answered `100`. `2029-10` is a month nothing in the tree computes; the assertion is that the wire
+   * payload carries `null`, not a number and not a missing key.
+   */
+  it('a month with no cube row returns uptimePct null over the wire, never 100', async () => {
+    const oh = await login('ops.head@fsm.test');
+    const report = await request(app.getHttpServer())
+      .get('/api/reports/fleet-uptime?month=2029-10&groupBy=zone')
+      .set('Authorization', `Bearer ${oh}`)
+      .expect(200);
+    expect(report.body.fleet).toHaveProperty('uptimePct');
+    expect(report.body.fleet.uptimePct).toBeNull();
+    expect(report.body.fleet.eligibleDeviceCount).toBe(0);
+    expect(report.body.rows).toEqual([]);
+  });
+
+  /** #346 AC5 — the manual recompute door is untouched by the honesty change. */
+  it('the Operations-Head recompute endpoint is unchanged (200, month + device count)', async () => {
+    const oh = await login('ops.head@fsm.test');
+    const res = await request(app.getHttpServer())
+      .post('/api/reports/fleet-uptime/recompute?month=2026-05')
+      .set('Authorization', `Bearer ${oh}`)
+      .expect(200);
+    expect(res.body.month).toBe('2026-05-01');
+    expect(typeof res.body.devices).toBe('number');
+  });
+
   it('rejects an invalid groupBy and an invalid month (400)', async () => {
     const oh = await login('ops.head@fsm.test');
     await request(app.getHttpServer())
