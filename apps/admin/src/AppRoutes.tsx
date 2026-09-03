@@ -41,6 +41,7 @@ import { BulkUnassignPage } from './pages/admin/BulkUnassignPage';
 import { PlantDeactivationsPage } from './pages/admin/PlantDeactivationsPage';
 import { PlantZonesPage } from './pages/admin/PlantZonesPage';
 import { AssignmentThresholdPage } from './pages/admin/AssignmentThresholdPage';
+import { ManagerAvailabilityPage } from './pages/admin/ManagerAvailabilityPage';
 import { TierOverridesPage } from './pages/admin/TierOverridesPage';
 import { BuildHealthPage } from './pages/admin/BuildHealthPage';
 import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
@@ -300,6 +301,17 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
                 <AssignmentThresholdPage />
+              </RoleRoute>
+            }
+          />
+          {/* Manager Availability — CSM / OH (#339). Routed for the same reason as the threshold
+              above: the CSM is the role a zone's duty cascades TO, so they are usually first to know
+              a manager is out, and the Settings console they would otherwise need is OH-only. */}
+          <Route
+            path="/manager-availability"
+            element={
+              <RoleRoute roles={['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <ManagerAvailabilityPage />
               </RoleRoute>
             }
           />

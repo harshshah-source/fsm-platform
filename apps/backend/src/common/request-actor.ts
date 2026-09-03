@@ -1,4 +1,4 @@
-import { resolveActingContext } from '../auth/acting-context';
+import type { ActingContext } from '../auth/acting-context';
 import type { AccessTokenClaims } from '../auth/token.service';
 
 /**
@@ -15,12 +15,9 @@ export interface RequestActor {
   actingZone: number | null;
 }
 
-/** Resolve the request's actor from verified claims + the optional acting-zone header. */
-export function resolveRequestActor(
-  user: AccessTokenClaims,
-  actingZoneHeader: string | undefined,
-): RequestActor {
-  const acting = resolveActingContext(user, actingZoneHeader);
+/** Resolve the request's actor from verified claims + the acting context `ActingContextGuard` proved
+ *  for this request (#339). */
+export function resolveRequestActor(user: AccessTokenClaims, acting: ActingContext): RequestActor {
   return {
     userId: user.user_id,
     role: acting.actorRole,

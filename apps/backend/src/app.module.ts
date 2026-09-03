@@ -6,12 +6,13 @@ import { HealthService } from './health/health.service';
 import { AuditModule } from './audit/audit.module';
 import { AuditTrailController } from './audit/audit-trail.controller';
 import { AuthModule } from './auth/auth.module';
+import { ActingContextGuard } from './common/guards/acting-context.guard';
 import { AuthGuard } from './common/guards/auth.guard';
 import { RoleGuard } from './common/guards/role.guard';
 import { ZoneScopeGuard } from './common/guards/zone-scope.guard';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { DashboardController } from './dashboard/dashboard.controller';
-import { OperatingModeController } from './dashboard/operating-mode.controller';
+import { OperatingModeController } from './dashboard/operating-mode.controller'; 
 import { ReportsModule } from './reports/reports.module';
 import { ReportsController } from './reports/reports.controller';
 import { DevicesModule } from './devices/devices.module';
@@ -217,9 +218,14 @@ import { MediaController } from './media/media.controller';
     // contracts (e.g. `{ code }`) preserved verbatim.
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
     // Global guard chain (#99), in order: every route authenticates by default (@Public opts out),
-    // then @Roles allow-lists, then ZM zone clamping. Per-controller @UseGuards stays valid (re-runs
+    // then the acting-context gate (#339), then @Roles allow-lists, then ZM zone clamping. Per-controller @UseGuards stays valid (re-runs
     // are idempotent) — but forgetting it no longer exposes a route.
     { provide: APP_GUARD, useClass: AuthGuard },
+    // #339 — resolves `X-Acting-As-Zone` once, into `request.acting`, and GATES it: the zone must
+    // exist and a CSM must actually hold that zone's ZM duty. Placed after AuthGuard (it needs
+    // `request.user`) and before RoleGuard, so every downstream check sees a proven acting claim
+    // rather than a header three separate call sites used to re-parse for themselves.
+    { provide: APP_GUARD, useClass: ActingContextGuard },
     { provide: APP_GUARD, useClass: RoleGuard },
     { provide: APP_GUARD, useClass: ZoneScopeGuard },
     // Global validation (#99): DTO-classed routes get whitelist + forbidNonWhitelisted + transform;

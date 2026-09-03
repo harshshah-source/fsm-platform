@@ -1,7 +1,5 @@
-import { AccessTokenClaims } from './token.service';
-
 /** Roles that can act in a Zonal Manager's scope via the backup cascade (CONTEXT.md §15). */
-const ACTING_CAPABLE_ROLES = new Set(['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']);
+export const ACTING_CAPABLE_ROLES = new Set(['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']);
 
 export interface ActingContext {
   /** The caller's real role. */
@@ -13,27 +11,18 @@ export interface ActingContext {
 }
 
 /**
- * Resolves whether the caller is acting in a Zonal Manager's scope. A CSM or Operations
- * Head that targets a zone (via the `X-Acting-As-Zone` header) is acting on that ZM's
- * behalf, so `acted_as_role` is stamped with their own role for the audit trail.
+ * The acting context of a request that is not acting — a caller's own role, nothing proxied.
  *
- * NOTE: this is the request-context proxy verified at the claims layer. The backup-cascade
- * *authorization* (who may act when, driven by ROLE_UNAVAILABILITY) and the persisting of
- * `acted_as_role` onto audit rows land with the DB slices (TB6+).
+ * #339 moved the *resolution* into `common/guards/acting-context.guard.ts`, which is the only place
+ * that reads the `X-Acting-As-Zone` header. It must be: the check the header now passes is async (the
+ * zone must exist, and the CSM must actually hold that zone's ZM duty per `role_unavailability`),
+ * while the two consumers — `@CurrentScope` and `@CurrentActor` — are synchronous param decorators.
+ * They read `request.acting`, and fall back to this when there is none.
+ *
+ * **The fallback is deliberately the non-acting context, never a re-parse.** Re-deriving acting from
+ * the header here would hand back exactly the ungated grant #339 exists to remove, from a code path
+ * that looks like a safety net.
  */
-export function resolveActingContext(
-  user: AccessTokenClaims,
-  actingZoneHeader: string | undefined,
-): ActingContext {
-  const zone = parseZone(actingZoneHeader);
-  if (zone !== null && ACTING_CAPABLE_ROLES.has(user.role)) {
-    return { actorRole: user.role, actedAsRole: user.role, actingZone: zone };
-  }
-  return { actorRole: user.role, actedAsRole: null, actingZone: null };
-}
-
-function parseZone(raw: string | undefined): number | null {
-  if (!raw) return null;
-  const value = Number(raw);
-  return Number.isNaN(value) ? null : value;
+export function notActing(role: string): ActingContext {
+  return { actorRole: role, actedAsRole: null, actingZone: null };
 }

@@ -1,6 +1,7 @@
 import type { MouseEvent } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthProvider';
+import { MuiBridge } from '../../theme/MuiBridge';
 import { Button } from '../ui/Button';
 import { Footer } from './Footer';
 import { Sidebar } from './Sidebar';
@@ -21,9 +22,11 @@ export function AppShell() {
 
   return (
     <ThemeProvider>
-      <SidebarProvider>
-        <ShellFrame role={session.role} />
-      </SidebarProvider>
+      <MuiBridge>
+        <SidebarProvider>
+          <ShellFrame role={session.role} />
+        </SidebarProvider>
+      </MuiBridge>
     </ThemeProvider>
   );
 }
@@ -40,7 +43,7 @@ const INTERACTIVE_SELECTOR =
   'a, button, input, select, textarea, label, table, [role="button"], [role="link"], [role="menuitem"], [tabindex]';
 
 function ShellFrame({ role }: { role: string }) {
-  const { actingZone, setActingZone } = useAuth();
+  const { actingZone, actingZoneName, setActingZone } = useAuth();
   const { collapsed, collapse } = useSidebar();
   const { pathname } = useLocation();
 
@@ -53,7 +56,10 @@ function ShellFrame({ role }: { role: string }) {
 
   return (
     <div className="flex min-h-screen bg-transparent">
-      <Sidebar role={role} />
+      {/* #339 — while acting, the menu is the ZM's. A sidebar still offering CSM-only destinations
+          contradicts the banner directly above it, and the two together tell the operator nothing
+          about what they can actually do right now. Reference 02 shows the ZM menu under the banner. */}
+      <Sidebar role={actingZone != null ? 'ZONAL_MANAGER' : role} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar />
 
@@ -63,7 +69,10 @@ function ShellFrame({ role }: { role: string }) {
             className="flex items-center justify-between border-b border-warning/20 bg-warning-bg/90 px-6 py-2.5 text-sm text-warning shadow-sm"
           >
             <span>
-              Acting as Zonal Manager for Zone {actingZone} (audited as {role})
+              {/* #339 — the zone by NAME. An operator has no reason to know that zone 3 is West, and
+                  the id is the one thing on this banner they cannot check. The id remains the
+                  fallback for a session entered through the free-text control. */}
+              Acting as Zonal Manager for {actingZoneName ?? `Zone ${actingZone}`} (audited as {role})
             </span>
             <Button type="button" size="sm" variant="secondary" onClick={() => setActingZone(null)}>
               Exit acting mode

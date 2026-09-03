@@ -2,9 +2,12 @@ import type { SessionView } from '@fsm/shared';
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { apiLogin, apiMe } from '../api/client';
 import { apiRefresh, setOnSessionExpired } from '../api/http';
+import { recordActingEntered, recordActingExited } from '../api/roleUnavailability';
 import { clearTokens, getAccessToken, setTokens } from '../api/tokens';
 
 const ACTING_ZONE_KEY = 'fsm.actingZone';
+/** #339 — the zone's NAME, remembered beside its id so the banner can say "West", not "Zone 3". */
+const ACTING_ZONE_NAME_KEY = 'fsm.actingZoneName';
 
 interface AuthContextValue {
   session: SessionView | null;
@@ -17,7 +20,9 @@ interface AuthContextValue {
   logout: () => void;
   /** The zone a CSM / Operations Head is currently acting in as ZM (backup cascade, Issue 27); null = not acting. */
   actingZone: number | null;
-  setActingZone: (zone: number | null) => void;
+  /** #339 — that zone's name when the picker knew it; null when acting was entered by raw id. */
+  actingZoneName: string | null;
+  setActingZone: (zone: number | null, zoneName?: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -27,6 +32,10 @@ function readActingZone(): number | null {
   if (!raw) return null;
   const n = Number(raw);
   return Number.isNaN(n) ? null : n;
+}
+
+function readActingZoneName(): string | null {
+  return sessionStorage.getItem(ACTING_ZONE_NAME_KEY);
 }
 
 /** Decode a JWT's `exp` (seconds since epoch) without verifying — for proactive-refresh scheduling only. */
@@ -52,6 +61,7 @@ export function AuthProvider({
   const [loading, setLoading] = useState<boolean>(initialSession == null && getAccessToken() != null);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [actingZone, setActingZoneState] = useState<number | null>(readActingZone);
+  const [actingZoneName, setActingZoneNameState] = useState<string | null>(readActingZoneName);
   const proactiveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Schedule a refresh ~1 min before the access token expires (reactive 401 refresh is the backstop). */
@@ -128,14 +138,35 @@ export function AuthProvider({
     if (proactiveTimer.current) clearTimeout(proactiveTimer.current);
     clearTokens();
     sessionStorage.removeItem(ACTING_ZONE_KEY);
+    sessionStorage.removeItem(ACTING_ZONE_NAME_KEY);
     setActingZoneState(null);
+    setActingZoneNameState(null);
     setSession(null);
   };
 
-  const setActingZone = (zone: number | null): void => {
-    if (zone == null) sessionStorage.removeItem(ACTING_ZONE_KEY);
-    else sessionStorage.setItem(ACTING_ZONE_KEY, String(zone));
+  /**
+   * Enter or leave acting (#339).
+   *
+   * The audit call is fired **after** the new state is written to `sessionStorage`, because
+   * `authHeaders()` reads the acting zone from there — an exit posted before the clear would carry
+   * the zone, and an entry posted before the write would carry none. Both are deliberately
+   * fire-and-forget: the operator's own view must not hang on, or be refused by, a bookkeeping call,
+   * and the backend gate has already had its say on whether the acting request is allowed at all.
+   */
+  const setActingZone = (zone: number | null, zoneName?: string | null): void => {
+    const leaving = actingZone;
+    if (zone == null) {
+      sessionStorage.removeItem(ACTING_ZONE_KEY);
+      sessionStorage.removeItem(ACTING_ZONE_NAME_KEY);
+    } else {
+      sessionStorage.setItem(ACTING_ZONE_KEY, String(zone));
+      if (zoneName) sessionStorage.setItem(ACTING_ZONE_NAME_KEY, zoneName);
+      else sessionStorage.removeItem(ACTING_ZONE_NAME_KEY);
+    }
     setActingZoneState(zone);
+    setActingZoneNameState(zone == null ? null : (zoneName ?? null));
+    if (zone != null) void recordActingEntered();
+    else if (leaving != null) void recordActingExited(leaving);
   };
 
   return (
@@ -148,6 +179,7 @@ export function AuthProvider({
         login,
         logout,
         actingZone,
+        actingZoneName,
         setActingZone,
       }}
     >
