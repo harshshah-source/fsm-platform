@@ -1,0 +1,31 @@
+diff --git a/dist/index.js b/dist/index.js
+index ccabbe78b68e1bb57a10cfd89219b3bc4489d963..c5b19d82af462c8ccba6fb656d814b53ec7c2c88 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -7,7 +7,7 @@ import { join } from "node:path";
+ import { inspect, types } from "node:util";
+ import assert from "node:assert";
+ import { performance } from "node:perf_hooks";
+-import { readFileSync } from "node:fs";
++import { readFileSync, appendFileSync } from "node:fs";
+ import os from "node:os";
+ import childProcess, { fork } from "node:child_process";
+ 
+@@ -111,6 +111,17 @@ var ProcessWorker = class {
+ 		this.process.stdout?.pipe(process.stdout);
+ 		this.process.stderr?.pipe(process.stderr);
+ 		this.threadId = this.process.pid;
++		if (process.env.TINYPOOL_CRASH_LOG) {
++			const pid = this.process.pid;
++			this.process.on("exit", (code, signal) => {
++				try {
++					appendFileSync(
++						process.env.TINYPOOL_CRASH_LOG,
++						`[${new Date().toISOString()}] child pid=${pid} exited code=${code} signal=${signal}\n`,
++					);
++				} catch {}
++			});
++		}
+ 		this.process.on("exit", this.onUnexpectedExit);
+ 		this.waitForExit = new Promise((r) => this.process.on("exit", r));
+ 	}

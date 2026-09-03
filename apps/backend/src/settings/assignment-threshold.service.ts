@@ -15,6 +15,7 @@ import { canWriteSetting, writeRolesFor, type SettingLock } from './setting-auth
 
 /** How many history rows the read surface returns — enough to back a revert picker, bounded so the
  *  settings page never pulls an unbounded table. */
+
 const HISTORY_LIMIT = 25;
 
 export interface ThresholdChangeView {

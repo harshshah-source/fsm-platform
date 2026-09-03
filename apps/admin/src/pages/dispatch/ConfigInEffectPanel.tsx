@@ -28,6 +28,7 @@ export function ConfigInEffectPanel({ snapshot }: { snapshot: ConfigSnapshot }) 
   const clusterMult = snapshot.settings?.plant_cluster_multiplier;
   const eligibility = snapshot.settings?.eligibility_mode;
   const sweepsOn = snapshot.scheduler?.businessSweepsEnabled;
+  const mv = snapshot.eligibilityMv;
 
   return (
     <SectionCard title="Configuration in effect" className="mb-5">
@@ -96,6 +97,15 @@ export function ConfigInEffectPanel({ snapshot }: { snapshot: ConfigSnapshot }) 
             <dd className="mt-1 text-sm text-ink">
               {eligibility ?? <span className="text-ink-muted">Default (not overridden)</span>}
             </dd>
+            {/* #270 Q4 — the current setting IS the interim proxy (audited 2026-07-10); the limitation
+                is stated here, not just in SYSTEM-STATE prose, because this is the surface an operator
+                actually reads the setting on. */}
+            {eligibility === 'all-deployed' && (
+              <p className="mt-1 text-xs text-ink-muted">
+                ACTIVE/DEPLOYED vehicle proxy — includes deployed-but-idle vehicles; PGI-based eligibility is
+                Phase 2 (#116).
+              </p>
+            )}
           </div>
 
           <div>
@@ -106,6 +116,34 @@ export function ConfigInEffectPanel({ snapshot }: { snapshot: ConfigSnapshot }) 
                 <span className="text-ink-muted"> · {humanizeCron(snapshot.scheduler.dispatchCron)}</span>
               )}
             </dd>
+          </div>
+
+          {/* #287 — the freshness of the floating-candidate pool this run selected from. Every other
+              entry on this panel is config someone set; this one is the state of a derived view whose
+              nightly rebuild used to fail silently, leaving the run to select from a stale pool with
+              no signal anywhere. Absent on runs predating the field — shown as unknown, not fresh. */}
+          <div>
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
+              Floating eligibility data
+            </dt>
+            <dd className="mt-1 text-sm text-ink" data-testid="config-eligibility-mv">
+              {mv == null ? (
+                <span className="text-ink-muted">Not recorded for this run</span>
+              ) : mv.stale ? (
+                <span className="font-medium text-warning">
+                  Stale — last rebuilt {mv.lastSuccessAt ? new Date(mv.lastSuccessAt).toLocaleString() : 'never'}
+                </span>
+              ) : (
+                <span>Fresh · rebuilt {new Date(mv.lastSuccessAt!).toLocaleString()}</span>
+              )}
+            </dd>
+            {mv?.stale && (
+              <p className="mt-1 text-xs text-ink-muted">
+                The run proceeded — staleness warns, it never blocks. Floating candidates may have
+                been drawn from out-of-date territory data.
+                {mv.lastError && <> Last refresh error: {mv.lastError}</>}
+              </p>
+            )}
           </div>
         </div>
       </dl>

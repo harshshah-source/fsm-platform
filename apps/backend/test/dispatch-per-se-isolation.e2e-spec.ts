@@ -56,8 +56,15 @@ describe('#262 — per-SE dispatch transactions (e2e)', () => {
     return run.runId;
   };
 
-  /** A zone with `seCount` dedicated SEs, one plant each, `perSe` OPEN tickets each. */
-  const seedZone = async (label: string, seCount: number, perSe: number): Promise<Seeded> => {
+  /**
+   * A zone with `seCount` dedicated SEs, one plant each, `perSe` OPEN tickets each.
+   *
+   * `capacity` defaults to 20 — enough for every case here except the throughput one, which
+   * deliberately offers 40 per SE. Since #304 the engine caps a dispatch at the engineer's remaining
+   * `daily_capacity` at commit time, so that case has to raise the cap or it would be measuring the
+   * capacity guard rather than the transaction budget it is named for.
+   */
+  const seedZone = async (label: string, seCount: number, perSe: number, capacity = 20): Promise<Seeded> => {
     const zoneId = (await prisma.zone.create({ data: { name: `Z-${label}-${NS}` } })).zoneId;
     zoneIds.push(zoneId);
     const companyId = (
@@ -75,7 +82,7 @@ describe('#262 — per-SE dispatch transactions (e2e)', () => {
       });
       userIds.push(u.userId);
       await prisma.engineerMaster.create({
-        data: { engineerId: u.userId, coverageType: 'DEDICATED', zoneId, dailyCapacity: 20 },
+        data: { engineerId: u.userId, coverageType: 'DEDICATED', zoneId, dailyCapacity: capacity },
       });
       await prisma.seCoverage.create({ data: { seId: u.userId, plantId, coverageType: 'DEDICATED' } });
 
@@ -340,7 +347,9 @@ describe('#262 — per-SE dispatch transactions (e2e)', () => {
   it('dispatches a large zone with every transaction far inside the 15s budget', async () => {
     const SES = 4;
     const PER_SE = 40;
-    const seeded = await seedZone('bulk', SES, PER_SE);
+    // Capacity above `PER_SE`: this case measures the per-SE transaction budget, and since #304 a
+    // capacity-20 engineer would legitimately be capped at 20 of the 40 offered — a different subject.
+    const seeded = await seedZone('bulk', SES, PER_SE, PER_SE + 10);
     const runId = await newRun();
     await suggest(seeded, runId);
 

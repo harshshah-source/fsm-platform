@@ -213,6 +213,23 @@ export function readDispatchRetryPolicy(env: NodeJS.ProcessEnv = process.env): D
   };
 }
 
+/**
+ * #303 — how long a `business-dispatch` tick claim may sit with **no admitted run** before the janitor
+ * calls the tick dead.
+ *
+ * Derived from the two knobs that already bound the tick's honest silence, rather than invented as a
+ * third: a patient run (#260) holds its claim for up to `deadlineMs` while every zone is contended,
+ * and #259's rule is that a run which never happened leaves no history — so during that whole window
+ * a perfectly healthy tick has a claim and no `dispatch_runs` row. Adding the stale-run threshold on
+ * top leaves a full reap cycle of slack beyond it, the same margin
+ * {@link DEFAULT_DISPATCH_STALE_RUN_MIN}'s own comment reasons about. Default 15 + 10 = 25 minutes.
+ *
+ * Anything shorter would mistake patience for death and re-dispatch a zone somebody is still working.
+ */
+export function readAbandonedTickGraceMs(env: NodeJS.ProcessEnv = process.env): number {
+  return readDispatchRetryPolicy(env).deadlineMs + readDispatchStaleRunMs(env);
+}
+
 /** Reap cutoff in ms, env-overridable via `DISPATCH_STALE_RUN_MIN` (minutes). */
 export function readDispatchStaleRunMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.DISPATCH_STALE_RUN_MIN);

@@ -306,41 +306,48 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     formula: 'MAX(device_states.computed_at)',
   },
 
-  // --- Commissioning cohort (#232 / #233 / #234) --------------------------------------------------
+  // --- Commissioning cohort (#232 / #233 / #234 / #236) --------------------------------------------
   // An INSTALL-QUALITY measure, not a fault queue. Every entry below is over the OPERATIONAL cohort —
-  // fitments in the window whose device is `is_departed = false` on a live plant — which is the same
-  // population every other rate in this catalog uses. Before #233 it was not, and a warehoused device
-  // read as a failed install: 39.1% failure against an actual 5.2%.
+  // fitting events in the window whose device is `is_departed = false` on a live plant — which is the
+  // same population every other rate in this catalog uses. Before #233 it was not, and a warehoused
+  // device read as a failed install: 39.1% failure against an actual 5.2%.
+  //
+  // #236 — relabeled "fitments" to "fitting events" throughout this block (display text only; the
+  // `commissioningFitments` catalog KEY and every backend/API field name are UNCHANGED, on purpose —
+  // this is a reader-facing wording fix, not a domain-term rename). Chosen over "installs" because
+  // "Install" already names something else and more specific in this system: a whole Ticket type with
+  // its own lifecycle (REQUESTED → SCHEDULED → ON_SITE → FITTED → ACTIVATED → CLOSED, see CONTEXT.md).
+  // Reusing that word here would make the page mean two different things by "install" in two places.
 
   commissioningFitments: {
     key: 'commissioningFitments',
-    name: 'Fitments in Window',
+    name: 'Fitting Events in Window',
     family: 'operational',
     definition:
       'Commissioning events recorded in the selected window — one per (device, vehicle, install date), not one per device.',
     counts:
-      'device_commissioning rows whose installed_at falls in the window, for devices in the operational fleet. A device re-mapped onto a second vehicle inside the window is TWO fitments; measured live, 6.4% of cohort devices have more than one.',
+      'device_commissioning rows whose installed_at falls in the window, for devices in the operational fleet. A device re-mapped onto a second vehicle inside the window is TWO fitting events; measured live, 6.4% of cohort devices have more than one.',
     excludes: [
       'Warehouse devices (an open device_departures row) — silent because they are in a box, not because an install failed',
       'Devices on a deactivated plant (#119)',
-      'Fitments whose device has no device_states row at all (the fact outlived the mirror, #227)',
-      'Fitments with no install date at source (~13% of source rows)',
+      'Fitting events whose device has no device_states row at all (the fact outlived the mirror, #227)',
+      'Fitting events with no install date at source (~13% of source rows)',
     ],
     source: 'device_commissioning ⋈ device_states ⋈ plants',
     refresh:
       'Appended by the daily master sync, which is manual today (INGESTION_SCHEDULER_ENABLED is off). The window itself is derived at read time, so a device ageing out requires no write.',
     formula: "COUNT(device_commissioning WHERE installed_at >= now() - N days AND is_departed = false)",
     reconciles:
-      'Operational + Warehouse + Deactivated-plant + Unmirrored = every fitment the window held. The page shows all four so the drop is named rather than silent.',
+      'Operational + Warehouse + Deactivated-plant + Unmirrored = every fitting event the window held. The page shows all four so the drop is named rather than silent.',
   },
 
   commissioningOnline: {
     key: 'commissioningOnline',
     name: 'Came Online',
     family: 'operational',
-    definition: 'Fitments whose device has sent its first GPS fix, at or after the moment it was fitted.',
+    definition: 'Fitting events whose device has sent its first GPS fix, at or after the moment it was fitted.',
     counts:
-      'Fitments where device_states.first_reported_at is set AND is at or after installed_at. The comparison is load-bearing, not defensive: a stamp EARLIER than its own fitment is a pre-existing device’s last-seen ping captured by the write-once column, and 2,138 rows on the mirror are in exactly that state.',
+      'Fitting events where device_states.first_reported_at is set AND is at or after installed_at. The comparison is load-bearing, not defensive: a stamp EARLIER than its own fitting event is a pre-existing device’s last-seen ping captured by the write-once column, and 2,138 rows on the mirror are in exactly that state.',
     excludes: [
       'device_commissioning.first_reported_at — that column is an observation-time snapshot (371 of 25,387 rows), so a reader requiring both to agree would report almost nothing as commissioned',
       ...EXCLUDED_EVERYWHERE,
@@ -349,7 +356,7 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     refresh:
       'Write-once at ingest, by COALESCE in the same upsert that advances latest_gps_datetime. Nothing else in FSM retains a first-ever ping — it is observable exactly once, as it happens.',
     formula: 'COUNT(WHERE first_reported_at IS NOT NULL AND first_reported_at >= installed_at)',
-    reconciles: 'Came Online + Awaiting First Report + Failed to Report = Fitments in Window.',
+    reconciles: 'Came Online + Awaiting First Report + Failed to Report = Fitting Events in Window.',
   },
 
   commissioningPending: {
@@ -357,10 +364,10 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     name: 'Awaiting First Report',
     family: 'operational',
     definition: 'Fitted, still silent, and still inside the grace window. Not yet a defect.',
-    counts: 'Fitments with no qualifying first report whose install is more recent than the grace cutoff (48 h by default).',
-    excludes: ['Fitments past the grace window — those are Failed to Report', ...EXCLUDED_EVERYWHERE],
+    counts: 'Fitting events with no qualifying first report whose install is more recent than the grace cutoff (48 h by default).',
+    excludes: ['Fitting events past the grace window — those are Failed to Report', ...EXCLUDED_EVERYWHERE],
     source: 'device_commissioning.installed_at vs now() − graceHours',
-    refresh: 'Ages continuously — a fitment crosses into Failed to Report on wall-clock, with no write.',
+    refresh: 'Ages continuously — a fitting event crosses into Failed to Report on wall-clock, with no write.',
     formula: 'COUNT(WHERE NOT online AND installed_at > now() - graceHours)',
   },
 
@@ -370,9 +377,9 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     family: 'operational',
     definition: 'Fitted, past the grace window, and never seen. Broken, not slow.',
     counts:
-      'Fitments with no qualifying first report whose install is older than the grace cutoff. There is essentially no commissioning tail: 96.97% of genuine new installations report within 12–24 h and the curve is flat after, so silence past the window is a defect rather than patience.',
+      'Fitting events with no qualifying first report whose install is older than the grace cutoff. There is essentially no commissioning tail: 96.97% of genuine new installations report within 12–24 h and the curve is flat after, so silence past the window is a defect rather than patience.',
     excludes: [
-      'Warehouse devices — the single largest correction #233 made; they were 4,187 of the window’s fitments and dominated this count',
+      'Warehouse devices — the single largest correction #233 made; they were 4,187 of the window’s fitting events and dominated this count',
       ...EXCLUDED_EVERYWHERE,
     ],
     source: 'device_commissioning ⋈ device_states.first_reported_at',
@@ -384,15 +391,15 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     key: 'commissioningTtfr',
     name: 'Median Time to First Report',
     family: 'derived',
-    definition: 'How long a fitment took to come online, from install to first GPS fix.',
+    definition: 'How long a fitting event took to come online, from install to first GPS fix.',
     counts:
-      'The median over fitments that came online AND were fitted after the TTFR epoch. Sample size is always shown beside it, because it is much smaller than the online count and honestly so.',
+      'The median over fitting events that came online AND were fitted after the TTFR epoch. Sample size is always shown beside it, because it is much smaller than the online count and honestly so.',
     excludes: [
-      'Fitments from before COMMISSIONING_TTFR_EPOCH — the write-once column captured a LAST-seen value for devices already reporting when it shipped, which yields a median of ~8,707 h against 17.26 h after',
-      'Fitments that never came online (they have no duration, and averaging them in as zero or as “now” would both be fiction)',
+      'Fitting events from before COMMISSIONING_TTFR_EPOCH — the write-once column captured a LAST-seen value for devices already reporting when it shipped, which yields a median of ~8,707 h against 17.26 h after',
+      'Fitting events that never came online (they have no duration, and averaging them in as zero or as “now” would both be fiction)',
     ],
     source: 'device_states.first_reported_at − device_commissioning.installed_at',
-    refresh: 'Grows as post-epoch fitments accumulate. The epoch is fixed, so the excluded population shrinks on its own.',
+    refresh: 'Grows as post-epoch fitting events accumulate. The epoch is fixed, so the excluded population shrinks on its own.',
     formula: 'percentile_cont(0.5) WITHIN GROUP (ORDER BY first_reported_at - installed_at)',
     reconciles:
       'Shown as “—” rather than 0 when nothing was measured. Zero would claim every device commissioned instantly; “—” says nothing was measured, and they are different answers.',
@@ -403,18 +410,18 @@ export const KPI_CATALOG: Record<string, KpiDefinition> = {
     name: 'Online Within 48 h',
     family: 'derived',
     definition:
-      'The share of a fitment batch that came online inside 48 hours — the shape of an install cohort resolving, rather than a point-in-time count.',
+      'The share of a fitting-event batch that came online inside 48 hours — the shape of an install cohort resolving, rather than a point-in-time count.',
     counts:
-      'Measured over MATURED, POST-EPOCH fitments only: sample + never-online. Both exclusions are symmetric and both are reported on the page.',
+      'Measured over MATURED, POST-EPOCH fitting events only: sample + never-online. Both exclusions are symmetric and both are reported on the page.',
     excludes: [
-      'Fitments younger than 72 h — they have not had the full window the curve plots, and counting them biases it hardest on exactly the newest cohort',
-      'Fitments from before the TTFR epoch, WHATEVER they did. Excluding only the pre-epoch fitments that came online, while keeping the silent ones, read 37.2% against an actual 83.1% — an inverted conclusion, not a rounding error',
+      'Fitting events younger than 72 h — they have not had the full window the curve plots, and counting them biases it hardest on exactly the newest cohort',
+      'Fitting events from before the TTFR epoch, WHATEVER they did. Excluding only the pre-epoch fitting events that came online, while keeping the silent ones, read 37.2% against an actual 83.1% — an inverted conclusion, not a rounding error',
     ],
     source: 'device_states.first_reported_at − device_commissioning.installed_at, banded',
     refresh:
-      'Recomputed per request in the same pass as the counts. The pre-epoch exclusion ages out with no backfill: once the epoch is older than the 90-day ceiling, no cohort window can contain a pre-epoch fitment.',
-    formula: 'COUNT(ttfr_hours < 48) / (sample + neverOnline), over matured post-epoch fitments',
-    reconciles: 'Sample + Never-online = curve population; + pre-epoch excluded = matured; + immature = Fitments in Window.',
+      'Recomputed per request in the same pass as the counts. The pre-epoch exclusion ages out with no backfill: once the epoch is older than the 90-day ceiling, no cohort window can contain a pre-epoch fitting event.',
+    formula: 'COUNT(ttfr_hours < 48) / (sample + neverOnline), over matured post-epoch fitting events',
+    reconciles: 'Sample + Never-online = curve population; + pre-epoch excluded = matured; + immature = Fitting Events in Window.',
   },
 };
 

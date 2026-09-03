@@ -1,3 +1,4 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the zone operating-mode read seam (`GET /api/dashboard/operating-mode`, Issue 136).
 // Read-only legibility of the recommender's per-zone DEFICIT/PREVENTIVE signal. A ZM gets a single-row
 // list (their own zone); OH/CSM get every zone (or one via `?zoneId=`). Mirrors the backend
@@ -5,7 +6,6 @@
 // plain-language mapping lives in `utils/operatingModeCopy.ts`.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
 export type OperatingMode = 'DEFICIT' | 'PREVENTIVE';
 
@@ -20,10 +20,9 @@ export interface ZoneOperatingMode {
 }
 
 export async function apiOperatingMode(zoneId?: number | string): Promise<ZoneOperatingMode[]> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   const qs = zoneId !== undefined && zoneId !== '' ? `?zoneId=${zoneId}` : '';
   const res = await fetch(`${BASE_URL}/dashboard/operating-mode${qs}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as ZoneOperatingMode[];

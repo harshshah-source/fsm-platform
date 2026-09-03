@@ -43,6 +43,10 @@ const ERROR_MESSAGE: Record<string, string> = {
   CROSS_ZONE_COVERAGE_FORBIDDEN: 'A plant can only be mapped to an SE in the same zone.',
   FLOATING_USES_TERRITORY: 'Floating SEs use the Territory page, not plant coverage.',
   COVERAGE_EXISTS: 'That plant is already mapped to this SE.',
+  // #267
+  HOME_BASE_INCOMPLETE: 'Set both latitude and longitude, or leave both blank.',
+  INVALID_HOME_LAT: 'Latitude must be between -90 and 90.',
+  INVALID_HOME_LNG: 'Longitude must be between -180 and 180.',
 };
 const messageFor = (code: string): string => ERROR_MESSAGE[code] ?? `Request failed (${code}).`;
 const codeOf = (err: unknown): string => (err instanceof SeApiError ? err.code : 'UNKNOWN');
@@ -59,6 +63,17 @@ const requireEmail = (v: string): string | null => (EMAIL_RE.test(v) ? null : 'E
 const requirePhone = (v: string): string | null => (PHONE_RE.test(v) ? null : 'Enter a valid phone number.');
 const requireCapacity = (v: string): string | null =>
   Number.isInteger(Number(v)) && Number(v) > 0 ? null : 'Daily capacity must be a positive whole number.';
+// #267 — blank is legal (clears the home base); a non-blank value must be a real coordinate. The
+// "both or neither" pairing is enforced server-side (`HOME_BASE_INCOMPLETE`), not here, since a lone
+// column cannot see the other's current value.
+const requireHomeLat = (v: string): string | null =>
+  v.trim() === '' || (Number.isFinite(Number(v)) && Number(v) >= -90 && Number(v) <= 90)
+    ? null
+    : 'Latitude must be between -90 and 90, or blank.';
+const requireHomeLng = (v: string): string | null =>
+  v.trim() === '' || (Number.isFinite(Number(v)) && Number(v) >= -180 && Number(v) <= 180)
+    ? null
+    : 'Longitude must be between -180 and 180, or blank.';
 
 /**
  * Phase 4 — SE Management directory (`/engineers/manage`). Admin-entered Service Engineers are the source
@@ -284,6 +299,38 @@ export function SeManagementDirectoryPage() {
           type="number"
           validate={requireCapacity}
           onSave={(v) => saveField(r.seId, { dailyCapacity: Number(v) })}
+        />
+      ),
+    },
+    {
+      key: 'homeLat',
+      header: 'Home Lat',
+      align: 'right',
+      render: (r) => (
+        <EditableCell
+          ariaLabel={`Edit home latitude for ${r.name}`}
+          value={r.homeLat != null ? String(r.homeLat) : ''}
+          display={<span className="text-ink-muted">{r.homeLat ?? '—'}</span>}
+          type="number"
+          placeholder="—"
+          validate={requireHomeLat}
+          onSave={(v) => saveField(r.seId, { homeLat: v.trim() === '' ? null : Number(v) })}
+        />
+      ),
+    },
+    {
+      key: 'homeLng',
+      header: 'Home Lng',
+      align: 'right',
+      render: (r) => (
+        <EditableCell
+          ariaLabel={`Edit home longitude for ${r.name}`}
+          value={r.homeLng != null ? String(r.homeLng) : ''}
+          display={<span className="text-ink-muted">{r.homeLng ?? '—'}</span>}
+          type="number"
+          placeholder="—"
+          validate={requireHomeLng}
+          onSave={(v) => saveField(r.seId, { homeLng: v.trim() === '' ? null : Number(v) })}
         />
       ),
     },

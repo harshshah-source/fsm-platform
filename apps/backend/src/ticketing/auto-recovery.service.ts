@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { LostRaceError, stampOnceOrLose } from '../common/lost-race';
 import type { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { REMOVAL_REASONS } from '../scheduling/removal-reason';
@@ -16,6 +17,11 @@ export interface AutoRecoveryActor {
   userId: string;
   role: string;
   actedAsRole?: string | null;
+  /**
+   * The zone whose ZM duty this write is being made under, when the caller is acting (#340).
+   * Attribution, not scope: it names who was covering, never what the caller may touch.
+   */
+  actingZone?: number | null;
 }
 
 export type ManualCloseResult = 'CLOSED' | 'NOT_FOUND' | 'NOT_OPEN';
@@ -76,6 +82,15 @@ export interface AutoRecoveryResult {
   examined: number;
   /** True when `maxClosures` stopped the pass with candidates still unexamined. */
   capped: boolean;
+  /**
+   * #302 — candidates this pass declined to close because the ticket left `OPEN` between the scan and
+   * the write (an SE submitted their form, a manager closed it by hand, an overlapping pass got there).
+   *
+   * Counted rather than logged, for the same reason `VerificationSweepResult.skipped` is: a pass that
+   * found five recovered devices and closed three is a different fact from one that found three, and
+   * the two must not report the same shape.
+   */
+  skipped: number;
   /** Present only under `dryRun`. */
   plan?: AutoRecoveryPlanRow[];
 }
@@ -117,6 +132,8 @@ export interface AutoRecoveryResult {
  */
 @Injectable()
 export class AutoRecoveryService {
+  private readonly logger = new Logger(AutoRecoveryService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async runAutoRecovery(options: AutoRecoveryOptions = {}): Promise<AutoRecoveryResult> {
@@ -144,6 +161,7 @@ export class AutoRecoveryService {
 
     let closed = 0;
     let examined = 0;
+    let skipped = 0;
     let capped = false;
     const plan: AutoRecoveryPlanRow[] = [];
 
@@ -179,19 +197,30 @@ export class AutoRecoveryService {
           zoneId: ticket.plant?.zoneId?.toString() ?? null,
         });
       } else {
-        await this.closeAsAutoRecovery({
-          ticketId: ticket.ticketId,
-          fromStatus: ticket.status,
-          cycleId: cycle.cycleId,
-          deviceId: ticket.deviceId,
-          now,
-          evidence,
-        });
+        try {
+          await this.closeAsAutoRecovery({
+            ticketId: ticket.ticketId,
+            fromStatus: ticket.status,
+            cycleId: cycle.cycleId,
+            deviceId: ticket.deviceId,
+            now,
+            evidence,
+          });
+        } catch (e) {
+          // #302 — the ticket left OPEN under us. Not an error and not a retry: whoever moved it did so
+          // with better information than a scan taken minutes ago, and the recovery evidence will still
+          // be there next pass if the ticket really is still open. The cap is not consumed either — a
+          // skip did no work.
+          if (!(e instanceof LostRaceError)) throw e;
+          this.logger.warn(`${e.message} — ticket left OPEN mid-pass, close skipped`);
+          skipped++;
+          continue;
+        }
       }
       closed++;
     }
 
-    return { closed, scanned: candidates.length, examined, capped, ...(dryRun ? { plan } : {}) };
+    return { closed, scanned: candidates.length, examined, skipped, capped, ...(dryRun ? { plan } : {}) };
   }
 
   /**
@@ -218,14 +247,22 @@ export class AutoRecoveryService {
     if (ticket.status !== 'OPEN' || ticket.workType !== 'TROUBLESHOOT' || !ticket.failureCycle)
       return 'NOT_OPEN';
 
-    await this.closeAsAutoRecovery({
-      ticketId: ticket.ticketId,
-      fromStatus: ticket.status,
-      cycleId: ticket.failureCycle.cycleId,
-      deviceId: ticket.deviceId,
-      now,
-      actor,
-    });
+    try {
+      await this.closeAsAutoRecovery({
+        ticketId: ticket.ticketId,
+        fromStatus: ticket.status,
+        cycleId: ticket.failureCycle.cycleId,
+        deviceId: ticket.deviceId,
+        now,
+        actor,
+      });
+    } catch (e) {
+      // #302 — the ticket stopped being OPEN between this method's own check and its write. That is
+      // precisely what NOT_OPEN already means to this door, so the caller gets the same honest 409 it
+      // would have got a moment earlier, instead of a silent second close on top of somebody else's.
+      if (e instanceof LostRaceError) return 'NOT_OPEN';
+      throw e;
+    }
     return 'CLOSED';
   }
 
@@ -262,9 +299,19 @@ export class AutoRecoveryService {
     const actorUuid = actor && UUID_RE.test(actor.userId) ? actor.userId : null;
 
     await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.ticket.update({
-        where: { ticketId },
-        data: {
+      // #302 — `status: 'OPEN'` belongs in the WHERE, not only in the caller's scan.
+      //
+      // The scan that selected this ticket ran minutes ago (per-ticket ping queries, up to 200 closures
+      // a pass), and `manualClose`'s check ran before its own await. The sweep's comment claims the OPEN
+      // scan enforces CONTEXT's "no SE troubleshooting form may have been submitted" — a scan cannot
+      // enforce anything about the moment of the write, and a submission moving the ticket to
+      // VERIFICATION_PENDING is exactly the event most likely to land in that window. Losing throws, so
+      // all seven writes below roll back together: a skipped close leaves no event, no audit row, no
+      // closed cycle and no detached day-plan row for somebody to explain later.
+      await stampOnceOrLose(
+        tx.ticket,
+        { ticketId, status: 'OPEN' },
+        {
           status: 'CLOSED_AUTO_RECOVERY',
           closureType: 'AUTO_RECOVERY_CLOSE',
           closureReason: actor
@@ -273,7 +320,8 @@ export class AutoRecoveryService {
           closedAt: now,
           lastStateChangedAt: now,
         },
-      });
+        `auto-recovery close for ticket ${ticketId}`,
+      );
       await tx.failureCycle.update({
         where: { cycleId },
         data: { state: 'VERIFIED', closedAt: now },
@@ -313,6 +361,7 @@ export class AutoRecoveryService {
           actorId: actorUuid ?? 'SYSTEM',
           actorRole: actor?.role ?? 'SYSTEM',
           actedAsRole: actor?.actedAsRole ?? null,
+          actingZone: actor?.actingZone != null ? BigInt(actor.actingZone) : null,
           action: 'AUTO_RECOVERY_CLOSED',
           entityType: 'TICKET',
           entityId: ticketId,

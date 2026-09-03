@@ -15,7 +15,22 @@ export interface SnapshotRunResult {
   succeeded: number;
   failed: number;
   inserted: number;
+  /**
+   * Rows the reader DROPPED across the whole run, by reason (#222 P6 skew, #299 AR-1 parse) — `{}`
+   * when nothing was dropped. Each of these is a device with no ping recorded for this run.
+   */
+  rejected: Record<string, number>;
+  /**
+   * Out-of-range telemetry fields nulled across the run, by reason, with their rows ingested
+   * (#299 AR-2) — `{}` when nothing was out of range. Not a run failure and not a lost device.
+   */
+  repaired: Record<string, number>;
 }
+
+/** Fold a chunk's per-reason tally into the run total. */
+const accumulate = (into: Record<string, number>, from: Record<string, number> | undefined): void => {
+  for (const [reason, n] of Object.entries(from ?? {})) into[reason] = (into[reason] ?? 0) + n;
+};
 
 export interface SnapshotRunOptions {
   /** Rows pulled per source read (LLD default ~1000). */
@@ -60,7 +75,13 @@ export class SnapshotIngestionWorker {
     let failed = 0;
     let inserted = 0;
     let dataAsOf: Date | null = null;
-    let firstFailedLowerBound: Date | null = null;
+    // #299 — row-level containment is only worth having if somebody can see what it contained. These
+    // are the run's own totals, which #300 turns into an operator-facing signal. They are counters,
+    // NOT failures: a run that dropped a poison row and succeeded on every chunk still finalizes
+    // SUCCESS, so the #230 gate lets device-state derivation, auto-recovery and ticket creation run.
+    // That is the whole point of the slice — one bad source row must not freeze the fleet's pipeline.
+    const rejected: Record<string, number> = {};
+    const repaired: Record<string, number> = {};
     // A source read (not a chunk write) throwing mid-scan — e.g. the AutoPlant VPN dropping. This is
     // the path that orphaned run 456: the throw escaped `run()` before `finishRun`, so the run hung
     // RUNNING forever and device-state recompute never ran → empty dashboards. We now catch it, stop
@@ -70,6 +91,8 @@ export class SnapshotIngestionWorker {
     try {
       for (;;) {
         const chunk = await this.source.readChunk(cursor, chunkSize);
+        accumulate(rejected, chunk.rejected);
+        accumulate(repaired, chunk.repaired);
 
         if (chunk.rows.length > 0) {
           chunkNo += 1;
@@ -88,7 +111,6 @@ export class SnapshotIngestionWorker {
             });
           } else {
             failed += 1;
-            if (firstFailedLowerBound === null) firstFailedLowerBound = minDate(chunk.rows);
             await this.prisma.snapshotRunChunk.update({
               where: { id: record.id },
               data: { status: 'FAILED', retryCount: outcome.attempts - 1, error: outcome.error },
@@ -122,23 +144,34 @@ export class SnapshotIngestionWorker {
             ? 'FAILED'
             : 'PARTIAL';
 
-    // Two cursors, deliberately asymmetric (review A3): `dataAsOf` is the conservative DISPLAY
-    // watermark (high-water of succeeded chunks; the freshness banner never advances on lost data),
-    // while `resumeCursor` is the optimistic RE-READ floor — on PARTIAL it drops back to the first
-    // failed chunk's lower bound so the next run re-reads that window (`>=` resume in the reader;
-    // the `(device_id, gps_datetime)` ON CONFLICT makes the overlap free).
-    // On a write-failure PARTIAL, drop back to the first failed chunk's lower bound to re-read it.
-    // On a read-failure PARTIAL there is no failed chunk (`firstFailedLowerBound` is null), so resume
-    // from the ingested high-water — the next run reads forward from where the source read died.
-    const resumeCursor = status === 'PARTIAL' ? (firstFailedLowerBound ?? dataAsOf) : dataAsOf;
+    // #324 (F4) — there used to be a SECOND cursor here: an optimistic re-read floor that dropped
+    // back to the first failed chunk's lower bound on a PARTIAL, persisted as `snapshot_runs.cursor`
+    // for the next run to resume from. Nothing resumed from it. The production reader restarts from
+    // `cursor = null` and keyset-scans every device every run *by design* — "correctness must not
+    // depend on a persisted watermark" is its own docblock — so the failed window is re-read anyway,
+    // and the floor's only consumer was the test that supplied its own resume-aware reader. Removed
+    // rather than labelled: a persisted value with a documented meaning nothing honours reads as a
+    // guarantee to the next person, and this one had already been quoted back as if it were true.
+    //
+    // `dataAsOf` is what remains, and it is the conservative DISPLAY watermark — the high-water of
+    // *succeeded* chunks, so the freshness banner never advances over lost data.
 
+    // F10 (#300), recorded here because this is the line the finding was about: `data_as_of` IS
+    // written on a PARTIAL run, deliberately. It is the high-water instant of the chunks that landed,
+    // and two things read it — integration-health freshness and (since #300) the banner's
+    // `partialDataAsOf`, which reports it under its own name. (#324 removed the third, a resume cursor
+    // no production reader ever honoured.) What it must never
+    // become is the plain "data as of" number: that one stays SUCCESS-only, so a partial read cannot
+    // advance the figure an operator reads as covering the whole fleet. FAILED still writes null —
+    // nothing landed, so there is no watermark to report at all.
     await this.runs.finishRun(runId, {
       status,
       dataAsOf: status === 'FAILED' ? null : dataAsOf,
-      cursor: resumeCursor ? resumeCursor.toISOString() : null,
+      // #300 — persist the containment tallies so a run's rejections stay answerable after the run.
+      chunkStats: { rejected, repaired },
     });
 
-    return { runId, status, chunks: chunkNo, succeeded, failed, inserted };
+    return { runId, status, chunks: chunkNo, succeeded, failed, inserted, rejected, repaired };
   }
 
   private async processChunk(
@@ -167,13 +200,4 @@ const maxDate = (current: Date | null, rows: readonly SourceSnapshotRow[]): Date
     if (max === null || r.gpsDatetime > max) max = r.gpsDatetime;
   }
   return max as Date;
-};
-
-/** Lower bound of a chunk's window — the PARTIAL resume floor. Chunks are only recorded non-empty. */
-const minDate = (rows: readonly SourceSnapshotRow[]): Date => {
-  let min: Date | null = null;
-  for (const r of rows) {
-    if (min === null || r.gpsDatetime < min) min = r.gpsDatetime;
-  }
-  return min as Date;
 };

@@ -264,7 +264,14 @@ export function ReportsPage() {
         </ChartCard>
         <ChartCard title="Fleet Uptime % — last 6 months">
           {uptimeTrend && uptimeTrend.length ? (
-            <TrendChart data={uptimeTrend} />
+            // Uptime clusters in the high 90s, so a zero baseline would draw six months of real
+            // movement as a flat line pinned to the top of the plot.
+            <TrendChart
+              data={uptimeTrend}
+              format="percent"
+              seriesName="Fleet uptime"
+              zeroBaseline={false}
+            />
           ) : (
             <EmptyState message="No monthly uptime history yet." />
           )}
@@ -276,14 +283,17 @@ export function ReportsPage() {
           {softInactiveGated ? (
             <EmptyState message="Available to Operations Head." />
           ) : softInactiveSeries.length ? (
-            <TrendChart data={softInactiveSeries} />
+            <TrendChart data={softInactiveSeries} seriesName="Soft-inactive devices" />
           ) : (
             <EmptyState message="No soft-inactive history yet." />
           )}
         </ChartCard>
         <ChartCard title="Fleet Uptime % by zone">
           {fleetByZone.length ? (
-            <BarChartCard data={fleetByZone} />
+            // Ascending puts the WORST-performing zone at the top, which is the row that needs
+            // acting on. The SLA-bucket panel above deliberately stays unsorted — its order is the
+            // severity ramp.
+            <BarChartCard data={fleetByZone} format="percent" sort="asc" />
           ) : (
             <EmptyState message="No per-zone uptime yet." />
           )}

@@ -110,7 +110,13 @@ export class DispatchChangesTodayService {
       // decisions, and the earlier plain assign is an ADD in its own right — it must not be absorbed
       // into the swap that happened later.
       const isMoveDestination =
-        a.addSource === ADD_SOURCES.MANUAL_REASSIGN || a.addSource === ADD_SOURCES.MANUAL_SPLIT;
+        a.addSource === ADD_SOURCES.MANUAL_REASSIGN ||
+        a.addSource === ADD_SOURCES.MANUAL_SPLIT ||
+        // A cross-day move is a move: its two rows are one decision and must count once, exactly as a
+        // reassignment's do. Omitting it here would report every day-move as an unexplained removal
+        // plus an unexplained add — the double-counting this pairing exists to prevent. `via` still
+        // carries `MANUAL_DAY_MOVE`, so a reader can tell which axis the work moved along.
+        a.addSource === ADD_SOURCES.MANUAL_DAY_MOVE;
       const source = isMoveDestination ? movedOut.get(a.ticketId) : undefined;
       const change: DispatchChange = source
         ? {
@@ -148,7 +154,10 @@ export class DispatchChangesTodayService {
         actorId: r.removedBy!,
         actorName: null,
         at: r.removedAt!.toISOString(),
-        reason: null,
+        // Was hard-coded `null` while ADD and SWAP carried theirs, so a door that *refuses to commit
+        // without a reason* published none. `via` keeps the closed predicate; this keeps the sentence.
+        // Still null for a system removal and for pre-`removal_note` history — absence, never a guess.
+        reason: r.removalNote ?? null,
         fromSeId: r.batch?.seId ?? null,
         toSeId: null,
         via: r.removalReason,

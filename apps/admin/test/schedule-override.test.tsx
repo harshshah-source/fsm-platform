@@ -9,8 +9,20 @@ import { ScheduleDetailPage } from '../src/pages/schedules/ScheduleDetailPage';
 /**
  * Issue 13b slice 3 — ZM override controls on the Schedule detail page. Each action POSTs
  * `/api/batches/:id/override` with a mandatory free-text reason and the page refetches to reflect the
- * immediate OVERRIDDEN flip (AC#3/#4). No approval gate. Reorder is slice 4; the ON_SITE conflict
- * banner is slice 5.
+ * immediate OVERRIDDEN flip (AC#3/#4). No approval gate.
+ *
+ * **#313 — these now drive the Console's own forms.** The page used to carry a second implementation
+ * of the six overrides; it renders `StopActions`/`TicketActions` instead, so what changed here is
+ * which DOM the same behaviour is asserted against, not the behaviour. Every AC below is unchanged and
+ * still checked: the mandatory reason still gates Confirm, each action still POSTs the same body to
+ * the same path, the page still refetches, and the two-gate conflict still requires an explicit
+ * second click.
+ *
+ * The renamed handles, once, so the diff reads as a retarget rather than a rewrite:
+ * `Swap SE`→`Swap engineer`, `Split batch`→`Split stop`, `Target SE`→`Target engineer`,
+ * `Move to position`→`New position`, `Select ticket X`→`Move ticket X`, the six per-action
+ * `Confirm <verb>` buttons→one `action-confirm`, and `onsite-conflict-banner`→`action-conflict`
+ * (which says *which* of the two 409s it is — the thing the old banner had to be taught separately).
  */
 const zm: SessionView = { user_id: 'zm1', role: 'ZONAL_MANAGER', zone_id: 1, acted_as_role: null };
 
@@ -203,10 +215,10 @@ describe('ZM override — Remove ticket (Issue 13b AC#3/#4)', () => {
     await userEvent.click(row.getByRole('button', { name: /remove/i }));
 
     // Reason is mandatory — Confirm is blocked until a reason is entered.
-    const confirm = stop.getByRole('button', { name: /confirm remove/i });
+    const confirm = row.getByTestId('action-confirm');
     expect(confirm).toBeDisabled();
 
-    await userEvent.type(stop.getByLabelText(/reason/i), 'duplicate visit');
+    await userEvent.type(row.getByLabelText(/reason/i), 'duplicate visit');
     expect(confirm).toBeEnabled();
     await userEvent.click(confirm);
 
@@ -238,7 +250,7 @@ describe('ZM override — Defer ticket (Issue 13b AC#3)', () => {
     await userEvent.click(row.getByRole('button', { name: /defer/i }));
 
     // Both a target date and a reason are mandatory before Confirm enables.
-    const confirm = row.getByRole('button', { name: /confirm defer/i });
+    const confirm = row.getByTestId('action-confirm');
     expect(confirm).toBeDisabled();
 
     fireEvent.change(row.getByLabelText(/defer to/i), { target: { value: '2026-06-25' } });
@@ -268,13 +280,14 @@ describe('ZM override — Swap SE (Issue 13b AC#3/#4)', () => {
     renderPage();
 
     const stop = within((await screen.findAllByTestId('schedule-stop'))[0]);
-    await userEvent.click(stop.getByRole('button', { name: /swap se/i }));
+    await userEvent.click(stop.getByRole('button', { name: /swap engineer/i }));
 
-    // Target SE comes from the zone-scoped engineer list (not the Ops-Head /org/engineers).
-    const picker = await stop.findByLabelText(/target se/i);
+    // The target list is still the zone-scoped engineer list (not the Ops-Head /org/engineers) — the
+    // shared form fetches it from the same endpoint, which is half of why there is one form.
+    const picker = await stop.findByLabelText(/target engineer/i);
     expect(within(picker).getByRole('option', { name: 'se-north-2' })).toBeInTheDocument();
 
-    const confirm = stop.getByRole('button', { name: /confirm swap/i });
+    const confirm = stop.getByTestId('action-confirm');
     expect(confirm).toBeDisabled();
 
     await userEvent.selectOptions(picker, 'se-north-2');
@@ -309,8 +322,8 @@ describe('ZM override — Reassign ticket (Issue 13b AC#3/#4)', () => {
 
     await userEvent.click(row.getByRole('button', { name: /reassign/i }));
 
-    const picker = await row.findByLabelText(/target se/i);
-    const confirm = row.getByRole('button', { name: /confirm reassign/i });
+    const picker = await row.findByLabelText(/target engineer/i);
+    const confirm = row.getByTestId('action-confirm');
     expect(confirm).toBeDisabled();
 
     await userEvent.selectOptions(picker, 'se-north-2');
@@ -339,14 +352,16 @@ describe('ZM override — Split batch (Issue 13b AC#3/#4)', () => {
     renderPage();
 
     const stop = within((await screen.findAllByTestId('schedule-stop'))[0]);
-    await userEvent.click(stop.getByRole('button', { name: /split batch/i }));
+    await userEvent.click(stop.getByRole('button', { name: /split stop/i }));
 
-    const confirm = stop.getByRole('button', { name: /confirm split/i });
+    const confirm = stop.getByTestId('action-confirm');
     expect(confirm).toBeDisabled();
 
-    // Pick a subset of tickets, a target SE, and a reason.
-    await userEvent.click(within(stop.getByTestId('ticket-row-tkt-2')).getByRole('checkbox'));
-    await userEvent.selectOptions(await stop.findByLabelText(/target se/i), 'se-north-2');
+    // Pick a subset of tickets, a target SE, and a reason. The device checkboxes now live INSIDE the
+    // split form rather than on the ticket rows — which is the better place for them: the selection
+    // belongs to the move being composed, not to the plan being looked at.
+    await userEvent.click(stop.getByLabelText('Move ticket tkt-2'));
+    await userEvent.selectOptions(await stop.findByLabelText(/target engineer/i), 'se-north-2');
     await userEvent.type(stop.getByLabelText(/reason/i), 'load balance');
     await userEvent.click(confirm);
 
@@ -384,10 +399,10 @@ describe('ZM override — Reorder stops (Issue 13b AC#3)', () => {
     // Move Pune (stop 1) to position 2.
     const pune = within(rows[0]);
     await userEvent.click(pune.getByRole('button', { name: /reorder/i }));
-    const confirm = pune.getByRole('button', { name: /confirm reorder/i });
+    const confirm = pune.getByTestId('action-confirm');
     expect(confirm).toBeDisabled();
 
-    fireEvent.change(pune.getByLabelText(/move to position/i), { target: { value: '2' } });
+    fireEvent.change(pune.getByLabelText(/new position/i), { target: { value: '2' } });
     await userEvent.type(pune.getByLabelText(/reason/i), 'cluster route');
     await userEvent.click(confirm);
 
@@ -436,7 +451,7 @@ function stubConflict() {
   vi.stubGlobal('fetch', fetchMock);
 }
 
-describe('ZM override — ON_SITE conflict banner (Issue 13b AC#5)', () => {
+describe('ZM override — ON_SITE conflict, the second gate (Issue 13b AC#5)', () => {
   it('surfaces the conflict, then re-submits with confirm to commit', async () => {
     stubConflict();
     renderPage();
@@ -444,17 +459,20 @@ describe('ZM override — ON_SITE conflict banner (Issue 13b AC#5)', () => {
     const stop = within((await screen.findAllByTestId('schedule-stop'))[0]);
     const row = within(stop.getByTestId('ticket-row-tkt-1'));
     await userEvent.click(row.getByRole('button', { name: /remove/i }));
-    await userEvent.type(stop.getByLabelText(/reason/i), 'duplicate visit');
-    await userEvent.click(stop.getByRole('button', { name: /confirm remove/i }));
+    await userEvent.type(row.getByLabelText(/reason/i), 'duplicate visit');
+    await userEvent.click(row.getByTestId('action-confirm'));
 
-    // The first POST hit the 409 — a conflict banner names the affected ON_SITE ticket.
-    const banner = await screen.findByTestId('onsite-conflict-banner');
+    // The first POST hit the 409 — the conflict is a second deliberate step, in the form itself,
+    // naming the affected ON_SITE ticket. #313: this is the Console's rendering of it, which also
+    // distinguishes ON_SITE from a future vehicle-return date; the page's old banner learned that
+    // separately and was therefore a second thing to keep correct.
+    const banner = await row.findByTestId('action-conflict');
     expect(banner).toHaveTextContent(/ON_SITE/i);
     expect(banner).toHaveTextContent('tkt-1');
     // The ticket is not yet removed (no silent commit).
     expect(screen.getByTestId('ticket-row-tkt-1')).toBeInTheDocument();
 
-    await userEvent.click(within(banner).getByRole('button', { name: /confirm override/i }));
+    await userEvent.click(within(banner).getByTestId('action-conflict-confirm'));
 
     await waitFor(() => {
       const confirmed = fetchMock.mock.calls.some(
@@ -466,10 +484,90 @@ describe('ZM override — ON_SITE conflict banner (Issue 13b AC#5)', () => {
       expect(confirmed).toBe(true);
     });
 
-    // Now it commits and the banner clears.
+    // Now it commits and the conflict clears.
     await waitFor(() => {
       expect(screen.queryByTestId('ticket-row-tkt-1')).toBeNull();
     });
-    expect(screen.queryByTestId('onsite-conflict-banner')).toBeNull();
+    expect(screen.queryByTestId('action-conflict')).toBeNull();
+  });
+});
+
+/**
+ * #313 / CB-7 — the defect the fork actually cost operators, pinned so the shared form can never be
+ * swapped back out for a local one that drops it.
+ *
+ * The page's own `onOverride` re-threw anything that was not a populated 409, and both of its commit
+ * helpers were `try/finally` with **no catch**. So a 500, a 403 or a dropped connection produced an
+ * unhandled promise rejection, a Confirm button that simply stopped being busy, and no message
+ * anywhere on the page — the operator was left unable to tell a refused write from a successful one.
+ */
+describe('#313 (CB-7) — a failed override is never silent', () => {
+  function stubCommitFails() {
+    fetchMock.mockImplementation(async (url: string, opts?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/schedules/engineers')) return json(ENGINEERS);
+      if (u.includes('/override/preview')) return json(previewBody(JSON.parse(String(opts?.body))));
+      if (u.includes('/override') && (opts?.method ?? 'GET') === 'POST') {
+        return new Response(JSON.stringify({ code: 'INTERNAL', message: 'Batch is being dispatched' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return json(detailBody());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+  }
+
+  it('renders the failure and leaves the plan untouched', async () => {
+    stubCommitFails();
+    renderPage();
+
+    const stop = within((await screen.findAllByTestId('schedule-stop'))[0]);
+    const row = within(stop.getByTestId('ticket-row-tkt-1'));
+    await userEvent.click(row.getByRole('button', { name: /remove/i }));
+    await userEvent.type(row.getByLabelText(/reason/i), 'duplicate visit');
+    await userEvent.click(row.getByTestId('action-confirm'));
+
+    // Something says so, in the form the operator is looking at — not a console warning.
+    const alert = await row.findByRole('alert');
+    expect(alert.textContent ?? '').not.toBe('');
+
+    // …and nothing was optimistically applied: the ticket is still on the plan, and the operator can
+    // try again without reopening the form.
+    expect(screen.getByTestId('ticket-row-tkt-1')).toBeInTheDocument();
+    expect(row.getByTestId('action-confirm')).toBeEnabled();
+  });
+});
+
+/**
+ * #313 AC3 — the dividend of there being one implementation.
+ *
+ * Move-to-another-day landed on the Console months ago and never reached this page, because reaching
+ * it would have meant building it twice. Nothing was written for it in this slice; the page renders
+ * the shared band, so it is simply there — which is the argument for the absorption, stated as a test.
+ */
+describe('#313 AC3 — Schedule detail gains Move to another day', () => {
+  it('offers the cross-day move and commits it through the same endpoint', async () => {
+    stub();
+    renderPage();
+
+    const row = within((await screen.findAllByTestId('ticket-row-tkt-1'))[0]);
+    await userEvent.click(row.getByRole('button', { name: /move to another day/i }));
+
+    // The move dialog has its own fields — it states a day as well as an engineer, which is the whole
+    // difference between it and a reassign.
+    fireEvent.change(await row.findByTestId('move-date'), { target: { value: '2026-06-25' } });
+    await userEvent.selectOptions(row.getByTestId('move-target-se'), 'se-north-2');
+    await userEvent.type(row.getByTestId('move-reason'), 'plant shut tomorrow');
+    await userEvent.click(row.getByTestId('move-confirm'));
+
+    await waitFor(() => {
+      const call = overrideCall('MOVE_TICKET');
+      expect(call).toBeTruthy();
+      const body = String((call![1] as RequestInit).body);
+      expect(body).toContain('"ticketId":"tkt-1"');
+      expect(body).toContain('"targetDate":"2026-06-25"');
+      expect(body).toContain('"reasonCode":"plant shut tomorrow"');
+    });
   });
 });

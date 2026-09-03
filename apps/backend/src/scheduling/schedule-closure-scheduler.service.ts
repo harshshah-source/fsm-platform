@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { type TicketStatus } from '../generated/prisma/enums';
 import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
+// #308 — the one definition of "this ticket's work is over". This file used to carry an identical
+// hand-spelled copy; the copies are what let the departure/deactivation ones drift to four members.
+import { RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 import { BUSINESS_TIMEZONE } from './dispatch-cron';
 import type { TickClaimant } from './cron-tick-claim';
 import { dispatchZoneLockKey } from './dispatch-zone-lock';
@@ -53,20 +55,6 @@ interface ZoneClosure {
   recycled: number;
 }
 
-/**
- * Ticket statuses that mean the day's work on that ticket is over — the same resolved set
- * `DeviceService.listDevices` excludes when it looks for a device's *open* ticket. A schedule none of
- * whose live tickets is outside this set finished; anything else was only partly worked.
- */
-const RESOLVED_TICKET_STATUSES: readonly TicketStatus[] = [
-  'CLOSED',
-  'CLOSED_AUTO_RECOVERY',
-  'CLOSED_NON_OPERATIONAL',
-  'FAILED_VERIFICATION',
-  'FAILED_ACTIVATION',
-  'FAILED_RECOVERY',
-  'RECEIVED_AT_WAREHOUSE',
-];
 
 /**
  * Issue 147 slice 2 — the closing transition the work-schedule lifecycle never had.

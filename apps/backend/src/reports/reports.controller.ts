@@ -1,6 +1,6 @@
 import { BadRequestException, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -53,7 +53,7 @@ export class ReportsController {
   @Get('commissioning/cohort')
   @Roles(...MANAGER_ROLES)
   commissioningCohort(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('cohortDays') cohortDays?: string,
     @Query('graceHours') graceHours?: string,
     @Query('population') population?: string,
@@ -62,7 +62,7 @@ export class ReportsController {
     @Query('remark') remark?: string | string[],
   ): Promise<CommissioningCohortReport> {
     return this.commissioning.cohort(
-      { role: user.role, zoneId: user.zone_id },
+      scope,
       {
         cohortDays: parseBoundedInt(cohortDays, 'cohortDays', COHORT_DAYS),
         graceHours: parseBoundedInt(graceHours, 'graceHours', GRACE_HOURS),
@@ -78,7 +78,7 @@ export class ReportsController {
   @Get('commissioning/installers')
   @Roles(...MANAGER_ROLES)
   commissioningInstallers(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('lookbackDays') lookbackDays?: string,
     @Query('groupBy') groupBy?: string,
     @Query('sort') sort?: string,
@@ -89,7 +89,7 @@ export class ReportsController {
     @Query('remark') remark?: string | string[],
   ): Promise<InstallQualityReport> {
     return this.commissioning.installQuality(
-      { role: user.role, zoneId: user.zone_id },
+      scope,
       {
         lookbackDays: parseBoundedInt(lookbackDays, 'lookbackDays', LOOKBACK_DAYS),
         groupBy: parseEnum(groupBy, 'groupBy', INSTALL_QUALITY_GROUP_BYS, 'installer'),
@@ -106,14 +106,16 @@ export class ReportsController {
   @Get('fleet-uptime')
   @Roles(...MANAGER_ROLES)
   fleetUptime(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('month') month?: string,
     @Query('groupBy') groupBy?: string,
   ): Promise<FleetUptimeReport> {
-    return this.reports.fleetUptime(
-      { role: user.role, zoneId: user.zone_id },
-      { month: month ?? currentMonth(), groupBy: parseGroupBy(groupBy) },
-    );
+    // Acting-aware (Issue 27): this is the Fleet Uptime hero KPI on the dashboard, so a CSM / OH
+    // acting in a zone must get that zone's uptime, not the pan-India figure under a zone heading.
+    return this.reports.fleetUptime(scope, {
+      month: month ?? currentMonth(),
+      groupBy: parseGroupBy(groupBy),
+    });
   }
 
   /** Recompute a month's summary on demand (Operations Head). Also cron-driven by
@@ -145,7 +147,7 @@ export class ReportsController {
   @Get('root-cause')
   @Roles(...MANAGER_ROLES)
   rootCause(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('zoneId') zoneId?: string,
@@ -155,7 +157,7 @@ export class ReportsController {
     @Query('seId') seId?: string,
   ): Promise<RootCauseReport> {
     return this.reports.rootCause(
-      { role: user.role, zoneId: user.zone_id },
+      scope,
       {
         fromMonth: from,
         toMonth: to,
@@ -201,7 +203,7 @@ export class ReportsController {
   @Get('efficiency')
   @Roles(...MANAGER_ROLES)
   systemEfficiencyReport(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('zoneId') zoneId?: string,
@@ -211,7 +213,7 @@ export class ReportsController {
     @Query('seId') seId?: string,
   ): Promise<SystemEfficiencyReport> {
     return this.reports.systemEfficiency(
-      { role: user.role, zoneId: user.zone_id },
+      scope,
       {
         from,
         to,
@@ -228,28 +230,28 @@ export class ReportsController {
   @Get('work-type-mix')
   @Roles(...MANAGER_ROLES)
   workTypeMix(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('zoneId') zoneId?: string,
     @Query('companyId') companyId?: string,
     @Query('plantId') plantId?: string,
   ): Promise<WorkTypeMixReport> {
-    return this.reports.workTypeMix({ role: user.role, zoneId: user.zone_id }, parseDistribution(from, to, zoneId, companyId, plantId));
+    return this.reports.workTypeMix(scope, parseDistribution(from, to, zoneId, companyId, plantId));
   }
 
   /** Verification-outcome distribution over a day range (Issue 90; ZM zone-scoped). */
   @Get('verification-outcomes')
   @Roles(...MANAGER_ROLES)
   verificationOutcomes(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('zoneId') zoneId?: string,
     @Query('companyId') companyId?: string,
     @Query('plantId') plantId?: string,
   ): Promise<VerificationOutcomesReport> {
-    return this.reports.verificationOutcomes({ role: user.role, zoneId: user.zone_id }, parseDistribution(from, to, zoneId, companyId, plantId));
+    return this.reports.verificationOutcomes(scope, parseDistribution(from, to, zoneId, companyId, plantId));
   }
 
   /** Recompute a day's efficiency summary on demand (Operations Head). Also cron-driven daily by

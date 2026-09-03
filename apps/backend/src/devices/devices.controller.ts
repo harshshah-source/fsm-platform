@@ -9,9 +9,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -54,7 +54,7 @@ export class DevicesController {
   @Get()
   @Roles(...READ_ROLES)
   list(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
@@ -68,7 +68,7 @@ export class DevicesController {
     @Query('commissionedWithinDays') commissionedWithinDays?: string,
   ): Promise<DeviceListPage> {
     return this.devices.listDevices(
-      { role: user.role, zoneId: user.zone_id },
+      scope,
       {
         search,
         limit: limit === undefined ? undefined : Number(limit),
@@ -88,8 +88,8 @@ export class DevicesController {
   /** Distinct zones + companies present in the caller's scope — the source for the list's filter dropdowns. */
   @Get('filter-options')
   @Roles(...READ_ROLES)
-  filterOptions(@CurrentUser() user: AccessTokenClaims): Promise<DeviceFilterOptions> {
-    return this.devices.filterOptions({ role: user.role, zoneId: user.zone_id });
+  filterOptions(@CurrentScope() scope: ManagerScope): Promise<DeviceFilterOptions> {
+    return this.devices.filterOptions(scope);
   }
 
   @Get(':deviceId')
@@ -104,8 +104,8 @@ export class DevicesController {
   /** Device Detail — lifetime Failure-Cycle list (Issue 44). ZM own-zone only; CSM / Operations Head all. */
   @Get(':deviceId/cycles')
   @Roles(...READ_ROLES)
-  async cycles(@CurrentUser() user: AccessTokenClaims, @Param('deviceId') deviceId: string): Promise<{ deviceId: string; cycles: DeviceCycleView[] }> {
-    const out = await this.deviceDetail.deviceCycles(this.parseId(deviceId), { role: user.role, zoneId: user.zone_id });
+  async cycles(@CurrentScope() scope: ManagerScope, @Param('deviceId') deviceId: string): Promise<{ deviceId: string; cycles: DeviceCycleView[] }> {
+    const out = await this.deviceDetail.deviceCycles(this.parseId(deviceId), scope);
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'DEVICE_NOT_FOUND' });
     return { deviceId: out.deviceId, cycles: out.cycles };
   }
@@ -113,8 +113,8 @@ export class DevicesController {
   /** Lifetime Downtime Trend — monthly series + lifetime totals + root-cause trend (Issue 44). */
   @Get(':deviceId/downtime-trend')
   @Roles(...READ_ROLES)
-  async downtimeTrend(@CurrentUser() user: AccessTokenClaims, @Param('deviceId') deviceId: string): Promise<DeviceDowntimeTrend> {
-    const out = await this.deviceDetail.downtimeTrend(this.parseId(deviceId), { role: user.role, zoneId: user.zone_id });
+  async downtimeTrend(@CurrentScope() scope: ManagerScope, @Param('deviceId') deviceId: string): Promise<DeviceDowntimeTrend> {
+    const out = await this.deviceDetail.downtimeTrend(this.parseId(deviceId), scope);
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'DEVICE_NOT_FOUND' });
     return out.trend;
   }

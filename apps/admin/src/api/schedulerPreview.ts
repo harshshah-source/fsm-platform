@@ -153,6 +153,16 @@ export async function placeHold(input: {
     };
   }
   if (res.status === 404) return { result: 'NOT_FOUND' };
+  // #310 — a 400 here is a *refusal with a stated reason* (`INVALID_DATE`: the date names a day the
+  // hold would not survive), not a transport failure. Same treatment `apiOverrideBatch` already gives
+  // `TARGET_DATE_IN_PAST`, and for the same reason: the server has already written the sentence the
+  // operator needs, and `REQUEST_FAILED_400` throws it away. Reachable despite the input's `min`,
+  // which is computed when the panel renders — a console left open past IST midnight offers a date
+  // that was future when it was drawn and is not when it is sent.
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(body?.message || 'That date would not hold the ticket back.');
+  }
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as HoldResult;
 }

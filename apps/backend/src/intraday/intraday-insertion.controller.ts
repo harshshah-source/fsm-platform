@@ -10,8 +10,11 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
+import type { RequestActor } from '../common/request-actor';
+import { toBigIntId } from '../common/parse-id';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -42,8 +45,8 @@ export class IntradayInsertionController {
 
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<IntradayInsertionRow[]> {
-    return this.svc.listForScope({ role: user.role, zoneId: user.zone_id });
+  list(@CurrentScope() scope: ManagerScope): Promise<IntradayInsertionRow[]> {
+    return this.svc.listForScope(scope);
   }
 
   /** Qualifying-event sweep — direct-assign newly-CRITICAL tickets in a zone, or escalate. */
@@ -51,12 +54,20 @@ export class IntradayInsertionController {
   @HttpCode(200)
   @Roles(...MANAGER_ROLES)
   async fire(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Body() body: { zoneId?: number | string },
   ): Promise<CriticalAssignOutcome> {
-    const zoneId = user.role === 'ZONAL_MANAGER' ? user.zone_id : body.zoneId;
-    if (zoneId == null) throw new BadRequestException({ code: 'ZONE_REQUIRED' });
-    return this.svc.assignCriticalForZone(BigInt(zoneId));
+    // #341 — a caller who is clamped to a zone sweeps that zone, and `body.zoneId` cannot widen it.
+    // That was already true for a ZM (their claims zone won); it is now equally true for a CSM or
+    // Operations Head **acting** in a zone, because `resolveManagerScope` collapses them to it. An
+    // unclamped manager still names the zone in the body, which is the only way they could.
+    const raw = scope.zoneId ?? body.zoneId;
+    if (raw == null) throw new BadRequestException({ code: 'ZONE_REQUIRED' });
+    // #310 (CB-9) — a 400 and not a 404: the zone is the sweep's *argument*, not a resource this route
+    // fetches, so a caller who names it wrong has made a malformed request, not asked for a missing one.
+    const zoneId = toBigIntId(raw);
+    if (zoneId === null) throw new BadRequestException({ code: 'INVALID_ZONE_ID' });
+    return this.svc.assignCriticalForZone(zoneId);
   }
 
   /**
@@ -65,24 +76,29 @@ export class IntradayInsertionController {
    */
   @Get(':id/available-ses')
   @Roles(...MANAGER_ROLES)
-  availableSes(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string): Promise<CandidateRow[]> {
-    return this.svc.availableSesForManualAssign(BigInt(id), { role: user.role, zoneId: user.zone_id });
+  availableSes(@CurrentScope() scope: ManagerScope, @Param('id') id: string): Promise<CandidateRow[]> {
+    const insertionId = toBigIntId(id);
+    if (insertionId === null) throw new NotFoundException({ code: 'INSERTION_NOT_FOUND' });
+    return this.svc.availableSesForManualAssign(insertionId, scope);
   }
 
   @Post(':id/manual-assign')
   @HttpCode(200)
   @Roles(...MANAGER_ROLES)
   async manualAssign(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
     @Body() body: { seId: string; confirm?: boolean; reasonCode?: string },
   ) {
     if (!body.seId) throw new BadRequestException({ code: 'SE_REQUIRED' });
+    const insertionId = toBigIntId(id);
+    if (insertionId === null) throw new NotFoundException({ code: 'INSERTION_OR_SE_NOT_FOUND' });
     const out = await this.svc.manualAssign(
-      BigInt(id),
+      insertionId,
       body.seId,
-      { userId: user.user_id, role: user.role, actedAsRole: null },
-      { role: user.role, zoneId: user.zone_id },
+      actor,
+      scope,
       undefined,
       // #265 item 4 — the ZM's deferral decision reaches the primitive, so #249's existing confirm
       // flow is reachable from the escalation queue instead of dead-ending in a 404.

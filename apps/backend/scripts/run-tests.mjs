@@ -10,24 +10,49 @@
  * numTotalTestSuites/numPassed.../numFailed... fields are DESCRIBE-BLOCK counts, not file counts, and
  * do not carry the pre-crash collected total at all.
  *
- * This wraps `vitest run`, tees its output live, then parses both summary lines and fails loudly
- * (distinct message, non-zero exit) the moment failed+passed+skipped != collected for either — so the
- * next occurrence is a named failure instead of "the passed count drifted by 7".
+ * #184 AC-4 — the crash itself is root-caused as a Windows child-process-level native fault (see
+ * docs/progress/184-vitest-worker-exited-unexpectedly.md): not caused by, or fixable in, test or
+ * application code. Since the fault can't be eliminated from here, this wraps detection with
+ * automatic recovery: on a reconciliation failure, diff the file list vitest streamed a per-file
+ * result line for (every file prints exactly one `<icon> path (N tests) ...` summary line as it
+ * finishes, pass or fail — regardless of whether the crash happens later) against the full expected
+ * spec glob, and re-run ONLY the files that never printed one. Repeats up to RETRY_BUDGET times
+ * before failing loudly (today's behaviour, unchanged, once the budget is exhausted) — targeted
+ * retry costs seconds per crash instead of re-running the whole 7-14 minute suite.
  */
 import { spawn } from 'node:child_process';
+import { readdirSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 
-const args = process.argv.slice(2);
-const child = spawn('npx', ['--no-install', 'vitest', 'run', ...args], { shell: true });
+const RETRY_BUDGET = 3;
 
-let combined = '';
-child.stdout.on('data', (chunk) => {
-  process.stdout.write(chunk);
-  combined += chunk;
-});
-child.stderr.on('data', (chunk) => {
-  process.stderr.write(chunk);
-  combined += chunk;
-});
+function collectSpecFiles(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const st = statSync(full);
+    if (st.isDirectory()) collectSpecFiles(full, out);
+    else if (/\.(spec|e2e-spec)\.ts$/.test(entry)) {
+      out.push(relative(process.cwd(), full).split('\\').join('/'));
+    }
+  }
+  return out;
+}
+
+function runVitest(fileArgs) {
+  return new Promise((resolve) => {
+    const child = spawn('npx', ['--no-install', 'vitest', 'run', ...fileArgs], { shell: true });
+    let combined = '';
+    child.stdout.on('data', (chunk) => {
+      process.stdout.write(chunk);
+      combined += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      process.stderr.write(chunk);
+      combined += chunk;
+    });
+    child.on('close', (code) => resolve({ code, combined }));
+  });
+}
 
 /** Parses a vitest summary line: "<label>  <n> failed | <n> passed | <n> skipped (<total>)". Any of
  * the failed/passed/skipped/todo segments may be absent (0). Returns null if the label's line is
@@ -52,34 +77,90 @@ function parseSummaryLine(text, label) {
   };
 }
 
-child.on('close', (code) => {
-  const files = parseSummaryLine(combined, 'Test Files');
-  const tests = parseSummaryLine(combined, 'Tests');
+/** Every file prints exactly one summary line as it finishes: ` ✓ test/foo.spec.ts (3 tests) 12ms`
+ * or ` ❯ test/foo.spec.ts (3 tests | 1 failed) 12ms`. Requiring the "(" right after the path excludes
+ * per-test lines (`✓ test/foo.spec.ts > describe > it`) and in-stack-trace file mentions
+ * (`❯ test/foo.spec.ts:5:15`), which have no "(" there. */
+function parseCompletedFiles(text) {
+  const stripped = text.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
+  const re = /^[ \t]*\S{1,2}\s+(\S+\.(?:e2e-spec|spec)\.ts)\s*\(/gm;
+  const files = new Set();
+  let m;
+  while ((m = re.exec(stripped))) files.add(m[1]);
+  return files;
+}
+
+function zeroAgg() {
+  return { failed: 0, passed: 0, skipped: 0, todo: 0 };
+}
+
+async function main() {
+  const explicitArgs = process.argv.slice(2);
+  const allSpecs = explicitArgs.length > 0 ? explicitArgs : collectSpecFiles(join(process.cwd(), 'test'));
+
+  let remaining = allSpecs;
+  let attempt = 0;
+  let lastExitCode = 0;
+  const aggFiles = zeroAgg();
+  const aggTests = zeroAgg();
+
+  while (remaining.length > 0 && attempt < RETRY_BUDGET) {
+    attempt += 1;
+    if (attempt > 1) {
+      console.error(
+        `\n#184 AC-4: retry ${attempt - 1}/${RETRY_BUDGET - 1} — re-running ${remaining.length} file(s) a ` +
+          `worker crash dropped from the previous attempt: ${remaining.join(', ')}\n`,
+      );
+    }
+    // The full-suite invocation (`pnpm test`, no explicit args) must NOT pass all ~300+ collected
+    // paths as CLI args — Windows' command-line length limit ("The command line is too long.") is
+    // far below that, and hitting it looks exactly like every file crashing (#184 investigation hit
+    // this by accident). Let vitest's own `include` glob resolve the full set; only ever pass an
+    // explicit (small) file list on a retry, where `remaining` is the handful of files a crash
+    // actually dropped.
+    const fileArgs = attempt === 1 && explicitArgs.length === 0 ? [] : remaining;
+    const { code, combined } = await runVitest(fileArgs);
+    lastExitCode = code ?? 1;
+
+    const files = parseSummaryLine(combined, 'Test Files');
+    const tests = parseSummaryLine(combined, 'Tests');
+    if (files) for (const k of Object.keys(aggFiles)) aggFiles[k] += files[k];
+    if (tests) for (const k of Object.keys(aggTests)) aggTests[k] += tests[k];
+
+    const completed = parseCompletedFiles(combined);
+    remaining = remaining.filter((f) => !completed.has(f));
+  }
+
+  const totalExpected = allSpecs.length;
+  const reportedFiles = aggFiles.failed + aggFiles.passed + aggFiles.skipped + aggFiles.todo;
 
   const problems = [];
-  if (!files) {
-    problems.push('could not find a "Test Files" summary line at all.');
-  } else if (files.failed + files.passed + files.skipped + files.todo !== files.total) {
+  if (remaining.length > 0) {
     problems.push(
-      `files: ${files.failed} failed + ${files.passed} passed + ${files.skipped} skipped + ${files.todo} todo ` +
-        `= ${files.failed + files.passed + files.skipped + files.todo}, but collected ${files.total}.`,
+      `${remaining.length} file(s) never produced a result after ${attempt} attempt(s): ${remaining.join(', ')}.`,
     );
   }
-  if (!tests) {
-    problems.push('could not find a "Tests" summary line at all.');
-  } else if (tests.failed + tests.passed + tests.skipped + tests.todo !== tests.total) {
-    problems.push(
-      `tests: ${tests.failed} failed + ${tests.passed} passed + ${tests.skipped} skipped + ${tests.todo} todo ` +
-        `= ${tests.failed + tests.passed + tests.skipped + tests.todo}, but collected ${tests.total}.`,
-    );
+  // Safety net independent of the per-file diff above: even if every file matched a completed-file
+  // line, cross-check against vitest's own reported totals in case a file's line was mis-parsed.
+  if (reportedFiles !== totalExpected) {
+    problems.push(`files: reconciled ${reportedFiles} across all attempts, but expected ${totalExpected}.`);
   }
 
   if (problems.length > 0) {
-    console.error('\nSUITE INCOMPLETE — do not trust this run:');
+    console.error(`\nSUITE INCOMPLETE after ${attempt} attempt(s) — do not trust this run:`);
     for (const p of problems) console.error(`  - ${p}`);
-    console.error('  A worker likely crashed mid-run and silently dropped a whole file (#184).');
+    console.error('  A worker crash (#184) survived every retry — see docs/progress/184-*.md.');
     process.exit(1);
   }
 
-  process.exit(code ?? 1);
-});
+  if (attempt > 1) {
+    console.error(
+      `\n#184 AC-4: recovered — all ${totalExpected} files accounted for after ${attempt} attempts ` +
+        `(${attempt - 1} crash-triggered retr${attempt - 1 === 1 ? 'y' : 'ies'}).`,
+    );
+  }
+
+  process.exit(aggFiles.failed > 0 || aggTests.failed > 0 ? 1 : lastExitCode);
+}
+
+main();

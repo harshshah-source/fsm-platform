@@ -249,10 +249,13 @@ describe('Issue 04 slice 5 — SnapshotIngestionWorker', () => {
     const run = await prisma.snapshotRun.findUnique({ where: { runId: result.runId } });
     expect(run?.status).toBe('PARTIAL');
     expect(run?.finishedAt).not.toBeNull();
-    // Display watermark advanced only to the ingested high-water; resume cursor lets the next run
-    // re-read forward from there (idempotent), so no ping is silently skipped.
+    // Display watermark advanced only to the ingested high-water, so the freshness banner never
+    // claims data the run lost. #324 (F4) — and there is no resume cursor beside it any more: nothing
+    // in production ever read one, because `AutoPlantSourceReader` restarts from a null cursor and
+    // re-scans every device on the next run regardless. The failed window is re-read by the scan, not
+    // by a persisted floor.
     expect(run?.dataAsOf?.toISOString()).toBe(new Date(Date.UTC(2026, 5, 19, 8, 0, 0)).toISOString());
-    expect(run?.cursor).toBe(new Date(Date.UTC(2026, 5, 19, 8, 0, 0)).toISOString());
+    expect(run?.cursor).toBeNull();
   });
 
   it('finalizes FAILED with null data_as_of when the very first read throws', async () => {
@@ -278,4 +281,181 @@ describe('Issue 04 slice 5 — SnapshotIngestionWorker', () => {
     expect(result.chunks).toBe(0);
     expect(result.inserted).toBe(0);
   });
+
+
+/**
+ * #299 — the run's verdict, which is what actually decides whether the fleet's pipeline moves.
+ *
+ * Containment in the mapping layer is only half the fix. The other half is that a run which dropped a
+ * poison row must still finalize **SUCCESS**, because the #230 gate
+ * (`integration-sync.service.ts`: `ingestComplete = snapshotStatus === 'SUCCESS'`) skips device-state
+ * derivation, auto-recovery and ticket creation on anything else — fleet-wide, on every 30-minute
+ * tick. A fix that contained the row but left the run PARTIAL would have changed nothing an operator
+ * could see.
+ *
+ * The counters ride the result: #299 explicitly adds no schema, and #300 owns the operator-facing
+ * surface built on top of them — including parking the run totals in the existing `chunk_stats`
+ * column so they survive the process (the `#300` describe at the foot of this file).
+ */
+describe('#299 — a contained poison row does not fail the run', () => {
+  /** A reader that reports per-chunk tallies the way `AutoPlantSourceReader` does. */
+  class TallyingReader implements SourceReader {
+    private reads = 0;
+    constructor(
+      private readonly chunks: ReadonlyArray<{ rows: SourceSnapshotRow[]; rejected?: Record<string, number>; repaired?: Record<string, number> }>,
+    ) {}
+    async readChunk(): Promise<SourceChunk> {
+      const chunk = this.chunks[this.reads];
+      this.reads += 1;
+      const last = this.reads >= this.chunks.length;
+      return { rows: [...chunk.rows], nextCursor: last ? null : String(this.reads), ...chunk };
+    }
+  }
+
+  it('AC3 — all chunks SUCCESS with rows rejected: the run is SUCCESS, so the #230 gate opens', async () => {
+    const source = new TallyingReader([
+      { rows: [row(DEV(61), 0), row(DEV(62), 1)], rejected: { UNPARSEABLE_TIMESTAMP: 1 } },
+      { rows: [row(DEV(63), 2)], rejected: { UNPARSEABLE_TIMESTAMP: 1, FUTURE_SKEW: 2 }, repaired: { RANGE_MAINS_STATUS: 4 } },
+    ]);
+
+    const result = await makeWorker(realWriter, source).run({ chunkSize: 2 });
+    created.push(result.runId);
+
+    // The verdict the gate reads. A rejection is a data-quality fact, never a run failure.
+    expect(result.status).toBe('SUCCESS');
+    expect(result.failed).toBe(0);
+    expect(result.inserted).toBe(3);
+
+    const run = await prisma.snapshotRun.findUnique({ where: { runId: result.runId } });
+    expect(run?.status).toBe('SUCCESS');
+    // `data_as_of` still advances — the surviving rows are real telemetry, and the freshness banner
+    // must not stall just because a sibling row was dropped.
+    expect(run?.dataAsOf?.toISOString()).toBe(new Date(Date.UTC(2026, 5, 19, 8, 2, 0)).toISOString());
+  });
+
+  it('AC2 — the run totals every reason across chunks, rejections and repairs kept apart', async () => {
+    const source = new TallyingReader([
+      { rows: [row(DEV(64), 0)], rejected: { UNPARSEABLE_TIMESTAMP: 1 }, repaired: { RANGE_LAT: 2 } },
+      { rows: [row(DEV(65), 1)], rejected: { UNPARSEABLE_TIMESTAMP: 3, FUTURE_SKEW: 1 }, repaired: { RANGE_LAT: 1, RANGE_SPEED: 5 } },
+    ]);
+
+    const result = await makeWorker(realWriter, source).run({ chunkSize: 1 });
+    created.push(result.runId);
+
+    // Nothing is silently dropped: every rejected row and every nulled field is countable, by reason.
+    expect(result.rejected).toEqual({ UNPARSEABLE_TIMESTAMP: 4, FUTURE_SKEW: 1 });
+    expect(result.repaired).toEqual({ RANGE_LAT: 3, RANGE_SPEED: 5 });
+  });
+
+  it('reports empty tallies for a clean run rather than omitting them', async () => {
+    const result = await makeWorker(realWriter, new InMemorySourceReader([row(DEV(66), 0)])).run();
+    created.push(result.runId);
+
+    // `{}` not `undefined`: a caller reading `Object.keys(result.rejected).length` — which is what an
+    // alert does — must not have to null-guard the happy path.
+    expect(result.rejected).toEqual({});
+    expect(result.repaired).toEqual({});
+    expect(result.status).toBe('SUCCESS');
+  });
+
+  it('AC4 — containment did not swallow real failures: a chunk write error still retries and degrades the run', async () => {
+    // The regression the issue names. Row-level containment must not turn a genuine, non-row DB
+    // failure into a quiet success — a chunk that fails for a reason that is not one bad row (a
+    // connection loss) has to retry, be recorded FAILED, and pull the run down to PARTIAL exactly as
+    // before, so the #230 gate still refuses to derive state from a partial read.
+    const source = new TallyingReader([
+      { rows: [row(DEV(67), 0)], rejected: { UNPARSEABLE_TIMESTAMP: 1 } },
+      { rows: [row(DEV(68), 1)] },
+    ]);
+    const writer = new PoisonWriter(realWriter, DEV(68));
+
+    const result = await makeWorker(writer, source).run({ chunkSize: 1, maxAttempts: 3, retryDelayMs: 0 });
+    created.push(result.runId);
+
+    expect(result.status).toBe('PARTIAL');
+    expect(result.succeeded).toBe(1);
+    expect(result.failed).toBe(1);
+    // The rejection tally is still reported alongside the failure — the two are independent facts.
+    expect(result.rejected).toEqual({ UNPARSEABLE_TIMESTAMP: 1 });
+
+    const chunks = await prisma.snapshotRunChunk.findMany({ where: { runId: result.runId }, orderBy: { chunkNo: 'asc' } });
+    const failedChunk = chunks.find((c) => c.status === 'FAILED');
+    expect(failedChunk).toBeTruthy();
+    expect(failedChunk!.retryCount).toBe(2); // all three attempts spent, as before
+  });
+});
+
+/**
+ * #300 — the containment counters have to outlive the run.
+ *
+ * #299 deliberately stopped at the in-process tallies: they rode `SnapshotRunResult` and a WARN log,
+ * which is enough for the caller that is standing right there and useless to an operator opening a
+ * page an hour later. That is the gap #300 closes, and it closes it on the row the run already
+ * writes — `snapshot_runs.chunk_stats`, a JSONB column that has existed since the original schema and
+ * had never been written to. No column, no migration, and no input to the SUCCESS/PARTIAL/FAILED
+ * verdict, which is computed exactly as before and handed to `finishRun` unchanged.
+ */
+describe('#300 — the run persists its containment tallies', () => {
+  class TallyingReader implements SourceReader {
+    private reads = 0;
+    constructor(
+      private readonly chunks: ReadonlyArray<{ rows: SourceSnapshotRow[]; rejected?: Record<string, number>; repaired?: Record<string, number> }>,
+    ) {}
+    async readChunk(): Promise<SourceChunk> {
+      const chunk = this.chunks[this.reads];
+      this.reads += 1;
+      const last = this.reads >= this.chunks.length;
+      return { rows: [...chunk.rows], nextCursor: last ? null : String(this.reads), ...chunk };
+    }
+  }
+
+  it('writes the run-total rejected/repaired tallies to chunk_stats', async () => {
+    const source = new TallyingReader([
+      { rows: [row(DEV(70), 0)], rejected: { UNPARSEABLE_TIMESTAMP: 1 }, repaired: { RANGE_LAT: 2 } },
+      { rows: [row(DEV(71), 1)], rejected: { UNPARSEABLE_TIMESTAMP: 3, FUTURE_SKEW: 1 } },
+    ]);
+
+    const result = await makeWorker(realWriter, source).run({ chunkSize: 1 });
+    created.push(result.runId);
+
+    const run = await prisma.snapshotRun.findUnique({ where: { runId: result.runId } });
+    // The same numbers the result reports — one derivation, persisted rather than recomputed, so the
+    // alert card and the caller can never disagree about what a run threw away.
+    expect(run?.chunkStats).toEqual({
+      rejected: { UNPARSEABLE_TIMESTAMP: 4, FUTURE_SKEW: 1 },
+      repaired: { RANGE_LAT: 2 },
+    });
+    expect(result.rejected).toEqual({ UNPARSEABLE_TIMESTAMP: 4, FUTURE_SKEW: 1 });
+  });
+
+  it('writes empty tallies for a clean run, not null', async () => {
+    const result = await makeWorker(realWriter, new InMemorySourceReader([row(DEV(72), 0)])).run();
+    created.push(result.runId);
+
+    const run = await prisma.snapshotRun.findUnique({ where: { runId: result.runId } });
+    // A clean run has to be distinguishable from a pre-#300 run that never recorded anything — the
+    // alert reads `{}` as "nothing was dropped" and NULL as "we do not know".
+    expect(run?.chunkStats).toEqual({ rejected: {}, repaired: {} });
+  });
+
+  it('records the tallies of a run that degraded to PARTIAL', async () => {
+    // The wedged case, which is the whole point: the run the operator needs the numbers for is the one
+    // that did NOT succeed, and `finishRun` must persist them on that path too.
+    const source = new TallyingReader([
+      { rows: [row(DEV(73), 0)], rejected: { UNPARSEABLE_TIMESTAMP: 2 } },
+      { rows: [row(DEV(74), 1)] },
+    ]);
+    const result = await makeWorker(new PoisonWriter(realWriter, DEV(74)), source).run({
+      chunkSize: 1,
+      maxAttempts: 2,
+      retryDelayMs: 0,
+    });
+    created.push(result.runId);
+
+    expect(result.status).toBe('PARTIAL');
+    const run = await prisma.snapshotRun.findUnique({ where: { runId: result.runId } });
+    expect(run?.chunkStats).toEqual({ rejected: { UNPARSEABLE_TIMESTAMP: 2 }, repaired: {} });
+  });
+});
+
 });

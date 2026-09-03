@@ -85,7 +85,8 @@ export function CsmApprovalSharePage() {
           {chartData.length === 0 ? (
             <EmptyState message="No acted-as-backup activity this month." />
           ) : (
-            <BarChartCard data={chartData} />
+            // Descending — a rising CSM share is the signal, so the highest zone leads.
+            <BarChartCard data={chartData} format="percent" sort="desc" />
           )}
         </ChartCard>
       </div>

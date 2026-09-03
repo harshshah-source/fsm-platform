@@ -185,13 +185,22 @@ describe('#263 — every scheduler claims its tick window (e2e, two pools)', () 
       const reapA = vi.fn(async () => ({ runs: 0, claims: 0 }));
       const reapB = vi.fn(async () => ({ runs: 0, claims: 0 }));
       const dispatchA = vi.fn(async () => ({ result: 'OK' }) as never);
+      // #303 — the reaper tick now also runs the abandoned-tick janitor, so a stub that stops at
+      // `reapStaleDispatchRuns` no longer stands in for the collaborator. (This spec caught that: the
+      // missing method threw inside the tick's own catch and turned a `ran: true` into an ERROR — the
+      // scheduler swallowing it is correct, and this assertion is what makes the swallow visible.)
+      const idleJanitor = async () => ({ marked: 0, windowStart: null });
       const svcA = new DispatchSchedulerService(
-        { reapStaleDispatchRuns: reapA, runForActiveZones: dispatchA } as unknown as DispatchRunService,
+        {
+          reapStaleDispatchRuns: reapA,
+          recoverAbandonedDispatchTick: idleJanitor,
+          runForActiveZones: dispatchA,
+        } as unknown as DispatchRunService,
         claimsA,
         { enabled: true },
       );
       const svcB = new DispatchSchedulerService(
-        { reapStaleDispatchRuns: reapB } as unknown as DispatchRunService,
+        { reapStaleDispatchRuns: reapB, recoverAbandonedDispatchTick: idleJanitor } as unknown as DispatchRunService,
         claimsB,
         { enabled: true },
       );

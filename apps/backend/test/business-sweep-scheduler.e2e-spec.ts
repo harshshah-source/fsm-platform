@@ -17,6 +17,7 @@ import {
   DEFAULT_FLEET_UPTIME_CRON,
   DEFAULT_INSTALL_VERIFICATION_CRON,
   DEFAULT_CRITICAL_ASSIGN_CRON,
+  DEFAULT_NOTIFICATION_OUTBOX_CRON,
   DEFAULT_REPEAT_ESCALATION_CRON,
   DEFAULT_ROOT_CAUSE_CRON,
   DEFAULT_SOFT_INACTIVE_CRON,
@@ -88,6 +89,7 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
         fleetUptimeCron: DEFAULT_FLEET_UPTIME_CRON,
         rootCauseCron: DEFAULT_ROOT_CAUSE_CRON,
         zmPerformanceCron: DEFAULT_ZM_PERFORMANCE_CRON,
+        notificationOutboxCron: DEFAULT_NOTIFICATION_OUTBOX_CRON,
       });
     });
 
@@ -248,7 +250,7 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
   });
 
   describe('cron registration (AC#4 — every sweep is on the clock, dormant by default)', () => {
-    it('registers all eleven named business-sweep cron jobs under ScheduleModule', async () => {
+    it('registers all twelve named business-sweep cron jobs under ScheduleModule', async () => {
       const { Test } = await import('@nestjs/testing');
       const { ScheduleModule, SchedulerRegistry } = await import('@nestjs/schedule');
 
@@ -274,6 +276,7 @@ describe('Issue 108 — BusinessSweepSchedulerService (config + guarded runner)'
           'business-fleet-uptime',
           'business-root-cause',
           'business-zm-performance',
+          'business-notification-outbox',
         ]) {
           expect(jobs.has(name)).toBe(true);
         }

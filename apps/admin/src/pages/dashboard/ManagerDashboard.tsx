@@ -47,6 +47,18 @@ export function ManagerDashboard() {
 
   useEffect(() => {
     let alive = true;
+    // Drop the previous scope's rows before asking for the new one. Entering acting mode otherwise
+    // renders the Zone Operations body over the pan-India numbers still in state until the requests
+    // land — the exact misreading this whole fix is about. A no-op on first mount.
+    setZones([]);
+    setCompanyPlants([]);
+    setCritical([]);
+    setActions([]);
+    setFleet(null);
+    setFleetUptime(null);
+    setZoneUptime(new Map());
+    setPlantUptime(new Map());
+    setError(null);
     Promise.all([
       apiActionRequired(),
       apiZoneOverview(),
@@ -86,7 +98,11 @@ export function ManagerDashboard() {
     return () => {
       alive = false;
     };
-  }, []);
+    // `actingZone` is a dependency, not decoration: every request above carries it as
+    // `X-Acting-As-Zone`, so entering or leaving acting mode changes what the SAME endpoints return.
+    // With an empty dep list the body swapped to the Zone view over whatever pan-India data was
+    // already in state, and nothing refetched until a reload.
+  }, [actingZone]);
 
   const refreshCritical = useCallback(() => {
     apiCriticalQueue()

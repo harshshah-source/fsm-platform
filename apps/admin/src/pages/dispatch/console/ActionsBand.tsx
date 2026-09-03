@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   apiAssignTicket,
   apiOverrideBatch,
@@ -17,6 +17,8 @@ import { Badge, Button } from '../../../components/ui';
 import { Input } from '../../../components/ui/Input';
 import { Select } from '../../../components/ui/Select';
 import { engineerOptionLabel } from '../../../lib/capacity';
+import { addIsoDays, istIsoDate } from '../../../lib/datetime';
+import { dayLabel } from './dayAxis';
 
 /**
  * **ACTIONS — the Inspector's write band** (Scheduler Console Phase 2.3/2.4, operator ruling D1).
@@ -27,6 +29,15 @@ import { engineerOptionLabel } from '../../../lib/capacity';
  * because the proposal at the time was to build a **second** set beside Schedule Detail's, which
  * `#282 R5` forbids. On 2026-08-27 they approved the Console, whose premise is different: this band
  * **absorbs** those controls rather than duplicating them. The number of implementations stays at one.
+ *
+ * **#313 (AR-4) — that last sentence was a claim before it was a fact.** The absorption was described
+ * here and never finished: `ScheduleDetailPage` kept a full second implementation of the six overrides
+ * and its own `useOverridePreview`, and the two forks had already diverged — the page had no Move, one
+ * copy of the deferral-vs-ON_SITE wording, and **silent failures** (CB-7: its commit helpers were
+ * `try/finally` with no `catch`, so anything but a 409 produced an unhandled rejection and no UI at
+ * all). `ScheduleDetailPage` now renders {@link StopActions} and {@link TicketActions} directly, so the
+ * count is one because there is one, not because a comment says so. Anything added here reaches both
+ * surfaces; nothing may be added there.
  *
  * So there is exactly one rule governing this file, and it is a maintenance rule as much as a design
  * one: **every action here commits through the endpoint that already owns it.** No new write path was
@@ -69,7 +80,9 @@ export type ActionPrefill =
   | { action: 'DEFER_TICKET'; date: string }
   | { action: 'REMOVE_TICKET' }
   | { action: 'ASSIGN'; seId: string }
-  | { action: 'SWAP_SE'; seId: string };
+  | { action: 'SWAP_SE'; seId: string }
+  /** A cross-day drop names both coordinates of the cell it landed on; both are seeded. */
+  | { action: 'MOVE_TICKET'; seId: string; date: string };
 
 /** What the Console can do to a ticket, given where that ticket currently sits. */
 export type TicketPlacement =
@@ -84,25 +97,103 @@ type Draft =
   | { action: 'REASSIGN' }
   | { action: 'REMOVE_TICKET' }
   | { action: 'DEFER_TICKET' }
+  | { action: 'MOVE_TICKET' }
   | { action: 'ASSIGN' }
   | { action: 'HOLD' }
   | null;
+
+/**
+ * **Bring an opened form into the overlay's own view — and move nothing else.**
+ *
+ * The Inspector's bands are tall: identity, the decision trace, the score breakdown and the links all
+ * sit above the Actions row, so a form that opens there opens below the *modal's* fold. That is the
+ * original off-screen-dialog defect at one box smaller, and a drop that seeds a dialog nobody can see
+ * is still a dead gesture.
+ *
+ * This scrolls the Inspector's own scroll region and nothing above it. `scrollIntoView` was the wrong
+ * tool: it walks every scrollable ancestor including the document, and the whole point of the overlay
+ * is that the page behind it stays exactly where the operator left it.
+ */
+function useRevealInOverlay(open: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const el = ref.current;
+    if (!el) return;
+
+    const align = () => {
+      let box: HTMLElement | null = null;
+      for (let n = el.parentElement; n; n = n.parentElement) {
+        const oy = getComputedStyle(n).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight) {
+          box = n;
+          break;
+        }
+      }
+      if (!box) return;
+      const target = el.getBoundingClientRect();
+      const view = box.getBoundingClientRect();
+      if (target.top >= view.top && target.bottom <= view.bottom) return; // already whole
+      // Top-aligned, not centred, for the same reason the page-level version was: the form is still
+      // growing — the engineer list, then the impact preview when its fetch lands — and centring
+      // something about to get taller puts it back under the fold. Align the top and everything that
+      // arrives afterwards arrives below it.
+      box.scrollTop += target.top - view.top;
+    };
+
+    align();
+    // The form arrives across several commits, and each one grows it under a scroll already asked
+    // for. Observing it is what makes this land right however many commits it takes; the observer
+    // lives ~1.5s so it never fights the operator's own scrolling afterwards.
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(align);
+    ro.observe(el);
+    const stop = setTimeout(() => ro.disconnect(), 1500);
+    return () => {
+      clearTimeout(stop);
+      ro.disconnect();
+    };
+  }, [open]);
+  return ref;
+}
 
 export function TicketActions({
   ticketId,
   placement,
   currentSeId,
   onCommitted,
+  onDismiss,
   prefill,
+  sourceDay,
+  sourceSeName,
 }: {
   ticketId: string;
   placement: TicketPlacement;
   /** Excluded from the target list: an engineer is never a reassign target for their own work. */
   currentSeId: string | null;
-  /** The Console's single lifted fetch. Called on every successful write, without exception. */
-  onCommitted: () => void;
+  /**
+   * The Console's single lifted fetch. Called on every successful write, without exception.
+   *
+   * `moved` is passed only by a cross-day move, and carries the day the work landed on. The board
+   * uses it to take the operator to that column — a move whose result is one column off-screen is
+   * the same silence the old defer produced, and refetching alone does not fix it.
+   */
+  onCommitted: (moved?: { day: string }) => void;
+  /**
+   * Puts the Inspector overlay away. Confirm and Cancel both end the operator's errand, so both close
+   * it — the alternative, a cancelled form dropping them back on an Actions row they did not ask to
+   * return to, is the modal equivalent of the dead gesture the overlay was introduced to fix.
+   */
+  onDismiss: () => void;
   /** Opens the named dialog pre-seeded — a drop initiates; only Confirm commits. */
   prefill?: ActionPrefill | null;
+  /**
+   * Where this ticket sits today, for the move dialog's summary line. The dialog states the whole
+   * change in the operator's own terms — *this ticket, from this day and engineer, to that day and
+   * engineer* — and a summary that could not name the source would be half a sentence.
+   */
+  sourceDay?: string;
+  sourceSeName?: string | null;
 }) {
   const [draft, setDraft] = useState<Draft>(null);
 
@@ -112,17 +203,24 @@ export function TicketActions({
     if (!prefill) return;
     const legal =
       placement.kind === 'PLACED'
-        ? prefill.action === 'REASSIGN' || prefill.action === 'DEFER_TICKET' || prefill.action === 'REMOVE_TICKET'
+        ? prefill.action === 'REASSIGN' ||
+          prefill.action === 'DEFER_TICKET' ||
+          prefill.action === 'MOVE_TICKET' ||
+          prefill.action === 'REMOVE_TICKET'
         : placement.kind === 'UNPLACED'
           ? prefill.action === 'ASSIGN'
           : false;
     if (legal) setDraft({ action: prefill.action } as Draft);
   }, [prefill, placement.kind]);
 
-  const close = () => setDraft(null);
-  const done = () => {
+  const formRef = useRevealInOverlay(draft !== null);
+  const close = () => {
     setDraft(null);
-    onCommitted();
+    onDismiss();
+  };
+  const done = (moved?: { day: string }) => {
+    setDraft(null);
+    onCommitted(moved);
   };
 
   return (
@@ -133,6 +231,10 @@ export function TicketActions({
         {placement.kind === 'PLACED' && (
           <>
             <ActionButton id="reassign" label="Reassign" draft={draft} setDraft={setDraft} action="REASSIGN" />
+            {/* Move and Defer sit side by side deliberately, because the distinction between them is
+                the one this band exists to make legible: Move keeps the work assigned and says which
+                day and whose; Defer gives it back to the pool until a date and says neither. */}
+            <ActionButton id="move" label="Move to another day" draft={draft} setDraft={setDraft} action="MOVE_TICKET" />
             <ActionButton id="defer" label="Defer" draft={draft} setDraft={setDraft} action="DEFER_TICKET" />
             <ActionButton id="remove" label="Remove" draft={draft} setDraft={setDraft} action="REMOVE_TICKET" />
           </>
@@ -150,6 +252,7 @@ export function TicketActions({
         )}
       </div>
 
+      <div ref={formRef} className="empty:hidden flex flex-col gap-2">
       {placement.kind === 'PLACED' && draft?.action === 'REASSIGN' && (
         <OverrideForm
           batchId={placement.batchId}
@@ -163,11 +266,25 @@ export function TicketActions({
         />
       )}
 
+      {placement.kind === 'PLACED' && draft?.action === 'MOVE_TICKET' && (
+        <MoveForm
+          ticketId={ticketId}
+          batchId={placement.batchId}
+          currentSeId={placement.seId}
+          sourceDay={sourceDay}
+          sourceSeName={sourceSeName ?? null}
+          initialSeId={prefill?.action === 'MOVE_TICKET' ? prefill.seId : undefined}
+          initialDate={prefill?.action === 'MOVE_TICKET' ? prefill.date : undefined}
+          onCancel={close}
+          onDone={done}
+        />
+      )}
+
       {placement.kind === 'PLACED' && draft?.action === 'DEFER_TICKET' && (
         <OverrideForm
           batchId={placement.batchId}
           currentSeId={currentSeId}
-          title="Defer this ticket to a later day"
+          title="Defer this ticket — take it off the plan until a date, owner undecided"
           build={(_seId, reason, date) => ({
             action: 'DEFER_TICKET',
             ticketId,
@@ -205,6 +322,7 @@ export function TicketActions({
       {placement.kind === 'UNPLACED' && draft?.action === 'HOLD' && (
         <HoldForm ticketId={ticketId} onCancel={close} onDone={done} />
       )}
+      </div>
     </div>
   );
 }
@@ -216,6 +334,7 @@ export function StopActions({
   ticketIds,
   stopSequence,
   onCommitted,
+  onDismiss,
   prefill,
 }: {
   batchId: string;
@@ -223,6 +342,8 @@ export function StopActions({
   ticketIds: string[];
   stopSequence: number;
   onCommitted: () => void;
+  /** Puts the Inspector overlay away — see {@link TicketActions}'s note on why Cancel closes it. */
+  onDismiss: () => void;
   /** A drag-initiated SWAP_SE opens pre-seeded; other prefills mean nothing to a stop. */
   prefill?: ActionPrefill | null;
 }) {
@@ -231,7 +352,11 @@ export function StopActions({
   useEffect(() => {
     if (prefill?.action === 'SWAP_SE') setDraft('SWAP_SE');
   }, [prefill]);
-  const close = () => setDraft(null);
+  const formRef = useRevealInOverlay(draft !== null);
+  const close = () => {
+    setDraft(null);
+    onDismiss();
+  };
   const done = () => {
     setDraft(null);
     onCommitted();
@@ -252,6 +377,7 @@ export function StopActions({
         </Button>
       </div>
 
+      <div ref={formRef} className="empty:hidden flex flex-col gap-2">
       {draft === 'SWAP_SE' && (
         <OverrideForm
           batchId={batchId}
@@ -300,6 +426,7 @@ export function StopActions({
           onDone={done}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -394,19 +521,32 @@ function OverrideForm({
     };
   }, [needsTarget]);
 
-  const ready =
-    reason.trim() !== '' &&
+  /**
+   * Everything the *move* needs. Deliberately not the reason — see {@link ready}.
+   *
+   * #313 — this used to be folded into `ready`, so the preview did not fire until a reason had been
+   * typed. That inverts what the preview is for: an operator picks a target in order to decide whether
+   * to make the move, and the projection is the thing that informs the decision, so withholding it
+   * until they have already justified the move shows it to them last. Schedule Detail's fork had it
+   * the other way round and was right; unifying the two implementations is what made the difference
+   * visible. `reasonCode` is still sent as `''` (below) because the preview and the confirm must take
+   * the identical body shape.
+   */
+  const moveSpecified =
     (!needsTarget || seId !== '') &&
     (!needsDate || date !== '') &&
     (!needsPosition || position !== '') &&
     (!selectable || selected.length > 0);
+
+  /** Everything the *write* needs. The reason is mandatory on all six actions (#272 R8). */
+  const ready = moveSpecified && reason.trim() !== '';
 
   const command = () => build(seId, reason.trim(), date, selected, position);
 
   // Keyed on the target and the selection, never on the reason — see this file's docblock.
   const impact = useOverridePreview(
     batchId,
-    ready && (needsTarget || selectable) ? build(seId, '', date, selected, position) : null,
+    moveSpecified && (needsTarget || selectable) ? build(seId, '', date, selected, position) : null,
   );
 
   const commit = async (confirm: boolean) => {
@@ -571,6 +711,226 @@ function OverrideForm({
             onClick={() => void commit(false)}
           >
             Confirm
+          </Button>
+          <Button size="sm" variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * **Move this ticket's planned assignment to another operating day.**
+ *
+ * ## Why this is its own form and not another `OverrideForm` mode
+ *
+ * `OverrideForm` collects *one* answer beside a reason — a target engineer, or a date, or a position.
+ * A move collects **two coordinates that are one decision**, and the whole reason the old gesture was
+ * confusing is that the dialog it opened could only ever name one of them. A form that restates
+ * `Wed 2 Sept` and the engineer as a single sentence is the fix; a fourth optional input bolted onto
+ * the shared form would collect the same two values and still not say what they mean together.
+ *
+ * ## The summary line is the point
+ *
+ * The operator dragged a chip and let go. What they get back has to be, in words, the gesture they
+ * just made:
+ *
+ * ```
+ * Day       Tue, 1 Sept  →  Wed, 2 Sept
+ * Engineer  Ravi Kumar   →  Ravi Kumar (unchanged)
+ * ```
+ *
+ * The old dialog said "Defer this ticket to a later day" for the identical gesture — an accurate
+ * description of a *different* operation. Copy that describes the wrong action is worse than no copy:
+ * it is read, believed, and confirmed.
+ *
+ * ## What it deliberately does not do
+ *
+ * It does not gate on capacity. `committed >= dailyCapacity` is **marked, never blocked** everywhere
+ * else in this app (#258 Q2 — overload is an administrative right, a seen decision rather than a
+ * refused one), so the target's load is shown and Confirm stays live. A refusal here that no sibling
+ * surface has would make the Console the one place a manager cannot do their job.
+ */
+function MoveForm({
+  ticketId,
+  batchId,
+  currentSeId,
+  sourceDay,
+  sourceSeName,
+  initialSeId,
+  initialDate,
+  onCancel,
+  onDone,
+}: {
+  ticketId: string;
+  batchId: string;
+  currentSeId: string | null;
+  sourceDay?: string;
+  sourceSeName: string | null;
+  initialSeId?: string;
+  initialDate?: string;
+  onCancel: () => void;
+  onDone: (moved: { day: string }) => void;
+}) {
+  const [engineers, setEngineers] = useState<ZoneEngineer[]>([]);
+  const [seId, setSeId] = useState(initialSeId ?? currentSeId ?? '');
+  const [date, setDate] = useState(initialDate ?? '');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [conflict, setConflict] = useState<OverrideConflict | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    // The same zone-scoped, acting-aware list every other target picker on this screen reads (#239):
+    // a move must not reach an engineer the board itself never shows.
+    void apiZoneEngineers()
+      .then((e) => live && setEngineers(e))
+      .catch(() => live && setEngineers([]));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const ready = reason.trim() !== '' && seId !== '' && date !== '';
+  const target = engineers.find((e) => e.engineerId === seId) ?? null;
+  const sameEngineer = seId !== '' && seId === currentSeId;
+
+  const commit = async (confirm: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiOverrideBatch(batchId, {
+        action: 'MOVE_TICKET',
+        ticketId,
+        newSeId: seId,
+        targetDate: date,
+        reasonCode: reason.trim(),
+        ...(confirm ? { confirm: true } : {}),
+      });
+      onDone({ day: date });
+    } catch (e) {
+      if (e instanceof OverrideConflictError) {
+        setConflict(e.conflict);
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'The move could not be committed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div data-testid="move-form" className="rounded-md border border-line bg-surface-sunken p-2">
+      <p className="text-[11px] font-semibold text-ink">Move this ticket to another day</p>
+      <p className="mt-0.5 text-[10px] text-ink-muted">
+        It stays assigned — this is not a defer. The work leaves{' '}
+        {sourceDay ? dayLabel(sourceDay) : "today's"} plan and lands on the day below, already owned.
+      </p>
+
+      {/* The gesture, restated. Rendered as soon as the target day is known — which, after a drop, is
+          immediately, because the drop answered both coordinates. */}
+      {date !== '' && (
+        <dl
+          data-testid="move-summary"
+          className="mt-2 grid grid-cols-[auto_auto_auto] items-baseline gap-x-2 gap-y-0.5 text-[11px]"
+        >
+          <dt className="text-ink-muted">Day</dt>
+          <dd className="text-ink-muted">{sourceDay ? dayLabel(sourceDay) : 'today'} &rarr;</dd>
+          <dd className="font-medium text-ink">{dayLabel(date)}</dd>
+          <dt className="text-ink-muted">Engineer</dt>
+          <dd className="text-ink-muted">{sourceSeName ?? '—'} &rarr;</dd>
+          <dd className="font-medium text-ink">
+            {sameEngineer ? (sourceSeName ?? '—') : (target?.name ?? target?.engineerId ?? '—')}
+            {sameEngineer && <span className="ml-1 font-normal text-ink-muted">(unchanged)</span>}
+          </dd>
+        </dl>
+      )}
+
+      <div className="mt-2 flex flex-wrap items-end gap-2">
+        <label className="text-[10px] text-ink-muted">
+          Move to day
+          <Input
+            type="date"
+            data-testid="move-date"
+            className="mt-0.5 h-8 text-xs"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </label>
+
+        <label className="text-[10px] text-ink-muted">
+          Engineer on that day
+          <Select
+            aria-label="Engineer on that day"
+            data-testid="move-target-se"
+            className="mt-0.5 h-8 w-52 text-xs"
+            value={seId}
+            onChange={(e) => setSeId(e.target.value)}
+          >
+            <option value="">Select…</option>
+            {engineers.map((e) => (
+              <option key={e.engineerId} value={e.engineerId}>
+                {engineerOptionLabel(e)}
+              </option>
+            ))}
+          </Select>
+        </label>
+
+        <label className="min-w-[12rem] flex-1 text-[10px] text-ink-muted">
+          Reason (required — recorded on the ticket)
+          <Input
+            data-testid="move-reason"
+            className="mt-0.5 h-8 text-xs"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+      </div>
+
+      {/* The figure this picker carries is TODAY's committed load, which is the wrong day for this
+          decision and would be quietly misread as the right one. Said out loud rather than dressed
+          up — the honest bound on what this dialog knows. */}
+      {target != null && (
+        <p data-testid="move-capacity-note" className="mt-1.5 text-[10px] text-ink-muted">
+          {target.name ?? target.engineerId} carries {target.committed ?? 0}/{target.dailyCapacity} today. That is
+          today&apos;s figure; the board&apos;s column for {date !== '' ? dayLabel(date) : 'the target day'} states
+          that day&apos;s.
+        </p>
+      )}
+
+      {conflict && (
+        <div data-testid="move-conflict" className="mt-2 rounded border border-warning bg-warning-soft/40 p-1.5">
+          <p className="text-[11px] text-ink">{conflict.message}</p>
+          <div className="mt-1.5 flex gap-2">
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => void commit(true)}>
+              Move anyway
+            </Button>
+            <Button size="sm" variant="secondary" onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <p data-testid="move-error" className="mt-2 text-[11px] text-critical">
+          {error}
+        </p>
+      )}
+
+      {!conflict && (
+        <div className="mt-2 flex gap-2">
+          <Button
+            size="sm"
+            variant="primary"
+            data-testid="move-confirm"
+            disabled={!ready || busy}
+            onClick={() => void commit(false)}
+          >
+            Confirm move
           </Button>
           <Button size="sm" variant="secondary" onClick={onCancel}>
             Cancel
@@ -753,6 +1113,10 @@ function HoldForm({
             type="date"
             data-testid="hold-until"
             className="mt-0.5 h-8 text-xs"
+            // #310 — a hold names the day the work comes BACK, and `notDeferredOn` is inclusive, so
+            // today holds nothing: the ticket is dispatched by the very next run. The server refuses
+            // that now; `min` means the operator is steered before they type it rather than after.
+            min={addIsoDays(istIsoDate(), 1)}
             value={until}
             onChange={(e) => setUntil(e.target.value)}
           />

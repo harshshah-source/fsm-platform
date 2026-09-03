@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiActivityTrend, type ActivityTrendRange, type ActivityTrendReport } from '../../api/dashboard';
+import { ChartSegmentedControl } from '../../components/charts/ChartSegmentedControl';
 import { FleetActivityTrendChart } from '../../components/charts/FleetActivityTrendChart';
 import { FilterSelect, Skeleton } from '../../components/data';
-import { cn } from '../../lib/cn';
 
 const RANGES: { key: ActivityTrendRange; label: string }[] = [
   { key: '1D', label: '1D' },
@@ -76,31 +76,15 @@ export function ActivityTrendSection({
           {canSelectZone && (
             <>
               {/* Pan-India / Zone-wise view toggle. */}
-              <div
-                role="group"
-                aria-label="Trend view"
-                className="flex items-center gap-1 rounded-full border border-line bg-surface-card p-1 text-[11px] shadow-sm"
-              >
-                {[
-                  { key: false, label: 'Pan-India' },
-                  { key: true, label: 'Zone-wise' },
-                ].map((v) => (
-                  <button
-                    key={v.label}
-                    type="button"
-                    aria-pressed={zoneWise === v.key}
-                    onClick={() => setZoneWise(v.key)}
-                    className={cn(
-                      'rounded-full px-2.5 py-1 font-semibold transition-colors focus-ring',
-                      zoneWise === v.key
-                        ? 'bg-brand-600 text-white'
-                        : 'text-ink-muted hover:bg-surface-sunken hover:text-ink-strong',
-                    )}
-                  >
-                    {v.label}
-                  </button>
-                ))}
-              </div>
+              <ChartSegmentedControl
+                ariaLabel="Trend view"
+                value={zoneWise ? 'zone' : 'pan'}
+                onChange={(next) => setZoneWise(next === 'zone')}
+                options={[
+                  { value: 'pan', label: 'Pan-India' },
+                  { value: 'zone', label: 'Zone-wise' },
+                ]}
+              />
               {zoneWise && (
                 <FilterSelect
                   aria-label="Select zone"
@@ -118,28 +102,12 @@ export function ActivityTrendSection({
             </>
           )}
           {/* Range selector: 1D 7D 1M 1Y MAX. */}
-          <div
-            role="group"
-            aria-label="Trend range"
-            className="flex items-center gap-1 rounded-full border border-line bg-surface-card p-1 text-[11px] shadow-sm"
-          >
-            {RANGES.map((r) => (
-              <button
-                key={r.key}
-                type="button"
-                aria-pressed={range === r.key}
-                onClick={() => setRange(r.key)}
-                className={cn(
-                  'rounded-full px-2.5 py-1 font-semibold transition-colors focus-ring',
-                  range === r.key
-                    ? 'bg-brand-600 text-white'
-                    : 'text-ink-muted hover:bg-surface-sunken hover:text-ink-strong',
-                )}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
+          <ChartSegmentedControl
+            ariaLabel="Trend range"
+            value={range}
+            onChange={setRange}
+            options={RANGES.map((r) => ({ value: r.key, label: r.label }))}
+          />
         </div>
       </div>
 

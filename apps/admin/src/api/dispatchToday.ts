@@ -13,6 +13,19 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
  * existed. `systemPlaced` is the server's own reading of it, so the client never has to re-derive the
  * one distinction #282 R2 forbids getting wrong.
  */
+/**
+ * #295 — the dispatcher's one-word verdict on a card, decided by the server.
+ *
+ * - `IN_PROGRESS` — an unresolved `TROUBLESHOOT_STARTED` exists: somebody is on it.
+ * - `AGING_UNTOUCHED` — nobody has started, and the **assignment** has sat past the published threshold.
+ * - `NOT_STARTED` — nobody has started, and it is still inside that threshold.
+ *
+ * The client never re-derives this. The rule involves a clock, a soft state and an operator-tunable
+ * threshold, and a second implementation of it here is exactly how `chronicThreshold` came to be
+ * permanently false in production.
+ */
+export type TicketActionStatus = 'IN_PROGRESS' | 'NOT_STARTED' | 'AGING_UNTOUCHED';
+
 export interface TodayTicket {
   ticketId: string;
   sortOrder: number;
@@ -32,6 +45,27 @@ export interface TodayTicket {
    * never failed.
    */
   failureCycles: number | null;
+
+  // ── #295 — what the work card names ─────────────────────────────────────────────────────────────
+  /** The unit in the field: the label an operator recognises. **Never a key** — `ticketId` is that. */
+  deviceId: string | null;
+  vehicleNo: string | null;
+  companyName: string | null;
+  transporterName: string | null;
+  /**
+   * How long the **device** has been silent, in hours. Displayed, and informational only.
+   *
+   * **Null means "never recomputed", not zero** — render an em-dash, never `0h`, or the card claims
+   * the unit just reported in. And this is emphatically *not* what {@link actionStatus} measures:
+   * that clock starts at {@link assignedAt}. A device quiet for 40 hours whose ticket was dispatched
+   * ten minutes ago is untouched-but-fresh.
+   */
+  inactivityHours: number | null;
+  /** When the work became this engineer's — the clock `actionStatus` is measured from. */
+  assignedAt: string;
+  /** An unresolved `TROUBLESHOOT_STARTED`. Not ON_SITE, and not "it has been assigned". */
+  troubleshootingStarted: boolean;
+  actionStatus: TicketActionStatus;
 }
 
 export interface TodayStop {
@@ -99,7 +133,18 @@ export interface TodayHold {
   plantName: string | null;
   heldUntil: string;
   expectedFrom: string | null;
+  /** Who approved the *vehicle-unavailability report* behind this hold — and nothing else. */
   decidedBy: string | null;
+  /**
+   * Who deferred it, when a manager did. A separate field from `decidedBy` on purpose: that one
+   * answers the vehicle-report question, and a single field standing for two different decisions is
+   * how a rail starts telling a plausible lie about which of them happened.
+   */
+  deferredBy: string | null;
+  /** Their name; null when the id resolves to no user — render the id, never a guess (B7). */
+  deferredByName: string | null;
+  /** The reason they were made to type. Null where no manager deferred it, or none was recorded. */
+  deferredReason: string | null;
   failureCycles: number | null;
 }
 
@@ -143,6 +188,13 @@ export interface DispatchTodayView {
   operatingDay: string;
   /** The chronic threshold in force. Published so no client hard-codes it (#244's precedent). */
   chronicThreshold: number;
+  /**
+   * #295 — hours an assignment may sit untouched before it reads as aged.
+   *
+   * Sent so the card can *say* the rule ("aged — untouched 4h+") without owning it. The verdict
+   * itself arrives as {@link TodayTicket.actionStatus}; this is for the sentence, not the decision.
+   */
+  agingThresholdHours: number;
   zone: { zoneId: string; name: string };
   run: TodayRun | null;
   /** #286 — null on an ordinary day; set when this zone was owed a re-dispatch. */
@@ -198,4 +250,49 @@ export function apiDispatchChangesToday(zoneId?: string): Promise<DispatchChange
   return get<DispatchChangesTodayView>(
     `/dispatch/changes-today${zoneId ? `?zoneId=${encodeURIComponent(zoneId)}` : ''}`,
   );
+}
+
+/**
+ * #295 — one visible card's identity on a column that is **not** today.
+ *
+ * The fields a day-scoped source can honestly answer, and not one more. In particular there is no
+ * `actionStatus`: nobody has started work whose day has not begun, and an aging verdict about
+ * Wednesday is a category error rather than a fact.
+ */
+export interface CardSummary {
+  ticketId: string;
+  deviceId: string | null;
+  vehicleNo: string | null;
+  companyName: string | null;
+  transporterName: string | null;
+  inactivityHours: number | null;
+}
+
+/**
+ * Identity for every card a non-today column is about to draw — **one request for the column**, not
+ * one per card.
+ *
+ * `GET /schedules?date=&detail=stops` gives that column its ticket ids and nothing physical, so
+ * without this the choice would be an eight-character hash or an N+1. A `POST` because the input is a
+ * list of ids that does not belong in a URL; the endpoint writes nothing (the same shape as
+ * `distribute-preview` and `override/preview`).
+ */
+export async function apiDispatchCardSummaries(
+  ticketIds: string[],
+  zoneId?: string,
+): Promise<CardSummary[]> {
+  if (ticketIds.length === 0) return [];
+  const res = await fetch(
+    `${BASE_URL}/dispatch/card-summaries${zoneId ? `?zoneId=${encodeURIComponent(zoneId)}` : ''}`,
+    {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticketIds }),
+    },
+  );
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
+    throw new Error(body.code ?? body.message ?? `Request failed (${res.status})`);
+  }
+  return ((await res.json()) as { summaries: CardSummary[] }).summaries;
 }

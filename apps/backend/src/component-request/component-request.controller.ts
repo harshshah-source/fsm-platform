@@ -1,6 +1,10 @@
 import { ConflictException, Controller, ForbiddenException, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -25,8 +29,8 @@ export class ComponentRequestController {
    */
   @Get()
   @Roles(...MANAGER_ROLES)
-  oversight(@CurrentUser() user: AccessTokenClaims) {
-    return this.requests.oversightQueue({ role: user.role, zoneId: user.zone_id });
+  oversight(@CurrentScope() scope: ManagerScope) {
+    return this.requests.oversightQueue(scope);
   }
 
   /**
@@ -35,8 +39,8 @@ export class ComponentRequestController {
    */
   @Get('by-ticket/:ticketId')
   @Roles(...MANAGER_ROLES)
-  byTicket(@CurrentUser() user: AccessTokenClaims, @Param('ticketId') ticketId: string) {
-    return this.requests.byTicket(ticketId, { role: user.role, zoneId: user.zone_id });
+  byTicket(@CurrentScope() scope: ManagerScope, @Param('ticketId') ticketId: string) {
+    return this.requests.byTicket(ticketId, scope);
   }
 
   @Post(':id/confirm-receipt')
@@ -53,8 +57,8 @@ export class ComponentRequestController {
 
   @Post(':id/confirm-resubmit')
   @Roles(...MANAGER_ROLES)
-  async confirmResubmit(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string) {
-    const outcome = await this.requests.confirmResubmit(id, { userId: user.user_id, role: user.role });
+  async confirmResubmit(@CurrentActor() actor: RequestActor, @Param('id') id: string) {
+    const outcome = await this.requests.confirmResubmit(id, actor);
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'COMPONENT_REQUEST_NOT_FOUND' });
     if (outcome.result === 'INVALID_STATE') {
       throw new ConflictException({ code: 'COMPONENT_REQUEST_INVALID_STATE', status: outcome.status });

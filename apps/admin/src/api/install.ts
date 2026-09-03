@@ -1,9 +1,9 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the Issue 33 Install-create backend (`/api/install`, `/api/install/upload`).
 // Consumed by the Issue 69 admin surface. Unlike the generic `org.ts` helper, this client preserves
 // the backend error `code` (and the CSV per-row `errors`) so the page can render them inline.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
 /** Single-create body — ids are numeric strings (the backend parses them to BigInt). */
 export interface CreateInstallBody {
@@ -59,12 +59,11 @@ export class InstallApiError extends Error {
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   const res = await fetch(`${BASE_URL}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...authHeaders(),
     },
     body: JSON.stringify(body),
   });

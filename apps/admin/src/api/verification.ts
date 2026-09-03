@@ -1,13 +1,13 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the ZM Verification Review surface (Issue 19) over the Issue 18 verification_runs.
 // Zone scope is enforced server-side. Token comes from the same sessionStorage key AuthProvider writes.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
-function authHeaders(json = false): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
+/** #341 — the shared builder plus this client's JSON content type. */
+function jsonHeaders(json = false): Record<string, string> {
   return {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...authHeaders(),
     ...(json ? { 'Content-Type': 'application/json' } : {}),
   };
 }
@@ -58,7 +58,7 @@ export async function apiVerificationReview(filters: VerificationReviewFilters =
 export async function apiEscalateVerification(ticketId: string, reason: string): Promise<void> {
   const res = await fetch(`${BASE_URL}/verification/${encodeURIComponent(ticketId)}/escalate`, {
     method: 'POST',
-    headers: authHeaders(true),
+    headers: jsonHeaders(true),
     body: JSON.stringify({ reason }),
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);

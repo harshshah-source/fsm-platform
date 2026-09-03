@@ -32,6 +32,10 @@ export interface CreateSeInput {
   zoneId: number;
   coverageType: string;
   dailyCapacity: number;
+  /** #267 — admin-managed home/base for the recommender's `distance` component. Blank/omitted is
+   *  legal: distance scores NOT_AVAILABLE for an SE with no home base, never a fabricated default. */
+  homeLat?: number | null;
+  homeLng?: number | null;
 }
 
 export interface UpdateSeInput {
@@ -42,6 +46,8 @@ export interface UpdateSeInput {
   zoneId?: number;
   coverageType?: string;
   dailyCapacity?: number;
+  homeLat?: number | null;
+  homeLng?: number | null;
 }
 
 export interface SeManagementRow {
@@ -54,6 +60,8 @@ export interface SeManagementRow {
   coverageType: string;
   dailyCapacity: number;
   isActive: boolean;
+  homeLat: number | null;
+  homeLng: number | null;
   /** Mapped plants (SE→plant coverage); `coverageId` is the se_coverage row id (for removal). */
   plants: { id: number; name: string; coverageId: number }[];
   /** SE→company mapping is not modeled (Plant carries no company FK); always empty — the UI renders "—". */
@@ -117,6 +125,7 @@ export class EngineerAdminService {
     if (!PHONE_RE.test(phone)) throw new BadRequestException({ code: 'INVALID_PHONE' });
     this.assertCoverageType(input.coverageType);
     this.assertCapacity(input.dailyCapacity);
+    this.assertLatLng(input.homeLat, input.homeLng);
 
     // A ZM may only create an SE in their own zone; OH/CSM anywhere.
     if (!this.managerZoneOk(scope, BigInt(input.zoneId))) throw new ForbiddenException({ code: 'ZONE_FORBIDDEN' });
@@ -138,6 +147,8 @@ export class EngineerAdminService {
               zoneId: BigInt(input.zoneId),
               dailyCapacity: input.dailyCapacity,
               address: input.address?.trim() || null,
+              homeLat: input.homeLat ?? null,
+              homeLng: input.homeLng ?? null,
             },
           });
         },
@@ -180,6 +191,15 @@ export class EngineerAdminService {
     if (patch.coverageType !== undefined) {
       this.assertCoverageType(patch.coverageType);
       engData.coverageType = patch.coverageType as $Enums.CoverageType;
+    }
+    if (patch.homeLat !== undefined || patch.homeLng !== undefined) {
+      // Both coordinates move together: a lone lat or lng is not a location, and this issue's own
+      // AC forbids ever fabricating the missing half as 0.
+      const nextLat = patch.homeLat !== undefined ? patch.homeLat : eng.homeLat;
+      const nextLng = patch.homeLng !== undefined ? patch.homeLng : eng.homeLng;
+      this.assertLatLng(nextLat, nextLng);
+      engData.homeLat = nextLat;
+      engData.homeLng = nextLng;
     }
     if (patch.zoneId !== undefined && patch.zoneId !== Number(eng.zoneId)) {
       // A ZM cannot move an SE out of their zone. OH/CSM can — but only if the SE has no plant coverage
@@ -317,6 +337,18 @@ export class EngineerAdminService {
   private assertCapacity(cap: number): void {
     if (!Number.isInteger(cap) || cap <= 0) throw new BadRequestException({ code: 'INVALID_DAILY_CAPACITY' });
   }
+
+  /**
+   * #267 — blank (both null) is legal: an SE with no home base scores `distance` as NOT_AVAILABLE,
+   * never a fabricated advantage. A HALF-set pair (one null, one not) is rejected — `(0, lng)` or
+   * `(lat, 0)` is exactly the fabricated-default footgun the issue's AC exists to prevent.
+   */
+  private assertLatLng(lat: number | null | undefined, lng: number | null | undefined): void {
+    if (lat == null && lng == null) return;
+    if (lat == null || lng == null) throw new BadRequestException({ code: 'HOME_BASE_INCOMPLETE' });
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) throw new BadRequestException({ code: 'INVALID_HOME_LAT' });
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) throw new BadRequestException({ code: 'INVALID_HOME_LNG' });
+  }
 }
 
 const isUnique = (e: unknown): boolean =>
@@ -333,6 +365,8 @@ function toRow(e: EngineerWithRels): SeManagementRow {
     coverageType: e.coverageType,
     dailyCapacity: e.dailyCapacity,
     isActive: e.isActive,
+    homeLat: e.homeLat,
+    homeLng: e.homeLng,
     plants: e.coverage.map((c) => ({ id: Number(c.plantId), name: c.plant.name, coverageId: Number(c.id) })),
     companies: [],
   };

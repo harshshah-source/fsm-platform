@@ -174,9 +174,13 @@ describe('#146 slice 1 — a deferred ticket leaves today\'s reads, its batch-ma
   it('the deferred ticket leaves the SE day plan; its batch-mate stays', async () => {
     const out = await override.override(
       batchId,
+      // #310 — the fixture clock is passed explicitly. `deferredToDate` is future relative to THIS
+      // file's `NOW`, not to the wall clock, and a deferral that does not name a day ahead of the
+      // caller's `now` holds nothing — the silent no-op #310 closes.
       { action: 'DEFER_TICKET', ticketId: deferred, deferredToDate: '2026-06-28', reasonCode: 'PARTS_ETA' },
       scope,
       ZM,
+      NOW,
     );
     expect(out.result).toBe('OK');
 

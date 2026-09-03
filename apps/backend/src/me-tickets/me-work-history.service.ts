@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { MeWorkHistoryDay, MeWorkHistoryView } from '@fsm/shared';
 import { istDate, IST_OFFSET_MS } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
+import { REMOVAL_REASONS, type RemovalReason } from '../scheduling/removal-reason';
 
 export type { MeWorkHistoryDay, MeWorkHistoryView } from '@fsm/shared';
 
@@ -18,6 +19,45 @@ export type { MeWorkHistoryDay, MeWorkHistoryView } from '@fsm/shared';
  *  `CLOSED_AUTO_RECOVERY` status exists to protect (PRD story 25). Latent until now only because no
  *  auto-recovery closure had ever been written; #229 wires the mechanism, so it stops being latent. */
 const COMPLETED_STATES = ['CLOSED'];
+
+/**
+ * The removal reasons under which a retired batch row still counts as work the SE was **assigned**
+ * that day — #297 (CB-1).
+ *
+ * **Why this list has to exist at all.** Before #178 a resolved ticket's `batch_assignment_tickets`
+ * row simply stayed live forever, so `removed_at IS NULL` meant "was on the plan" and this read was
+ * right by accident. #178 made every terminal closure stamp the row inside the closing transaction
+ * (`scheduling/close-assignment.ts`), and its backfill stamped history too — so the same predicate
+ * quietly started meaning "on the plan **and** not finished", and the chart inverted: a completed
+ * ticket left `assigned`, and because `completed ⊆ assigned` is enforced below it left `completed`
+ * with it. Completed read ~0 and assigned *shrank* as work got done, retroactively. The sibling live
+ * read (`MeTicketsQueryService`) was given a same-day compensation for exactly this; this one never
+ * was.
+ *
+ * **The split.** A retired row belongs in `assigned` when the assignment ended *because the ticket's
+ * own life ended*, and not when somebody took the work off the plan or the attempt ran out — the
+ * distinction `removal-reason.ts` already draws in prose on `TICKET_RESOLVED`: "Distinct from
+ * `TICKET_CANCELLED`, where the work was called off from outside: here the work genuinely finished,
+ * successfully or not."
+ *
+ * **An allow-list, deliberately** — the same discipline as `COUNTABLE_REMOVAL_REASONS`
+ * (`ticketing/special-ticket.query.ts`). A reason code added later is excluded until somebody
+ * classifies it here, because a wrong inclusion silently inflates the denominator of an SE's
+ * productivity chart, while a wrong exclusion reproduces a failure we already know how to recognise.
+ *
+ * **Not `removed_by IS NULL`.** That NULL is the pre-#241 auto-recovery signature and means only
+ * "that one system path" (SYSTEM-STATE §2.4) — several other writers stamp a null actor today. The
+ * reason column is the thing that carries the classification.
+ */
+export const CONCLUDED_REMOVAL_REASONS: readonly RemovalReason[] = [
+  /** Verification decided, warehouse receipt, install closed/failed, non-operational, manual recovery. */
+  REMOVAL_REASONS.TICKET_RESOLVED,
+  /** The device healed itself and the ticket auto-closed. Still a day's assignment; it scores 0 in
+   *  `completed` because `CLOSED_AUTO_RECOVERY` is not a completed state (#229 D6, above). */
+  REMOVAL_REASONS.AUTO_RECOVERY,
+  /** The nightly closure backstop, stamping a row left live on an already-resolved ticket (#242). */
+  REMOVAL_REASONS.RESOLVED_AT_CLOSURE,
+];
 
 /** Request bound. 31 days is a month of bars — far past anything the 7-bar chart asks for, and small
  *  enough that the two queries below stay index-sized however the client is called. */
@@ -36,9 +76,12 @@ const isoDay = (utcMidnight: Date): string => utcMidnight.toISOString().slice(0,
  * **The definition, which #175 required be settled before building rather than guessed:**
  *
  * - **assigned(D)** — the distinct tickets sitting in the SE's plant batches on every `work_schedule`
- *   whose `[dateFrom, dateTo]` covers IST day D, excluding tickets a ZM removed from the plan
- *   (`removedAt`). Same "assigned" the live read (`MeTicketsQueryService`) means, evaluated per day
- *   instead of only for the current schedule.
+ *   whose `[dateFrom, dateTo]` covers IST day D, excluding tickets that were taken *off* the plan: a
+ *   ZM withdrawal or defer, a reassignment away, a bulk unassign, a cancellation, a component wait, a
+ *   recycle that ran out. A row retired because the ticket itself reached a terminal state stays in —
+ *   finishing work is not the same as never having been given it (#297,
+ *   {@link CONCLUDED_REMOVAL_REASONS}). Same "assigned" the live read (`MeTicketsQueryService`)
+ *   means, evaluated per day instead of only for the current schedule.
  * - **completed(D)** — of *that day's assigned set*, the tickets carrying a `ticket_events` row whose
  *   `toState` is a closure state and whose `at` falls inside IST day D.
  *
@@ -77,14 +120,26 @@ export class MeWorkHistoryService {
 
     const assignedByDay = new Map<string, Set<string>>(dates.map((d) => [isoDay(d), new Set<string>()]));
 
-    // Every schedule overlapping the window, with its (non-removed) batch tickets. A schedule can span
-    // several days, and a day can be covered by more than one schedule — hence sets, not counts.
+    // Every schedule overlapping the window, with the batch tickets that count as assigned. A schedule
+    // can span several days, and a day can be covered by more than one schedule — hence sets, not
+    // counts; a ticket relocated between batches on the same day is one assignment, counted once.
     const schedules = await this.prisma.workSchedule.findMany({
       where: { seId, dateFrom: { lte: lastDate }, dateTo: { gte: firstDate } },
       select: {
         dateFrom: true,
         dateTo: true,
-        batches: { select: { tickets: { where: { removedAt: null }, select: { ticketId: true } } } },
+        batches: {
+          select: {
+            tickets: {
+              // Live rows, plus rows retired *because the work concluded* — see
+              // {@link CONCLUDED_REMOVAL_REASONS}. A row a ZM withdrew or deferred, a reassignment
+              // relocated, a bulk unassign cleared, a cancellation voided or a recycle expired was
+              // not this SE's assignment for the day, and stays out.
+              where: { OR: [{ removedAt: null }, { removalReason: { in: [...CONCLUDED_REMOVAL_REASONS] } }] },
+              select: { ticketId: true },
+            },
+          },
+        },
       },
     });
 

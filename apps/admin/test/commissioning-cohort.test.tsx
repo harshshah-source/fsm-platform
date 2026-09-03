@@ -80,6 +80,49 @@ const installers = {
   ],
 };
 
+// #236 — the cohort's device list, over the existing `GET /api/devices`. One row with an open,
+// unassigned ticket (assignable) and one with no live ticket at all (the honest "nothing owns this
+// device" case #229's gap creates), so the two Assign-SE branches both have a fixture row.
+const devices = {
+  rows: [
+    {
+      deviceId: 'DEV-001',
+      vehicleNo: 'GJ01-A2291',
+      deviceType: 'GT06',
+      plantName: 'RCP-9211',
+      zoneName: 'West',
+      companyName: 'Acme Logistics',
+      slaBucket: null,
+      latestGpsDatetime: null,
+      isInactive: true,
+      openTicketId: 'ticket-111',
+      openTicketStatus: 'OPEN',
+      assignmentState: 'UNASSIGNED',
+      assignedSeName: null,
+    },
+    {
+      deviceId: 'DEV-002',
+      vehicleNo: 'MH12-B8830',
+      deviceType: 'GT06',
+      plantName: 'DSTL K1PLANT',
+      zoneName: 'West',
+      companyName: 'Beta Movers',
+      slaBucket: null,
+      latestGpsDatetime: null,
+      isInactive: true,
+      openTicketId: null,
+      openTicketStatus: null,
+      assignmentState: null,
+      assignedSeName: null,
+    },
+  ],
+  total: 2,
+};
+
+const engineers = [
+  { engineerId: 'se-1', name: 'Ramesh K.', coverageType: 'ZONE', zoneId: '1', dailyCapacity: 5, isActive: true },
+];
+
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
 const fetchMock = vi.fn();
 const urls = () => fetchMock.mock.calls.map(([u]) => String(u));
@@ -90,6 +133,8 @@ beforeEach(() => {
     const u = String(url);
     if (u.includes('/reports/commissioning/cohort')) return json(cohort);
     if (u.includes('/reports/commissioning/installers')) return json(installers);
+    if (u.includes('/devices')) return json(devices);
+    if (u.includes('/schedules/engineers')) return json(engineers);
     return json({});
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -142,7 +187,7 @@ describe('Commissioning Cohort (#232 AC-1)', () => {
     const census = await screen.findByTestId('commissioning-census');
     // Without this line a reader reconciling against AutoPlant concludes the page is broken. Before
     // #233 the page WOULD have been broken — those 4,187 were counted as failed installs.
-    expect(census).toHaveTextContent('6810 fitments in window');
+    expect(census).toHaveTextContent('6810 fitting events in window');
     expect(census).toHaveTextContent('2623 operational');
     expect(census).toHaveTextContent('4187 warehouse');
     expect(census).toHaveTextContent(/silent because they are in a warehouse/i);
@@ -176,11 +221,11 @@ describe('Commissioning Cohort (#232 AC-1)', () => {
   it('states what the curve is measured over, including both exclusions', async () => {
     render(<CommissioningCohortPage />);
     const basis = await screen.findByTestId('commissioning-curve-basis');
-    expect(basis).toHaveTextContent('65 fitments old enough to be graded');
+    expect(basis).toHaveTextContent('65 fitting events old enough to be graded');
     expect(basis).toHaveTextContent('56 measured');
     // Both exclusions are stated on the page, not just honoured in SQL — a curve over 65 of 2,623
-    // fitments needs to say so.
-    expect(basis).toHaveTextContent(/2040 pre-epoch fitments are excluded whatever they did/i);
+    // fitting events needs to say so.
+    expect(basis).toHaveTextContent(/2040 pre-epoch fitting events are excluded whatever they did/i);
     expect(basis).toHaveTextContent(/younger than 72 h/i);
   });
 
@@ -208,6 +253,8 @@ describe('Commissioning Cohort (#232 AC-1)', () => {
       const u = String(url);
       if (u.includes('/reports/commissioning/cohort')) return json({ ...cohort, scopedToZoneId: '1' });
       if (u.includes('/reports/commissioning/installers')) return json(installers);
+      if (u.includes('/devices')) return json(devices);
+      if (u.includes('/schedules/engineers')) return json(engineers);
       return json({});
     });
     render(<CommissioningCohortPage />);
@@ -231,12 +278,27 @@ describe('Commissioning Cohort (#232 AC-1)', () => {
       const u = String(url);
       if (u.includes('/reports/commissioning/cohort')) return json(noCurve);
       if (u.includes('/reports/commissioning/installers')) return json(installers);
+      if (u.includes('/devices')) return json(devices);
+      if (u.includes('/schedules/engineers')) return json(engineers);
       return json({});
     });
     render(<CommissioningCohortPage />);
     // A 0% curve says every device stayed dark. "Nothing was measured" is a different claim and has to
     // read differently.
-    expect(await screen.findByText(/needs fitments older than the grace window/i)).toBeInTheDocument();
+    expect(await screen.findByText(/needs fitting events older than the grace window/i)).toBeInTheDocument();
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // #236 — the curve is a curve, install quality gets the whole page.
+  // -----------------------------------------------------------------------------------------------
+  it('draws the resolution curve as a line chart, not a stacked bar list', async () => {
+    render(<CommissioningCohortPage />);
+    const curve = await screen.findByTestId('commissioning-curve');
+    // jsdom cannot lay out recharts' SVG (setup.ts: "charts measure 0×0 and simply draw nothing"), so
+    // the provable seam is the library boundary itself: recharts mounts its ResponsiveContainer wrapper
+    // regardless of measured size, while the old BarList rendered a plain <ul> with no such wrapper.
+    expect(curve.querySelector('.recharts-responsive-container')).toBeInTheDocument();
+    expect(curve.querySelector('ul')).not.toBeInTheDocument();
   });
 
   // -----------------------------------------------------------------------------------------------
@@ -265,14 +327,142 @@ describe('Commissioning Cohort (#232 AC-1)', () => {
 
   it('states its grain, because the list it links into counts something else', async () => {
     render(<CommissioningCohortPage />);
-    // 6.4% of cohort devices carry more than one fitment in 90 days, so the two totals legitimately
-    // differ. Unstated, that reads as a bug.
-    expect(await screen.findByTestId('commissioning-grain-note')).toHaveTextContent(/two fitments here and one row on the device list/i);
+    // 6.4% of cohort devices carry more than one fitting event in 90 days, so the two totals
+    // legitimately differ. Unstated, that reads as a bug.
+    expect(await screen.findByTestId('commissioning-grain-note')).toHaveTextContent(/two fitting events here and one row on the device list/i);
   });
 
   it('surfaces a load failure rather than rendering an empty page as if it were zero', async () => {
     fetchMock.mockImplementation(async () => new Response('nope', { status: 500 }));
     render(<CommissioningCohortPage />);
     expect(await screen.findByRole('alert')).toHaveTextContent(/failed to load the commissioning cohort/i);
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // #236 — the cohort's devices, on the page.
+  // -----------------------------------------------------------------------------------------------
+  it('lists the cohort devices on the page, scoped by the window only', async () => {
+    render(<CommissioningCohortPage />);
+    expect(await screen.findByTestId('cc-device-row-DEV-001')).toHaveTextContent('GJ01-A2291');
+    expect(screen.getByTestId('cc-device-row-DEV-002')).toHaveTextContent('MH12-B8830');
+
+    const deviceCalls = urls().filter((u) => u.includes('/devices') && !u.includes('/devices/filter-options'));
+    expect(deviceCalls.some((u) => u.includes('commissionedWithinDays=90'))).toBe(true);
+    // No `population=` param exists on this endpoint — see the issue's implementation correction.
+    // Sending one anyway would silently no-op server-side, which is worse than not sending it.
+    expect(deviceCalls.every((u) => !u.includes('population='))).toBe(true);
+  });
+
+  it('states plainly that the device list is scoped by window only, not by the population filter above', async () => {
+    render(<CommissioningCohortPage />);
+    // GET /api/devices has no population predicate — that concept lives only in the commissioning
+    // aggregation SQL (#233). Reconciling here would mean a second, independent definition of
+    // "operational" living in the browser, which is the exact defect class #232–234 exist to prevent.
+    const note = await screen.findByTestId('commissioning-device-scope-note');
+    expect(note).toHaveTextContent(/does not apply the population filter/i);
+  });
+
+  it('sends search, sort and status to the server rather than filtering the list in the browser', async () => {
+    render(<CommissioningCohortPage />);
+    await screen.findByTestId('cc-device-row-DEV-001');
+    fetchMock.mockClear();
+
+    await userEvent.type(screen.getByLabelText(/search devices/i), 'GJ01');
+    await waitFor(() => {
+      expect(urls().some((u) => u.includes('/devices') && u.includes('search=GJ01'))).toBe(true);
+    });
+
+    await userEvent.selectOptions(screen.getByLabelText(/sort devices/i), 'DEVICE_ID');
+    await waitFor(() => {
+      expect(urls().some((u) => u.includes('/devices') && u.includes('sort=DEVICE_ID'))).toBe(true);
+    });
+
+    await userEvent.selectOptions(screen.getByLabelText(/device status/i), 'NEVER_REPORTED');
+    await waitFor(() => {
+      expect(urls().some((u) => u.includes('/devices') && u.includes('status=NEVER_REPORTED'))).toBe(true);
+    });
+  });
+
+  it('pages through the device list without re-fetching everything as one list', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const u = String(url);
+      if (u.includes('/reports/commissioning/cohort')) return json(cohort);
+      if (u.includes('/reports/commissioning/installers')) return json(installers);
+      if (u.includes('/devices')) return json({ rows: devices.rows, total: 120 });
+      if (u.includes('/schedules/engineers')) return json(engineers);
+      return json({});
+    });
+    render(<CommissioningCohortPage />);
+    await screen.findByTestId('cc-device-row-DEV-001');
+    fetchMock.mockClear();
+
+    await userEvent.click(screen.getByTestId('cc-device-page-next'));
+    await waitFor(() => {
+      expect(urls().some((u) => u.includes('/devices') && /offset=(?!0)\d/.test(u))).toBe(true);
+    });
+  });
+
+  it('filters the device list to a plant in place, without leaving the page', async () => {
+    render(<CommissioningCohortPage />);
+    await screen.findByTestId('cc-device-row-DEV-001');
+    fetchMock.mockClear();
+
+    await userEvent.click(screen.getByTestId('cc-plant-filter-11'));
+    await waitFor(() => {
+      expect(urls().some((u) => u.includes('/devices') && u.includes('plantId=11'))).toBe(true);
+    });
+    // The existing #235 drill-through link is a SEPARATE affordance and must still work unmodified.
+    expect(screen.getByTestId('cc-plant-link-11')).toHaveAttribute(
+      'href',
+      '/reports/device?plantId=11&commissionedWithinDays=90',
+    );
+  });
+
+  // -----------------------------------------------------------------------------------------------
+  // #236 — Assign SE per row, and the no-ticket truth.
+  // -----------------------------------------------------------------------------------------------
+  it('offers Assign SE for a row with an open, unassigned ticket', async () => {
+    render(<CommissioningCohortPage />);
+    const row = await screen.findByTestId('cc-device-row-DEV-001');
+
+    const picker = within(row).getByLabelText(/assign se for dev-001/i);
+    await userEvent.selectOptions(picker, 'se-1');
+    await userEvent.click(within(row).getByTestId('cc-assign-btn-DEV-001'));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url, init]) => {
+          if (!String(url).includes('/schedules/assign')) return false;
+          const body = init && typeof init === 'object' && 'body' in init ? JSON.parse(String(init.body)) : null;
+          return body?.ticketId === 'ticket-111' && body?.seId === 'se-1';
+        }),
+      ).toBe(true);
+    });
+
+    // Same primitive the Critical-Queue one-click uses, so schedules/batches/audit/notifications all
+    // behave identically — asserted here as "posts to /schedules/assign", not re-derived.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/schedules/assign'))).toBe(true);
+  });
+
+  it('refetches the device list after a successful assignment, so the column stays truthful', async () => {
+    render(<CommissioningCohortPage />);
+    const row = await screen.findByTestId('cc-device-row-DEV-001');
+    await userEvent.selectOptions(within(row).getByLabelText(/assign se for dev-001/i), 'se-1');
+
+    fetchMock.mockClear();
+    await userEvent.click(within(row).getByTestId('cc-assign-btn-DEV-001'));
+
+    await waitFor(() => {
+      expect(urls().some((u) => u.includes('/devices') && !u.includes('/devices/filter-options'))).toBe(true);
+    });
+  });
+
+  it('shows "No open ticket" and offers no assign control for a device with none', async () => {
+    render(<CommissioningCohortPage />);
+    const row = await screen.findByTestId('cc-device-row-DEV-002');
+
+    expect(within(row).getByTestId('cc-assign-state-DEV-002')).toHaveTextContent(/no open ticket/i);
+    expect(within(row).queryByTestId('cc-assign-control-DEV-002')).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /assign/i })).not.toBeInTheDocument();
   });
 });

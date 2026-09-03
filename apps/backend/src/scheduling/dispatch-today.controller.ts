@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentScope } from '../common/decorators/current-scope.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -8,7 +8,12 @@ import {
   DispatchChangesTodayService,
   type DispatchChangesTodayView,
 } from './dispatch-changes-today.service';
-import { DispatchTodayQueryService, type DispatchTodayView } from './dispatch-today-query.service';
+import {
+  DispatchTodayQueryService,
+  type CardSummary,
+  type DispatchTodayView,
+} from './dispatch-today-query.service';
+import { CardSummariesDto } from './dto/card-summaries.dto';
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 
@@ -44,6 +49,30 @@ export class DispatchTodayController {
     @Query('zoneId') zoneId?: string,
   ): Promise<DispatchChangesTodayView> {
     return this.changesQuery.changesToday(scope, { zoneId: parseZoneId(zoneId, scope) });
+  }
+
+  /**
+   * #295 — the identity of every card visible on a **non-today** board column, in one request.
+   *
+   * A `POST` for a read, which this repo already does twice for the same reason (`distribute-preview`,
+   * `override/preview`): the input is a list of ids that does not belong in a URL. It writes nothing,
+   * takes no lock and opens no run — the service's only statements are `findMany`s.
+   *
+   * The alternative was widening `GET /schedules?detail=stops` with these fields. That read is
+   * pan-zone and consumed by four other surfaces, so enriching it would make every one of them pay
+   * for a join only the board needs.
+   */
+  @Post('card-summaries')
+  @Roles(...MANAGER_ROLES)
+  cardSummaries(
+    @CurrentScope() scope: ManagerScope,
+    @Body() body: CardSummariesDto,
+    @Query('zoneId') zoneId?: string,
+  ): Promise<{ summaries: CardSummary[] }> {
+    return this.todayQuery.cardSummaries(scope, {
+      zoneId: parseZoneId(zoneId, scope),
+      ticketIds: body.ticketIds ?? [],
+    });
   }
 }
 

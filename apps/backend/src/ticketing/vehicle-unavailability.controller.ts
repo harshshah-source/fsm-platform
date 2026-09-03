@@ -15,7 +15,9 @@ import {
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -74,7 +76,11 @@ export class VehicleUnavailabilityController {
 
   @Post()
   @Roles('SERVICE_ENGINEER', ...MANAGER_ROLES)
-  async file(@CurrentUser() user: AccessTokenClaims, @Body() body: FileBody): Promise<Extract<VuFileOutcome, { result: 'OK' }>> {
+  async file(
+    @CurrentScope() scope: ManagerScope,
+    @CurrentUser() user: AccessTokenClaims,
+    @Body() body: FileBody,
+  ): Promise<Extract<VuFileOutcome, { result: 'OK' }>> {
     if (!body.ticketId || !body.seId) throw new BadRequestException({ code: 'TICKET_AND_SE_REQUIRED' });
     if (!REASONS.includes(body.reasonCode)) throw new BadRequestException({ code: 'INVALID_REASON' });
     const expectedFrom = new Date(body.expectedFrom);
@@ -97,15 +103,15 @@ export class VehicleUnavailabilityController {
           gpsLat: body.gpsLat ?? null,
           gpsLng: body.gpsLng ?? null,
         },
-        { userId: user.user_id, role: user.role, zoneId: user.zone_id },
+        { ...scope, userId: user.user_id },
       ),
     );
   }
 
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<VehicleUnavailRow[]> {
-    return this.vu.listForZone({ role: user.role, zoneId: user.zone_id });
+  list(@CurrentScope() scope: ManagerScope): Promise<VehicleUnavailRow[]> {
+    return this.vu.listForZone(scope);
   }
 
   /**
@@ -114,8 +120,12 @@ export class VehicleUnavailabilityController {
    */
   @Get(':id/history')
   @Roles(...MANAGER_ROLES)
-  async history(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string): Promise<VehicleUnavailRow[]> {
-    const out = await this.vu.historyForReport(id, { userId: user.user_id, role: user.role, zoneId: user.zone_id });
+  async history(
+    @CurrentScope() scope: ManagerScope,
+    @CurrentUser() user: AccessTokenClaims,
+    @Param('id') id: string,
+  ): Promise<VehicleUnavailRow[]> {
+    const out = await this.vu.historyForReport(id, { ...scope, userId: user.user_id });
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'VU_NOT_FOUND' });
     if (out.result === 'FORBIDDEN') throw new ForbiddenException({ code: 'VU_FORBIDDEN' });
     return out.rows;
@@ -173,8 +183,12 @@ export class VehicleUnavailabilityController {
   @Post(':id/resume-sla')
   @HttpCode(200)
   @Roles(...MANAGER_ROLES)
-  async resume(@CurrentUser() user: AccessTokenClaims, @Param('id') id: string): Promise<VuResumeOutcome> {
-    return this.map(await this.vu.resumeSla(id, { userId: user.user_id, role: user.role, zoneId: user.zone_id }));
+  async resume(
+    @CurrentScope() scope: ManagerScope,
+    @CurrentUser() user: AccessTokenClaims,
+    @Param('id') id: string,
+  ): Promise<VuResumeOutcome> {
+    return this.map(await this.vu.resumeSla(id, { ...scope, userId: user.user_id }));
   }
 
   /**

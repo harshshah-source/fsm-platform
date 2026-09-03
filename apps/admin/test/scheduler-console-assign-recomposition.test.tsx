@@ -106,6 +106,7 @@ const engineer = (over: Partial<DispatchTodayView['engineers'][number]> = {}) =>
 const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
   operatingDay: '2026-08-28',
   chronicThreshold: 3,
+  agingThresholdHours: 4,
   zone: { zoneId: '7', name: 'North Zone' },
   run: { runId: '42', status: 'SUCCESS', trigger: 'CRON', startedAt: '2026-08-28T05:00:00Z', finishedAt: null },
   recovery: null,

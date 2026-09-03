@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
+import { LostRaceError, stampOnceOrLose } from '../common/lost-race';
 import { PrismaService } from '../prisma/prisma.service';
 import { retireAssignmentOnClosure } from '../scheduling/close-assignment';
 import { foldAndResumeSlaPause } from '../ticketing/sla-pause';
@@ -25,10 +26,23 @@ export interface VerificationSweepResult {
   failed: number;
   fraud: number;
   pending: number;
+  /**
+   * #301 — tickets this pass declined to finalize because something else transitioned them first (a
+   * ZM's fraud escalation, a manual auto-recovery close, an overlapping sweep).
+   *
+   * A counted outcome rather than a log line, for the reason the whole slice exists: "we chose not to
+   * write" and "there was nothing to write" are different facts, and a sweep that skipped half its
+   * candidates must not report the same shape as one that had nothing to do (#228 R3, the same
+   * argument as `PipelineSummary.ingestComplete`). Nothing is lost by skipping — the winner's verdict
+   * is already recorded, and if the ticket is genuinely still pending the next pass picks it up.
+   */
+  skipped: number;
 }
 
 @Injectable()
 export class VerificationService {
+  private readonly logger = new Logger(VerificationService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async runVerification(
@@ -48,7 +62,7 @@ export class VerificationService {
     // value and the sweep runs every 5 minutes over every pending ticket.
     const telemetryAsOf = await this.telemetryWatermark();
 
-    const result: VerificationSweepResult = { closed: 0, failed: 0, fraud: 0, pending: 0 };
+    const result: VerificationSweepResult = { closed: 0, failed: 0, fraud: 0, pending: 0, skipped: 0 };
     for (const ticket of tickets) {
       const outcome = await this.verifyTicket(ticket, now, telemetryAsOf);
       if (outcome === 'CLOSED') result.closed++;
@@ -56,6 +70,7 @@ export class VerificationService {
         result.failed++;
         result.fraud++;
       } else if (outcome === 'FAILED') result.failed++;
+      else if (outcome === 'SKIPPED') result.skipped++;
       else result.pending++;
     }
     return result;
@@ -87,32 +102,50 @@ export class VerificationService {
     if (!run) return 'NOT_FRAUD';
 
     const now = new Date();
-    await this.prisma.$transaction(async (tx) => {
-      await tx.ticket.update({ where: { ticketId }, data: { status: 'ESCALATED', lastStateChangedAt: now } });
-      await tx.ticketEvent.create({
-        data: {
-          ticketId,
-          fromState: ticket.status,
-          toState: 'ESCALATED',
-          at: now,
-          actorId: actor.userId,
-          actorRole: actor.role as never,
-          actedAsRole: (actor.actedAsRole as never) ?? null,
-          reasonCode: 'VERIFICATION_FRAUD_ESCALATED',
-        },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // #301 — the status is in the WHERE, not in a JS check above. `ticket.status` is what THIS
+        // caller read; requiring it to be unchanged is what stops the 5-minute sweep's finalize (or a
+        // concurrent auto-recovery close) from being overwritten by an escalation raised against a
+        // ticket that has since moved. It is also what makes the `fromState` on the event below true —
+        // that field was previously free to claim a transition the database never made.
+        await stampOnceOrLose(
+          tx.ticket,
+          { ticketId, status: ticket.status },
+          { status: 'ESCALATED', lastStateChangedAt: now },
+          `fraud escalation for ticket ${ticketId}`,
+        );
+        await tx.ticketEvent.create({
+          data: {
+            ticketId,
+            fromState: ticket.status,
+            toState: 'ESCALATED',
+            at: now,
+            actorId: actor.userId,
+            actorRole: actor.role as never,
+            actedAsRole: (actor.actedAsRole as never) ?? null,
+            reasonCode: 'VERIFICATION_FRAUD_ESCALATED',
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: actor.userId,
+            actorRole: actor.role,
+            actedAsRole: actor.actedAsRole ?? null,
+            action: 'VERIFICATION_FRAUD_ESCALATED',
+            entityType: 'tickets',
+            entityId: ticketId,
+            metadata: { runId: run.runId, reason },
+          },
+        });
       });
-      await tx.auditLog.create({
-        data: {
-          actorId: actor.userId,
-          actorRole: actor.role,
-          actedAsRole: actor.actedAsRole ?? null,
-          action: 'VERIFICATION_FRAUD_ESCALATED',
-          entityType: 'tickets',
-          entityId: ticketId,
-          metadata: { runId: run.runId, reason },
-        },
-      });
-    });
+    } catch (e) {
+      // The documented lost-race mapping (`common/lost-race.ts`): the row the caller asked to act on is
+      // no longer the row they read, which is the same answer their own pre-read would give a moment
+      // later. No new member on the outcome union — an honest 404 where a silent overwrite used to be.
+      if (e instanceof LostRaceError) return 'NOT_FOUND';
+      throw e;
+    }
     return 'OK';
   }
 
@@ -132,27 +165,40 @@ export class VerificationService {
       return 'NOT_FOUND';
     }
     const now = new Date();
-    await this.prisma.$transaction(async (tx) => {
-      await tx.ticket.update({ where: { ticketId }, data: { status: 'CLOSED_AUTO_RECOVERY', lastStateChangedAt: now } });
-      if (ticket.failureCycleId) {
-        await tx.failureCycle.update({ where: { cycleId: ticket.failureCycleId }, data: { state: 'VERIFIED', closedAt: now } });
-        await tx.deviceState.updateMany({ where: { deviceId: ticket.deviceId }, data: { hasOpenFailureCycle: false } });
-      }
-      await tx.verificationRun.updateMany({
-        where: { ticketId, outcome: null },
-        data: { outcome: 'CLOSED_AUTO_RECOVERY', outcomeAt: now },
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // #301 — guarded on the status this caller read. Without it, a sweep that finalized the ticket
+        // CLOSED (or FAILED_VERIFICATION, which restores van stock) a moment ago is overwritten here,
+        // and the cycle/run/assignment writes below commit against a verdict that no longer exists.
+        await stampOnceOrLose(
+          tx.ticket,
+          { ticketId, status: ticket.status },
+          { status: 'CLOSED_AUTO_RECOVERY', lastStateChangedAt: now },
+          `manual auto-recovery for ticket ${ticketId}`,
+        );
+        if (ticket.failureCycleId) {
+          await tx.failureCycle.update({ where: { cycleId: ticket.failureCycleId }, data: { state: 'VERIFIED', closedAt: now } });
+          await tx.deviceState.updateMany({ where: { deviceId: ticket.deviceId }, data: { hasOpenFailureCycle: false } });
+        }
+        await tx.verificationRun.updateMany({
+          where: { ticketId, outcome: null },
+          data: { outcome: 'CLOSED_AUTO_RECOVERY', outcomeAt: now },
+        });
+        await tx.ticketEvent.create({
+          data: { ticketId, fromState: ticket.status, toState: 'CLOSED_AUTO_RECOVERY', at: now, actorId: actor.userId, actorRole: actor.role as never, reasonCode: 'MANUAL_AUTO_RECOVERY' },
+        });
+        await tx.auditLog.create({
+          data: { actorId: actor.userId, actorRole: actor.role, action: 'MANUAL_AUTO_RECOVERY', entityType: 'tickets', entityId: ticketId },
+        });
+        // #178 — the ticket is terminal, so the assignment is over: retire the live batch row and clear
+        // FORMALLY_ASSIGNED in this same transaction, or the SE keeps a stop (and the recommender keeps
+        // a spent capacity slot) for a device just declared recovered.
+        await retireAssignmentOnClosure(tx, [ticketId], now);
       });
-      await tx.ticketEvent.create({
-        data: { ticketId, fromState: ticket.status, toState: 'CLOSED_AUTO_RECOVERY', at: now, actorId: actor.userId, actorRole: actor.role as never, reasonCode: 'MANUAL_AUTO_RECOVERY' },
-      });
-      await tx.auditLog.create({
-        data: { actorId: actor.userId, actorRole: actor.role, action: 'MANUAL_AUTO_RECOVERY', entityType: 'tickets', entityId: ticketId },
-      });
-      // #178 — the ticket is terminal, so the assignment is over: retire the live batch row and clear
-      // FORMALLY_ASSIGNED in this same transaction, or the SE keeps a stop (and the recommender keeps
-      // a spent capacity slot) for a device just declared recovered.
-      await retireAssignmentOnClosure(tx, [ticketId], now);
-    });
+    } catch (e) {
+      if (e instanceof LostRaceError) return 'NOT_FOUND';
+      throw e;
+    }
     return 'OK';
   }
 
@@ -199,7 +245,7 @@ export class VerificationService {
     ticket: { ticketId: string; deviceId: string; failureCycleId: string | null; status: string },
     now: Date,
     telemetryAsOf: Date | null,
-  ): Promise<'CLOSED' | 'FRAUD' | 'FAILED' | 'PENDING'> {
+  ): Promise<'CLOSED' | 'FRAUD' | 'FAILED' | 'PENDING' | 'SKIPPED'> {
     // Phase-1 anchor: the latest troubleshoot submission for this ticket.
     const submission = await this.prisma.troubleshootingSubmission.findFirst({
       where: { ticketId: ticket.ticketId },
@@ -223,7 +269,7 @@ export class VerificationService {
       skipGeoCheck,
     });
 
-    const baseUpdate: Prisma.VerificationRunUpdateInput = {
+    const baseUpdate: Prisma.VerificationRunUpdateManyMutationInput = {
       pingsReceivedCount: p1.pingsCount,
       firstPingDistanceMeters: p1.firstPingDistanceMeters,
     };
@@ -298,71 +344,100 @@ export class VerificationService {
     });
   }
 
-  /** Persist the terminal run outcome and transition the ticket (+ cycle on CLOSED), audited, one tx. */
+  /**
+   * Persist the terminal run outcome and transition the ticket (+ cycle on CLOSED), audited, one tx.
+   *
+   * #301 — both terminal writes are guarded, and the guards come FIRST so nothing else in the
+   * transaction can commit against a verdict that lost. The ticket guard is `status` as the candidate
+   * scan read it (`VERIFICATION_PENDING`); the run guard is `outcome: null`, matching the one
+   * `markAutoRecovery` already used. A loss throws {@link LostRaceError}, which rolls the whole
+   * per-ticket transaction back — cycle close, assignment retirement, ticket event, audit row **and**
+   * the inventory leg. That last one is why this is corruption and not a labelling bug: a lost
+   * FAILED_VERIFICATION would otherwise restore the SE's van stock against a CLOSED that says the
+   * components were consumed.
+   */
   private async finalize(
     ticket: { ticketId: string; failureCycleId: string | null; status: string; deviceId: string },
     runId: string,
-    runData: Prisma.VerificationRunUpdateInput,
+    runData: Prisma.VerificationRunUpdateManyMutationInput,
     outcome: 'CLOSED' | 'FAILED_VERIFICATION',
     now: Date,
     tag: 'CLOSED' | 'FAILED' | 'FRAUD',
-  ): Promise<'CLOSED' | 'FAILED' | 'FRAUD'> {
+  ): Promise<'CLOSED' | 'FAILED' | 'FRAUD' | 'SKIPPED'> {
     const ticketStatus = outcome === 'CLOSED' ? 'CLOSED' : 'FAILED_VERIFICATION';
-    await this.prisma.$transaction(async (tx) => {
-      await tx.verificationRun.update({
-        where: { runId },
-        data: { ...runData, outcome, outcomeAt: now },
-      });
-      await tx.ticket.update({ where: { ticketId: ticket.ticketId }, data: { status: ticketStatus, lastStateChangedAt: now } });
-      // #178 — CLOSED and FAILED_VERIFICATION are both terminal, so the assignment ends here. This is
-      // the highest-volume closure in the product and the largest source of the phantom live rows.
-      await retireAssignmentOnClosure(tx, [ticket.ticketId], now);
-      if (outcome === 'CLOSED' && ticket.failureCycleId) {
-        // #271 (Q7 Case 1) — terminal bookkeeping only. By this point submission has already folded
-        // any running pause, so this is expected to be a no-op on every real path; it exists so a
-        // cycle reaching VERIFIED can never carry `sla_paused = true` into closed work, whatever wrote
-        // it. Generic (no `onlyReason`) on purpose — a defensive backstop that only cleared ONE reason
-        // would still leave the other able to leak into downtime maths on closed work.
-        await foldAndResumeSlaPause(tx, ticket.failureCycleId, now);
-        await tx.failureCycle.update({ where: { cycleId: ticket.failureCycleId }, data: { state: 'VERIFIED', closedAt: now } });
-        await tx.deviceState.updateMany({ where: { deviceId: ticket.deviceId }, data: { hasOpenFailureCycle: false } });
-      }
-
-      // Inventory follows the outcome (Issue 24, CONTEXT §Inventory). A verified close confirms the
-      // PRE_VERIFICATION consumption as DEDUCTED; a failed verification means the device wasn't repaired,
-      // so the components roll back and the SE's van stock is restored to physical reality.
-      if (outcome === 'CLOSED') {
-        await tx.inventoryTransaction.updateMany({
-          where: { ticketId: ticket.ticketId, status: 'PRE_VERIFICATION' },
-          data: { status: 'DEDUCTED' },
-        });
-      } else {
-        const pre = await tx.inventoryTransaction.findMany({
-          where: { ticketId: ticket.ticketId, status: 'PRE_VERIFICATION' },
-        });
-        for (const txn of pre) {
-          await tx.seVanStock.upsert({
-            where: { seId_componentId: { seId: txn.seId, componentId: txn.componentId } },
-            create: { seId: txn.seId, componentId: txn.componentId, qty: txn.qty },
-            update: { qty: { increment: txn.qty } },
-          });
-          await tx.inventoryTransaction.update({ where: { id: txn.id }, data: { status: 'ROLLED_BACK' } });
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await stampOnceOrLose(
+          tx.verificationRun,
+          { runId, outcome: null },
+          { ...runData, outcome, outcomeAt: now },
+          `verification run ${runId}`,
+        );
+        await stampOnceOrLose(
+          tx.ticket,
+          { ticketId: ticket.ticketId, status: ticket.status },
+          { status: ticketStatus, lastStateChangedAt: now },
+          `verification ${tag} for ticket ${ticket.ticketId}`,
+        );
+        // #178 — CLOSED and FAILED_VERIFICATION are both terminal, so the assignment ends here. This is
+        // the highest-volume closure in the product and the largest source of the phantom live rows.
+        await retireAssignmentOnClosure(tx, [ticket.ticketId], now);
+        if (outcome === 'CLOSED' && ticket.failureCycleId) {
+          // #271 (Q7 Case 1) — terminal bookkeeping only. By this point submission has already folded
+          // any running pause, so this is expected to be a no-op on every real path; it exists so a
+          // cycle reaching VERIFIED can never carry `sla_paused = true` into closed work, whatever wrote
+          // it. Generic (no `onlyReason`) on purpose — a defensive backstop that only cleared ONE reason
+          // would still leave the other able to leak into downtime maths on closed work.
+          await foldAndResumeSlaPause(tx, ticket.failureCycleId, now);
+          await tx.failureCycle.update({ where: { cycleId: ticket.failureCycleId }, data: { state: 'VERIFIED', closedAt: now } });
+          await tx.deviceState.updateMany({ where: { deviceId: ticket.deviceId }, data: { hasOpenFailureCycle: false } });
         }
+
+        // Inventory follows the outcome (Issue 24, CONTEXT §Inventory). A verified close confirms the
+        // PRE_VERIFICATION consumption as DEDUCTED; a failed verification means the device wasn't repaired,
+        // so the components roll back and the SE's van stock is restored to physical reality.
+        if (outcome === 'CLOSED') {
+          await tx.inventoryTransaction.updateMany({
+            where: { ticketId: ticket.ticketId, status: 'PRE_VERIFICATION' },
+            data: { status: 'DEDUCTED' },
+          });
+        } else {
+          const pre = await tx.inventoryTransaction.findMany({
+            where: { ticketId: ticket.ticketId, status: 'PRE_VERIFICATION' },
+          });
+          for (const txn of pre) {
+            await tx.seVanStock.upsert({
+              where: { seId_componentId: { seId: txn.seId, componentId: txn.componentId } },
+              create: { seId: txn.seId, componentId: txn.componentId, qty: txn.qty },
+              update: { qty: { increment: txn.qty } },
+            });
+            await tx.inventoryTransaction.update({ where: { id: txn.id }, data: { status: 'ROLLED_BACK' } });
+          }
+        }
+        await tx.ticketEvent.create({
+          data: { ticketId: ticket.ticketId, fromState: ticket.status, toState: ticketStatus, at: now, reasonCode: `VERIFICATION_${tag}` },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: 'SYSTEM',
+            actorRole: 'SYSTEM',
+            action: `VERIFICATION_${tag}`,
+            entityType: 'tickets',
+            entityId: ticket.ticketId,
+            metadata: { runId },
+          },
+        });
+      });
+    } catch (e) {
+      if (e instanceof LostRaceError) {
+        // Not an error: somebody else already decided this ticket. Nothing to undo (the transaction
+        // rolled back), nothing to retry — if it is genuinely still pending, the next 5-minute pass
+        // picks it up from its real current state.
+        this.logger.warn(`${e.message} — verification ${tag} not recorded, the concurrent winner stands`);
+        return 'SKIPPED';
       }
-      await tx.ticketEvent.create({
-        data: { ticketId: ticket.ticketId, fromState: ticket.status, toState: ticketStatus, at: now, reasonCode: `VERIFICATION_${tag}` },
-      });
-      await tx.auditLog.create({
-        data: {
-          actorId: 'SYSTEM',
-          actorRole: 'SYSTEM',
-          action: `VERIFICATION_${tag}`,
-          entityType: 'tickets',
-          entityId: ticket.ticketId,
-          metadata: { runId },
-        },
-      });
-    });
+      throw e;
+    }
     return tag;
   }
 }

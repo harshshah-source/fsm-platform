@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { evaluateRecomputeCanary } from '../../device-state/recompute-canary';
 import { PrismaService } from '../../prisma/prisma.service';
+import { readIngestionAlert, readIngestionStreakThreshold, type IngestionAlertHealth } from '../ingestion-alert';
+import { prismaIngestionAlertSource } from '../snapshot-query.service';
 
 /** How many recent recompute-ledger rows the health surface returns (#130 L5). */
 const RECOMPUTE_HISTORY_LIMIT = 10;
@@ -140,6 +142,13 @@ export interface IntegrationHealth {
   reconciliation: ReconciliationHealth;
   /** #218 — lifecycle self-consistency; needs no VPN, so it survives a source outage. */
   lifecycle: LifecycleHealth;
+  /**
+   * #300 — consecutive non-SUCCESS telemetry runs, the chunk that keeps failing, and the downstream
+   * stages the #230 gate is skipping. Derived entirely inside Postgres, for the same reason
+   * {@link LifecycleHealth} is: a wedged pipeline is exactly the situation in which the source is
+   * likely unreachable, and this is the surface that has to keep answering then.
+   */
+  ingestion: IngestionAlertHealth;
   /** #130 — current build high-water mark, for stale-run comparison in the UI. */
   runtimeLock: RuntimeLockHealth;
   /** #130 L5 — last-N recompute ledger rows (counts + build + swing), newest first. */
@@ -197,6 +206,7 @@ export class AutoPlantHealthService {
       snapshot: await this.snapshotHealth(now, lockVersion),
       reconciliation: await this.reconciliationHealth(),
       lifecycle: await this.lifecycleHealth(),
+      ingestion: await this.ingestionHealth(),
       runtimeLock: lock,
       recomputes: await this.recomputeHistory(lockVersion),
       checkedAt: now,
@@ -370,6 +380,18 @@ export class AutoPlantHealthService {
       quietRunsThreshold,
       healthy: drift === 0 && !quietRunsAlert,
     };
+  }
+
+  /**
+   * #300 — the wedged-ingestion alert. Reads the SAME source the freshness banner's copy reads
+   * (`prismaIngestionAlertSource`), so the OH card and the every-page banner cannot report different
+   * verdicts about whether the pipeline is stuck. Read-only; no VPN.
+   *
+   * **Public** for the same reason {@link lifecycleHealth} is — one predicate, reused rather than
+   * respelled by whatever surface needs it next.
+   */
+  async ingestionHealth(): Promise<IngestionAlertHealth> {
+    return readIngestionAlert(prismaIngestionAlertSource(this.prisma), readIngestionStreakThreshold());
   }
 
   private async sourceHealth(): Promise<IntegrationSourceHealth> {

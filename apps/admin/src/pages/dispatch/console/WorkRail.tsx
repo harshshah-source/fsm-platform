@@ -1,12 +1,137 @@
 import { useMemo, useState } from 'react';
 import type { DispatchChangesTodayView, DispatchTodayView } from '../../../api/dispatchToday';
 import { Badge } from '../../../components/ui';
+import { IconPackage } from '../../../components/ui/icons';
 import { cn } from '../../../lib/cn';
 import type { DropIntent } from './BoardGrid';
 import type { Selection } from './selection';
 import { DRAG_MIME, type ChipDragPayload } from './WorkChip';
 
 type PoolTab = 'unassignable' | 'held' | 'changes';
+
+const RAIL_OPEN_KEY = 'fsm.console.workRailOpen';
+
+/**
+ * Whether the rail was left open, as a **per-operator preference and not shared state**.
+ *
+ * It is deliberately not a URL param. `?sel=`, `?day=` and `?assign=` all describe *what the Console
+ * is looking at* and are worth pasting to a colleague; how wide someone likes their gutter is not,
+ * and putting it in the query string would have every shared link impose one operator's furniture on
+ * the next. `rememberZone` set the precedent in {@link ZonePicker}.
+ *
+ * **Collapsed is the default** (operator ruling, 2026-09-01): the board is the canvas, and 20rem of
+ * permanent gutter is 20rem the work cards do not get. The pool is one click away and says how much
+ * is waiting in it even while shut.
+ */
+export function readRailOpen(): boolean {
+  try {
+    return localStorage.getItem(RAIL_OPEN_KEY) === '1';
+  } catch {
+    return false; // private mode / storage disabled — collapsed is the safe default either way.
+  }
+}
+
+export function rememberRailOpen(open: boolean): void {
+  try {
+    localStorage.setItem(RAIL_OPEN_KEY, open ? '1' : '0');
+  } catch {
+    /* remembering is a convenience, never a requirement */
+  }
+}
+
+/**
+ * The three tab counts, computed where the collapsed handle can reach them.
+ *
+ * Filtered by the frame's find box exactly as the rail's own tabs are, so the badge on the handle and
+ * the number behind it can never disagree — two counts of the same population differing by a filter
+ * is the sort of thing an operator rightly stops trusting. The chronic toggle is *not* applied: it
+ * lives inside the rail and can only be set while the rail is open, so the handle is never on screen
+ * to contradict it.
+ */
+export function poolCounts(
+  rails: DispatchTodayView['rails'],
+  changes: DispatchChangesTodayView | null,
+  filter: string,
+): { unassignable: number; held: number; changes: number } {
+  const q = filter.trim().toLowerCase();
+  const hit = (...parts: (string | null | undefined)[]) =>
+    q === '' || parts.some((p) => (p ?? '').toLowerCase().includes(q));
+  return {
+    unassignable: rails.unassignable.filter((u) => hit(u.ticketId, u.deviceId, u.plantName)).length,
+    held: rails.held.filter((h) => hit(h.ticketId, h.deviceId, h.plantName)).length,
+    changes: (changes?.changes ?? []).filter((c) => hit(c.ticketId, c.reason, c.actorName)).length,
+  };
+}
+
+/**
+ * **The collapsed Work Pool** — the rail reduced to an icon so the board gets the whole screen.
+ *
+ * It is a handle, not a decoration, and it keeps the two things the open rail was doing that a plain
+ * hidden panel would have thrown away:
+ *
+ * 1. **It still says how much is waiting.** A pool that vanishes takes its 225 unassigned devices out
+ *    of the operator's head with it. The count rides the icon.
+ * 2. **It is still the Remove drop target.** Dragging a placed chip onto the rail opens Remove
+ *    prefilled (D10); collapsing the rail must not quietly delete a gesture the board still offers.
+ */
+export function WorkRailHandle({
+  counts,
+  onOpen,
+  drag,
+  onDragChange,
+  onDropIntent,
+}: {
+  counts: { unassignable: number; held: number; changes: number };
+  onOpen: () => void;
+  drag?: ChipDragPayload | null;
+  onDragChange?: (p: ChipDragPayload | null) => void;
+  onDropIntent?: (intent: DropIntent) => void;
+}) {
+  const removable = drag?.type === 'ticket';
+  const summary = `Work pool — ${counts.unassignable} unassigned, ${counts.held} held, ${counts.changes} changes`;
+
+  return (
+    <section
+      data-testid="console-work-rail-handle"
+      aria-label="Work pool, collapsed"
+      className={cn(
+        'sticky top-[4.75rem] self-start rounded-lg border border-line bg-surface',
+        removable && 'outline-dashed outline-1 -outline-offset-2 outline-brand-600',
+      )}
+      onDragOver={(e) => {
+        if (removable) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer.getData(DRAG_MIME);
+        const payload: ChipDragPayload | null = raw ? (JSON.parse(raw) as ChipDragPayload) : (drag ?? null);
+        onDragChange?.(null);
+        if (!payload || payload.type !== 'ticket' || !payload.ticketId || !onDropIntent) return;
+        e.preventDefault();
+        onDropIntent({ sel: { kind: 'ticket', id: payload.ticketId }, prefill: { action: 'REMOVE_TICKET' } });
+      }}
+    >
+      <button
+        type="button"
+        data-testid="work-rail-open"
+        onClick={onOpen}
+        title={summary}
+        aria-label={`Open the work pool. ${summary}`}
+        className="flex w-full items-center justify-center gap-2 p-2 text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink xl:flex-col"
+      >
+        <IconPackage className="h-4 w-4 shrink-0" />
+        <span className="rounded bg-surface-sunken px-1 text-[10px] font-semibold tabular-nums text-ink">
+          {counts.unassignable}
+        </span>
+        {/* Stacked into a 2.5rem gutter at xl, a full-width bar below it — where the grid is one
+            column and a bare icon on its own line would read as an orphan. */}
+        <span className="text-[11px] xl:hidden">Work pool</span>
+      </button>
+    </section>
+  );
+}
 
 /**
  * **WORK POOL / WORK — the Console's right rail** (approved structure, 2026-08-27).
@@ -50,6 +175,7 @@ export function WorkRail({
   drag,
   onDragChange,
   onDropIntent,
+  onCollapse,
 }: {
   rails: DispatchTodayView['rails'];
   changes: DispatchChangesTodayView | null;
@@ -66,6 +192,8 @@ export function WorkRail({
   drag?: ChipDragPayload | null;
   onDragChange?: (p: ChipDragPayload | null) => void;
   onDropIntent?: (intent: DropIntent) => void;
+  /** Shuts the rail back down to {@link WorkRailHandle}, giving the board the gutter. */
+  onCollapse: () => void;
 }) {
   const [tab, setTab] = useState<PoolTab>('unassignable');
   const [chronicOnly, setChronicOnly] = useState(false);
@@ -125,7 +253,11 @@ export function WorkRail({
       data-testid="console-work-rail"
       aria-label="Work pool"
       className={cn(
-        'flex flex-col gap-2 rounded-lg border border-line bg-surface p-3',
+        // `max-h` + `min-h-0` is the whole of composition rule 1 in CSS: the rail is allowed to be as
+        // tall as the screen and no taller, so the board stays the only region that grows. `sticky`
+        // then keeps it beside the board all the way down, which is what stops a bounded rail from
+        // leaving an empty gutter under itself on a tall board.
+        'sticky top-[4.75rem] flex max-h-[calc(100vh-5.75rem)] flex-col gap-2 self-start rounded-lg border border-line bg-surface p-3',
         removable && 'outline-dashed outline-1 -outline-offset-2 outline-brand-600',
       )}
       onDragOver={(e) => {
@@ -146,7 +278,19 @@ export function WorkRail({
         });
       }}
     >
-      <h2 className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Work pool</h2>
+      <div className="flex items-baseline gap-2">
+        <h2 className="flex-1 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Work pool</h2>
+        <button
+          type="button"
+          data-testid="work-rail-collapse"
+          onClick={onCollapse}
+          title="Collapse the work pool — the board takes the width"
+          aria-label="Collapse the work pool"
+          className="rounded px-1 text-[11px] leading-none text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink"
+        >
+          ›
+        </button>
+      </div>
 
       <div role="tablist" aria-label="Work pool" className="flex gap-1 rounded-md bg-surface-sunken p-0.5">
         {TABS.map((t) => (
@@ -167,6 +311,20 @@ export function WorkRail({
         ))}
       </div>
 
+      {/*
+        **The rows scroll here, they do not stretch the page** (2026-08-31).
+
+        This rail shipped rendering every unassigned row inline. On a live zone that is 215 rows, which
+        made the three-column deck 11,124px tall — and the Inspector is the band *underneath* that
+        deck, so the dialog a drop opens landed roughly twelve thousand pixels below where the operator
+        was looking. Drag-and-drop worked perfectly and was reported as broken, which is the same
+        thing. Composition rule 1 already said it: the board "takes all remaining width *and* all
+        remaining height — it is the only region that grows."
+
+        The population is not truncated. Truncating would be the other kind of lie: `215` in the tab
+        with 20 rows under it says the pool is smaller than it is. It scrolls instead.
+      */}
+      <div data-testid="work-rail-scroll" className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
       {tab === 'unassignable' &&
         (unassignable.length === 0 ? (
           <p className="text-[11px] text-ink-muted">
@@ -219,6 +377,20 @@ export function WorkRail({
                     {h.plantName ?? '—'} · returns {h.heldUntil}
                     {h.decidedBy ? ' · manager-approved' : ''}
                   </span>
+                  {/*
+                    **Who decided this, and why.** The rail's only attribution used to be `decidedBy`,
+                    which answers *who approved the vehicle report* — a different question — so a
+                    manager's own deferral rendered as a bare hold, indistinguishable from one the
+                    system made. Three deliberate deferrals read on screen as three devices that had
+                    simply vanished. The name falls back to the id and never to a guess (B7); the
+                    reason is printed only when one was recorded.
+                  */}
+                  {h.deferredBy && (
+                    <span data-testid={`held-deferred-by-${h.ticketId}`} className="block text-ink">
+                      deferred by {h.deferredByName ?? h.deferredBy.slice(0, 8)}
+                      {h.deferredReason ? ` — ${h.deferredReason}` : ''}
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -260,6 +432,8 @@ export function WorkRail({
             </ul>
           </>
         ))}
+
+      </div>
 
       {/*
         **Chronic device** (3.4 · D6/D8). The framing is deliberate and is the answer to D8: under the

@@ -6,12 +6,12 @@ import { Badge } from '../../components/ui';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useAuth } from '../../auth/AuthProvider';
+import { cn } from '../../lib/cn';
 import { AssignMode } from './console/AssignMode';
 import { AttentionRail, AttentionStrip, useActionRequired } from './console/AttentionBand';
 import { BoardGrid, type DropIntent } from './console/BoardGrid';
 import { addDays, parseDayParam, visibleDays, type Span } from './console/dayAxis';
 import { Inspector } from './console/Inspector';
-import { PeopleRail } from './console/PeopleRail';
 import { ChooseZoneState, readLastZone, rememberZone, ZonePicker } from './console/ZonePicker';
 import { RunNowControl } from './console/RunNowControl';
 import { NextRunPill } from './console/NextRunPill';
@@ -19,7 +19,7 @@ import { encodeSelection, parseSelection, sameSelection, type Selection } from '
 import { useConsoleData } from './console/useConsoleData';
 import { useDayContext } from './console/useDayContext';
 import { GrammarLegend, type ChipDragPayload } from './console/WorkChip';
-import { WorkRail } from './console/WorkRail';
+import { poolCounts, readRailOpen, rememberRailOpen, WorkRail, WorkRailHandle } from './console/WorkRail';
 
 /**
  * The roles `POST /schedules/dispatch-run` serves. A ZM joined them in **#291**, together with the
@@ -33,6 +33,19 @@ const CAN_CHOOSE_ZONE = ['CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'];
 const ESCALATION_STRIP_ROWS = 6;
 
 /**
+ * The one shape every secondary control in the frame's second row wears.
+ *
+ * They are all the same kind of thing — a small toggle that opens or switches something — and until
+ * 2026-09-01 they were drawn in three different weights: a bordered pill with its own caret, a button
+ * carrying a long muted explainer inline that made it twice its neighbours' width, a `▾` disclosure,
+ * and a lone `?`. A row of peers that does not look like a row of peers makes the operator re-read it
+ * every time. The one control that departs from this is {@link AttentionStrip}, and only in colour —
+ * its amber says work is waiting, which is a fact and not decoration.
+ */
+const FRAME_CONTROL =
+  'rounded-md border border-line px-2 py-1 text-[11px] text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink';
+
+/**
  * **The Scheduler Console** — one zone-scoped operational workspace (`/dispatch/today`).
  *
  * > The Console is the single zone-scoped operating-day workspace in which a manager sees what the
@@ -44,8 +57,9 @@ const ESCALATION_STRIP_ROWS = 6;
  * paths, RBAC clamps and honesty rules as the Phase 1–4 build, on the composition of a professional
  * workforce-scheduling product —
  *
- * - **The board is the canvas**: an ENGINEER × DAY grid takes all remaining width and height between
- *   two fixed rails. Rows are engineers in People-rail order; columns are operating days.
+ * - **The board is the canvas**: an ENGINEER × DAY grid takes all remaining width and height beside
+ *   the one right-hand rail. Rows are engineers; columns are operating days. Its first column is the
+ *   Console's only engineer representation (#295 — the separate People rail was deleted into it).
  * - **The day axis replaces the Plan / Live / Replay mode nav** (D9). A past column answers from the
  *   committed-schedule read, today from the one lifted `GET /dispatch/today` fetch — which is
  *   **never given a date** — and a future column from the projection. Each column says which mood it
@@ -84,9 +98,25 @@ export default function TodaysDispatchPage() {
   const findRef = useRef<HTMLInputElement>(null);
   const [railView, setRailView] = useState<'pool' | 'attention'>('pool');
   /**
+   * **The right rail is collapsed by default** (operator ruling, 2026-09-01), remembered per operator.
+   *
+   * Composition rule 1 says the board is the only region that grows; a 20rem gutter that is always
+   * there contradicts that for the ~90% of the day nobody is reading the pool. Collapsed it is an
+   * icon carrying its own count, and one click brings it back — see {@link readRailOpen} for why this
+   * is localStorage and not a URL param.
+   *
+   * The Attention list shares this slot and is opened *deliberately* from the top bar, so asking for
+   * it opens the slot; there is no state in which the operator asks for a rail and gets a sliver.
+   */
+  const [railOpen, setRailOpenState] = useState(readRailOpen);
+  const setRailOpen = (open: boolean) => {
+    setRailOpenState(open);
+    rememberRailOpen(open);
+  };
+  /**
    * Assign mode's own "may I leave?" guard, published by {@link AssignMode} while it is mounted.
    *
-   * The escalation strip sits **above** the mode and stays visible inside it, which until now made
+   * The escalation strip sits **below** the mode and stays visible inside it, which until now made
    * its verbs dead controls: clicking "Assign this work →" set `?sel=` and nothing rendered, because
    * the Inspector is not on screen in Assign mode. That is the field-ops P1 the composition
    * correction's §10 says the recomposition fixes. It is fixed by routing the verb through the mode's
@@ -157,11 +187,62 @@ export default function TodaysDispatchPage() {
     [patchParams],
   );
 
+  /**
+   * **The drop's answer opens as an overlay, so there is nothing to scroll to.**
+   *
+   * This used to be a `scrollIntoView` plus a `ResizeObserver` that re-aimed it for two seconds as the
+   * band grew. It existed because the Inspector was the band *underneath* a deck a screen or more
+   * tall: a drop selected the object and seeded the dialog perfectly around 12,000px below the fold,
+   * and the gesture was reported as "drag and drop is not working". It was working; its answer was
+   * off-screen, which for an operator is the same thing.
+   *
+   * The Inspector is a modal overlay now (operator ruling, 2026-09-01), so the distance is gone rather
+   * than chased: the answer opens over the board wherever the operator happens to be, and the board
+   * keeps the scroll position they had. The whole effect went with the band — a scroll that now only
+   * moves the page *behind* a modal is motion with no reader.
+   */
+
   const setFocusedDay = (day: string) =>
     patchParams((p) => {
       if (view && day === view.operatingDay) p.delete('day');
       else p.set('day', day);
     });
+
+  /**
+   * **A write that moved work to another day takes the operator to that day — and puts the overlay away.**
+   *
+   * Every other override changes today's column, which the operator is already looking at, so
+   * `invalidate` alone is the whole response. A cross-day move is the one write whose result lands
+   * somewhere else — and a refetch that leaves them staring at the column the work just *left* is
+   * indistinguishable, from their seat, from the move not happening. That was the entire complaint
+   * about the old defer, and refetching harder does not fix it.
+   *
+   * Focusing the target day is also what makes the ticket *visible* rather than merely counted: a
+   * focused future column renders committed work as chips, a context column renders it as a tally
+   * (BoardGrid, §6.3 rule 5). One `?day=` change satisfies both, and costs the one projection/detail
+   * fetch the operator has now explicitly asked for by moving work there.
+   *
+   * **Clearing the selection is what closes the overlay.** The Inspector is a modal now, and a modal
+   * left standing over the very board change it just made is a wall between the operator and their own
+   * result. The errand is finished on Confirm, so the overlay goes.
+   *
+   * **One params update, not three.** `select` and `setFocusedDay` each rebuild the query from the
+   * same render's `params`, so calling them in sequence would have the second silently drop the
+   * first's edit. The board also re-renders once this way rather than twice.
+   */
+  const onWriteCommitted = useCallback(
+    (moved?: { day: string }) => {
+      invalidate();
+      setDropIntent(null); // a committed prefill must never re-open its dialog
+      patchParams((p) => {
+        p.delete('sel');
+        if (!moved) return;
+        if (view && moved.day === view.operatingDay) p.delete('day');
+        else p.set('day', moved.day);
+      });
+    },
+    [invalidate, patchParams, view],
+  );
   const setSpan = (next: Span) =>
     patchParams((p) => {
       if (next === 'day') p.delete('span');
@@ -344,8 +425,14 @@ export default function TodaysDispatchPage() {
         <div className="flex flex-wrap items-center gap-2">
           <AttentionStrip
             state={attention}
-            expanded={railView === 'attention'}
-            onToggle={() => setRailView((v) => (v === 'attention' ? 'pool' : 'attention'))}
+            expanded={railView === 'attention' && railOpen}
+            onToggle={() => {
+              // Asking for Attention opens the slot as well as switching it — a rail requested and
+              // then served as a collapsed sliver is a dead control.
+              const next = railView === 'attention' && railOpen ? 'pool' : 'attention';
+              setRailView(next);
+              if (next === 'attention') setRailOpen(true);
+            }}
           />
 
           {!assigning && (
@@ -353,19 +440,21 @@ export default function TodaysDispatchPage() {
               type="button"
               data-testid="assign-mode-toggle"
               onClick={() => setAssigning(true)}
-              className="rounded-md border border-line px-2 py-1 text-[11px] text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink"
+              // The explainer moved from inline text to the tooltip. It is worth saying and not worth
+              // 180px of the frame's width every second of the day — inline it made this control
+              // twice the size of the three peers beside it, which read as importance it does not
+              // have over them.
+              title="Hand out what the engine left"
+              className={FRAME_CONTROL}
             >
               Assign work
-              <span className="ml-1.5 hidden text-[10px] sm:inline">hand out what the engine left</span>
             </button>
           )}
 
           {/* Run facts — the two nullable funnel counters keep their `—` ≠ 0 distinction here (B1),
               and the manual refresh lives beside them rather than competing with Run Now (§5.7). */}
           <details className="relative" data-testid="run-facts">
-            <summary className="cursor-pointer list-none rounded-md border border-line px-2 py-1 text-[11px] text-ink-muted hover:text-ink">
-              Run facts ▾
-            </summary>
+            <summary className={cn('cursor-pointer list-none', FRAME_CONTROL)}>Run facts ▾</summary>
             <div className="absolute z-20 mt-1 w-72 rounded-lg border border-line bg-surface p-3 shadow-lg">
               <SituationFacts view={view} />
               <Button className="mt-2" size="sm" variant="secondary" onClick={invalidate}>
@@ -375,10 +464,7 @@ export default function TodaysDispatchPage() {
           </details>
 
           <details className="relative" data-testid="grammar-legend">
-            <summary
-              className="cursor-pointer list-none rounded-md border border-line px-2 py-1 text-[11px] text-ink-muted hover:text-ink"
-              title="What the chips mean"
-            >
+            <summary className={cn('cursor-pointer list-none', FRAME_CONTROL)} title="What the chips mean">
               ?
             </summary>
             <div className="absolute z-20 mt-1 w-80 rounded-lg border border-line bg-surface p-3 shadow-lg">
@@ -390,6 +476,111 @@ export default function TodaysDispatchPage() {
 
       {/* ── HEALTH — properties of *this run of this zone*, not the cross-cutting queue ──────── */}
       {view.recovery && <RecoveryNotice recovery={view.recovery} />}
+
+      {/* ── ASSIGN MODE — its own board region (§3.4, correction §10) ────────────────────────
+          It replaces the board, both rails and the Inspector rather than sitting beside them:
+          draft lanes and committed lanes may share a screen and a grammar but never a lane object.
+          The frame above — zone, day, run state, attention, Run Now — stays throughout. */}
+      {assigning ? (
+        /* Keyed on the zone as a structural guarantee, not a convenience. The draft is client state
+           and would otherwise survive a zone change, leaving the old zone's plants staged under the
+           new zone's heading — one Commit from handing out another zone's work. The zone picker
+           already leaves Assign mode outright, so this key should never fire; it is here so that no
+           future path into a zone change can quietly reintroduce the defect. */
+        <AssignMode
+          key={view.zone.zoneId}
+          view={view}
+          filter={filter}
+          onExit={() => setAssigning(false)}
+          onCommitted={invalidate}
+          exitGuardRef={exitGuardRef}
+        />
+      ) : (
+        <>
+          {/* ── BOARD │ WORK-or-ATTENTION ──────────────────────────────────────────────────────
+              **Two regions, not three** (#295). The People rail stood here and rendered the same
+              `engineers[]` array the board's first column renders — one array, one fetch, drawn
+              twice. Its identity, coverage, workload and drop target now live in that column
+              (`BoardGrid.EngineerRow`), which is what the reference personnel column shows and what
+              gives the board back the width a work card needs. */}
+          <div
+            className={cn(
+              'grid gap-3',
+              // Collapsed, the second track is just wide enough for the handle, and every pixel it
+              // gives up goes to the board — which is the whole point of the collapse.
+              railOpen ? 'xl:grid-cols-[minmax(0,1fr)_20rem]' : 'xl:grid-cols-[minmax(0,1fr)_2.5rem]',
+            )}
+          >
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[11px] text-ink-muted">
+                  {engineers.length}
+                  {filter.trim() && ` of ${view.engineers.length}`} engineers ·{' '}
+                  <span className="tabular-nums">{view.situation.placed}</span> devices placed today
+                </span>
+              </div>
+              {view.engineers.length === 0 ? (
+                <EmptyState message="No engineers on this zone's roster yet." />
+              ) : engineers.length === 0 ? (
+                <EmptyState message={`No engineer, plant or ticket matches “${filter.trim()}”.`} />
+              ) : (
+                <BoardGrid
+                  view={view}
+                  engineers={engineers}
+                  days={days}
+                  focused={focused}
+                  selection={selection}
+                  onSelect={select}
+                  context={dayContext}
+                  drag={drag}
+                  onDragChange={setDrag}
+                  onDropIntent={onDropIntent}
+                  onFocusDay={setFocusedDay}
+                />
+              )}
+            </div>
+
+            {/* One slot, three states — collapsed to a handle, the Work Pool, or Attention on
+                demand. Never two at once. */}
+            {!railOpen ? (
+              <WorkRailHandle
+                counts={poolCounts(view.rails, changes, filter)}
+                onOpen={() => {
+                  setRailView('pool');
+                  setRailOpen(true);
+                }}
+                drag={drag}
+                onDragChange={setDrag}
+                onDropIntent={onDropIntent}
+              />
+            ) : railView === 'attention' ? (
+              <AttentionRail state={attention} zoneName={view.zone.name} onClose={() => setRailView('pool')} />
+            ) : (
+              <WorkRail
+                rails={view.rails}
+                changes={changes}
+                selection={selection}
+                onSelect={select}
+                filter={filter}
+                chronicThreshold={view.chronicThreshold}
+                drag={drag}
+                onDragChange={setDrag}
+                onDropIntent={onDropIntent}
+                onCollapse={() => setRailOpen(false)}
+              />
+            )}
+          </div>
+
+          {/* ── CONTEXTUAL INSPECTOR — a modal overlay, rendered only while something is selected ── */}
+          <Inspector
+            selection={selection}
+            view={view}
+            onClose={() => select(null)}
+            onCommitted={onWriteCommitted}
+            prefill={dropIntent && selection && sameSelection(dropIntent.sel, selection) ? dropIntent.prefill : null}
+          />
+        </>
+      )}
 
       {view.escalations.length > 0 && (
         <section
@@ -474,99 +665,6 @@ export default function TodaysDispatchPage() {
           )}
         </section>
       )}
-
-      {/* ── ASSIGN MODE — its own board region (§3.4, correction §10) ────────────────────────
-          It replaces the board, both rails and the Inspector rather than sitting beside them:
-          draft lanes and committed lanes may share a screen and a grammar but never a lane object.
-          The frame above — zone, day, run state, attention, Run Now — stays throughout. */}
-      {assigning ? (
-        /* Keyed on the zone as a structural guarantee, not a convenience. The draft is client state
-           and would otherwise survive a zone change, leaving the old zone's plants staged under the
-           new zone's heading — one Commit from handing out another zone's work. The zone picker
-           already leaves Assign mode outright, so this key should never fire; it is here so that no
-           future path into a zone change can quietly reintroduce the defect. */
-        <AssignMode
-          key={view.zone.zoneId}
-          view={view}
-          filter={filter}
-          onExit={() => setAssigning(false)}
-          onCommitted={invalidate}
-          exitGuardRef={exitGuardRef}
-        />
-      ) : (
-        <>
-          {/* ── ENGINEERS │ BOARD │ WORK-or-ATTENTION ──────────────────────────────────────── */}
-          <div className="grid gap-3 xl:grid-cols-[15rem_minmax(0,1fr)_20rem]">
-            {/* The roster is a drop target as well as a selector: dropping a device on a person is
-                the gesture operators actually reach for, and it opens the same prefilled dialog the
-                board's cells do. */}
-            <PeopleRail
-              engineers={engineers}
-              selection={selection}
-              onSelect={select}
-              today={view.operatingDay}
-              drag={drag}
-              onDragChange={setDrag}
-              onDropIntent={onDropIntent}
-            />
-
-            <div className="flex min-w-0 flex-col gap-1.5">
-              <div className="flex items-baseline justify-between">
-                <span className="text-[11px] text-ink-muted">
-                  {engineers.length}
-                  {filter.trim() && ` of ${view.engineers.length}`} engineers ·{' '}
-                  <span className="tabular-nums">{view.situation.placed}</span> devices placed today
-                </span>
-              </div>
-              {view.engineers.length === 0 ? (
-                <EmptyState message="No engineers on this zone's roster yet." />
-              ) : engineers.length === 0 ? (
-                <EmptyState message={`No engineer, plant or ticket matches “${filter.trim()}”.`} />
-              ) : (
-                <BoardGrid
-                  view={view}
-                  engineers={engineers}
-                  days={days}
-                  focused={focused}
-                  selection={selection}
-                  onSelect={select}
-                  context={dayContext}
-                  drag={drag}
-                  onDragChange={setDrag}
-                  onDropIntent={onDropIntent}
-                  onFocusDay={setFocusedDay}
-                />
-              )}
-            </div>
-
-            {/* One slot, two occupants — Work Pool by default, Attention on demand. Never both. */}
-            {railView === 'attention' ? (
-              <AttentionRail state={attention} zoneName={view.zone.name} onClose={() => setRailView('pool')} />
-            ) : (
-              <WorkRail
-                rails={view.rails}
-                changes={changes}
-                selection={selection}
-                onSelect={select}
-                filter={filter}
-                chronicThreshold={view.chronicThreshold}
-                drag={drag}
-                onDragChange={setDrag}
-                onDropIntent={onDropIntent}
-              />
-            )}
-          </div>
-
-          {/* ── CONTEXTUAL INSPECTOR — rendered only while something is selected ───────────── */}
-          <Inspector
-            selection={selection}
-            view={view}
-            onClose={() => select(null)}
-            onCommitted={invalidate}
-            prefill={dropIntent && selection && sameSelection(dropIntent.sel, selection) ? dropIntent.prefill : null}
-          />
-        </>
-      )}
     </div>
   );
 }
@@ -574,7 +672,7 @@ export default function TodaysDispatchPage() {
 /**
  * B1 — the situation counters, relocated from the full-width strip into the run-facts popover and
  * the regions that own them (correction §4): placed lives on the board header, unassignable / held /
- * changes are the Work Pool's tab counts, over-capacity is per-engineer in the People rail, and
+ * changes are the Work Pool's tab counts, over-capacity is per-engineer in the personnel column, and
  * critical is the interception strip. The two *nullable* funnel populations live here with their
  * `—` ≠ 0 distinction intact — null is "this run did not record it", never zero.
  */
@@ -618,7 +716,15 @@ function SituationFacts({ view }: { view: DispatchTodayView }) {
 }
 
 /**
- * #286 — what happened to a zone whose dispatch run died this morning.
+ * #286 — what happened to a zone that lost its dispatch this morning.
+ *
+ * **#319 widened the cause, so the wording no longer names one.** The notice used to say "this zone's
+ * dispatch run died", which was true while only the reaper could mark a zone. A zone is now also
+ * marked when it throws *inside* a live run, or when its claim is still open as the run unwinds — in
+ * both of those the run did not die, it finished and reported the loss. Saying "died" would send an
+ * operator hunting for a crashed process that never existed, so the headline states the thing that is
+ * true of every marked zone (it lost its dispatch) and `lastError` carries the specific reason
+ * whenever the collector has one.
  *
  * Rendered above the deck rather than in the work rail on purpose: it is not a queue of work, it is a
  * statement about whether this zone's day is intact — the one thing besides the escalation strip that
@@ -633,12 +739,12 @@ function RecoveryNotice({ recovery }: { recovery: NonNullable<DispatchTodayView[
   const needsAction = recovery.state === 'EXHAUSTED' || recovery.state === 'EXPIRED';
   const headline =
     recovery.state === 'RECOVERED'
-      ? "This zone's dispatch run died and was automatically re-dispatched"
+      ? 'This zone lost its dispatch run and was automatically re-dispatched'
       : recovery.state === 'PENDING'
-        ? "This zone's dispatch run died — a re-dispatch is queued"
+        ? 'This zone lost its dispatch run — a re-dispatch is queued'
         : recovery.state === 'EXHAUSTED'
-          ? "This zone's dispatch run died and could not be recovered automatically"
-          : "This zone's dispatch run died and the operating day ended before it could be recovered";
+          ? 'This zone lost its dispatch run and could not be recovered automatically'
+          : 'This zone lost its dispatch run and the operating day ended before it could be recovered';
 
   return (
     <section

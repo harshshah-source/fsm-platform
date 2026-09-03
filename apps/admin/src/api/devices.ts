@@ -1,12 +1,12 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the Device Detail surface (FE-22) over the Issue 44/49 device reads + the new
 // Issue-list endpoint. Manager-scoped server-side; token from the shared sessionStorage key.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
-function authHeaders(json = false): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(json ? { 'Content-Type': 'application/json' } : {}) };
+/** #341 — the shared builder plus this client's JSON content type. */
+function jsonHeaders(json = false): Record<string, string> {
+  return { ...authHeaders(), ...(json ? { 'Content-Type': 'application/json' } : {}) };
 }
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
@@ -170,7 +170,7 @@ export const apiDeviceDowntimeTrend = (id: string) => get<DeviceDowntimeTrend>(`
 export async function apiSetDealType(id: string, dealType: 'RECURRING' | 'ONE_TIME'): Promise<DeviceView> {
   const res = await fetch(`${BASE_URL}/devices/${encodeURIComponent(id)}/deal-type`, {
     method: 'PATCH',
-    headers: authHeaders(true),
+    headers: jsonHeaders(true),
     body: JSON.stringify({ dealType }),
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);

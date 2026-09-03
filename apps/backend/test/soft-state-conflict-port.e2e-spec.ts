@@ -113,4 +113,54 @@ describe('Issue 15 slice 8 — PrismaSoftStateConflictPort', () => {
   it('returns an empty set for an empty ticket list', async () => {
     expect((await port.activeOnSiteTicketIds([])).size).toBe(0);
   });
+
+  /**
+   * #295 — the **narrower** read the dispatch board needs, and the reason it could not reuse the one
+   * above. `activeOnSiteTicketIds` deliberately unions ON_SITE with TROUBLESHOOT_STARTED, because an
+   * override that disturbs an engineer standing at the plant is a conflict either way.
+   *
+   * A green card is a different claim: *somebody has started the work*. An engineer who has arrived
+   * and not yet begun has not, and painting their ticket green would tell the dispatcher the one
+   * thing they most need to be told correctly. So the board asks for TROUBLESHOOT_STARTED alone.
+   */
+  it('#295 — troubleshooting-started is ON_SITE’s narrower sibling, not the same question', async () => {
+    const arrivedOnly = await makeTicket();
+    await svc.advance({ ticketId: arrivedOnly, seId: se, target: 'VIEWED', now: NOW });
+    await svc.advance({ ticketId: arrivedOnly, seId: se, target: 'ON_SITE', now: NOW });
+
+    const working = await makeTicket();
+    await svc.advance({ ticketId: working, seId: se, target: 'VIEWED', now: NOW });
+    await svc.advance({ ticketId: working, seId: se, target: 'ON_SITE', now: NOW });
+    await svc.advance({ ticketId: working, seId: se, target: 'TROUBLESHOOT_STARTED', now: NOW });
+
+    const finished = await makeTicket();
+    await svc.advance({ ticketId: finished, seId: se, target: 'VIEWED', now: NOW });
+    await svc.advance({ ticketId: finished, seId: se, target: 'ON_SITE', now: NOW });
+    await svc.advance({ ticketId: finished, seId: se, target: 'TROUBLESHOOT_STARTED', now: NOW });
+    await prisma.softState.updateMany({
+      where: { ticketId: finished, resolvedAt: null },
+      data: { resolvedAt: NOW, resolvedBy: 'ZM', resolutionReason: 'OVERRIDE' },
+    });
+
+    const started = await port.activeTroubleshootStartedTicketIds([arrivedOnly, working, finished]);
+    expect(started.has(working)).toBe(true);
+    // On site, not started. The one distinction this method exists for.
+    expect(started.has(arrivedOnly)).toBe(false);
+    expect(started.has(finished)).toBe(false);
+    expect(started.size).toBe(1);
+
+    // …and the conflict read still answers its own, wider question about the same three tickets.
+    const conflicting = await port.activeOnSiteTicketIds([arrivedOnly, working, finished]);
+    expect(conflicting.has(arrivedOnly)).toBe(true);
+    expect(conflicting.has(working)).toBe(true);
+  });
+
+  /**
+   * The empty-list guard, which is not defensive boilerplate here: a zone with no committed work
+   * calls this with `[]` on every Console load, and the sibling method's missing guard is exactly
+   * what produced a live 500 on 2026-09-01 (`TypeError: Cannot read properties of undefined`).
+   */
+  it('#295 — returns an empty set for an empty ticket list, without touching the database', async () => {
+    expect((await port.activeTroubleshootStartedTicketIds([])).size).toBe(0);
+  });
 });

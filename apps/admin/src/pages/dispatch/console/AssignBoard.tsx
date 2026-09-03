@@ -657,7 +657,7 @@ function Step({
 /**
  * **The roster as the lane-target list** (§10, left region).
  *
- * The same people, in the same order, showing the same load as the committed board's People rail —
+ * The same people, in the same order, showing the same load as the committed board's personnel column —
  * `committed` and `dailyCapacity` from `committedDayPlan`, the definition the recommender enforces
  * against (#269). Two counts of one engineer's day on one screen is the defect that definition exists
  * to prevent, and the Console is the surface most able to show both at once.

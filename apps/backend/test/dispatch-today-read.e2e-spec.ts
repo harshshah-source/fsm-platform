@@ -231,6 +231,135 @@ describe('#284 — GET /dispatch/today', () => {
    * lost, recovered, or abandoned after three attempts looks identical on this page to a zone that had
    * a quiet morning, and that is precisely the reading an operator would draw if nothing said otherwise.
    */
+  /**
+   * A decision trace is written **per run**, not per day. A zone dispatched twice — Run Now, or the
+   * recovery collector picking up a crashed zone — writes a second `seId: null` trace for every
+   * ticket still nobody could take, and the rail returned both.
+   *
+   * That inflated `situation.unassignable` on the one surface whose purpose is to report what did not
+   * get placed (a real zone showed 376 rows for 215 tickets), and handed the client duplicate React
+   * keys. Both halves are asserted here: one row per ticket, and the **latest** run's verdict on it,
+   * because coverage can be fixed between runs and the stale reason would explain the wrong problem.
+   */
+  describe('two runs in one day — the unassignable rail is per ticket, not per trace', () => {
+    let dupTicket: string;
+    const runIds: bigint[] = [];
+    const recIds: bigint[] = [];
+
+    beforeAll(async () => {
+      dupTicket = await makeTicket();
+      // Two runs an hour apart, each refusing the same ticket for a different reason — the exact
+      // shape a Run Now (or a recovery re-dispatch) produces on top of the morning cron.
+      for (const [i, reason] of ['NO_COVERAGE', 'ALL_DROPPED'].entries()) {
+        const run = await prisma.dispatchRun.create({
+          data: {
+            trigger: i === 0 ? 'CRON' : 'MANUAL',
+            status: 'SUCCESS',
+            startedAt: new Date(TODAY.getTime() + i * 3_600_000),
+            configSnapshot: {},
+          },
+        });
+        runIds.push(run.runId);
+        const rec = await prisma.recommendation.create({
+          data: {
+            ticketId: dupTicket,
+            seId: null,
+            status: 'UNASSIGNABLE',
+            path: 'MORNING_BATCH',
+            scoreBreakdown: { reason },
+            runId: run.runId,
+          },
+        });
+        recIds.push(rec.recommendationId);
+        await prisma.dispatchDecisionTrace.create({
+          data: {
+            runId: run.runId,
+            recommendationId: rec.recommendationId,
+            zoneId,
+            ticketId: dupTicket,
+            seId: null,
+            trace: { poolEmptyReason: reason },
+          },
+        });
+      }
+    });
+
+    afterAll(async () => {
+      await prisma.dispatchDecisionTrace.deleteMany({ where: { runId: { in: runIds } } });
+      await prisma.recommendation.deleteMany({ where: { recommendationId: { in: recIds } } });
+      await prisma.dispatchRun.deleteMany({ where: { runId: { in: runIds } } });
+    });
+
+    it('lists the ticket once, however many runs refused it', async () => {
+      const view = await svc.today(scope(), { zoneId, now: TODAY });
+      const mine = view.rails.unassignable.filter((u) => u.ticketId === dupTicket);
+      expect(mine).toHaveLength(1);
+      // Duplicate ids are what broke the client; assert the whole rail is distinct, not just this one.
+      const ids = view.rails.unassignable.map((u) => u.ticketId);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('counts it once in the situation figure the header reports', async () => {
+      const view = await svc.today(scope(), { zoneId, now: TODAY });
+      expect(view.situation.unassignable).toBe(view.rails.unassignable.length);
+    });
+
+    it("carries the latest run's reason, not the first", async () => {
+      const view = await svc.today(scope(), { zoneId, now: TODAY });
+      const row = view.rails.unassignable.find((u) => u.ticketId === dupTicket);
+      expect(row?.poolEmptyReason).toBe('ALL_DROPPED');
+    });
+  });
+
+  /**
+   * **A hold a manager decided must not read like a hold the system made.**
+   *
+   * The Held rail's only attribution channel was `decidedBy`, sourced solely from an open
+   * `VehicleUnavailabilityReport` — i.e. it answers "who approved the vehicle report", which is a
+   * different question from "who deferred this ticket". A manager's own deferral therefore rendered as
+   * a bare hold, indistinguishable from work the system parked, and the operator who made three of
+   * them read that silence as the decision not having been taken.
+   *
+   * `deferredBy` is a **separate** field rather than a wider reading of `decidedBy`, because one field
+   * meaning two different decisions is how a rail starts telling a plausible lie about which happened.
+   */
+  describe('a manager-deferred hold names the manager and the reason', () => {
+    let deferred: string;
+
+    beforeAll(async () => {
+      deferred = await makeTicket();
+      const actor = { userId: zmUserId, role: 'ZONAL_MANAGER', actedAsRole: null };
+      await override.assignTicket(deferred, idleSe, scope(), actor, TODAY);
+      const row = await prisma.batchAssignmentTicket.findFirstOrThrow({
+        where: { ticketId: deferred, removedAt: null },
+        include: { batch: true },
+      });
+      const res = await override.override(
+        row.batch.batchId,
+        { action: 'DEFER_TICKET', ticketId: deferred, deferredToDate: '2026-06-30', reasonCode: 'Vehicle return not confirmed' },
+        scope(),
+        actor,
+        TODAY,
+      );
+      expect(res.result).toBe('OK');
+    });
+
+    it('says who deferred it and why, on the hold itself', async () => {
+      const view = await svc.today(scope(), { zoneId, now: TODAY });
+      const hold = view.rails.held.find((h) => h.ticketId === deferred);
+      expect(hold).toBeDefined();
+      expect(hold?.deferredBy).toBe(zmUserId);
+      expect(hold?.deferredByName).toBeTruthy();
+      expect(hold?.deferredReason).toBe('Vehicle return not confirmed');
+    });
+
+    it('leaves `decidedBy` alone — that field still answers only the vehicle-report question', async () => {
+      const view = await svc.today(scope(), { zoneId, now: TODAY });
+      const hold = view.rails.held.find((h) => h.ticketId === deferred);
+      expect(hold?.decidedBy ?? null).toBeNull();
+    });
+  });
+
   describe('#286 — the crashed-zone recovery rail', () => {
     afterEach(async () => {
       await prisma.dispatchZoneRecovery.deleteMany({ where: { zoneId } });

@@ -9,8 +9,11 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
+import type { RequestActor } from '../common/request-actor';
+import { toBigIntId } from '../common/parse-id';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -32,23 +35,24 @@ export class IntradayUpdatesController {
 
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<IntradayUpdateRow[]> {
-    return this.sameDay.listIntradayUpdates({ role: user.role, zoneId: user.zone_id });
+  list(@CurrentScope() scope: ManagerScope): Promise<IntradayUpdateRow[]> {
+    return this.sameDay.listIntradayUpdates(scope);
   }
 
   @Post('add')
   @HttpCode(200)
   @Roles(...MANAGER_ROLES)
   async add(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { ticketId: string; seId: string; confirm?: boolean; reasonCode?: string },
   ): Promise<AssignOutcome> {
     if (!body.ticketId || !body.seId) throw new BadRequestException({ code: 'TICKET_AND_SE_REQUIRED' });
     const out = await this.sameDay.addTicket(
       body.ticketId,
       body.seId,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
+      scope,
+      actor,
       new Date(),
       { confirm: body?.confirm, reasonCode: body?.reasonCode },
     );
@@ -75,18 +79,23 @@ export class IntradayUpdatesController {
   @HttpCode(200)
   @Roles(...MANAGER_ROLES)
   async remove(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { batchId: string; ticketId: string; reasonCode: string; confirm?: boolean },
   ): Promise<OverrideOutcome> {
     if (!body.batchId || !body.ticketId) throw new BadRequestException({ code: 'BATCH_AND_TICKET_REQUIRED' });
     if (!body.reasonCode) throw new BadRequestException({ code: 'REASON_REQUIRED' });
+    // #310 (CB-9) — a batch id that is not a number names no batch. The presence checks above always
+    // ran; the parse did not, so `{ batchId: 'abc' }` was a 500 rather than this file's own 404.
+    const batchId = toBigIntId(body.batchId);
+    if (batchId === null) throw new NotFoundException({ code: 'BATCH_OR_TICKET_NOT_FOUND' });
     const out = await this.sameDay.removeTicket(
-      BigInt(body.batchId),
+      batchId,
       body.ticketId,
       body.reasonCode,
       body.confirm ?? false,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
+      scope,
+      actor,
     );
     return this.mapOverride(out);
   }
@@ -95,17 +104,20 @@ export class IntradayUpdatesController {
   @HttpCode(200)
   @Roles(...MANAGER_ROLES)
   async reorder(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { batchId: string; stopSequence: number; reasonCode: string },
   ): Promise<OverrideOutcome> {
     if (!body.batchId || body.stopSequence == null) throw new BadRequestException({ code: 'BATCH_AND_SEQUENCE_REQUIRED' });
     if (!body.reasonCode) throw new BadRequestException({ code: 'REASON_REQUIRED' });
+    const batchId = toBigIntId(body.batchId);
+    if (batchId === null) throw new NotFoundException({ code: 'BATCH_OR_TICKET_NOT_FOUND' });
     const out = await this.sameDay.reorder(
-      BigInt(body.batchId),
+      batchId,
       body.stopSequence,
       body.reasonCode,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
+      scope,
+      actor,
     );
     return this.mapOverride(out);
   }

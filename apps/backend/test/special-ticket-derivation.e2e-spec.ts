@@ -75,7 +75,9 @@ describe('#244 — Special-ticket derivation over the assignment ledger', () => 
     const t = await prisma.ticket.create({
       data: {
         workType,
-        status,
+        // #309's `tickets_work_type_status` CHECK: `OPEN` is a TROUBLESHOOT status. An install
+        // ticket's live state is `REQUESTED`, so that is what "open install work" is seeded as.
+        status: workType === 'INSTALL' && status === 'OPEN' ? 'REQUESTED' : status,
         failureCycleId: cycle.cycleId,
         deviceId,
         plantId,
@@ -397,6 +399,12 @@ describe('#244 — Special-ticket derivation over the assignment ledger', () => 
    * troubleshooting submission*, and an INSTALL ticket can never have one — so without this clause
    * every repeatedly-dispatched install would be Special by vacuous truth, which is a different and
    * unapproved concept ("dispatched a lot") wearing the same badge.
+   *
+   * Since #309 the install is seeded `REQUESTED` — its real live state; `OPEN` belongs to
+   * TROUBLESHOOT and the DB now says so — which means the predicate's `status = 'OPEN'` clause also
+   * excludes it. The `work_type` clause is therefore belt-and-braces rather than the only thing
+   * standing between an install and the badge, and this case now asks the question that can actually
+   * arise: an install ticket dispatched over and over, in the state an install ticket can be in.
    */
   it('an INSTALL ticket is never Special, however often it expired', async () => {
     const t = await makeTicket('OPEN', 'INSTALL');

@@ -2,12 +2,44 @@ import { Injectable } from '@nestjs/common';
 import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { SUPERSEDED_RECOMMENDATION_STATUSES } from '../recommender/recommendation-status';
+import { isSystemAddSource } from './add-source';
 import { committedDayLoad } from './committed-day-load';
 import { LIVE_SCHEDULE_STATUSES } from './schedule-status';
 
 export interface ZmScope {
   role: string;
   zoneId: number | null;
+}
+
+/**
+ * One committed stop on a listed schedule, at the fidelity a board cell needs to draw it — plant,
+ * status, and the tickets with the provenance the chip grammar reads (#282 R2 / #283).
+ *
+ * Deliberately **not** {@link ZmDetailStop}: that shape carries the gated "Why suggested?"
+ * {@link TicketReasoning}, which costs two extra queries per schedule and answers a question a board
+ * cell never asks. This one is assembled entirely from rows {@link ZmScheduleQueryService.listSchedules}
+ * already fetches to compute its counts, so it adds a wider `select` and not a single query.
+ */
+export interface ZmScheduleRowStop {
+  batchId: string;
+  stopSequence: number;
+  plantId: string;
+  plantName: string;
+  status: string;
+  tickets: {
+    ticketId: string;
+    sortOrder: number;
+    addSource: string | null;
+    addedBy: string | null;
+    coverageTypeAtAssign: string | null;
+    /**
+     * The server's own reading of `addSource` — the same posture `GET /dispatch/today` takes, and for
+     * the same reason: the "which sources are the engine's" rule lives in `add-source.ts` and the
+     * client never re-derives it. NULL provenance is **not** system (it is unknown), which is exactly
+     * the distinction a client-side `includes()` is one careless edit away from losing.
+     */
+    systemPlaced: boolean;
+  }[];
 }
 
 export interface ZmScheduleRow {
@@ -22,6 +54,19 @@ export interface ZmScheduleRow {
   status: string;
   batchCount: number;
   ticketCount: number;
+  /**
+   * The stops themselves — present only when the caller asked for `detail`, absent otherwise.
+   *
+   * **Why this exists.** The Scheduler Console renders a non-today column from this read, and until
+   * now the read could answer only in counts, so a future day could say "1 stop · 1 device" and never
+   * *which* device. That is tolerable for a context column and is not tolerable for the day an
+   * operator just moved a ticket to: they need to see the ticket they moved, in the cell they dropped
+   * it on, or the move is indistinguishable from the silence the old defer produced.
+   *
+   * Opt-in rather than always-on for #284 §D's reason, unchanged: a caller that does not ask gets
+   * byte-identical bytes to what it got before.
+   */
+  stops?: ZmScheduleRowStop[];
 }
 
 export interface ZoneEngineerRow {
@@ -111,7 +156,7 @@ export class ZmScheduleQueryService {
    * clothes. The surface that promises "today" passes the parameter; the endpoint keeps its word to
    * everyone else.
    */
-  async listSchedules(scope: ZmScope, opts: { date?: Date } = {}): Promise<ZmScheduleRow[]> {
+  async listSchedules(scope: ZmScope, opts: { date?: Date; detail?: boolean } = {}): Promise<ZmScheduleRow[]> {
     const schedules = await this.prisma.workSchedule.findMany({
       where: {
         status: { in: [...LIVE_SCHEDULE_STATUSES] },
@@ -124,7 +169,20 @@ export class ZmScheduleQueryService {
         zone: { select: { name: true } },
         batches: {
           where: { status: { in: ['AUTO_ASSIGNED', 'OVERRIDDEN'] } },
-          include: { tickets: { where: { removedAt: null }, select: { id: true } } },
+          orderBy: { stopSequence: 'asc' },
+          // `detail` widens the columns read off rows this query already walks — it adds no round
+          // trip and no join the count path did not already make. `plant` is the one genuine
+          // addition, and it is skipped entirely when detail was not asked for.
+          include: {
+            ...(opts.detail ? { plant: { select: { name: true } } } : {}),
+            tickets: {
+              where: { removedAt: null },
+              orderBy: { sortOrder: 'asc' },
+              select: opts.detail
+                ? { id: true, ticketId: true, sortOrder: true, addSource: true, addedBy: true, coverageTypeAtAssign: true }
+                : { id: true },
+            },
+          },
         },
       },
     });
@@ -140,6 +198,38 @@ export class ZmScheduleQueryService {
       status: s.status,
       batchCount: s.batches.length,
       ticketCount: s.batches.reduce((n, b) => n + b.tickets.length, 0),
+      ...(opts.detail
+        ? {
+            // Same hollow-stop rule `getScheduleDetail` and the SE day plan apply: a batch whose every
+            // ticket has been removed carries no live work and is not a stop anyone will make.
+            stops: s.batches
+              .filter((b) => b.tickets.length > 0)
+              .map((b) => ({
+                batchId: String(b.batchId),
+                stopSequence: b.stopSequence,
+                plantId: String(b.plantId),
+                plantName: (b as { plant?: { name: string } | null }).plant?.name ?? String(b.plantId),
+                status: b.status,
+                tickets: b.tickets.map((t) => {
+                  const d = t as typeof t & {
+                    ticketId: string;
+                    sortOrder: number;
+                    addSource: string | null;
+                    addedBy: string | null;
+                    coverageTypeAtAssign: string | null;
+                  };
+                  return {
+                    ticketId: d.ticketId,
+                    sortOrder: d.sortOrder,
+                    addSource: d.addSource,
+                    addedBy: d.addedBy,
+                    coverageTypeAtAssign: d.coverageTypeAtAssign,
+                    systemPlaced: isSystemAddSource(d.addSource),
+                  };
+                }),
+              })),
+          }
+        : {}),
     }));
   }
 

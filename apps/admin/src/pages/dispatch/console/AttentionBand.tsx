@@ -98,8 +98,12 @@ export function AttentionStrip({
       aria-expanded={expanded}
       onClick={onToggle}
       className={cn(
+        // Same shape and same hover as the frame's other secondary controls (`FRAME_CONTROL` in
+        // TodaysDispatchPage); only the colour departs, and only when it has something to say.
         'flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] transition-colors',
-        total > 0 ? 'border-warning bg-warning-bg/30 text-ink' : 'border-line text-ink-muted',
+        total > 0
+          ? 'border-warning bg-warning-bg/30 text-ink hover:bg-warning-bg/50'
+          : 'border-line text-ink-muted hover:bg-surface-sunken hover:text-ink',
         expanded && 'ring-1 ring-brand-600',
       )}
     >

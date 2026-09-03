@@ -1,6 +1,8 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Patch, UseGuards } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -35,8 +37,8 @@ export class WarehouseStockController {
 
   @Get('warehouse-stock')
   @Roles(...READ_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<WarehouseStockRow[]> {
-    return this.stock.listStock({ role: user.role, zoneId: user.zone_id });
+  list(@CurrentScope() scope: ManagerScope): Promise<WarehouseStockRow[]> {
+    return this.stock.listStock(scope);
   }
 
   @Get('warehouse-stock/fulfillment-sla')

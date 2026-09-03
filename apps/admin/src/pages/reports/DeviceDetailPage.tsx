@@ -63,10 +63,16 @@ export function DeviceDetailPage() {
   // zone / bucket / status. Read those once as the initial filter values.
   const [searchParams] = useSearchParams();
   const initialStatus = searchParams.get('status');
+  /**
+   * `?search=` is the top bar's global search landing here (it is the one index spanning device id /
+   * vehicle / plant / company). Seeded into BOTH states so the first request already carries the term
+   * — seeding only `searchInput` would render one unfiltered page while the debounce settled.
+   */
+  const urlSearch = searchParams.get('search') ?? '';
   // The search box is debounced: `searchInput` follows every keystroke, `search` (what the list
   // query uses) settles 300ms after typing stops — one backend query per pause, not per key.
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState(urlSearch);
+  const [search, setSearch] = useState(urlSearch);
   const [sort, setSort] = useState<DeviceSort>('LONGEST_INACTIVE');
   const [status, setStatus] = useState<DeviceStatusFilter>(
     initialStatus === 'INACTIVE' || initialStatus === 'ACTIVE' || initialStatus === 'NEVER_REPORTED'
@@ -116,6 +122,13 @@ export function DeviceDetailPage() {
     const t = setTimeout(() => setSearch(searchInput), 300);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  // A search submitted from the top bar while this page is already open only changes the URL — adopt it
+  // (typing in the page's own box moves `searchInput`, not `urlSearch`, so this does not fight it).
+  useEffect(() => {
+    setSearchInput(urlSearch);
+    setSearch(urlSearch);
+  }, [urlSearch]);
 
   // Any change to the query (search / sort / filters) restarts at page 1 — a stale offset could land
   // past a now-smaller result set.
@@ -623,7 +636,9 @@ export function DeviceDetailPage() {
                 empty={<EmptyState message="No monthly downtime history." />}
               />
             ) : trendBars.length ? (
-              <BarChartCard data={trendBars} />
+              // Chronological months — left unsorted on purpose; ranking them would destroy the
+              // "trend" the panel is named for. Values are downtime HOURS, so they keep a decimal.
+              <BarChartCard data={trendBars} format="decimal" />
             ) : (
               <EmptyState message="No monthly downtime history." />
             )}

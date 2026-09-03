@@ -1,8 +1,8 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the ticket read surface (Issue 05 `/api/tickets`). Used by the dashboard's
 // company → plant → device drill-down to load a plant's devices.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
 export interface TicketRow {
   ticketId: string;
@@ -89,9 +89,8 @@ export interface TicketFilters {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as T;

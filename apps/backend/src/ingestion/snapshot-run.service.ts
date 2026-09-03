@@ -83,18 +83,24 @@ export class SnapshotRunService {
   }
 
   /**
-   * The last SUCCESS/PARTIAL run's persisted cursor (its `data_as_of`, a UTC instant), or null when no
-   * prior run has ingested data. The `AutoPlantSourceReader` resumes from this across runs (blueprint
-   * §6.2 option a) — keeps the worker generic while making ingestion incremental (R10).
+   * #324 (F4) — there is deliberately **no `lastResumeCursor` here any more**, and nothing writes
+   * `snapshot_runs.cursor`.
+   *
+   * It read the newest SUCCESS/PARTIAL run's persisted cursor so `AutoPlantSourceReader` could resume
+   * across runs (blueprint §6.2 option a). That reader was then built the other way on purpose — see
+   * its own docblock: *"There is deliberately NO cross-run resume cursor: correctness must not depend
+   * on a persisted watermark."* It restarts from `cursor = null` and keyset-scans every device by
+   * `device_id` on every run, so the whole window a resume floor protects is re-read regardless, and
+   * `ON CONFLICT DO NOTHING` on `(device_id, gps_datetime)` makes the overlap free.
+   *
+   * What was left was worse than dead code: a persisted value with a documented meaning that no
+   * production path honoured, so anyone reading `snapshot_runs.cursor` — or this method — would have
+   * concluded the pipeline was incremental when it is not. The only caller was a test that supplied
+   * its own resume-aware reader, i.e. the machinery's only consumer was its own test.
+   *
+   * The **column stays** (`schema.prisma`): dropping it needs a migration, it is nullable, and old rows
+   * are honest history of a design that once did this. It simply stops being written.
    */
-  async lastResumeCursor(): Promise<string | null> {
-    const last = await this.prisma.snapshotRun.findFirst({
-      where: { status: { in: ['SUCCESS', 'PARTIAL'] }, cursor: { not: null } },
-      orderBy: { runId: 'desc' },
-      select: { cursor: true },
-    });
-    return last?.cursor ?? null;
-  }
 
   /**
    * Close the run — **only if it is still RUNNING** (#261, the defect half of #132).
@@ -110,7 +116,17 @@ export class SnapshotRunService {
     params: {
       status: SnapshotRunOutcome;
       dataAsOf?: Date | null;
-      cursor?: string | null;
+      /**
+       * #300 — the run's own #299 containment tallies (`{ rejected, repaired }`), parked in the
+       * already-existing (and until now unwritten) `chunk_stats` JSONB column.
+       *
+       * #299 left these riding `SnapshotRunResult` and a WARN log only, so a run's rejections were
+       * un-queryable the moment the process moved on — which makes them useless to the operator
+       * surface #300 exists to build. This is diagnostic bookkeeping on the row the run already
+       * writes: it adds no column, no migration, and no input to the SUCCESS/PARTIAL/FAILED verdict
+       * or the #230 gate, which are computed exactly as before and passed in unchanged.
+       */
+      chunkStats?: { rejected: Record<string, number>; repaired: Record<string, number> } | null;
     },
   ): Promise<void> {
     const { count } = await this.prisma.snapshotRun.updateMany({
@@ -119,7 +135,7 @@ export class SnapshotRunService {
         status: params.status,
         finishedAt: new Date(),
         dataAsOf: params.dataAsOf ?? null,
-        cursor: params.cursor,
+        ...(params.chunkStats ? { chunkStats: params.chunkStats } : {}),
       },
     });
     if (count === 0) {

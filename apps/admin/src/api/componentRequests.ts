@@ -1,14 +1,9 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the Warehouse Manager Component Requests queue (Issue 22). The WM legs of the
 // component-unavailable loop: list active requests, Approve, Mark Shipped (tracking + destination),
 // Reject (mandatory reason). WAREHOUSE_MANAGER only — enforced server-side.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
-
-function authHeaders(): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 export type ComponentRequestStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'SHIPPED' | 'RECEIVED';
 export type DeliveryDestination = 'SE_LOCATION' | 'PLANT_WAREHOUSE';

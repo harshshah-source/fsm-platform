@@ -3,6 +3,7 @@ import { AuditService } from '../audit/audit.service';
 import { Prisma } from '../generated/prisma/client';
 import { type DealType, type SlaBucket } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 import { readSpecialAttemptThreshold } from '../settings/special-threshold';
 import { specialPredicateSql } from '../ticketing/special-ticket.query';
 import { cohortWindowStart, deviceCommissionedWithin } from '../reports/commissioning-window';
@@ -130,6 +131,11 @@ export interface DealTypeActor {
   userId: string;
   role: string;
   actedAsRole?: string | null;
+  /**
+   * The zone whose ZM duty this write is being made under, when the caller is acting (#340).
+   * Attribution, not scope: it names who was covering, never what the caller may touch.
+   */
+  actingZone?: number | null;
 }
 
 function toView(d: {
@@ -172,6 +178,7 @@ export class DeviceService {
         actorId: actor.userId,
         actorRole: actor.role,
         actedAsRole: actor.actedAsRole ?? null,
+        actingZone: actor.actingZone ?? null,
         action: 'DEVICE_DEAL_TYPE_TAG',
         entityType: 'device',
         entityId: String(deviceId),
@@ -280,9 +287,10 @@ export class DeviceService {
                ${specialPredicateSql(specialThreshold)} AS is_special
         FROM tickets t
         WHERE t.device_id = page."deviceId"
-          AND t.status NOT IN ('CLOSED', 'CLOSED_AUTO_RECOVERY', 'CLOSED_NON_OPERATIONAL',
-                               'FAILED_VERIFICATION', 'FAILED_ACTIVATION', 'FAILED_RECOVERY',
-                               'RECEIVED_AT_WAREHOUSE')
+          -- #308 — the canonical set, not a sixth hand-spelled copy. Raw SQL is exactly where a copy
+          -- goes unnoticed longest: nothing typechecks a string, so this list could (and did) sit here
+          -- agreeing with the canonical set by luck rather than by construction.
+          AND t.status NOT IN (${Prisma.join([...RESOLVED_TICKET_STATUSES])})
         ORDER BY t.created_at DESC
         LIMIT 1
       ) ot ON true

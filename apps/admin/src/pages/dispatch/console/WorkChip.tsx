@@ -12,8 +12,9 @@ import type { Selection } from './selection';
  * | chip BORDER STYLE  | provenance — solid+dot = the engine · dashed = a human · dashed violet =
  * |                    | a human crossed a coverage tier · dotted = not recorded |
  * | inline TOKENS      | urgency (`CRIT`), vehicle return (`RET`), chronic device (`CHR ×n`) |
- * | chip FILL          | operational state — **reserved**: needs the day-scoped board read (D13),
- * |                    | which is deferred, so no fill claims anything yet |
+ * | chip/card FILL     | action status — green started · red untouched · yellow aged (#295, made a fill
+ * |                    | 2026-09-01). Spent only on the {@link WorkCard}; this compact chip has no
+ * |                    | `actionStatus` to draw and stays unfilled |
  * | CELL treatment     | capacity — an amber cell means the engineer is at/over capacity (BoardGrid) |
  *
  * **Urgency became a token, and that is the fix for the field-ops P0.** The old grammar drew
@@ -26,7 +27,11 @@ import type { Selection } from './selection';
  * treatment, which reads as neither a system decision nor a human one. Drawing it solid would be the
  * single lie this grammar exists to prevent.
  */
-function provenanceTreatment(t: TodayTicket): { className: string; title: string } {
+export function provenanceTreatment(
+  /** Narrowed to the three fields the grammar actually reads, so #295's committed card — which has
+   *  provenance but no SLA bucket or inactivity — can use the *same* reader rather than a copy. */
+  t: Pick<TodayTicket, 'addSource' | 'systemPlaced' | 'coverageTypeAtAssign'>,
+): { className: string; title: string } {
   if (t.addSource == null) {
     return {
       className: 'border border-dotted border-line text-ink-muted',
@@ -49,8 +54,9 @@ function provenanceTreatment(t: TodayTicket): { className: string; title: string
 
 const CRITICAL_BUCKETS = new Set(['CRITICAL', 'HIGH_CRITICAL']);
 
-/** The inline-token idiom shared by CRIT / RET / CHR — words and numbers, never a hue-only mark. */
-function Token({
+/** The inline-token idiom shared by CRIT / RET / CHR — words and numbers, never a hue-only mark.
+ *  Exported so #295's work card carries the same tokens rather than a lookalike set of its own. */
+export function Token({
   label,
   title,
   testId,
@@ -195,13 +201,25 @@ export function WorkChip({
  * no committed object behind it to inspect, no trace to explain and no override to offer. Hold is
  * the only pre-run lever, and it lives on the Work Pool's held population, not here.
  */
-export function GhostChip({ ticketId }: { ticketId: string }) {
+export function GhostChip({ ticketId, deferred }: { ticketId: string; deferred?: boolean }) {
   return (
     <span
       data-testid={`ghost-${ticketId}`}
-      title="Projected — nothing is committed. The run may decide differently; holding a ticket back is the only pre-run lever."
+      title={
+        deferred
+          ? 'You deferred this to this day, and this is where the run would put it — projected, not committed.'
+          : 'Projected — nothing is committed. The run may decide differently; holding a ticket back is the only pre-run lever.'
+      }
       className="inline-flex items-center gap-1 rounded border border-dashed border-line px-1.5 py-0.5 text-[11px] tabular-nums italic text-ink-muted opacity-70"
     >
+      {/* The operator's own decision, marked where its consequence lands. Without it a deferral's
+          outcome is indistinguishable from any other projection, which is how three deliberate
+          postponements came to look like nothing had happened. */}
+      {deferred && (
+        <span data-testid={`ghost-deferred-${ticketId}`} aria-label="you deferred this" className="not-italic">
+          ↩
+        </span>
+      )}
       ~{ticketId.slice(0, 8)}
     </span>
   );
@@ -250,15 +268,48 @@ export function GrammarLegend() {
         <span className="rounded bg-warning-soft/60 px-1.5 py-0.5">amber cell</span>
         engineer at or over capacity
       </li>
+      {/*
+        #295 — the action status. Its own row in the legend because it is its own channel: the card's
+        left rail and its word, in a palette (`--color-action-*`) nothing else on the board uses. The
+        rail is never the only carrier — the word is always beside it — so the three states survive
+        grayscale exactly as CRIT / RET / CHR do. Two of them share the red (operator ruling,
+        2026-09-01: red = nobody has troubleshooted it, green = somebody has, no yellow), which is
+        exactly why the legend spells out what each word means rather than leaving hue to do it.
+      */}
+      <li className="mt-1 flex flex-col gap-1 border-t border-line pt-1.5">
+        <span>on a work card, the left rail and its word say whether anyone is on the job:</span>
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden className="inline-block h-3 w-[3px] rounded bg-action-started" />
+            <span className="text-[9px] font-bold uppercase tracking-wide text-action-started">Started</span>
+            troubleshooting has begun
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden className="inline-block h-3 w-[3px] rounded bg-action-untouched" />
+            <span className="text-[9px] font-bold uppercase tracking-wide text-action-untouched">Untouched</span>
+            nobody has started yet
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden className="inline-block h-3 w-[3px] rounded bg-action-untouched" />
+            <span className="text-[9px] font-bold uppercase tracking-wide text-action-untouched">Aged</span>
+            untouched since it was assigned, past the threshold
+          </span>
+        </span>
+        <span>
+          <strong>Inactive Nh</strong> on the card is a different clock — how long the <em>device</em>{' '}
+          has been silent, which is why the ticket exists. It is not how long the work has gone
+          untouched.
+        </span>
+      </li>
       {/* Drag was undiscoverable: nothing on the board said a chip could be picked up, so the whole
           accelerator went unused and was reported as broken. The legend is where the grammar is
           explained, so it is where this belongs too. */}
       <li className="mt-1 flex items-start gap-1.5 border-t border-line pt-1.5">
         <span className="rounded border border-line px-1.5 py-0.5">drag</span>
         <span>
-          drag a device onto another engineer — in the list on the left, or their cell on today's
-          column — to reassign it; onto the same engineer on a later day to defer it. Nothing is
-          written on release: the usual dialog opens with the target filled in.
+          drag a device onto another engineer — onto their name in the engineer column, or onto their
+          cell on today's column — to reassign it; onto any engineer on a later day to move it there.
+          Nothing is written on release: the usual dialog opens with the target filled in.
         </span>
       </li>
     </ul>

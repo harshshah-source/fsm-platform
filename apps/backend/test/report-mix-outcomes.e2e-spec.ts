@@ -36,8 +36,16 @@ describe('Issue 90 — work-type-mix + verification-outcomes (e2e)', () => {
       cycleIds.push(cycle.cycleId);
       failureCycleId = cycle.cycleId;
     }
+    // Each work type is seeded in the status its own creator writes — TROUBLESHOOT opens `OPEN`
+    // (ticket-creation), INSTALL and RECOVERY open `REQUESTED` (install / non-operational). #309's
+    // `tickets_work_type_status` CHECK refuses the flat `OPEN` this used to seed for all three. The
+    // report is unaffected: `workTypeMix` counts over `created_at` + `work_type` and never reads status.
     const t = await prisma.ticket.create({
-      data: { workType, status: 'OPEN', failureCycleId, deviceId, plantId, companyId, companyTier: 'GOLD', lastStateChangedAt: createdAt, createdAt },
+      data: {
+        workType,
+        status: workType === 'TROUBLESHOOT' ? 'OPEN' : 'REQUESTED',
+        failureCycleId, deviceId, plantId, companyId, companyTier: 'GOLD', lastStateChangedAt: createdAt, createdAt,
+      },
     });
     ticketIds.push(t.ticketId);
     return t.ticketId;

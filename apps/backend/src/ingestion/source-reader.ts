@@ -74,8 +74,23 @@ export interface SourceChunk {
    * cannot tell a dropped row from a row that was never there. This field is the only place the drop is
    * observable, which is the entire justification for preferring rejection over silent acceptance.
    * Optional so non-AutoPlant readers (fixtures, CSV, in-memory) need no change.
+   *
+   * Since #299 this also carries `UNPARSEABLE_TIMESTAMP` — a row whose `latest_gps_datetime` is not a
+   * timestamp at all. That used to be a *throw* rather than a count: it escaped the reader, the worker
+   * read it as a source-read failure and stopped draining, and the deterministic `ORDER BY device_id`
+   * scan then failed at the same row on every subsequent run.
    */
   rejected?: Record<string, number>;
+  /**
+   * Nullable telemetry FIELDS discarded for being out of range for their column, counted by reason,
+   * with the row itself KEPT and ingested (#299 AR-2) — absent when nothing was out of range.
+   *
+   * Deliberately not folded into {@link rejected}. A rejection is a hole in the fleet's telemetry: that
+   * device has no ping for this run. A repair is a data-quality fact about a device that reported
+   * perfectly well and had one unusable reading. Summing them would produce a number that answers
+   * neither question, and #300 has to alert on them differently.
+   */
+  repaired?: Record<string, number>;
 }
 
 export interface SourceReader {

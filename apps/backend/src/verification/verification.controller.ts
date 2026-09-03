@@ -11,7 +11,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { ManagerScope } from '../common/manager-scope';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -42,7 +46,7 @@ export class VerificationController {
   @Get('verification/review')
   @Roles(...MANAGER_ROLES)
   review(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('outcome') outcome?: string,
     @Query('companyId') companyId?: string,
     @Query('zoneId') zoneId?: string,
@@ -60,14 +64,15 @@ export class VerificationController {
         dateFrom: dateFrom ? new Date(dateFrom) : undefined,
         dateTo: dateTo ? new Date(dateTo) : undefined,
       },
-      { role: user.role, zoneId: user.zone_id },
+      scope,
     );
   }
 
   @Post('verification/:ticketId/escalate')
   @Roles(...MANAGER_ROLES)
   async escalate(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Param('ticketId') ticketId: string,
     @Body() body: { reason?: string },
   ): Promise<{ result: 'OK' }> {
@@ -77,8 +82,8 @@ export class VerificationController {
     const outcome = await this.verification.escalateFraud(
       ticketId,
       body.reason.trim(),
-      { userId: user.user_id, role: user.role },
-      { role: user.role, zoneId: user.zone_id },
+      actor,
+      scope,
     );
     if (outcome === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     if (outcome === 'NOT_FRAUD') throw new ConflictException({ code: 'NOT_FRAUD_FLAGGED' });
@@ -88,13 +93,14 @@ export class VerificationController {
   @Post('verification/:ticketId/mark-auto-recovery')
   @Roles(...MANAGER_ROLES)
   async markAutoRecovery(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Param('ticketId') ticketId: string,
   ): Promise<{ result: 'OK' }> {
     const outcome = await this.verification.markAutoRecovery(
       ticketId,
-      { userId: user.user_id, role: user.role },
-      { role: user.role, zoneId: user.zone_id },
+      actor,
+      scope,
     );
     if (outcome === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     return { result: 'OK' };
@@ -102,8 +108,12 @@ export class VerificationController {
 
   @Get('tickets/:id/verification')
   @Roles('SERVICE_ENGINEER', ...MANAGER_ROLES)
-  async forTicket(@CurrentUser() user: AccessTokenClaims, @Param('id') ticketId: string): Promise<VerificationView> {
-    const view = await this.query.forTicket(ticketId, { role: user.role, userId: user.user_id, zoneId: user.zone_id });
+  async forTicket(
+    @CurrentScope() scope: ManagerScope,
+    @CurrentUser() user: AccessTokenClaims,
+    @Param('id') ticketId: string,
+  ): Promise<VerificationView> {
+    const view = await this.query.forTicket(ticketId, { ...scope, userId: user.user_id });
     if (!view) throw new NotFoundException({ code: 'NO_VERIFICATION_RUN' });
     return view;
   }

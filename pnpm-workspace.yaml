@@ -24,3 +24,5 @@ allowBuilds:
   esbuild: true
   prisma: true
   unrs-resolver: true
+patchedDependencies:
+  tinypool@1.1.1: patches/tinypool@1.1.1.patch

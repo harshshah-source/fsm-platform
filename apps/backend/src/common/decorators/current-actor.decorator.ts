@@ -21,7 +21,9 @@ interface ActorRequest {
  * re-deriving it would restore the ungated grant the guard exists to remove.
  */
 export const CurrentActor = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): RequestActor => {
+  // Named, not anonymous: #341's route sweep identifies a scoped handler by this factory's name in
+  // Nest's `ROUTE_ARGS_METADATA`, which is the only trace a param decorator leaves on a method.
+  function currentActorFactory(_data: unknown, ctx: ExecutionContext): RequestActor {
     const request = ctx.switchToHttp().getRequest<ActorRequest>();
     return resolveRequestActor(request.user, request.acting ?? notActing(request.user.role));
   },

@@ -3,8 +3,10 @@
 // flag against the current runtime-lock high-water mark) and the last-N device-state recompute
 // history with the semantic-canary swing flag. Mirrors the backend `IntegrationHealth`.
 
+import type { IngestionAlertHealth } from './snapshots';
+import { authHeaders } from './authHeaders';
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
 export interface RunBuildStamp {
   buildVersion: string | null;
@@ -35,18 +37,26 @@ export interface RecomputeLedgerEntry {
   swing: boolean;
 }
 
-/** The subset of the backend `IntegrationHealth` this client reads (build attribution + canary). */
+/**
+ * The subset of the backend `IntegrationHealth` this client reads (build attribution + canary, and
+ * since #300 the wedged-ingestion alert). Re-exported from `snapshots.ts` rather than redeclared —
+ * the banner and this card render the same backend derivation, and two copies of the type would be
+ * the first step towards two different reads of it.
+ */
+export type { IngestionAlertHealth, IngestionFailingChunk } from './snapshots';
+
 export interface IntegrationHealthView {
   masterSync: { build: RunBuildStamp | null };
   snapshot: { build: RunBuildStamp | null };
   runtimeLock: RuntimeLockHealth;
   recomputes: RecomputeLedgerEntry[];
+  /** #300 — consecutive non-SUCCESS telemetry runs, the failing chunk, and the gated-off stages. */
+  ingestion: IngestionAlertHealth;
 }
 
 export async function apiIntegrationHealth(): Promise<IntegrationHealthView> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   const res = await fetch(`${BASE_URL}/integration/health`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as IntegrationHealthView;

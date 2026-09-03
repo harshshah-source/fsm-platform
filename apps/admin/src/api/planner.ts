@@ -1,14 +1,14 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the SE Planner surface (Issue 14a backend / 14b grid UI). ZM-authored plant-visit
 // intents (SE × plant × date), zone-scoped server-side. Token comes from the same sessionStorage key
 // AuthProvider writes. The grid reads `/planner` + `/planner/plants`, writes via POST/DELETE `/planner`.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
-function authHeaders(json = false): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
+/** #341 — the shared builder plus this client's JSON content type. */
+function jsonHeaders(json = false): Record<string, string> {
   return {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...authHeaders(),
     ...(json ? { 'Content-Type': 'application/json' } : {}),
   };
 }
@@ -48,7 +48,7 @@ export async function apiCreatePlannerEntry(input: {
 }): Promise<PlannerEntry> {
   const res = await fetch(`${BASE_URL}/planner`, {
     method: 'POST',
-    headers: authHeaders(true),
+    headers: jsonHeaders(true),
     body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);

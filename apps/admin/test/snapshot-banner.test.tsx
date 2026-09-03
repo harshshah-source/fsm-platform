@@ -21,6 +21,21 @@ type LatestPayload = {
     finishedAt: string | null;
     dataAsOf: string | null;
   } | null;
+  // #300 — additive on the wire; the older payloads below deliberately omit them, which is also the
+  // upgrade-order case (a new FE against a not-yet-deployed BE must not crash the global banner).
+  partialDataAsOf?: string | null;
+  ingestion?: {
+    streak: number;
+    threshold: number;
+    alert: boolean;
+    latestStatus: string | null;
+    downstreamGated: boolean;
+    gatedStages: string[];
+    failingChunk: { runId: string; chunkNo: number; retryCount: number; error: string | null } | null;
+    repeatingFailure: boolean;
+    rejected: Record<string, number>;
+    repaired: Record<string, number>;
+  };
 };
 
 function stubLatest(payload: LatestPayload) {
@@ -145,5 +160,129 @@ describe('Snapshot freshness banner (Issue 04 AC#5/#6)', () => {
     });
 
     expect(await screen.findByRole('status', { name: /snapshot/i })).toBeInTheDocument();
+  });
+});
+
+/**
+ * #300 — the banner must never render a gated pipeline as healthy freshness (AC2).
+ *
+ * Before this, a PARTIAL run produced the ordinary grey "data as of …" line. That is the reading an
+ * operator must not get: PARTIAL means the #230 gate skipped device-state derivation, auto-recovery
+ * and ticket creation, so the timestamp on screen describes a fleet nothing has re-derived since.
+ * The banner said "fresh"; the pipeline was frozen.
+ */
+const gatedIngestion = (over: Partial<LatestPayload['ingestion']> = {}) => ({
+  streak: 1,
+  threshold: 3,
+  alert: false,
+  latestStatus: 'PARTIAL',
+  downstreamGated: true,
+  gatedStages: ['device-state derivation', 'auto-recovery', 'ticket creation'],
+  failingChunk: null,
+  repeatingFailure: false,
+  rejected: {},
+  repaired: {},
+  ...over,
+});
+
+describe('#300 — the banner states a gated pipeline', () => {
+  it('warns, names the paused stages, and does not read as plain freshness', async () => {
+    stubLatest({
+      dataAsOf: '2026-09-01T10:00:00.000Z',
+      lastSuccessAt: '2026-09-01T10:05:00.000Z',
+      latest: {
+        runId: '20',
+        status: 'PARTIAL',
+        startedAt: '2026-09-01T11:00:00.000Z',
+        finishedAt: '2026-09-01T11:04:00.000Z',
+        dataAsOf: '2026-09-01T11:30:00.000Z',
+      },
+      partialDataAsOf: '2026-09-01T11:30:00.000Z',
+      ingestion: gatedIngestion(),
+    });
+
+    renderAt('/', zm);
+
+    const alert = await screen.findByTestId('snapshot-banner-gated');
+    expect(alert).toHaveTextContent(/did not complete/i);
+    expect(alert).toHaveTextContent(/auto-recovery/i);
+    expect(alert).toHaveTextContent(/ticket creation/i);
+    expect(alert).toHaveTextContent(/may be stale/i);
+    // The healthy grey line must be gone — not merely accompanied by a warning.
+    expect(screen.queryByRole('status', { name: /snapshot/i })).not.toBeInTheDocument();
+  });
+
+  it('F10 — reports the PARTIAL watermark under its own name, never as data-as-of', async () => {
+    stubLatest({
+      dataAsOf: '2026-09-01T10:00:00.000Z',
+      lastSuccessAt: '2026-09-01T10:05:00.000Z',
+      latest: {
+        runId: '21',
+        status: 'PARTIAL',
+        startedAt: '2026-09-01T11:00:00.000Z',
+        finishedAt: '2026-09-01T11:04:00.000Z',
+        dataAsOf: '2026-09-01T11:30:00.000Z',
+      },
+      partialDataAsOf: '2026-09-01T11:30:00.000Z',
+      ingestion: gatedIngestion(),
+    });
+
+    renderAt('/', zm);
+
+    const partial = await screen.findByTestId('snapshot-partial-asof');
+    expect(partial).toHaveTextContent(/partial data through/i);
+    expect(within(partial).getByText((_, el) => el?.tagName === 'TIME')).toHaveAttribute(
+      'datetime',
+      '2026-09-01T11:30:00.000Z',
+    );
+    // "Data as of" still names the SUCCESS watermark — a partial read may not advance it.
+    const alert = screen.getByTestId('snapshot-banner-gated');
+    expect(within(alert).getAllByText((_, el) => el?.tagName === 'TIME')[0]).toHaveAttribute(
+      'datetime',
+      '2026-09-01T10:00:00.000Z',
+    );
+  });
+
+  it('escalates a wedged streak to the same alert tone as a failed run', async () => {
+    stubLatest({
+      dataAsOf: '2026-09-01T10:00:00.000Z',
+      lastSuccessAt: '2026-09-01T10:05:00.000Z',
+      latest: {
+        runId: '22',
+        status: 'PARTIAL',
+        startedAt: '2026-09-01T13:00:00.000Z',
+        finishedAt: '2026-09-01T13:04:00.000Z',
+        dataAsOf: null,
+      },
+      partialDataAsOf: null,
+      ingestion: gatedIngestion({ streak: 4, alert: true }),
+    });
+
+    renderAt('/', zm);
+
+    const alert = await screen.findByTestId('snapshot-banner-gated');
+    expect(alert).toHaveTextContent(/last 4 telemetry runs did not complete/i);
+    expect(alert.className).toMatch(/red/);
+  });
+
+  it('stays the quiet grey line once a run succeeds again', async () => {
+    stubLatest({
+      dataAsOf: '2026-09-01T12:00:00.000Z',
+      lastSuccessAt: '2026-09-01T12:05:00.000Z',
+      latest: {
+        runId: '23',
+        status: 'SUCCESS',
+        startedAt: '2026-09-01T12:00:00.000Z',
+        finishedAt: '2026-09-01T12:05:00.000Z',
+        dataAsOf: '2026-09-01T12:00:00.000Z',
+      },
+      partialDataAsOf: null,
+      ingestion: gatedIngestion({ streak: 0, latestStatus: 'SUCCESS', downstreamGated: false, gatedStages: [] }),
+    });
+
+    renderAt('/', zm);
+
+    expect(await screen.findByRole('status', { name: /snapshot/i })).toHaveTextContent(/data as of/i);
+    expect(screen.queryByTestId('snapshot-banner-gated')).not.toBeInTheDocument();
   });
 });

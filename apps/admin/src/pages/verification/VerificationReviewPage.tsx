@@ -140,7 +140,9 @@ export function VerificationReviewPage() {
               </div>
             }
           />
-          <ChartLegend items={donutData} />
+          {/* Shares in the legend, not just counts — the donut shows the mix but cannot be read to a
+              number, and this panel is entirely about proportion of outcomes. */}
+          <ChartLegend items={donutData} showShare />
         </div>
       </ChartCard>
 

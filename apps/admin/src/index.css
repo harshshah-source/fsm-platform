@@ -101,6 +101,59 @@
   --color-tier-cross: #7c3aed;
   --color-tier-cross-bg: #f1ebfe;
 
+  /* ── #295 · action status — the dispatch board's traffic light ───────────────────────────────────
+   * Has troubleshooting started on this ticket?
+   *   green = somebody is on it · red = nobody is
+   *
+   * **Two colours, not three (operator ruling, 2026-09-01).** `AGING_UNTOUCHED` painted yellow until
+   * then, which put a third hue on the board for a state that is not a third answer to the question
+   * the light asks: aged work is untouched work, with a clock on it. The operator's instruction was
+   * red for anything nobody has troubleshooted, green for anything somebody has, and no yellow — so
+   * aged and untouched now share the red, and the *word* carries the difference between them
+   * ("Aged" vs "Untouched"), which is where the aging signal belonged all along under this file's own
+   * never-hue-alone rule. One fewer hue on the board also gives the amber that means over-capacity
+   * back its exclusive claim on yellow.
+   *
+   * These are red, and the rule three lines up says never the same colour for two meanings. That rule
+   * is intact, and this is how.
+   *
+   * The rule is really about a *channel* carrying two meanings: #290 was a whole slice spent undoing
+   * over-capacity rendered in crimson, because crimson-the-token already meant critical work and a
+   * reader had to know which surface they were on before they could read a colour. So these three get
+   * their own values AND their own channel, and both halves are load-bearing:
+   *
+   *   - **Own values.** Not `--color-critical` / `--color-warning`. Nothing about the SLA token or the
+   *     capacity badge changes if a dispatcher later asks for a different traffic light, and nothing
+   *     about the traffic light changes if the SLA ramp is retuned.
+   *   - **Own channel, enforced by position.** These may be used ONLY on a work card — its left
+   *     status rail, its status label, and (amended 2026-09-01) **its own background fill**. Never a
+   *     chip border (provenance), never a token background (urgency), never a CELL background
+   *     (capacity, which is the amber the card sits on top of). Every existing channel keeps its hue
+   *     and its position; this one takes a position nothing else occupies.
+   *
+   *     The fill is the operator's correction to the first build: shipped as a 3px rail alone, the
+   *     traffic light was reported as "not present" — at board scale a hairline is a signal only to
+   *     someone who already knows where to look. The card surface was unclaimed (`WorkChip`'s fill
+   *     was reserved and never spent), so this takes it, and the `-bg` values below are the fill.
+   *     They are deliberately tinted rather than saturated: the card's text has to stay readable on
+   *     them, and a wall of solid red cells is a board nobody can read either.
+   *
+   *     **Retuned 2026-09-01** after the operator called the first set "the AI colour": mint / pink /
+   *     peach at full chroma is a highlighter set, and highlighters tiled across a board read as
+   *     decoration rather than as a signal. These are those hues walked toward sage and clay — lower
+   *     chroma, warmer, and at the same lightness, which is the thing that makes a set look chosen
+   *     rather than assembled. The foregrounds came down with them so the word and the rail stay of a
+   *     piece with the fill instead of sitting on top of it.
+   *   - **Never hue alone.** The rail is always accompanied by the word — "Started" / "Untouched" /
+   *     "Aged" — so the state survives grayscale and a screen reader, exactly as the CRIT/RET/CHR
+   *     tokens do. With aged and untouched sharing a fill, the word is now the *only* thing that
+   *     separates them, which makes this rule load-bearing rather than belt-and-braces: never drop it.
+   */
+  --color-action-started: #256b42;
+  --color-action-started-bg: #e6f1e9;
+  --color-action-untouched: #b03a2e;
+  --color-action-untouched-bg: #f8e4e0;
+
   /* ── SLA severity ramp ──────────────────────────────────────────────────────────
    * The eight SLA bands as an ORDINAL ramp: severity is carried by LIGHTNESS first and hue second,
    * so it survives red/green colour blindness — under deuteranopia the hues collapse but the
@@ -218,6 +271,14 @@
      near-invisible against #121212. */
   --color-tier-cross: #a78bfa;
   --color-tier-cross-bg: #1d1630;
+
+  /* #295 action status, lifted for the dark ground on the same reasoning as the token above: a 3px
+     rail at #15803d is invisible against #121212, and this rail is the one thing on a card an
+     operator scans for. Channel rules are in the light block and are unchanged by the theme. */
+  --color-action-started: #63c491;
+  --color-action-started-bg: #18291f;
+  --color-action-untouched: #e8756d;
+  --color-action-untouched-bg: #2f1c1a;
 
   /* SLA ramp, re-stepped for the dark canvas (see the light block for the rules). Same hue path and
    * the same monotone-lightness contract, lifted so the DARKEST step — LONG_PENDING, the one that

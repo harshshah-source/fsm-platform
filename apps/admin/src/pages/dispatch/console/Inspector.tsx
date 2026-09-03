@@ -16,6 +16,7 @@ import {
   type TicketDetail,
 } from '../../../api/tickets';
 import { Skeleton } from '../../../components/data';
+import { Modal } from '../../../components/overlay';
 import { Badge } from '../../../components/ui';
 import { LoadBadge } from '../../../components/ui/LoadBadge';
 import { cn } from '../../../lib/cn';
@@ -29,11 +30,19 @@ import type { Selection } from './selection';
 type Band = 'why' | 'candidates' | 'history';
 
 /**
- * **The CONTEXTUAL INSPECTOR — the Console's bottom band** (approved structure, 2026-08-27).
+ * **The CONTEXTUAL INSPECTOR — the Console's modal overlay** (operator ruling, 2026-09-01).
  *
  * Exactly one object is selected, and this is where the Console answers everything about it: what it
  * is, why the engine placed it where it did, who else could have taken it, what has happened to it,
  * and — from Phase 2 — what can be done about it and what that would cost.
+ *
+ * **It was the bottom band until 2026-09-01, and the band is why drops felt broken.** The Console's
+ * deck is a screen or more tall, so a band *underneath* it opened the drop's whole answer below the
+ * fold; the page answered by scroll-chasing it into view with a `ResizeObserver`, which put the
+ * operator somewhere they had not asked to be and still lost the board. An overlay makes the distance
+ * irrelevant instead of chasing it: the answer opens where the operator is looking, the board keeps
+ * its scroll position, and Escape / the backdrop / Close all put it away. The scroll-chasing effect
+ * was deleted with the band, not kept as a belt.
  *
  * **The Inspector is composition, not new views.** `DecisionTraceView` already owns "why this SE";
  * `CandidateColumn` already renders the engine's candidate list tier-grouped, in precedence order,
@@ -68,8 +77,12 @@ export function Inspector({
   /**
    * The Console's single lifted fetch (§8.4). Every write in this band calls it — that is the whole
    * mechanism by which four regions reading one payload cannot disagree after an override.
+   *
+   * `moved` is passed only by a cross-day move. Refetching alone would leave the operator staring at
+   * the day the work just *left*, which is the same "nothing happened" the old defer produced; the
+   * page uses this to focus the day it landed on.
    */
-  onCommitted: () => void;
+  onCommitted: (moved?: { day: string }) => void;
   /**
    * A drag-initiated action to open pre-filled (correction §12, D10). The drop wrote nothing — this
    * only opens the same authoritative dialog the typed path uses, with target/date seeded.
@@ -99,7 +112,13 @@ export function Inspector({
         onClose={onClose}
       >
         {found ? (
-          <StopBands stop={found.stop} engineer={found.engineer} onCommitted={onCommitted} prefill={prefill} />
+          <StopBands
+            stop={found.stop}
+            engineer={found.engineer}
+            onCommitted={onCommitted}
+            onDismiss={onClose}
+            prefill={prefill}
+          />
         ) : (
           <NotOnThisDeck what="stop" />
         )}
@@ -125,7 +144,9 @@ export function Inspector({
         located={located}
         placement={placementOf(view, selection.id, located)}
         onCommitted={onCommitted}
+        onDismiss={onClose}
         prefill={prefill}
+        operatingDay={view.operatingDay}
       />
     </InspectorFrame>
   );
@@ -143,20 +164,26 @@ function InspectorFrame({
   children: React.ReactNode;
 }) {
   return (
-    <section
-      data-testid="console-inspector"
-      aria-label="Inspector"
-      className="rounded-lg border border-line bg-surface"
-    >
-      <header className="flex flex-wrap items-baseline gap-2 border-b border-line px-3 py-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{kind}</span>
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{title}</h2>
-        <button type="button" onClick={onClose} className="text-[11px] text-link" data-testid="inspector-close">
-          Close
-        </button>
-      </header>
-      <div className="p-3">{children}</div>
-    </section>
+    <Modal open onClose={onClose} className="max-w-4xl" bodyClassName="p-0">
+      <section
+        data-testid="console-inspector"
+        aria-label="Inspector"
+        /* Takes the whole viewport minus the overlay's own 1rem gutter, so the compact case — a drop's
+           seeded dialog — fits without scrolling down to laptop heights. Capped rather than unbounded
+           because the browsing bands (Alternatives, History) are genuinely long lists; those scroll
+           under a header that stays put, so the Close button and the object's name never leave. */
+        className="flex max-h-[calc(100vh-2rem)] flex-col"
+      >
+        <header className="flex flex-wrap items-baseline gap-2 border-b border-line px-3 py-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">{kind}</span>
+          <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{title}</h2>
+          <button type="button" onClick={onClose} className="text-[11px] text-link" data-testid="inspector-close">
+            Close
+          </button>
+        </header>
+        <div className="overflow-y-auto p-3">{children}</div>
+      </section>
+    </Modal>
   );
 }
 
@@ -213,11 +240,14 @@ function StopBands({
   stop,
   engineer,
   onCommitted,
+  onDismiss,
   prefill,
 }: {
   stop: TodayStop;
   engineer: TodayEngineer;
-  onCommitted: () => void;
+  onCommitted: (moved?: { day: string }) => void;
+  /** Cancelling a form closes the overlay, so Cancel and Close mean the same thing to the operator. */
+  onDismiss: () => void;
   prefill?: ActionPrefill | null;
 }) {
   return (
@@ -247,6 +277,7 @@ function StopBands({
         ticketIds={stop.tickets.map((t) => t.ticketId)}
         stopSequence={stop.stopSequence}
         onCommitted={onCommitted}
+        onDismiss={onDismiss}
         prefill={prefill}
       />
     </div>
@@ -260,15 +291,21 @@ function TicketBands({
   located,
   placement,
   onCommitted,
+  onDismiss,
   prefill,
+  operatingDay,
 }: {
   ticketId: string;
   runId: string | null;
   plantId: string | null;
   located: { stop: TodayStop; engineer: TodayEngineer; ticket: TodayTicket } | null;
   placement: TicketPlacement;
-  onCommitted: () => void;
+  onCommitted: (moved?: { day: string }) => void;
+  /** Cancelling a form closes the overlay, so Cancel and Close mean the same thing to the operator. */
+  onDismiss: () => void;
   prefill?: ActionPrefill | null;
+  /** Today's operating day — the "from" half of a move's summary line. */
+  operatingDay: string;
 }) {
   const [band, setBand] = useState<Band>('why');
   const [trace, setTrace] = useState<DispatchTicketTrace | null>(null);
@@ -345,8 +382,23 @@ function TicketBands({
           ) : (
             <>
               <DecisionTraceView data={trace} />
-              {/* C7 — served, typed, and until now discarded. */}
-              <ScoreBreakdownPanel breakdown={trace.scoreBreakdown} />
+              {/* C7 — served, typed, and until now discarded; **collapsed by default since
+                  2026-09-01.** The overlay has to answer a drop without the operator scrolling, and
+                  the per-term table is the tallest thing in the band by a wide margin. It is reading
+                  material for the rare "why *that* number" question, not part of the decision the
+                  dialog is asking for — so it stays one click away rather than being deleted, which
+                  would put C7's terms back on the floor they were rescued from. */}
+              <details data-testid="score-breakdown-disclosure" className="group">
+                <summary className="cursor-pointer list-none text-[10px] font-semibold uppercase tracking-wide text-ink-muted hover:text-ink">
+                  Score breakdown
+                  <span className="ml-1 font-normal normal-case tracking-normal group-open:hidden">▾</span>
+                  <span className="ml-1 hidden font-normal normal-case tracking-normal group-open:inline">▴</span>
+                </summary>
+                <div className="mt-2">
+                  {/* The summary above is this panel's heading, so it does not print a second one. */}
+                  <ScoreBreakdownPanel breakdown={trace.scoreBreakdown} titled={false} />
+                </div>
+              </details>
             </>
           )}
         </div>
@@ -367,7 +419,10 @@ function TicketBands({
         placement={placement}
         currentSeId={located?.engineer.seId ?? null}
         onCommitted={onCommitted}
+        onDismiss={onDismiss}
         prefill={prefill}
+        sourceDay={operatingDay}
+        sourceSeName={located?.engineer.name ?? null}
       />
     </div>
   );

@@ -12,9 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { auditActor, AuditService } from '../audit/audit.service';
-import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -55,7 +53,7 @@ export class RoleBackupController {
   @Post('role-unavailability')
   @HttpCode(201)
   @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER')
-  async mark(@CurrentUser() user: AccessTokenClaims, @Body() body: MarkBody): Promise<MarkOutcome> {
+  async mark(@CurrentActor() actor: RequestActor, @Body() body: MarkBody): Promise<MarkOutcome> {
     if (!ROLES.includes(body.role)) throw new BadRequestException({ code: 'INVALID_ROLE' });
     const windowStart = new Date(body.windowStart);
     if (Number.isNaN(windowStart.getTime())) throw new BadRequestException({ code: 'INVALID_WINDOW_START' });
@@ -64,7 +62,7 @@ export class RoleBackupController {
 
     const outcome = await this.roles.markUnavailable(
       { role: body.role, zoneId: body.zoneId ?? null, userId: body.userId ?? null, windowStart, windowEnd, reason: body.reason ?? null },
-      { userId: user.user_id, role: user.role, zoneId: user.zone_id },
+      actor,
     );
     if (outcome.result === 'FORBIDDEN') throw new ForbiddenException({ code: 'ROLE_MARK_FORBIDDEN' });
     return outcome;

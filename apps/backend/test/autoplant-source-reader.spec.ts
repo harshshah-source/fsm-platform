@@ -144,3 +144,98 @@ describe('Phase 3 — AutoPlantSourceReader (single device-scan engine)', () => 
     expect(chunk.rejected).toBeUndefined();
   });
 });
+
+
+/**
+ * #299 (AR-1 + AR-2) — the containment, proved where it matters: over a whole chunk, and across runs.
+ *
+ * The mapping spec proves one row degrades correctly. This proves the consequence the issue is
+ * actually about — that the other 89 rows in the chunk still arrive, and that the *next* run gets past
+ * the same poison row rather than dying at it again. That second half is the whole of AR-1: the scan
+ * is deterministic (`ORDER BY device_id`, restarted from `cursor = null` every run), so before this a
+ * failure at one row was a permanent ceiling on the fleet — every device sorting after it was never
+ * ingested again, at any point in the future, until the source row was edited by hand.
+ */
+describe('#299 — poison containment over a chunk', () => {
+  it('AR-1: an unparseable timestamp costs its own row and nothing else', async () => {
+    const q = fakeQuery([
+      vm('D1', '2026-07-02 11:00:00'),
+      vm('DPOISON', 'not-a-date'),
+      vm('D3', '2026-07-02 11:02:00'),
+    ]);
+    // Before #299 this call REJECTED — the throw came out of the row loop, out of readChunk, and the
+    // worker recorded it as a source-read failure and stopped draining. Nothing after DPOISON was read.
+    const chunk = await reader(q).readChunk(null, 10);
+
+    expect(chunk.rows.map((r) => r.deviceId)).toEqual(['D1', 'D3']);
+    expect(chunk.rejected).toEqual({ UNPARSEABLE_TIMESTAMP: 1 });
+    // The cursor rides the last RAW row, not the last mapped one, so the scan walks past the poison
+    // row rather than re-reading it for ever.
+    expect(chunk.nextCursor).toBeNull(); // short page → source exhausted
+  });
+
+  it('AR-1 replay: the NEXT run reads straight past the same row, because nothing throws', async () => {
+    // The scan restarts from cursor=null every run and orders by the immutable device_id, so "the next
+    // run" is the identical query over the identical rows. The defect was that this was deterministic
+    // FAILURE; the fix makes it deterministic SKIP.
+    const rows = [vm('D1', '2026-07-02 11:00:00'), vm('DPOISON', 'not-a-date'), vm('D3', '2026-07-02 11:02:00')];
+    const first = await reader(fakeQuery(rows)).readChunk(null, 10);
+    const second = await reader(fakeQuery(rows)).readChunk(null, 10);
+
+    expect(second.rows.map((r) => r.deviceId)).toEqual(['D1', 'D3']);
+    expect(second.rows.map((r) => r.deviceId)).toEqual(first.rows.map((r) => r.deviceId));
+    expect(second.rejected).toEqual({ UNPARSEABLE_TIMESTAMP: 1 });
+  });
+
+  it('AR-1 at scale: 89 of 90 rows survive one poison row, and the poison row is the one named', async () => {
+    // The real chunk size the issue measured. A count is not enough on its own — the assertion is that
+    // the survivors are exactly the non-poison rows, so containment cannot pass by dropping the chunk.
+    const rows = Array.from({ length: 90 }, (_, i) =>
+      vm(`D${String(i).padStart(2, '0')}`, i === 40 ? 'not-a-date' : '2026-07-02 11:00:00'),
+    );
+    const chunk = await reader(fakeQuery(rows)).readChunk(null, 90);
+
+    expect(chunk.rows).toHaveLength(89);
+    expect(chunk.rows.map((r) => r.deviceId)).not.toContain('D40');
+    expect(chunk.rejected).toEqual({ UNPARSEABLE_TIMESTAMP: 1 });
+  });
+
+  it('AR-2: an out-of-range reading costs its field, not its row and not its chunk', async () => {
+    const q = fakeQuery([
+      vm('DGOOD', '2026-07-02 11:00:00'),
+      // The measured poison: 99999 bound for a SmallInt. `createMany` is atomic per chunk, so this one
+      // value used to fail all 90 rows, through all three retries, on every 30-minute tick, for ever.
+      vm('DRANGE', '2026-07-02 11:01:00', { gpssignal: { power: { mainstatus: '99999', mainvoltage: null } } }),
+    ]);
+    const chunk = await reader(q).readChunk(null, 10);
+
+    // Both devices ingest. The bad reading is gone; the ping that proves DRANGE is alive is not.
+    expect(chunk.rows.map((r) => r.deviceId)).toEqual(['DGOOD', 'DRANGE']);
+    expect(chunk.rows[1].mainsStatus).toBeNull();
+    expect(chunk.rows[1].gpsDatetime.toISOString()).toBe('2026-07-02T11:01:00.000Z');
+    expect(chunk.repaired).toEqual({ RANGE_MAINS_STATUS: 1 });
+    // Not a rejection: no device lost its ping, so the rejection tally must stay empty.
+    expect(chunk.rejected).toBeUndefined();
+  });
+
+  it('reports the two tallies separately when a chunk carries both kinds of damage', async () => {
+    const q = fakeQuery([
+      vm('DGOOD', '2026-07-02 11:00:00'),
+      vm('DPOISON', 'not-a-date'),
+      vm('DIST', '2026-07-02 17:30:00'), // IST written into the UTC column — the #222 P6 signature
+      vm('DRANGE', '2026-07-02 11:01:00', { latitude: 200 }),
+    ]);
+    const chunk = await reader(q).readChunk(null, 10);
+
+    expect(chunk.rows.map((r) => r.deviceId)).toEqual(['DGOOD', 'DRANGE']);
+    expect(chunk.rejected).toEqual({ UNPARSEABLE_TIMESTAMP: 1, FUTURE_SKEW: 1 });
+    expect(chunk.repaired).toEqual({ RANGE_LAT: 1 });
+  });
+
+  it('reports no repair tally when every reading is in range', async () => {
+    const q = fakeQuery([vm('D1', '2026-07-02 11:57:00'), vm('D2', '2026-07-02 11:58:00')]);
+    const chunk = await reader(q).readChunk(null, 10);
+    expect(chunk.repaired).toBeUndefined();
+    expect(chunk.rejected).toBeUndefined();
+  });
+});

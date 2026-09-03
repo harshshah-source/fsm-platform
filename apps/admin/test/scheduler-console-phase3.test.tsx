@@ -75,6 +75,7 @@ const situation = (over: Partial<DispatchTodayView['situation']> = {}): Dispatch
 const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
   operatingDay: '2026-08-28',
   chronicThreshold: 3,
+  agingThresholdHours: 4,
   zone: { zoneId: '7', name: 'North Zone' },
   run: { runId: '42', status: 'SUCCESS', trigger: 'CRON', startedAt: '2026-08-28T05:00:00Z', finishedAt: null },
   recovery: null,
@@ -132,6 +133,11 @@ const renderAt = (entry: string, session: SessionView = ZM) =>
   );
 
 beforeEach(() => {
+  // The Work Pool rail is collapsed by default since 2026-09-01 (the board is the canvas). These
+  // assertions are about what the rail *contains*, not about its default width, so they start from
+  // the operator preference that opens it; the default and the toggle are covered explicitly in
+  // `scheduler-console-composition.test.tsx`.
+  localStorage.setItem('fsm.console.workRailOpen', '1');
   vi.mocked(apiDispatchToday).mockResolvedValue(view());
   vi.mocked(apiDispatchChangesToday).mockResolvedValue(changes());
   vi.mocked(apiActionRequired).mockResolvedValue(CARDS);
@@ -301,6 +307,14 @@ describe('Phase 3.4 — chronic device', () => {
     systemPlaced: true,
     returnDueToday: false,
     failureCycles,
+    deviceId: '869645080787056',
+    vehicleNo: 'MH-12-AB-3456',
+    companyName: 'Northbound Cement',
+    transporterName: 'Sharma Logistics',
+    inactivityHours: 18,
+    assignedAt: '2026-08-28T05:30:00Z',
+    troubleshootingStarted: false,
+    actionStatus: 'NOT_STARTED' as const,
   });
 
   const withChips = (cycles: (number | null)[]) =>

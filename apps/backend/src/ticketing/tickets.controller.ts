@@ -9,8 +9,10 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
+import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -40,7 +42,7 @@ export class TicketsController {
   @Get()
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   list(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('status') status?: string,
     @Query('workType') workType?: string,
     @Query('companyId') companyId?: string,
@@ -54,7 +56,7 @@ export class TicketsController {
     @Query('offset') offset?: string,
   ): Promise<TicketView[]> {
     return this.query.list(
-      { role: user.role, zoneId: user.zone_id },
+      scope,
       {
         status,
         workType,
@@ -81,17 +83,17 @@ export class TicketsController {
    */
   @Get('special-count')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
-  specialCount(@CurrentUser() user: AccessTokenClaims): Promise<{ count: number; threshold: number }> {
-    return this.query.countSpecial({ role: user.role, zoneId: user.zone_id });
+  specialCount(@CurrentScope() scope: ManagerScope): Promise<{ count: number; threshold: number }> {
+    return this.query.countSpecial(scope);
   }
 
   @Get(':id')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   async getOne(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('id') id: string,
   ): Promise<TicketDetailView> {
-    const ticket = await this.query.getById(id, { role: user.role, zoneId: user.zone_id });
+    const ticket = await this.query.getById(id, scope);
     if (!ticket) throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     return ticket;
   }
@@ -101,10 +103,10 @@ export class TicketsController {
   @Get(':id/forms')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   async forms(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('id') id: string,
   ): Promise<{ ticketId: string; forms: TicketFormView[] }> {
-    const forms = await this.query.formsForTicket(id, { role: user.role, zoneId: user.zone_id });
+    const forms = await this.query.formsForTicket(id, scope);
     if (forms === null) throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     return { ticketId: id, forms };
   }
@@ -119,10 +121,10 @@ export class TicketsController {
   @Get(':id/attempts')
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   async attempts(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('id') id: string,
   ): Promise<SpecialAttemptHistory> {
-    const visible = await this.query.getById(id, { role: user.role, zoneId: user.zone_id });
+    const visible = await this.query.getById(id, scope);
     if (!visible) throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     const history = await this.special.attemptsFor(id);
     if (!history) throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
@@ -134,14 +136,13 @@ export class TicketsController {
   @HttpCode(200)
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   async autoRecoveryClose(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
   ): Promise<{ status: string }> {
-    const result = await this.autoRecovery.manualClose(
-      id,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role, actedAsRole: null },
-    );
+    // #341 — the reproduced case. A CSM acting in zone 2 used to close a zone-1 ticket for real,
+    // because the scope came from their claims (pan-India for a CSM) while the banner said otherwise.
+    const result = await this.autoRecovery.manualClose(id, scope, actor);
     if (result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
     if (result === 'NOT_OPEN') throw new ConflictException({ code: 'TICKET_NOT_OPEN' });
     return { status: 'CLOSED_AUTO_RECOVERY' };

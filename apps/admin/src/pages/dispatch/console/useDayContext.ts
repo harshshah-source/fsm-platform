@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { apiListSchedules } from '../../../api/schedules';
+import { apiDispatchCardSummaries, type CardSummary } from '../../../api/dispatchToday';
+import { apiListSchedules, type ScheduleRowStop } from '../../../api/schedules';
 import { getSchedulerPreview, type ZoneProjection } from '../../../api/schedulerPreview';
 import { semanticOf } from './dayAxis';
 
@@ -25,9 +26,26 @@ import { semanticOf } from './dayAxis';
  * fetch's invalidation counter — because a committed override can change any day's committed rows.
  */
 
+/** One engineer's committed work on a non-today day: the counts, and the stops behind them. */
+export interface DayCommitment {
+  stops: number;
+  devices: number;
+  /**
+   * The stops themselves, so a future column can draw the work rather than only count it.
+   *
+   * **Why this is here now.** A cross-day move writes a real `work_schedules` row for the target day,
+   * and an operator who has just dropped a ticket onto Wednesday has to see *that ticket* in that
+   * cell. `1 stop · 1 device` is true and is not an answer: it is indistinguishable from any other
+   * stop appearing, which is how the old defer's silence felt like being ignored. The rows come from
+   * the same `GET /schedules?date=` this column already fetched — `detail=stops` widens the select on
+   * rows the count path walked anyway, so this costs no additional request.
+   */
+  plan: ScheduleRowStop[];
+}
+
 export interface DayCounts {
   /** Committed plan counts keyed by seId, for the engineers on this zone's roster. */
-  bySe: Record<string, { stops: number; devices: number }>;
+  bySe: Record<string, DayCommitment>;
   /**
    * Committed rows for engineers *not* on today's roster. Dropped silently they would make a past
    * day look lighter than it was — the row count is a fact about that day, not about today's roster.
@@ -41,9 +59,23 @@ export interface DayProjection {
   state: 'loading' | 'loaded' | 'failed';
 }
 
+/**
+ * #295 — identity for the cards on one committed future column, fetched **once for the column**.
+ *
+ * `GET /schedules?date=&detail=stops` hands this column its ticket ids and nothing physical, so
+ * without this the choice is an eight-character hash or one request per card. The `state` is
+ * rendered, not hidden: a column that could not read its enrichment falls back to the compact
+ * committed chip rather than a card frame with five blank rows.
+ */
+export interface DaySummaries {
+  byTicket: Record<string, CardSummary>;
+  state: 'loading' | 'loaded' | 'failed';
+}
+
 export interface DayContext {
   counts: Record<string, DayCounts>;
   projection: Record<string, DayProjection>;
+  summaries: Record<string, DaySummaries>;
 }
 
 const NO_COUNTS: DayCounts['others'] = { engineers: 0, stops: 0, devices: 0 };
@@ -60,6 +92,15 @@ export function useDayContext(
 ): DayContext {
   const [counts, setCounts] = useState<Record<string, DayCounts>>({});
   const [projection, setProjection] = useState<Record<string, DayProjection>>({});
+  const [summaries, setSummaries] = useState<Record<string, DaySummaries>>({});
+  /** Whether this hook is still mounted. See the summaries effect for why it is not a per-effect flag. */
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
   /** Which `(zone, version, day)` fetches have been issued — the cache-identity guard. */
   const requested = useRef(new Set<string>());
   const generation = useRef('');
@@ -74,6 +115,7 @@ export function useDayContext(
       requested.current.clear();
       setCounts({});
       setProjection({});
+      setSummaries({});
     }
 
     let live = true;
@@ -85,15 +127,24 @@ export function useDayContext(
       if (requested.current.has(key)) continue;
       requested.current.add(key);
       setCounts((p) => ({ ...p, [day]: { bySe: {}, others: NO_COUNTS, state: 'loading' } }));
-      void apiListSchedules(day)
+      // `detail=stops` on every non-today column, not only the focused one. The stops ride along on
+      // rows this request already returns, so the cheap-context-column bargain (§6.3 rule 5) is
+      // untouched — what the column *renders* still depends on focus; what it *knows* no longer has to.
+      void apiListSchedules(day, 'stops')
         .then((rows) => {
           if (!live || generation.current !== gen) return;
           const bySe: DayCounts['bySe'] = {};
           const others = { engineers: 0, stops: 0, devices: 0 };
           for (const r of rows.filter((row) => String(row.zoneId) === String(zoneId))) {
             if (rosterSet.has(r.seId)) {
-              const cur = bySe[r.seId] ?? { stops: 0, devices: 0 };
-              bySe[r.seId] = { stops: cur.stops + r.batchCount, devices: cur.devices + r.ticketCount };
+              const cur = bySe[r.seId] ?? { stops: 0, devices: 0, plan: [] };
+              bySe[r.seId] = {
+                stops: cur.stops + r.batchCount,
+                devices: cur.devices + r.ticketCount,
+                // An engineer can hold more than one live schedule covering a day (a multi-day plan
+                // beside a single-day one), so the stops accumulate rather than replace.
+                plan: [...cur.plan, ...(r.stops ?? [])],
+              };
             } else {
               others.engineers += 1;
               others.stops += r.batchCount;
@@ -132,5 +183,70 @@ export function useDayContext(
     };
   }, [zoneId, daysKey, today, focused, roster, version]);
 
-  return { counts, projection };
+  /**
+   * #295 — **one batched identity read for the focused committed-future column.**
+   *
+   * A separate effect, keyed on *focus* rather than chained onto the counts response, and that is the
+   * whole point. Counts are cached per `(zone, version, day)` and fetched once for every visible
+   * column, so by the time an operator clicks tomorrow its rows are already in hand and no request is
+   * re-issued. Enrichment hung off the counts arriving would therefore fire only for a day that was
+   * *already* focused when its counts loaded — a column reached by deep link would show cards while
+   * the same column reached by clicking it showed compact chips for ever. One screen, disagreeing
+   * with itself about what it knows.
+   *
+   * **Focused only**, which is composition rule 5 unchanged: a context column stays a strip of counts,
+   * so the expensive question is asked about the day the operator is actually looking at. Past columns
+   * never reach here at all — their fidelity is counts by design, and painting today's live
+   * inactivity onto a day that has already happened would fabricate historical operational state.
+   */
+  useEffect(() => {
+    if (semanticOf(focused, today) !== 'future') return;
+    const day = counts[focused];
+    if (day?.state !== 'loaded') return;
+
+    const gen = `${zoneId}|${version}`;
+    const key = `summaries|${gen}|${focused}`;
+    if (requested.current.has(key)) return;
+
+    const ticketIds = [
+      ...new Set(
+        Object.values(day.bySe)
+          .flatMap((c) => c.plan)
+          .flatMap((s) => s.tickets.map((t) => t.ticketId)),
+      ),
+    ];
+    if (ticketIds.length === 0) return;
+
+    requested.current.add(key);
+    setSummaries((p) => ({ ...p, [focused]: { byTicket: {}, state: 'loading' } }));
+    void apiDispatchCardSummaries(ticketIds, zoneId)
+      .then((rows) => {
+        if (!mounted.current || generation.current !== gen) return;
+        setSummaries((p) => ({
+          ...p,
+          [focused]: { byTicket: Object.fromEntries(rows.map((r) => [r.ticketId, r])), state: 'loaded' },
+        }));
+      })
+      .catch(() => {
+        if (!mounted.current || generation.current !== gen) return;
+        // The column keeps its compact chips. Reduced is honest; blank card rows are not.
+        setSummaries((p) => ({ ...p, [focused]: { byTicket: {}, state: 'failed' } }));
+      });
+
+    /**
+     * **No per-effect cancel flag here, deliberately** — and this is the bug that taught it.
+     *
+     * `counts` is a dependency, and every *other* visible column calls `setCounts` as its own request
+     * lands, replacing that object. A `let live = true` cleared in this effect's cleanup would then be
+     * cleared by an unrelated column resolving a moment later, and the summaries response — already in
+     * flight and perfectly valid — would be thrown away. The column showed compact chips for ever,
+     * intermittently, depending on which day's fetch won the race.
+     *
+     * The two guards that are actually about staleness do the work instead: `generation` invalidates
+     * on a zone or version change (the only events that make an answer wrong), and `requested`
+     * prevents a duplicate request. `mounted` covers teardown.
+     */
+  }, [zoneId, focused, today, counts, version]);
+
+  return { counts, projection, summaries };
 }

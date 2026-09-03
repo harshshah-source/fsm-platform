@@ -1,5 +1,7 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -25,8 +27,8 @@ export class ComponentBlockedController {
 
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<ComponentBlockedRow[]> {
-    return this.inventory.componentBlockedQueue({ role: user.role, zoneId: user.zone_id });
+  list(@CurrentScope() scope: ManagerScope): Promise<ComponentBlockedRow[]> {
+    return this.inventory.componentBlockedQueue(scope);
   }
 }
 

@@ -25,6 +25,10 @@ const ran = (summary: Partial<{ zones: number; schedules: number; tickets: numbe
 const makeRun = () => ({
   runForActiveZones: vi.fn(async () => ran()),
   reapStaleDispatchRuns: vi.fn(async () => ({ runs: 0, claims: 0 })),
+  // #303 — the reaper tick also runs the abandoned-tick janitor now. Idle by default here: this file
+  // is about the scheduler's cadence and dormancy, and `dispatch-abandoned-tick.e2e-spec.ts` owns what
+  // the janitor decides.
+  recoverAbandonedDispatchTick: vi.fn(async () => ({ marked: 0, windowStart: null })),
 });
 const makeScheduler = (run: ReturnType<typeof makeRun>, enabled: boolean): DispatchSchedulerService =>
   new DispatchSchedulerService(run as unknown as DispatchRunService, alwaysClaims(), { enabled });
@@ -85,6 +89,8 @@ describe('Issue 113 — DispatchSchedulerService', () => {
     const outcome = await makeScheduler(run, true).dispatchReaperTick(now);
 
     expect(run.reapStaleDispatchRuns).toHaveBeenCalledWith(now);
+    // #303 — and the crash the reaper above cannot see, on the same tick clock.
+    expect(run.recoverAbandonedDispatchTick).toHaveBeenCalledWith(now);
     expect(outcome).toEqual({ ran: true });
     // A reap tick must never start work of its own — that is the dispatch cron's job, and a reaper
     // that also dispatched would turn "clean up after a crash" into an unscheduled 09:07 dispatch run.

@@ -9,11 +9,20 @@ import {
   type ThresholdChange,
   type ThresholdWriteResult,
 } from '../../api/assignmentThreshold';
-import { Badge, Button } from '../../components/ui';
+import { Badge, Button, Input, Select } from '../../components/ui';
 import { cn } from '../../lib/cn';
-
-const inputClass =
-  'h-9 rounded-md border border-line bg-surface-card px-3 text-sm text-ink-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600/40';
+import {
+  cellClass,
+  FactList,
+  Field,
+  Notice,
+  Panel,
+  PanelBand,
+  rowClass,
+  SettingsSection,
+  SubHeading,
+  TablePanel,
+} from './primitives';
 
 const ROLE_SHORT: Record<string, string> = {
   OPERATIONS_HEAD: 'Operations Head',
@@ -120,13 +129,16 @@ export function AssignmentThresholdSection() {
 
   if (data === null) {
     return (
-      <section className="text-sm text-ink-muted">
+      <section aria-busy={!error}>
         {error ? (
-          <p role="alert" className="text-critical">
-            {error}
-          </p>
+          <Notice tone="critical">{error}</Notice>
         ) : (
-          'Loading…'
+          <div className="flex flex-col gap-4">
+            <span className="sr-only">Loading the SE-assignment threshold…</span>
+            <span aria-hidden className="h-5 w-56 animate-pulse rounded-full bg-line" />
+            <span aria-hidden className="h-4 w-full max-w-[46rem] animate-pulse rounded-full bg-line" />
+            <span aria-hidden className="mt-2 h-44 w-full animate-pulse rounded-card bg-line/60" />
+          </div>
         )}
       </section>
     );
@@ -136,20 +148,21 @@ export function AssignmentThresholdSection() {
   const dirty = draft !== null && draft !== data.hours;
 
   return (
-    <section className="flex max-w-3xl flex-col gap-5">
-      <p className="text-sm text-ink-muted">
-        How long a device must stay silent before the platform opens a Troubleshoot Ticket and
-        auto-assigns a Service Engineer. Changes take effect on the next dispatch run — no restart.
-      </p>
-
+    <SettingsSection
+      title="SE assignment threshold"
+      description="How long a device must stay silent before the platform opens a Troubleshoot Ticket and auto-assigns a Service Engineer. Changes take effect on the next dispatch run — no restart."
+      meta={
+        locked ? (
+          <Badge tone="warning" dot>
+            Locked
+          </Badge>
+        ) : (
+          <Badge tone="neutral">Co-owned</Badge>
+        )
+      }
+    >
       {/* Authority, stated up front. A disabled control with no explanation reads as a bug. */}
-      <div
-        data-testid="threshold-authority"
-        className={cn(
-          'rounded-card border px-3 py-2 text-sm',
-          locked ? 'border-warning/30 bg-warning-bg text-warning' : 'border-line bg-surface-card text-ink',
-        )}
-      >
+      <Notice tone={locked ? 'warning' : 'neutral'} data-testid="threshold-authority">
         {locked ? (
           <>
             <strong>Locked by {ROLE_SHORT[data.lock.lockedByRole ?? ''] ?? data.lock.lockedByRole ?? 'the Operations Head'}.</strong>{' '}
@@ -162,90 +175,116 @@ export function AssignmentThresholdSection() {
             Head can lock this setting at any time to take sole control.
           </>
         )}
-      </div>
+      </Notice>
 
-      {error && (
-        <div role="alert" className="rounded-md border border-critical/30 bg-critical-bg px-3 py-2 text-sm text-critical">
-          {error}
-        </div>
-      )}
+      {error && <Notice tone="critical">{error}</Notice>}
       {notice && (
-        <p role="status" data-testid="threshold-saved" className="text-sm text-success">
+        <Notice tone="success" role="status" data-testid="threshold-saved">
           {notice}
-        </p>
+        </Notice>
       )}
 
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">
-            Assign an SE after
-          </span>
-          <select
-            aria-label="SE assignment threshold"
-            data-testid="threshold-select"
-            className={inputClass}
-            disabled={!data.canEdit || busy}
-            value={draft ?? data.hours}
-            onChange={(e) => setDraft(Number(e.target.value))}
-          >
-            {data.options.map((h) => (
-              <option key={h} value={h}>
-                {hoursLabel(h)}
-                {h === data.defaultHours ? ' — default' : ''}
-              </option>
-            ))}
-          </select>
-        </label>
+      {/* The decision itself, as one object: the choice on top, what the *pending* choice would do
+          directly beneath it, and what is actually in force along the bottom. They belong together —
+          the consequence is only useful while the operator can still change their mind, and the
+          current value is what they are changing *from*. */}
+      <Panel>
+        <PanelBand>
+          <div className="flex flex-wrap items-end gap-3 p-4 sm:p-5">
+            <Field label="Assign an SE after" className="sm:w-52">
+              <Select
+                aria-label="SE assignment threshold"
+                data-testid="threshold-select"
+                disabled={!data.canEdit || busy}
+                value={draft ?? data.hours}
+                onChange={(e) => setDraft(Number(e.target.value))}
+              >
+                {data.options.map((h) => (
+                  <option key={h} value={h}>
+                    {hoursLabel(h)}
+                    {h === data.defaultHours ? ' — default' : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
 
-        <label className="flex flex-1 flex-col gap-1 text-sm">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">
-            Reason (recorded in the history)
-          </span>
-          <input
-            aria-label="Reason for the threshold change"
-            className={inputClass}
-            disabled={!data.canEdit || busy}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-        </label>
+            <Field label="Reason (recorded in the history)" className="min-w-56 flex-1 sm:w-auto">
+              <Input
+                aria-label="Reason for the threshold change"
+                disabled={!data.canEdit || busy}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </Field>
 
-        <Button
-          type="button"
-          data-testid="threshold-save"
-          disabled={!data.canEdit || !dirty}
-          loading={busy}
-          onClick={() => run(() => setAssignmentThreshold(draft!, reason), `Saved — SEs are now assigned after ${draft} h of silence.`)}
+            <Button
+              className="w-full sm:w-auto"
+              type="button"
+              data-testid="threshold-save"
+              disabled={!data.canEdit || !dirty}
+              loading={busy}
+              onClick={() => run(() => setAssignmentThreshold(draft!, reason), `Saved — SEs are now assigned after ${draft} h of silence.`)}
+            >
+              Save threshold
+            </Button>
+          </div>
+        </PanelBand>
+
+        <p
+          data-testid="threshold-effect"
+          className={cn(
+            'px-4 py-3.5 text-sm leading-6 sm:px-5',
+            dirty ? 'bg-info-bg text-info' : 'text-ink-muted',
+          )}
         >
-          Save threshold
-        </Button>
-      </div>
+          {effectSentence(draft ?? data.hours, data.inactivityThresholdHours)}
+        </p>
 
-      {/* The consequence of the *pending* choice, not the saved one — it has to be readable before
-          the operator commits, which is the only moment it can still change their mind. */}
-      <p data-testid="threshold-effect" className="rounded-card border border-line bg-surface-raised px-3 py-2 text-sm text-ink">
-        {effectSentence(draft ?? data.hours, data.inactivityThresholdHours)}
-      </p>
-
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-        <dt className="text-ink-subtle">In force</dt>
-        <dd className="font-semibold text-ink-strong" data-testid="threshold-current">
-          {hoursLabel(data.hours)}
-        </dd>
-        <dt className="text-ink-subtle">Inactive definition</dt>
-        <dd className="text-ink-strong">
-          {data.inactivityThresholdHours} h{' '}
-          <span className="text-ink-muted">— separate setting; drives Fleet Uptime and the SLA buckets</span>
-        </dd>
-        <dt className="text-ink-subtle">Last changed</dt>
-        <dd className="text-ink-strong">{data.updatedAt ? new Date(data.updatedAt).toLocaleString() : '—'}</dd>
-      </dl>
+        <PanelBand position="bottom">
+          <div className="px-4 py-4 sm:px-5">
+            <FactList
+              items={[
+                {
+                  term: 'In force',
+                  value: (
+                    <span className="font-semibold" data-testid="threshold-current">
+                      {hoursLabel(data.hours)}
+                    </span>
+                  ),
+                },
+                {
+                  term: 'Inactive definition',
+                  value: (
+                    <>
+                      {data.inactivityThresholdHours} h{' '}
+                      <span className="text-ink-muted">
+                        — separate setting; drives Fleet Uptime and the SLA buckets
+                      </span>
+                    </>
+                  ),
+                },
+                {
+                  term: 'Last changed',
+                  value: data.updatedAt ? new Date(data.updatedAt).toLocaleString() : '—',
+                },
+              ]}
+            />
+          </div>
+        </PanelBand>
+      </Panel>
 
       {data.canLock && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-caps">
-            Operations Head control
-          </span>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-6">
+          <div className="mr-auto min-w-0 max-w-[62ch]">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-caps">
+              Operations Head control
+            </p>
+            <p className="mt-1 text-sm leading-6 text-ink-muted">
+              {locked
+                ? 'Unlocking returns write access to the CSM. Uses the reason field above.'
+                : 'Locking takes sole control of this setting. Uses the reason field above.'}
+            </p>
+          </div>
           {locked ? (
             <Button
               type="button"
@@ -269,70 +308,69 @@ export function AssignmentThresholdSection() {
               Lock to Operations Head
             </Button>
           )}
-          <span className="text-xs text-ink-muted">Uses the reason field above.</span>
         </div>
       )}
 
-      <div>
-        <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-caps">Change history</h3>
-        {data.history.length === 0 ? (
-          <p className="text-sm text-ink-muted">No changes recorded yet.</p>
-        ) : (
-          <div className="overflow-hidden rounded-card border border-line bg-surface-card shadow-sm">
-            <table aria-label="Assignment threshold history" className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-chrome-700 bg-chrome-900 text-left">
-                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white">When</th>
-                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white">Change</th>
-                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white">By</th>
-                  <th className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white">Reason</th>
-                  {data.canLock && <th className="px-3 py-2" />}
-                </tr>
-              </thead>
-              <tbody>
-                {data.history.map((h) => (
-                  <tr key={h.id} className="border-b border-line last:border-b-0">
-                    <td className="px-3 py-2 text-ink">{new Date(h.createdAt).toLocaleString()}</td>
-                    <td className="px-3 py-2">
-                      <Badge tone={CHANGE_TONE[h.changeType]}>{CHANGE_LABEL[h.changeType]}</Badge>{' '}
-                      {h.newHours !== null && (
-                        <span className="text-ink">
-                          {h.previousHours !== null ? `${h.previousHours} h → ` : ''}
-                          <strong>{h.newHours} h</strong>
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-ink">{ROLE_SHORT[h.actorRole] ?? h.actorRole}</td>
-                    <td className="px-3 py-2 text-ink-muted">{h.reason ?? '—'}</td>
-                    {data.canLock && (
-                      <td className="px-3 py-2 text-right">
-                        {/* Only value-bearing rows can be reverted; a lock moved authority, not value. */}
-                        {h.newHours !== null && h.newHours !== data.hours && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            data-testid={`threshold-revert-${h.id}`}
-                            disabled={busy}
-                            onClick={() =>
-                              run(
-                                () => revertAssignmentThreshold(h.id, reason),
-                                `Reverted — SEs are now assigned after ${h.newHours} h of silence.`,
-                              )
-                            }
-                          >
-                            Revert to {h.newHours} h
-                          </Button>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div className="border-t border-line pt-6">
+        <SubHeading hint="Each entry carries the value it replaced, so a past decision can be restored rather than retyped.">
+          Change history
+        </SubHeading>
+        <TablePanel
+          ariaLabel="Assignment threshold history"
+          headers={[
+            { label: 'When' },
+            { label: 'Change' },
+            { label: 'By' },
+            { label: 'Reason', hideBelow: 'md' },
+            ...(data.canLock ? [{ label: <span className="sr-only">Revert</span>, align: 'right' as const }] : []),
+          ]}
+          rowCount={data.history.length}
+          emptyMessage="No changes recorded yet."
+        >
+          {data.history.map((h) => (
+            <tr key={h.id} className={rowClass}>
+              <td className={cn(cellClass, 'whitespace-nowrap text-ink-muted')}>
+                {new Date(h.createdAt).toLocaleString()}
+              </td>
+              <td className={cellClass}>
+                <span className="flex flex-wrap items-center gap-2">
+                  <Badge tone={CHANGE_TONE[h.changeType]}>{CHANGE_LABEL[h.changeType]}</Badge>
+                  {h.newHours !== null && (
+                    <span className="text-ink tabular-nums">
+                      {h.previousHours !== null ? `${h.previousHours} h → ` : ''}
+                      <strong className="text-ink-strong">{h.newHours} h</strong>
+                    </span>
+                  )}
+                </span>
+              </td>
+              <td className={cellClass}>{ROLE_SHORT[h.actorRole] ?? h.actorRole}</td>
+              <td className={cn(cellClass, 'hidden text-ink-muted md:table-cell')}>{h.reason ?? '—'}</td>
+              {data.canLock && (
+                <td className={cn(cellClass, 'whitespace-nowrap text-right')}>
+                  {/* Only value-bearing rows can be reverted; a lock moved authority, not value. */}
+                  {h.newHours !== null && h.newHours !== data.hours && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      data-testid={`threshold-revert-${h.id}`}
+                      disabled={busy}
+                      onClick={() =>
+                        run(
+                          () => revertAssignmentThreshold(h.id, reason),
+                          `Reverted — SEs are now assigned after ${h.newHours} h of silence.`,
+                        )
+                      }
+                    >
+                      Revert to {h.newHours} h
+                    </Button>
+                  )}
+                </td>
+              )}
+            </tr>
+          ))}
+        </TablePanel>
       </div>
-    </section>
+    </SettingsSection>
   );
 }

@@ -154,7 +154,7 @@ export class IntegrationSyncService {
       );
       return {
         deviceState,
-        recovered: { closed: 0, scanned: 0, examined: 0, capped: false },
+        recovered: { closed: 0, scanned: 0, examined: 0, skipped: 0, capped: false },
         tickets: { created: 0 },
         ingestComplete,
       };

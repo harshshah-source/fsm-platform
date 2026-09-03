@@ -13,6 +13,23 @@
 export const dispatchZoneLockKey = (zoneId: bigint): string => `dispatch_zone_${zoneId}`;
 
 /**
+ * #304 — the engine's per-ENGINEER lock, spanning zones.
+ *
+ * `daily_capacity` caps an engineer's whole day, but zone claims serialize per zone and
+ * `work_schedules_one_active_per_se_zone_day` is deliberately per-(SE, zone, day), so two concurrent
+ * runs in different zones — a manual zone-scoped run, or a #286 recovery beside the 05:00 loop — could
+ * each fill the same floating SE to capacity. Nothing downstream re-checked, and the database permits
+ * it by design.
+ *
+ * Taken **after** the zone lock and never the other way round, so the ordering is the same in every
+ * transaction that takes both. A per-SE transaction holds one zone lock and one engineer lock and
+ * never asks for a second zone lock, so there is no cycle to deadlock on: two runs contending for one
+ * engineer simply take turns, and every other engineer in both zones proceeds in parallel. That is
+ * what keeps this from serializing zone runs against each other, which #259/#260's model forbids.
+ */
+export const dispatchEngineerLockKey = (seId: string): string => `dispatch_se_${seId}`;
+
+/**
  * How long a per-SE dispatch transaction waits for the zone advisory lock before giving up (#262).
  *
  * #262 changed this lock's job. Run-vs-run exclusion moved to #259's zone claim, so what the advisory

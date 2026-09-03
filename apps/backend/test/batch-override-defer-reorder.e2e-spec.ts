@@ -102,11 +102,16 @@ describe('Issue 13a slice 3 — DEFER_TICKET + REORDER', () => {
     batchA = (await prisma.plantBatchAssignment.findFirstOrThrow({ where: { plantId: plantA } })).batchId;
     batchB = (await prisma.plantBatchAssignment.findFirstOrThrow({ where: { plantId: plantB } })).batchId;
 
+    // #310 — `NOW` is passed explicitly. `deferredToDate` is the 25th because this fixture's clock is
+    // the 21st, and a deferral must name a day still ahead of the caller's `now` or it holds nothing.
+    // Leaving `now` to default meant the whole file was deferring four days into the past against the
+    // real wall clock — the defer still "worked", which is precisely the silent no-op #310 closes.
     await override.override(
       batchA,
       { action: 'DEFER_TICKET', ticketId: ticketA, deferredToDate: '2026-06-25', reasonCode: 'PARTS_ETA' },
       { role: 'ZONAL_MANAGER', zoneId: Number(zoneId) },
       ZM,
+      NOW,
     );
     await override.override(
       batchB,

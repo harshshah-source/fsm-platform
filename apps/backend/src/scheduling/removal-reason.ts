@@ -24,7 +24,13 @@ export const REMOVAL_REASONS = {
   ZM_WITHDRAWN: 'ZM_WITHDRAWN',
   /** ZM deferred the ticket to a later date (`OverrideService.deferTicket`); `deferred_to_date` is set. */
   ZM_DEFERRED: 'ZM_DEFERRED',
-  /** Source row of a REASSIGN / SPLIT_BATCH move — a new row opens on the destination batch. */
+  /**
+   * Source row of a REASSIGN / SPLIT_BATCH / MOVE_TICKET move — a new row opens on the destination
+   * batch. One reason for all three because they state one fact: this row closed *because* another
+   * opened, so the assignment did not end, it relocated. Which axis it moved along — another
+   * engineer, or another day — is the destination row's `add_source` to say. #244 excludes this from
+   * attempt counting for exactly that reason: a relocated attempt never ran out.
+   */
   REASSIGNED: 'REASSIGNED',
   /** Cleared by an admin bulk-unassign run (`BulkUnassignService`). */
   BULK_UNASSIGNED: 'BULK_UNASSIGNED',

@@ -154,7 +154,7 @@ describe('Issue 97 Slice 2 — stale-run reaper', () => {
     const runs = new SnapshotRunService(prisma);
     await runs.reapStaleRuns();
 
-    await runs.finishRun(orphan.runId, { status: 'SUCCESS', dataAsOf: new Date(), cursor: 'c-1' });
+    await runs.finishRun(orphan.runId, { status: 'SUCCESS', dataAsOf: new Date() });
 
     const after = await prisma.snapshotRun.findUnique({ where: { runId: orphan.runId } });
     expect(after?.status).toBe('FAILED');
@@ -249,11 +249,14 @@ describe('Issue 97 Slice 2 — stale-run reaper', () => {
     const live = await prisma.snapshotRun.create({ data: { status: 'RUNNING' } });
     created.push(live.runId);
 
-    await new SnapshotRunService(prisma).finishRun(live.runId, { status: 'SUCCESS', dataAsOf: null, cursor: 'c-9' });
+    const asOf = new Date();
+    await new SnapshotRunService(prisma).finishRun(live.runId, { status: 'SUCCESS', dataAsOf: asOf });
 
     const after = await prisma.snapshotRun.findUnique({ where: { runId: live.runId } });
     expect(after?.status).toBe('SUCCESS');
-    expect(after?.cursor).toBe('c-9');
+    // Was `cursor: 'c-9'` — #324 (F4) removed that parameter along with the resume machinery nothing
+    // read. `data_as_of` is the write this case needs anyway: it is what the guard must not lose.
+    expect(after?.dataAsOf?.toISOString()).toBe(asOf.toISOString());
     expect(after?.finishedAt).not.toBeNull();
   });
 });

@@ -137,6 +137,18 @@ export class DispatchSchedulerService {
         return { ran: false, reason: 'TICK_CLAIMED' };
       const { runs, claims } = await this.dispatchRun.reapStaleDispatchRuns(now);
       if (runs > 0) this.logger.warn(`dispatch reaper tick: aborted ${runs} run(s), freed ${claims} claim(s)`);
+      // #303 — the crash the reaper above cannot see, because it left nothing to reap: a tick that
+      // burned its claim and died before `admit` wrote a run row. Detected here rather than in a job
+      // of its own because this is already the short-cadence janitor for exactly this class of
+      // wreckage, and because the recovery it feeds (#286's collector) is the one that follows it.
+      // Still no dispatching from a janitor: it records that a day is owed, nothing more.
+      const abandoned = await this.dispatchRun.recoverAbandonedDispatchTick(now);
+      if (abandoned.marked > 0) {
+        this.logger.warn(
+          `dispatch reaper tick: the ${abandoned.windowStart?.toISOString()} dispatch tick never admitted a ` +
+            `run — ${abandoned.marked} zone(s) marked for same-day re-dispatch`,
+        );
+      }
       return { ran: true };
     } catch (e) {
       this.logger.error(`dispatch reaper tick failed: ${e instanceof Error ? e.message : String(e)}`);

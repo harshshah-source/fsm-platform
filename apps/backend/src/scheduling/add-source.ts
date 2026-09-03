@@ -43,6 +43,17 @@ export const ADD_SOURCES = {
   MANUAL_REASSIGN: 'MANUAL_REASSIGN',
   /** Destination row of a human SPLIT_BATCH. */
   MANUAL_SPLIT: 'MANUAL_SPLIT',
+  /**
+   * Destination row of a human **cross-day move** — the Console's drag from today's column onto a
+   * future one (`MOVE_TICKET`). Its source row is stamped `REASSIGNED` on removal, exactly as the
+   * same-day move's is, because it is the same fact: this row opened because that one closed.
+   *
+   * A separate member rather than reusing `MANUAL_REASSIGN` because the two answer different
+   * operational questions. `MANUAL_REASSIGN` means *somebody else does this today*; this means
+   * *the same work happens on a different day*. The changes ledger pairs both into one SWAP, but a
+   * reader asking "what did we push to another day this week" can only ask it of a distinct value.
+   */
+  MANUAL_DAY_MOVE: 'MANUAL_DAY_MOVE',
   /** A same-day ADD onto an already-dispatched plan (`POST /intraday-updates/add`). */
   SAME_DAY_ADD: 'SAME_DAY_ADD',
   /** Placed by an approved cross-zone escalation (`CrossZoneEscalationService.approve`). */

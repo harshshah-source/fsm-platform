@@ -11,9 +11,11 @@ import { SE_ASSIGNMENT_THRESHOLD_KEY } from '../settings/assignment-threshold';
 import { BatchAssignmentService, type DispatchSummary } from './batch-assignment.service';
 import {
   DISPATCH_CRON_SETTING_KEY,
+  DISPATCH_JOB_NAME,
   type DispatchRecoveryPolicy,
   type DispatchRetryPolicy,
   bootstrapDispatchCron,
+  readAbandonedTickGraceMs,
   readDispatchRecoveryPolicy,
   readDispatchRetryPolicy,
   staleDispatchRunFilter,
@@ -304,7 +306,9 @@ export class DispatchRunService {
     } finally {
       // A run that throws must not wedge its zones permanently refusing. #261 adds the reaper that
       // covers the case this cannot — a process that dies without unwinding at all.
-      await this.releaseStrandedClaims(admission.runId);
+      // #319 — the run's own `now`, so a mark written while unwinding lands on the operating day the
+      // run was dispatching rather than on whatever the wall clock says when it finally lets go.
+      await this.releaseStrandedClaims(admission.runId, now);
     }
   }
 
@@ -550,6 +554,84 @@ export class DispatchRunService {
   }
 
   /**
+   * #303 — the one crash point in the dispatch lattice that used to have no recovery story.
+   *
+   * `claimTick` is `INSERT … ON CONFLICT DO NOTHING` with no TTL and no heartbeat, and it is burned
+   * **before** any durable evidence of the run exists. An instance that dies in that gap leaves a
+   * claim and nothing else: `reapStaleDispatchRuns` and the #286 collector both key off run and claim
+   * rows that were never written, and every other instance already no-oped with `TICK_CLAIMED`. For a
+   * minute-cadence sweep that costs one tick, which is fine. For `business-dispatch` — 05:00 IST,
+   * once — it costs the day, silently, until a human notices and presses Run Now.
+   *
+   * The detection needs no new column and no claim-side liveness: **a tick that ran admitted a run.**
+   * So a claim for today with no `dispatch_runs` row started at or after its window, older than the
+   * grace period, is a tick that died before admission. Everything after that reuses the machinery
+   * #286 already built — mark the zones as owed a day, and let {@link recoverMarkedZones} collect on
+   * the 5-minute tick — which is also why this keeps #261's rule that **the janitor does not
+   * dispatch**.
+   *
+   * Three things keep it quiet and bounded:
+   *  - **Today only** (`>= istDayStartInstant`). `markZonesForRecovery` stamps `businessDate =
+   *    istDate(now)`, so acting on a week-old abandoned claim would mark *today's* zones for a day
+   *    that is long over. A lost day is lost; this recovers the current one or nothing.
+   *  - **The grace period** ({@link readAbandonedTickGraceMs}) is longer than a patient run's whole
+   *    deadline, because #259 deliberately writes no run at all while every zone is held — so during
+   *    that window "claim, no run" is the healthy state, not a crash.
+   *  - **Self-limiting.** The moment recovery runs, `runForActiveZones` admits a run started after the
+   *    claim's window, and this goes silent on its own. `markZonesForRecovery` leaves EXHAUSTED and
+   *    EXPIRED marks alone, so a zone that cannot be recovered is not re-armed every three minutes.
+   */
+  async recoverAbandonedDispatchTick(now: Date = new Date()): Promise<{ marked: number; windowStart: Date | null }> {
+    const claim = await this.prisma.cronTickClaim.findFirst({
+      where: {
+        jobName: DISPATCH_JOB_NAME,
+        windowStart: { lte: new Date(now.getTime() - readAbandonedTickGraceMs()), gte: istDayStartInstant(now) },
+      },
+      orderBy: { windowStart: 'desc' },
+    });
+    if (claim === null) return { marked: 0, windowStart: null };
+
+    // The evidence, asked **per zone**: has anything dispatched this zone since the claim was taken?
+    //
+    // Counting runs fleet-wide would be both too coarse and too loose. Too coarse, because a run that
+    // crashed after admitting three of five zones leaves the other two owed and a run-level count says
+    // the tick was fine. Too loose, because ANY later run — a manual one for a single zone, a
+    // recovery for a different zone — would suppress the whole check. `dispatch_run_zones.started_at`
+    // is the row that actually says "this zone was worked", which is the question being asked.
+    //
+    // It is also what makes this self-limiting per zone: the moment the collector re-dispatches zone
+    // Z, Z has a row after the window and is never marked again, while a zone still owed keeps being
+    // seen. No trigger filter — a manual dispatch counts as the zone having been worked, because it
+    // was.
+    const zoneIds = await this.activeZoneIds();
+    if (zoneIds.length === 0) return { marked: 0, windowStart: claim.windowStart };
+
+    const dispatched = new Set(
+      (
+        await this.prisma.dispatchRunZone.findMany({
+          where: { zoneId: { in: zoneIds }, startedAt: { gte: claim.windowStart } },
+          select: { zoneId: true },
+          distinct: ['zoneId'],
+        })
+      ).map((z) => z.zoneId.toString()),
+    );
+    const owed = zoneIds.filter((zoneId) => !dispatched.has(zoneId.toString()));
+    if (owed.length === 0) return { marked: 0, windowStart: null };
+
+    // `runId: null` — there is no run to name, which is the whole point of this path. The column is
+    // already nullable and is diagnosis only, never a predicate.
+    await this.markZonesForRecovery(
+      owed.map((zoneId) => ({ zoneId, runId: null })),
+      now,
+    );
+    this.logger.warn(
+      `dispatch tick claimed at ${claim.windowStart.toISOString()} by ${claim.claimedBy} never dispatched ` +
+        `${owed.length} of ${zoneIds.length} zone(s) — marking them for same-day re-dispatch (#303)`,
+    );
+    return { marked: owed.length, windowStart: claim.windowStart };
+  }
+
+  /**
    * #286 — record that these zones are owed a re-dispatch today, without dispatching anything.
    *
    * Upserted per (zone, operating day), so a zone that crashes three times before noon draws from ONE
@@ -563,11 +645,11 @@ export class DispatchRunService {
    * RECOVERED *is* re-armed: the zone crashed again after being put right, which is a new day owed,
    * and the preserved `attempts` is what keeps it bounded.
    */
-  private async markZonesForRecovery(orphans: Array<{ zoneId: bigint; runId: bigint }>, now: Date): Promise<void> {
+  private async markZonesForRecovery(orphans: Array<{ zoneId: bigint; runId: bigint | null }>, now: Date): Promise<void> {
     const businessDate = istDate(now);
     // One mark per zone even when a zone lost several claims; the run named is whichever of them the
     // map keeps, and any of them is a true answer to "which dead run left this zone owed a day".
-    const runByZone = new Map(orphans.map((o) => [o.zoneId, o.runId]));
+    const runByZone = new Map<bigint, bigint | null>(orphans.map((o) => [o.zoneId, o.runId]));
     for (const zoneId of runByZone.keys()) {
       try {
         await this.prisma.dispatchZoneRecovery.upsert({
@@ -767,8 +849,25 @@ export class DispatchRunService {
    * because every admitted zone was finalized as it completed. It cannot clobber a real result for the
    * same reason: `status = 'RUNNING'` is only true of a claim nobody closed.
    */
-  private async releaseStrandedClaims(runId: bigint): Promise<void> {
+  private async releaseStrandedClaims(runId: bigint, now: Date): Promise<void> {
     try {
+      // #319 — read first, because the zones being freed are the zones being owed a day and a blind
+      // `updateMany` cannot name them. On a clean run this matches nothing and costs one indexed read.
+      //
+      // Marked BEFORE the claims are freed, the same order the reaper takes: a death in the gap leaves
+      // them RUNNING under a run that is about to be terminal, which is precisely the population the
+      // next reap pass finds and marks. This is the half the reaper cannot reach on its own — the
+      // process is alive and finalizing itself, so nothing about this run ever looks stale.
+      const stranded = await this.prisma.dispatchRunZone.findMany({
+        where: { runId, status: 'RUNNING' },
+        select: { zoneId: true },
+      });
+      if (stranded.length > 0) {
+        await this.markZonesForRecovery(
+          stranded.map((z) => ({ zoneId: z.zoneId, runId })),
+          now,
+        );
+      }
       await this.prisma.dispatchRunZone.updateMany({
         where: { runId, status: 'RUNNING' },
         data: { status: 'ERROR', error: 'dispatch run ended without finalizing this zone', finishedAt: new Date() },
@@ -1088,8 +1187,21 @@ export class DispatchRunService {
     let out: DispatchSummary | undefined;
     let error: string | null = null;
     try {
-      rec = await this.recommender.runForZone(zoneId, { now, runId });
-      out = await this.dispatch.dispatchForZone(zoneId, { dateFrom: day, dateTo: day, now, runId });
+      // #305 — the beat now happens DURING a zone's work, not only after it. A zone whose
+      // recommend+dispatch outlasts `DISPATCH_STALE_RUN_MIN` used to have its live run reaped, its
+      // claim freed and a recovery mark written — so the collector could start a second dispatch of a
+      // zone still being written, and the ledger recorded ABORTED for a run that completed. The beat
+      // is the reaper's precondition (#261); it has to be emitted at a granularity the reaper's
+      // threshold can outlast, and zone size is not that.
+      const beat = () => this.touchHeartbeat(runId);
+      rec = await this.recommender.runForZone(zoneId, { now, runId, onProgress: beat });
+      out = await this.dispatch.dispatchForZone(zoneId, {
+        dateFrom: day,
+        dateTo: day,
+        now,
+        runId,
+        onProgress: beat,
+      });
       summary.zones++;
       // #126 — a benign non-dispatch (residual schedule conflict / lock contention) is no longer
       // silent: its reason is stamped on the zone row's `error`. A dispatched zone → skipReason
@@ -1100,6 +1212,24 @@ export class DispatchRunService {
       this.logger.error(`dispatch run failed for zone ${zoneId}: ${error}`);
       summary.errors.push({ zoneId: zoneId.toString(), message: error });
     }
+    // #319 (AR-13) — a zone lost to a *contained* error is owed the same day a crashed zone is owed.
+    //
+    // #286 scoped marks to the reaper, which left recovery pointing the wrong way: kill the process and
+    // the zone is marked, re-dispatched and reported; let it throw in a live run and the ledger records
+    // ERROR and nothing ever asks for the zone again until 05:00 tomorrow. Both losses end at the same
+    // row in the same state, so **finalizing ERROR** is the trigger — not the cause of it. That
+    // deliberately includes a whole-zone `skipReason` (`LOCK_CONTENDED`): the zone did not dispatch,
+    // whichever containment produced that, and the claim's own discriminator is where the rule belongs
+    // so it cannot drift the next time a skip reason is added.
+    //
+    // A zone that finalizes DONE is never marked, and neither is a CONTENDED one — that row is written
+    // by `admit`, never here, which is what keeps #286's "busy is not broken" rule intact by
+    // construction rather than by a second predicate that could disagree with it.
+    //
+    // **Before the finalize, and not after**, for the reason the reaper states at its own call site: if
+    // this process dies in the gap the claim is still RUNNING, so the reaper finds it and marks it. The
+    // other order loses the zone's day to exactly the death the mark exists to survive.
+    if (error !== null) await this.markZonesForRecovery([{ zoneId, runId }], now);
     await this.finalizeZoneClaim(runId, zoneId, rec, out, error);
     // #261 — one beat per zone. A run over many zones is legitimately long, and this is what stops the
     // reaper mistaking length for death. It follows the finalize rather than preceding it so the beat

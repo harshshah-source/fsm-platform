@@ -93,7 +93,18 @@ const TERMS: {
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-export function ScoreBreakdownPanel({ breakdown }: { breakdown: Record<string, unknown> | null }) {
+export function ScoreBreakdownPanel({
+  breakdown,
+  titled = true,
+}: {
+  breakdown: Record<string, unknown> | null;
+  /**
+   * Drops the panel's own "Score breakdown" caption — for the one caller that already names it, the
+   * Inspector's disclosure, whose `<summary>` *is* the heading. The mode and weight-set line stays
+   * either way: which weights produced these numbers is part of the reading, not decoration.
+   */
+  titled?: boolean;
+}) {
   if (!breakdown) return null;
 
   // An unassignable decision persists a breakdown too, but it is a reason rather than a computation:
@@ -126,7 +137,7 @@ export function ScoreBreakdownPanel({ breakdown }: { breakdown: Record<string, u
   return (
     <div data-testid="score-breakdown" className="text-[11px]">
       <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-ink-muted">
-        <span className="font-semibold uppercase tracking-wide">Score breakdown</span>
+        {titled && <span className="font-semibold uppercase tracking-wide">Score breakdown</span>}
         {/* UI§34.1 — the engine's enum names never reach a user-facing surface. */}
         {mode && <span>mode: {mode === 'DEFICIT' ? 'Catch-up' : mode === 'PREVENTIVE' ? 'Steady' : mode}</span>}
         {weightSetRef && <span>weights: {weightSetRef}</span>}

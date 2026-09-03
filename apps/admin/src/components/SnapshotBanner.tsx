@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiSnapshotLatest, type SnapshotLatestView } from '../api/snapshots';
+import { apiSnapshotLatest, type IngestionAlertHealth, type SnapshotLatestView } from '../api/snapshots';
 import { useAuth } from '../auth/AuthProvider';
 import { onIngestionComplete } from '../pages/dashboard/ingestionEvents';
 import { BuildHealthNotice } from './BuildHealthNotice';
@@ -14,6 +14,14 @@ import { BuildHealthNotice } from './BuildHealthNotice';
  * Live (Issue 122b): the banner re-reads on a poll AND immediately after a manual "Run Ingestion
  * Now" completes — previously it fetched once on mount, so a recovered (or newly failed) run kept
  * showing the stale verdict until a full page reload.
+ *
+ * #300 — a PARTIAL run used to render here as the ordinary grey "data as of …" line, which is the
+ * exact reading an operator must not get: PARTIAL means the #230 gate skipped device-state
+ * derivation, auto-recovery and ticket creation, so the number on screen describes a fleet nothing
+ * has re-derived. The banner now states the gate whenever it is closed, and reports the partial
+ * watermark under its own name rather than as freshness. The wedge DETAIL (which chunk, which error,
+ * how many rows were dropped) belongs on the OH Build Health page; this line's job is to make sure
+ * nobody reads a frozen pipeline as a healthy one.
  */
 const STUCK_AFTER_MS = 15 * 60 * 1000;
 const POLL_MS = 60 * 1000;
@@ -26,6 +34,15 @@ function isStuck(view: SnapshotLatestView): boolean {
 
 function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString();
+}
+
+/** Plain-language "why it stopped advancing" — the sentence the freshness line was missing. */
+function gatedSummary(ingestion: IngestionAlertHealth): string {
+  const runs =
+    ingestion.streak > 1 ? `The last ${ingestion.streak} telemetry runs` : 'The last telemetry run';
+  const stages =
+    ingestion.gatedStages.length > 0 ? ingestion.gatedStages.join(', ') : 'downstream processing';
+  return `${runs} did not complete, so ${stages} are paused.`;
 }
 
 export function SnapshotBanner() {
@@ -58,23 +75,51 @@ export function SnapshotBanner() {
 
   const failed = view?.latest?.status === 'FAILED';
   const stuck = view ? isStuck(view) : false;
+  // Defensive against an older/partial payload — this rides every page and must never crash it.
+  const ingestion = view?.ingestion;
+  const gated = ingestion?.downstreamGated === true;
+  const wedged = ingestion?.alert === true;
+  const partialAsOf = view?.partialDataAsOf ?? null;
+
+  // A wedged pipeline is alert-grade in its own right: the individual runs may each be "only" PARTIAL,
+  // but a streak of them is the state that silently froze the fleet's derivation.
+  const critical = failed || stuck || wedged;
 
   return (
     <>
       <BuildHealthNotice />
       {view &&
-        (failed || stuck ? (
+        (critical || gated ? (
           <div
             role="alert"
             aria-label="Snapshot status"
-            className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-6 py-2 text-sm text-red-800"
+            data-testid="snapshot-banner-gated"
+            className={
+              critical
+                ? 'flex flex-wrap items-center gap-2 border-b border-red-200 bg-red-50 px-6 py-2 text-sm text-red-800'
+                : 'flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-6 py-2 text-sm text-amber-900'
+            }
           >
             <span className="font-semibold">Snapshot alert:</span>
-            <span>{failed ? 'last run failed' : 'last run is stuck / overdue'}.</span>
-            {view.dataAsOf && (
-              <span className="text-red-700">
+            {failed ? (
+              <span>last run failed.</span>
+            ) : stuck ? (
+              <span>last run is stuck / overdue.</span>
+            ) : (
+              <span>{gatedSummary(ingestion as IngestionAlertHealth)}</span>
+            )}
+            {view.dataAsOf ? (
+              <span className={critical ? 'text-red-700' : 'text-amber-800'}>
                 Showing data as of <time dateTime={view.dataAsOf}>{formatTimestamp(view.dataAsOf)}</time> — may be
                 stale.
+              </span>
+            ) : (
+              <span className={critical ? 'text-red-700' : 'text-amber-800'}>No successful snapshot yet.</span>
+            )}
+            {partialAsOf && (
+              // F10 — the PARTIAL watermark is real and is reported, but never as "data as of".
+              <span data-testid="snapshot-partial-asof" className={critical ? 'text-red-700' : 'text-amber-800'}>
+                Partial data through <time dateTime={partialAsOf}>{formatTimestamp(partialAsOf)}</time>.
               </span>
             )}
           </div>

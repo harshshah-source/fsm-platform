@@ -11,6 +11,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
+import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
+import type { RequestActor } from '../common/request-actor';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
@@ -35,31 +39,30 @@ export class SePlannerController {
   @Get()
   @Roles(...MANAGER_ROLES)
   list(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('dateFrom') dateFrom: string,
     @Query('dateTo') dateTo: string,
   ): Promise<PlannerEntryView[]> {
-    return this.planner.list({ dateFrom, dateTo }, { role: user.role, zoneId: user.zone_id });
+    return this.planner.list({ dateFrom, dateTo }, scope);
   }
 
   // Static route — distinct from the GET list (`''`); the grid's zone-scoped plant picker source.
   @Get('plants')
   @Roles(...MANAGER_ROLES)
-  plants(@CurrentUser() user: AccessTokenClaims): Promise<PlannerPlantView[]> {
-    return this.planner.listPlants({ role: user.role, zoneId: user.zone_id });
+  plants(@CurrentScope() scope: ManagerScope): Promise<PlannerPlantView[]> {
+    return this.planner.listPlants(scope);
   }
 
+
+          //new HttP methord (25th August )
   @Post()
   @Roles(...MANAGER_ROLES)
   async create(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { seId: string; plantId: string; plannedDate: string },
   ): Promise<PlannerEntryView> {
-    const outcome = await this.planner.upsert(
-      body,
-      { role: user.role, zoneId: user.zone_id },
-      { userId: user.user_id, role: user.role },
-    );
+    const outcome = await this.planner.upsert(body, scope, actor);
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'PLANT_NOT_FOUND' });
     if (outcome.result === 'OUT_OF_SCOPE') throw new ForbiddenException({ code: 'ZONE_SCOPE_VIOLATION' });
     return outcome.entry;
@@ -68,10 +71,10 @@ export class SePlannerController {
   @Delete(':id')
   @Roles(...MANAGER_ROLES)
   async remove(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('id') id: string,
   ): Promise<{ deleted: boolean }> {
-    const outcome = await this.planner.remove(id, { role: user.role, zoneId: user.zone_id });
+    const outcome = await this.planner.remove(id, scope);
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'PLANNER_ENTRY_NOT_FOUND' });
     if (outcome.result === 'OUT_OF_SCOPE') throw new ForbiddenException({ code: 'ZONE_SCOPE_VIOLATION' });
     return { deleted: true };

@@ -25,4 +25,18 @@ export class PrismaSoftStateConflictPort implements SoftStateConflictPort {
     });
     return new Set(rows.map((r) => r.ticketId));
   }
+
+  /**
+   * #295 — tickets somebody has actually started work on: an unresolved `TROUBLESHOOT_STARTED`, and
+   * only that type. See the port's docblock for why this is not a flag on the method above.
+   */
+  async activeTroubleshootStartedTicketIds(ticketIds: string[]): Promise<Set<string>> {
+    if (ticketIds.length === 0) return new Set();
+    const rows = await this.prisma.softState.findMany({
+      where: { ticketId: { in: ticketIds }, resolvedAt: null, type: 'TROUBLESHOOT_STARTED' },
+      select: { ticketId: true },
+      distinct: ['ticketId'],
+    });
+    return new Set(rows.map((r) => r.ticketId));
+  }
 }

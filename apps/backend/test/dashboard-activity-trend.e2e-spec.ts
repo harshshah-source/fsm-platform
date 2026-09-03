@@ -74,11 +74,14 @@ describe('Issue 134 — /api/dashboard/activity-trend', () => {
         },
       });
     }
-    // One INSTALL ticket; its device is ACTIVE (not counted in the live inactive stock).
+    // One INSTALL ticket; its device is ACTIVE (not counted in the live inactive stock). The status
+    // is incidental — the trend query groups on `created_at` + `work_type` and never reads it — so it
+    // is the one an install ticket is actually created in (#309: `OPEN` belongs to TROUBLESHOOT, and
+    // the `tickets_work_type_status` CHECK now says so).
     await prisma.device.create({ data: { deviceId: installDevice } });
     await prisma.ticket.create({
       data: {
-        workType: 'INSTALL', status: 'OPEN', deviceId: installDevice, plantId, companyId,
+        workType: 'INSTALL', status: 'REQUESTED', deviceId: installDevice, plantId, companyId,
         companyTier: 'GOLD', lastStateChangedAt: now, createdAt: now,
       },
     });

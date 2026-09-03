@@ -1,4 +1,5 @@
 import { CHART } from './colors';
+import { formatValue, type ValueFormat } from './format';
 
 export interface BarListItem {
   label: string;
@@ -24,10 +25,14 @@ export function BarList({
   items,
   color = CHART.info,
   labelWidth = 'w-32',
+  format = 'count',
 }: {
   items: BarListItem[];
   color?: string;
   labelWidth?: string;
+  /** Kept in step with the recharts panels — an unformatted `4820` beside a `4,820` reads as a
+   *  different number at a glance. */
+  format?: ValueFormat;
 }) {
   const max = Math.max(...items.map((i) => i.value), 1);
   return (
@@ -43,8 +48,8 @@ export function BarList({
               style={{ width: `${(100 * item.value) / max}%`, background: item.color ?? color }}
             />
           </span>
-          <span className="w-8 shrink-0 text-right text-xs font-semibold tabular-nums text-ink-strong">
-            {item.value}
+          <span className="w-12 shrink-0 text-right text-xs font-semibold tabular-nums text-ink-strong">
+            {formatValue(item.value, format)}
           </span>
         </li>
       ))}

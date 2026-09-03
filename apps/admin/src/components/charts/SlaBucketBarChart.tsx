@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
-  ReferenceLine,
+  LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -12,13 +11,14 @@ import {
 } from 'recharts';
 import {
   BUCKET_COLOR,
-  BUCKET_LABEL,
   BUCKET_LABEL_RANGE,
   SLA_BUCKETS,
+  criticalPlusCount,
   type SlaBucket,
 } from '../../lib/slaBucket';
-import { IconClose } from '../ui/icons';
+import { ChartTooltip } from './ChartTooltip';
 import { CHART } from './colors';
+import { formatTick, formatValue } from './format';
 
 /** One zone's per-bucket device counts (shape of `ZoneOverviewRow` the dashboards already hold). */
 export interface SlaZoneDistribution {
@@ -26,87 +26,71 @@ export interface SlaZoneDistribution {
   byBucket: Record<string, number>;
 }
 
-/** A clicked bar — the zone + bucket it belongs to (drives the isolate/callout state). */
-interface BarSelection {
-  zone: string;
-  bucket: SlaBucket;
-  value: number;
-}
-
-const nf = new Intl.NumberFormat('en-IN');
+/** Row height per zone, and the space the X axis needs under the plot. */
+const ROW_HEIGHT = 44;
+const AXIS_HEIGHT = 34;
 
 /**
- * Dark value pill (uiDashboardRef "82.6 CCI" chip): bucket title, one row per zone, and the bucket
- * total. Bucket identity keeps its semantic SLA colour dot; text stays white/muted ink. When a zone
- * is click-selected, its row is emphasised.
- */
-function PillTooltip({
-  active,
-  payload,
-  selectedZone,
-}: {
-  active?: boolean;
-  payload?: Array<{ name?: string; value?: number; payload?: Record<string, unknown> }>;
-  selectedZone?: string | null;
-}) {
-  if (!active || !payload?.length) return null;
-  const bucket = payload[0].payload?.bucket as SlaBucket | undefined;
-  if (!bucket) return null;
-  const total = payload.reduce((s, p) => s + (typeof p.value === 'number' ? p.value : 0), 0);
-  return (
-    <div className="rounded-lg bg-chrome-900 px-3 py-2 text-xs text-white shadow-floating ring-1 ring-white/10">
-      <div className="mb-1 flex items-center gap-1.5 font-semibold">
-        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_COLOR[bucket] }} />
-        {BUCKET_LABEL_RANGE[bucket]}
-      </div>
-      {payload.map((p) => {
-        const isSelected = selectedZone != null && p.name === selectedZone;
-        return (
-          <div key={p.name} className="flex items-center justify-between gap-4">
-            <span className={isSelected ? 'font-semibold text-white' : 'text-white/60'}>{p.name}</span>
-            <span className={`tabular-nums ${isSelected ? 'font-bold' : 'font-semibold'}`}>
-              {nf.format(p.value ?? 0)}
-            </span>
-          </div>
-        );
-      })}
-      <div className="mt-1 flex items-center justify-between gap-4 border-t border-white/15 pt-1">
-        <span className="text-white/60">Total</span>
-        <span className="font-bold tabular-nums">{nf.format(total)}</span>
-      </div>
-      <div className="mt-1 text-[10px] text-white/40">Click a bar to isolate its zone</div>
-    </div>
-  );
-}
-
-/**
- * SLA Bucket Distribution as the reference bar graph (docs/ui/desktop/uiDashboardSLA Bucket
- * Distribution.jpg): thin rounded per-zone bars grouped by SLA bucket on a soft raised plot panel,
- * a dashed fleet-average line, and a dark hover pill. Clicking a bar isolates that zone — other
- * zones' bars dim, and a callout chip names the zone, bucket, count and zone total (click the bar
- * again or the × to clear). Bar colours are the pinned semantic SLA heat ramp (`BUCKET_COLOR`) —
- * never restyled. The legend pills below carry the same label(range) + total per bucket the
- * previous `DistributionBar` legend showed, so the counts stay readable without hover.
+ * SLA Bucket Distribution — one stacked bar per zone, segments ordered worst-SLA-first.
+ *
+ * ## Why this is not the grouped chart it used to be
+ *
+ * The previous version put SLA bucket on the X axis and drew one bar per zone inside each bucket
+ * group — but coloured every bar in a group by its BUCKET, so all five zones in a group were the
+ * same colour, with no zone axis and no zone legend. Zone identity had *no visual encoding at all*.
+ * The panel's own subtitle conceded it ("click a bar to see which zone it is"), which made reading
+ * the whole chart a forty-click exercise. That shape came from adapting
+ * `uiDashboardSLA Bucket Distribution.jpg` a little too literally: in the reference the bars inside
+ * a group are sequential TIME points, so one hue is right and colour carries nothing. Here the
+ * grouping variable is a category that has to be identifiable, and the same treatment discards it.
+ *
+ * ## What the stack order is doing
+ *
+ * Segments run in `SLA_BUCKETS` order, which is worst-first — so LONG_PENDING starts at x=0 on every
+ * row. That is the whole point: **segments sharing a baseline are comparable, segments floating
+ * mid-bar are not.** Anchoring the severe end at the axis makes "which zone has the worst tail" a
+ * glance instead of a click, and it is the one comparison the grouped version could not support at
+ * any effort. Total bar length still reads as the zone's total inactive fleet.
+ *
+ * Zones are ordered by `criticalPlusCount` descending — the canonical critical+ definition from
+ * `slaBucket.ts`, not a second one invented here — so the zone needing attention is the top row.
+ *
+ * Colours stay the pinned semantic SLA heat ramp (`BUCKET_COLOR`), never restyled: it is an ordinal
+ * scale validated for monotone lightness, which is what keeps it readable under deuteranopia and on
+ * the dark canvas. Colouring by zone instead would have identified zones at the cost of that.
+ *
+ * ## Deliberately removed
+ *
+ * - **The dashed "avg" line.** It averaged non-zero zone×bucket cells, mixing a ~3,000-device
+ *   `4–8Hr` cell with a ~40-device `7d+` one. It rendered as `avg 892` and read like a threshold
+ *   while having no operational referent at all.
+ * - **Click-to-isolate and its callout chip.** Both existed only to recover the zone identity the
+ *   encoding threw away. With zones on the axis there is nothing left to isolate.
  */
 export function SlaBucketBarChart({
   zones,
-  height = 260,
+  height,
 }: {
   zones: SlaZoneDistribution[];
   height?: number;
 }) {
-  const zoneNames = useMemo(() => Array.from(new Set(zones.map((z) => z.zoneName))), [zones]);
-  const [clicked, setClicked] = useState<BarSelection | null>(null);
-  // A refetch can rename/remove zones — a selection pointing at a vanished zone silently clears.
-  const selected = clicked && zoneNames.includes(clicked.zone) ? clicked : null;
-
+  // Worst-first by critical+ load. Sorted on a copy — the caller's array is shared with the
+  // scorecard and the KPI strip, and reordering it in place would reorder those too.
   const rows = useMemo(
     () =>
-      SLA_BUCKETS.map((b) => {
-        const r: Record<string, number | string> = { bucket: b };
-        for (const z of zones) r[z.zoneName] = z.byBucket[b] ?? 0;
-        return r;
-      }),
+      [...zones]
+        .sort((a, b) => criticalPlusCount(b.byBucket) - criticalPlusCount(a.byBucket))
+        .map((z) => {
+          const row: Record<string, number | string> = { zoneName: z.zoneName };
+          let total = 0;
+          for (const b of SLA_BUCKETS) {
+            const n = z.byBucket[b] ?? 0;
+            row[b] = n;
+            total += n;
+          }
+          row.total = total;
+          return row;
+        }),
     [zones],
   );
 
@@ -114,97 +98,103 @@ export function SlaBucketBarChart({
     () =>
       SLA_BUCKETS.map((b) => ({
         bucket: b,
-        total: zones.reduce((s, z) => s + (z.byBucket[b] ?? 0), 0),
+        total: zones.reduce((sum, z) => sum + (z.byBucket[b] ?? 0), 0),
       })),
     [zones],
   );
 
-  // Dashed reference line at the mean of the non-zero zone×bucket counts (the reference's threshold
-  // line, computed rather than decorative).
-  const avg = useMemo(() => {
-    const values = zones.flatMap((z) => SLA_BUCKETS.map((b) => z.byBucket[b] ?? 0)).filter((v) => v > 0);
-    return values.length ? values.reduce((s, v) => s + v, 0) / values.length : 0;
-  }, [zones]);
+  // Whole-axis compaction, and headroom for the row-total labels at the end of each bar.
+  const axisMax = useMemo(
+    () => rows.reduce((max, r) => Math.max(max, r.total as number), 0),
+    [rows],
+  );
 
-  const selectedZoneTotal = useMemo(() => {
-    if (!selected) return 0;
-    const zone = zones.find((z) => z.zoneName === selected.zone);
-    return zone ? SLA_BUCKETS.reduce((s, b) => s + (zone.byBucket[b] ?? 0), 0) : 0;
-  }, [zones, selected]);
-
-  const toggleBar = (zone: string, payload: Record<string, unknown> | undefined): void => {
-    const bucket = payload?.bucket as SlaBucket | undefined;
-    if (!bucket) return;
-    const value = typeof payload?.[zone] === 'number' ? (payload[zone] as number) : 0;
-    setClicked((cur) => (cur && cur.zone === zone && cur.bucket === bucket ? null : { zone, bucket, value }));
-  };
+  // Derived from the row count, so a single-zone ZM view is one properly-proportioned bar rather
+  // than the eight stranded 10px slivers the fixed-height grouped version produced.
+  const resolvedHeight = height ?? rows.length * ROW_HEIGHT + AXIS_HEIGHT;
 
   return (
     <div>
       <p className="mb-3 text-xs text-ink-muted">
-        Device counts per SLA bucket, split by zone — hover a bucket for per-zone counts,{' '}
-        <span className="font-medium text-ink">click a bar to see which zone it is</span>.
+        Inactive devices per zone, split by SLA bucket. Bars start with the{' '}
+        <span className="font-medium text-ink">worst</span> buckets, so the severe end of every zone
+        lines up and can be compared directly. Zones are ordered by critical+ load.
       </p>
 
       {/* Soft raised plot panel (reference chart sits on a subtle gray field inside the white card). */}
       <div className="rounded-xl bg-surface-raised/70 p-3 ring-1 ring-line/70">
         <div
-          style={{ height }}
+          style={{ height: resolvedHeight }}
           role="img"
-          aria-label="SLA bucket distribution — device counts per bucket by zone"
+          aria-label="SLA bucket distribution — inactive device counts per zone, split by SLA bucket, worst buckets first"
         >
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={rows} margin={{ top: 18, right: 12, bottom: 0, left: 0 }} barGap={2} barCategoryGap="26%">
-              <CartesianGrid stroke={CHART.grid} vertical={false} />
+            <BarChart
+              layout="vertical"
+              data={rows}
+              // Right margin holds the row-total label.
+              margin={{ top: 4, right: 56, bottom: 0, left: 0 }}
+              barCategoryGap="28%"
+            >
+              <CartesianGrid stroke={CHART.grid} horizontal={false} />
               <XAxis
-                dataKey="bucket"
-                tickFormatter={(b: string) => BUCKET_LABEL[b as SlaBucket]}
+                type="number"
+                tick={{ fontSize: 10, fill: CHART.axis }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+                tickFormatter={(v: number) => formatTick(v, 'count', axisMax)}
+              />
+              {/* Zone on the axis — the identity the grouped version had no way to show. Short
+                  zone names (NORTH / SOUTH / …) mean this survives a narrow viewport, where the
+                  old bucket-on-X axis collapsed into an unreadable smear of overlapping labels. */}
+              <YAxis
+                type="category"
+                dataKey="zoneName"
+                width={78}
                 tick={{ fontSize: 11, fill: 'var(--color-ink-muted)', fontWeight: 500 }}
                 axisLine={false}
                 tickLine={false}
                 interval={0}
               />
-              <YAxis
-                tick={{ fontSize: 10, fill: CHART.axis }}
-                axisLine={false}
-                tickLine={false}
-                width={48}
-                tickFormatter={(v: number) => nf.format(v)}
-              />
               <Tooltip
                 cursor={{ fill: 'var(--color-surface-sunken)', fillOpacity: 0.55 }}
-                content={<PillTooltip selectedZone={selected?.zone ?? null} />}
+                content={
+                  <ChartTooltip format="count" showTotal showShare hideZeroRows />
+                }
               />
-              {avg > 0 && (
-                <ReferenceLine
-                  y={avg}
-                  stroke={CHART.axis}
-                  strokeDasharray="5 4"
-                  label={{ value: `avg ${nf.format(Math.round(avg))}`, position: 'insideTopRight', fontSize: 10, fill: CHART.axis }}
-                />
-              )}
-              {zoneNames.map((name) => (
+              {SLA_BUCKETS.map((b, i) => (
                 <Bar
-                  key={name}
-                  dataKey={name}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={10}
-                  cursor="pointer"
-                  onClick={(entry: { payload?: Record<string, unknown> }) => toggleBar(name, entry?.payload)}
+                  key={b}
+                  dataKey={b}
+                  name={BUCKET_LABEL_RANGE[b as SlaBucket]}
+                  stackId="sla"
+                  fill={BUCKET_COLOR[b as SlaBucket]}
+                  // Hairline in the card surface between segments. `DistributionBar` documents the
+                  // same need for the same reason: without a break, two neighbouring steps of an
+                  // ordinal ramp read as one longer segment — precisely the misreading a heat ramp
+                  // invites, and worst at the red end where consecutive steps are closest.
+                  stroke="var(--color-surface-card)"
+                  strokeWidth={1.5}
+                  isAnimationActive={false}
                 >
-                  {SLA_BUCKETS.map((b) => {
-                    const isClickedBar = selected?.zone === name && selected.bucket === b;
-                    return (
-                      <Cell
-                        key={b}
-                        fill={BUCKET_COLOR[b]}
-                        fillOpacity={selected && selected.zone !== name ? 0.22 : 1}
-                        // Selection outline: the page ink, so it stays visible when the canvas inverts.
-                        stroke={isClickedBar ? 'var(--color-ink-strong)' : undefined}
-                        strokeWidth={isClickedBar ? 1.5 : 0}
-                      />
-                    );
-                  })}
+                  {/* The row total rides on the LAST segment, so it lands just past the end of the
+                      stack whatever the mix. `dataKey="total"` supplies the value; the segment only
+                      supplies the position. */}
+                  {i === SLA_BUCKETS.length - 1 && (
+                    <LabelList
+                      dataKey="total"
+                      position="right"
+                      offset={8}
+                      formatter={(v: number) => formatValue(v, 'count')}
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        fill: 'var(--color-ink-strong)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    />
+                  )}
                 </Bar>
               ))}
             </BarChart>
@@ -212,40 +202,29 @@ export function SlaBucketBarChart({
         </div>
       </div>
 
-      {/* Click callout — names the zone behind the clicked bar; the rest of the chart dims to match. */}
-      {selected && (
-        <div
-          role="status"
-          data-testid="sla-zone-callout"
-          className="mt-3 inline-flex max-w-full flex-wrap items-center gap-x-2.5 gap-y-1 rounded-lg border border-line bg-chrome-900 px-3 py-2 text-xs text-white shadow-card"
-        >
-          <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_COLOR[selected.bucket] }} />
-          <span className="font-bold">{selected.zone} zone</span>
-          <span className="text-white/60">{BUCKET_LABEL_RANGE[selected.bucket]}</span>
-          <span className="font-bold tabular-nums">{nf.format(selected.value)} devices</span>
-          <span className="text-white/60">· {nf.format(selectedZoneTotal)} across all buckets</span>
-          <button
-            type="button"
-            aria-label="Clear zone selection"
-            onClick={() => setClicked(null)}
-            className="ml-1 flex h-5 w-5 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/15 hover:text-white focus-ring"
-          >
-            <IconClose className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* Bucket legend — identical information to the previous DistributionBar legend (semantic dot,
-          label + range, fleet total), styled as quiet pills on the app surface tokens. */}
+      {/* Bucket legend — the colour key for the stack (eight segments need one) AND the fleet-wide
+          per-bucket totals, which read faster here than they ever did off the bars. */}
       <ul className="mt-3 flex flex-wrap gap-1.5 text-xs">
         {totals.map(({ bucket, total }) => (
+          // Empty buckets are DIMMED, not dropped: "nothing in 7d+" is a result worth stating, and
+          // the strip doubles as the colour key for an eight-segment stack, so removing entries
+          // would put holes in the key. A healthy zone otherwise renders six identical `0` pills at
+          // full weight, which reads as clutter rather than as good news.
           <li
             key={bucket}
-            className="flex items-center gap-1.5 rounded-full border border-line bg-surface-card px-2.5 py-1 shadow-sm"
+            className={`flex items-center gap-1.5 rounded-full border border-line bg-surface-card px-2.5 py-1 shadow-sm${
+              total === 0 ? ' opacity-45' : ''
+            }`}
           >
-            <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: BUCKET_COLOR[bucket] }} />
-            <span className="text-ink-muted">{BUCKET_LABEL_RANGE[bucket]}</span>
-            <span className="font-semibold tabular-nums text-ink-strong">{nf.format(total)}</span>
+            <span
+              aria-hidden
+              className="h-2 w-2 rounded-full"
+              style={{ background: BUCKET_COLOR[bucket as SlaBucket] }}
+            />
+            <span className="text-ink-muted">{BUCKET_LABEL_RANGE[bucket as SlaBucket]}</span>
+            <span className="font-semibold tabular-nums text-ink-strong">
+              {formatValue(total, 'count')}
+            </span>
           </li>
         ))}
       </ul>

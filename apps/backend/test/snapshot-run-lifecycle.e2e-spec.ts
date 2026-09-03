@@ -72,12 +72,28 @@ describe('Issue 04 slice 4 — run lifecycle', () => {
     created.push(runId);
     const asOf = new Date(Date.UTC(2026, 5, 19, 8, 30, 0));
 
-    await service.finishRun(runId, { status: 'SUCCESS', dataAsOf: asOf, cursor: '120' });
+    await service.finishRun(runId, { status: 'SUCCESS', dataAsOf: asOf });
 
     const run = await prisma.snapshotRun.findUnique({ where: { runId } });
     expect(run?.status).toBe('SUCCESS');
     expect(run?.finishedAt).not.toBeNull();
     expect(run?.dataAsOf?.toISOString()).toBe(asOf.toISOString());
-    expect(run?.cursor).toBe('120');
+  });
+
+  it('#324 F4 — nothing writes the resume cursor any more', async () => {
+    // `snapshot_runs.cursor` held a cross-run re-read floor for a resume `AutoPlantSourceReader`
+    // deliberately does not do: it restarts from a null cursor and keyset-scans every device on every
+    // run, so correctness never depended on the watermark and nothing in production ever read it back.
+    // The column stays (dropping it needs a migration for no behavioural gain, and stored values are
+    // honest history); the write and its reader are gone. Pinned here so a future edit cannot quietly
+    // revive a persisted value with a documented meaning nothing honours.
+    const { runId } = await service.startRun();
+    created.push(runId);
+
+    await service.finishRun(runId, { status: 'PARTIAL', dataAsOf: new Date() });
+
+    expect((await prisma.snapshotRun.findUnique({ where: { runId } }))?.cursor).toBeNull();
+    expect('lastResumeCursor' in (service as unknown as Record<string, unknown>)).toBe(false);
+    expect((service as unknown as Record<string, unknown>).lastResumeCursor).toBeUndefined();
   });
 });

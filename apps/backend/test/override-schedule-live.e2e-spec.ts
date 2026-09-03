@@ -155,9 +155,13 @@ describe('#153 — an overridden schedule is still live: the SE day plan survive
   it('the day plan survives a ZM override — it does not go blank', async () => {
     await override.override(
       batchA,
+      // #310 — the fixture clock is passed explicitly. `deferredToDate` is future relative to THIS
+      // file's `NOW`, not to the wall clock, and a deferral that does not name a day ahead of the
+      // caller's `now` holds nothing — the silent no-op #310 closes.
       { action: 'DEFER_TICKET', ticketId: ticketA, deferredToDate: '2026-06-25', reasonCode: 'PARTS_ETA' },
       { role: 'ZONAL_MANAGER', zoneId: Number(zoneId) },
       ZM,
+      NOW,
     );
     // Pre-condition: the override really did flip the SCHEDULE, not just the batch — that flip is the
     // mechanism under test, so assert it rather than trusting it.

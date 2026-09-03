@@ -133,12 +133,15 @@ describe('#146 slice 3 — a deferred ticket is re-dispatched ON its deferred da
     await dispatch.dispatchForZone(zoneId, { dateFrom: TODAY, dateTo: TODAY, now: TODAY_AT });
     batchId = (await prisma.plantBatchAssignment.findFirstOrThrow({ where: { plantId } })).batchId;
 
-    // The ZM defers it to tomorrow.
+    // The ZM defers it to tomorrow. `TODAY_AT` is passed explicitly (#310): `DEFER_TO` is tomorrow
+    // relative to THIS fixture's clock, and a deferral that does not name a day ahead of the caller's
+    // `now` holds nothing — which is exactly what this file goes on to assert does not happen.
     await override.override(
       batchId,
       { action: 'DEFER_TICKET', ticketId, deferredToDate: DEFER_TO, reasonCode: 'PARTS_ETA' },
       scope,
       ZM,
+      TODAY_AT,
     );
   });
 

@@ -59,7 +59,8 @@ export function RootCauseAnalyticsPage() {
 
       <ReportGrid>
         <ChartCard title="Distribution by root cause">
-          {bars.length ? <BarChartCard data={bars} /> : <EmptyState message="No troubleshoot submissions in this window." />}
+          {/* Ranked: the question is which root cause dominates, so the biggest belongs at the top. */}
+          {bars.length ? <BarChartCard data={bars} sort="desc" /> : <EmptyState message="No troubleshoot submissions in this window." />}
         </ChartCard>
       </ReportGrid>
 

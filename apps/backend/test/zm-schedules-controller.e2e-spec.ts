@@ -58,6 +58,53 @@ describe('ZM schedules monitoring (e2e)', () => {
     expect(bad.body.code).toBe('INVALID_DATE');
   });
 
+  /**
+   * **`?detail=stops` — the read the Scheduler Console's future columns draw chips from.**
+   *
+   * Additive on exactly the terms `?date=` established (#284 §D): a caller that does not ask gets a
+   * byte-identical response, so the assertion below is not "detail works" but "**omitting it changes
+   * nothing**". That is the property a widened shared read can lose silently, because every existing
+   * caller keeps working right up until one of them chokes on a field it never expected.
+   *
+   * Why the Console needs it at all: a future day used to be answerable only in counts, so a ticket
+   * an operator had just moved onto Wednesday could be reported as `1 stop · 1 device` and never as
+   * *which* device — indistinguishable from any other stop appearing, which is the same silence the
+   * old cross-day defer produced.
+   */
+  it('accepts ?detail=stops, and omitting it leaves the response exactly as it was', async () => {
+    const token = await login('zm.north@fsm.test');
+    const plain = await request(app.getHttpServer())
+      .get('/api/schedules')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const detailed = await request(app.getHttpServer())
+      .get('/api/schedules?detail=stops')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(Array.isArray(detailed.body)).toBe(true);
+    // The opt-out is the contract: no `stops` key at all unless it was asked for.
+    for (const row of plain.body as Record<string, unknown>[]) {
+      expect(row).not.toHaveProperty('stops');
+    }
+    // Same rows, same counts — `detail` widens a select, it does not change what is selected.
+    expect((detailed.body as unknown[]).length).toBe((plain.body as unknown[]).length);
+    for (const row of detailed.body as { stops?: unknown[]; batchCount: number; ticketCount: number }[]) {
+      expect(Array.isArray(row.stops)).toBe(true);
+      // Hollow stops are dropped, so `stops.length <= batchCount` rather than equal — a batch whose
+      // every ticket was removed is not a stop anyone will make.
+      expect(row.stops!.length).toBeLessThanOrEqual(row.batchCount);
+      for (const stop of row.stops as { tickets: Record<string, unknown>[] }[]) {
+        for (const t of stop.tickets) {
+          // The provenance the chip grammar reads, including the server's own reading of it — the
+          // client never re-derives which add sources are the engine's (#283's rule).
+          expect(t).toHaveProperty('ticketId');
+          expect(typeof t.systemPlaced).toBe('boolean');
+        }
+      }
+    }
+  });
+
   it('forbids an SE from the ZM monitoring list', async () => {
     const token = await login('se.north@fsm.test');
     await request(app.getHttpServer())

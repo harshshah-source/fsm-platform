@@ -2,9 +2,9 @@
  * The Console's selection model (Scheduler Console §3.2).
  *
  * **Exactly one object is selected at a time**, and it is one of five kinds. The Inspector below the
- * board renders that one object and nothing else — selecting an engineer in the People rail and
- * selecting the same engineer's lane on the board are the *same* selection, because they are the same
- * object reached through different doors.
+ * board renders that one object and nothing else — selecting an engineer in the personnel column and
+ * selecting the same engineer through any other door are the *same* selection, because they are the
+ * same object. (Until #295 those really were two places: the People rail and the board's row label.)
  *
  * Selection is reflected in the URL so a manager can send a colleague the exact thing they are looking
  * at. The encoding is deliberately flat (`?sel=ticket:<id>`) rather than a JSON blob: it survives a

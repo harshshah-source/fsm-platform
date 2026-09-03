@@ -35,7 +35,7 @@ describe('Phase 4 — EngineerAdminService (SE Management CRUD + recommender int
   const csmScope: EngineerAdminScope = { role: 'CENTRAL_SERVICE_MANAGER', zoneId: null, userId: randomUUID() };
   let zmAScope: EngineerAdminScope;
   const seScope: EngineerAdminScope = { role: 'SERVICE_ENGINEER', zoneId: 0, userId: randomUUID() };
-  const actor: RequestActor = { userId: randomUUID(), role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null };
+  const actor: RequestActor = { userId: randomUUID(), role: 'OPERATIONS_HEAD', actedAsRole: null, actingZone: null, zoneId: null };
 
   const freshSe = (zoneId: bigint, over: Partial<Parameters<EngineerAdminService['createSe']>[0]> = {}) => {
     idSeq++;
@@ -132,6 +132,41 @@ describe('Phase 4 — EngineerAdminService (SE Management CRUD + recommender int
     const first = await svc.createSe(taken, ohScope, actor);
     createdSeIds.push(first.seId);
     await reject(svc.createSe({ ...freshSe(zoneA), email: taken.email }, ohScope, actor), 'SE_IDENTITY_TAKEN');
+  });
+
+  // ---- #267 home base ----
+
+  it('creates an SE with a blank home base (legal — recommender distance falls back to NOT_AVAILABLE)', async () => {
+    const row = await create(ohScope, zoneA);
+    expect(row.homeLat).toBeNull();
+    expect(row.homeLng).toBeNull();
+  });
+
+  it('creates an SE with a home base and rejects a half-set pair or an out-of-range coordinate', async () => {
+    const row = await create(ohScope, zoneA, { homeLat: 28.6139, homeLng: 77.209 });
+    expect(row.homeLat).toBe(28.6139);
+    expect(row.homeLng).toBe(77.209);
+
+    await reject(svc.createSe(freshSe(zoneA, { homeLat: 28.6139 }), ohScope, actor), 'HOME_BASE_INCOMPLETE');
+    await reject(svc.createSe(freshSe(zoneA, { homeLng: 77.209 }), ohScope, actor), 'HOME_BASE_INCOMPLETE');
+    await reject(svc.createSe(freshSe(zoneA, { homeLat: 200, homeLng: 77.209 }), ohScope, actor), 'INVALID_HOME_LAT');
+    await reject(svc.createSe(freshSe(zoneA, { homeLat: 28.6139, homeLng: -200 }), ohScope, actor), 'INVALID_HOME_LNG');
+  });
+
+  it('an SE-edit updates the home base, and clearing both coordinates is legal', async () => {
+    const se = await create(zmAScope, zoneA);
+    const withHome = await svc.updateSe(se.seId, { homeLat: 19.076, homeLng: 72.8777 }, zmAScope, actor);
+    expect(withHome.homeLat).toBe(19.076);
+    expect(withHome.homeLng).toBe(72.8777);
+
+    // Editing only lat while an lng is already on file is legal — the pair is still complete.
+    const movedLat = await svc.updateSe(se.seId, { homeLat: 19.1 }, zmAScope, actor);
+    expect(movedLat.homeLat).toBe(19.1);
+    expect(movedLat.homeLng).toBe(72.8777);
+
+    const cleared = await svc.updateSe(se.seId, { homeLat: null, homeLng: null }, zmAScope, actor);
+    expect(cleared.homeLat).toBeNull();
+    expect(cleared.homeLng).toBeNull();
   });
 
   // ---- edit + deactivate ----

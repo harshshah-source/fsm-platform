@@ -15,7 +15,9 @@ import {
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -99,10 +101,10 @@ export class VouchersController {
 
   @Get()
   @Roles(...REVIEW_ROLES)
-  queue(@CurrentUser() user: AccessTokenClaims, @Query('status') status?: string) {
+  queue(@CurrentScope() scope: ManagerScope, @Query('status') status?: string) {
     // Default = the ZM review queue. Operations Head also lists APPROVED for the Mark-PAID pass.
     const resolved = status === 'APPROVED' ? 'APPROVED' : 'ZONAL_MANAGER_REVIEW';
-    return this.vouchers.reviewQueue({ role: user.role, zoneId: user.zone_id }, resolved);
+    return this.vouchers.reviewQueue(scope, resolved);
   }
 
   @Get('export')
@@ -135,7 +137,7 @@ export class VouchersController {
   @HttpCode(200)
   @Roles(...REVIEW_ROLES)
   async review(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Param('id') id: string,
     @Body() body: { action?: string; notes?: string | null },
@@ -146,7 +148,7 @@ export class VouchersController {
     const out = await this.vouchers.review(
       id,
       { action: body.action as ReviewAction, notes: body.notes ?? null },
-      { role: user.role, zoneId: user.zone_id },
+      scope,
       actor,
     );
     if (out.result === 'NOT_FOUND') throw new NotFoundException({ code: 'VOUCHER_NOT_FOUND' });

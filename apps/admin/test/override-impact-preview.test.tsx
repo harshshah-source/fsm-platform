@@ -143,7 +143,7 @@ function renderPage() {
 async function openReassign(target = 'se-north-2') {
   const row = within(await screen.findByTestId('ticket-row-tkt-1'));
   await userEvent.click(row.getByRole('button', { name: /^reassign$/i }));
-  await userEvent.selectOptions(await row.findByLabelText(/target se/i), target);
+  await userEvent.selectOptions(await row.findByLabelText(/target engineer/i), target);
   return row;
 }
 
@@ -182,7 +182,7 @@ describe('#289 — over capacity is stated, never a barrier (#258 Q2 · #290)', 
 
     // #258 Q2 — manual overload is an administrative right. The preview reports it and stops there.
     await userEvent.type(row.getByLabelText(/reason/i), 'closer se');
-    expect(row.getByRole('button', { name: /confirm reassign/i })).toBeEnabled();
+    expect(row.getByTestId('action-confirm')).toBeEnabled();
   });
 });
 
@@ -290,7 +290,7 @@ describe('#289 — conflicts the confirm will gate on', () => {
     expect(conflicts).toHaveTextContent('tkt-1');
     // Reported, not enforced: both gates are confirm-and-reason on the write, never refusals.
     await userEvent.type(row.getByLabelText(/reason/i), 'vehicle back early');
-    expect(row.getByRole('button', { name: /confirm reassign/i })).toBeEnabled();
+    expect(row.getByTestId('action-confirm')).toBeEnabled();
   });
 
   it('names on-site work when the backend reports it', async () => {
@@ -310,7 +310,7 @@ describe('#289 — the preview is a function of the target', () => {
     const row = within(await screen.findByTestId('ticket-row-tkt-1'));
     await userEvent.click(row.getByRole('button', { name: /^reassign$/i }));
 
-    await row.findByLabelText(/target se/i);
+    await row.findByLabelText(/target engineer/i);
     expect(previewCalls()).toHaveLength(0);
     expect(screen.queryByTestId('override-impact')).toBeNull();
   });
@@ -342,7 +342,7 @@ describe('#289 — the preview is a function of the target', () => {
     await userEvent.type(row.getByLabelText(/reason/i), 'closer se');
     expect(previewCalls()).toHaveLength(1);
 
-    await userEvent.selectOptions(row.getByLabelText(/target se/i), 'se-north-3');
+    await userEvent.selectOptions(row.getByLabelText(/target engineer/i), 'se-north-3');
     await waitFor(() => expect(previewCalls()).toHaveLength(2));
     expect(JSON.parse(String((previewCalls()[1][1] as RequestInit).body))).toMatchObject({
       newSeId: 'se-north-3',
@@ -354,8 +354,8 @@ describe('#289 — the same preview on all three move panels', () => {
   it('projects a whole-batch Swap SE', async () => {
     renderPage();
     const stop = within((await screen.findAllByTestId('schedule-stop'))[0]);
-    await userEvent.click(stop.getByRole('button', { name: /swap se/i }));
-    await userEvent.selectOptions(await stop.findByLabelText(/target se/i), 'se-north-2');
+    await userEvent.click(stop.getByRole('button', { name: /swap engineer/i }));
+    await userEvent.selectOptions(await stop.findByLabelText(/target engineer/i), 'se-north-2');
 
     await screen.findByTestId('override-impact');
     expect(JSON.parse(String((previewCalls()[0][1] as RequestInit).body))).toEqual({
@@ -369,13 +369,13 @@ describe('#289 — the same preview on all three move panels', () => {
   it('projects a Split only once there is work to move, and re-projects when the selection changes', async () => {
     renderPage();
     const stop = within((await screen.findAllByTestId('schedule-stop'))[0]);
-    await userEvent.click(stop.getByRole('button', { name: /split batch/i }));
+    await userEvent.click(stop.getByRole('button', { name: /split stop/i }));
 
     // A target with no tickets ticked moves nothing — there is nothing to project.
-    await userEvent.selectOptions(await stop.findByLabelText(/target se/i), 'se-north-2');
+    await userEvent.selectOptions(await stop.findByLabelText(/target engineer/i), 'se-north-2');
     expect(previewCalls()).toHaveLength(0);
 
-    await userEvent.click(within(stop.getByTestId('ticket-row-tkt-2')).getByRole('checkbox'));
+    await userEvent.click(stop.getByLabelText('Move ticket tkt-2'));
     await screen.findByTestId('override-impact');
     expect(JSON.parse(String((previewCalls()[0][1] as RequestInit).body))).toEqual({
       action: 'SPLIT_BATCH',
@@ -385,7 +385,7 @@ describe('#289 — the same preview on all three move panels', () => {
     });
 
     // Which work moves is as much the projection's input as who it moves to.
-    await userEvent.click(within(stop.getByTestId('ticket-row-tkt-1')).getByRole('checkbox'));
+    await userEvent.click(stop.getByLabelText('Move ticket tkt-1'));
     await waitFor(() => expect(previewCalls()).toHaveLength(2));
     expect(JSON.parse(String((previewCalls()[1][1] as RequestInit).body))).toMatchObject({
       ticketIds: ['tkt-2', 'tkt-1'],
@@ -415,9 +415,9 @@ describe('#289 — the preview is an aid, never a gate (AC4)', () => {
     // thereby forbidden a move they are entitled to make.
     expect(screen.queryByTestId('override-impact')).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(row.getByRole('button', { name: /confirm reassign/i })).toBeEnabled();
+    expect(row.getByTestId('action-confirm')).toBeEnabled();
 
-    await userEvent.click(row.getByRole('button', { name: /confirm reassign/i }));
+    await userEvent.click(row.getByTestId('action-confirm'));
     await waitFor(() => expect(commitCalls()).toHaveLength(1));
   });
 
@@ -448,12 +448,12 @@ describe('#289 — the preview is an aid, never a gate (AC4)', () => {
     const row = await openReassign();
     await screen.findByTestId('override-impact');
     await userEvent.type(row.getByLabelText(/reason/i), 'closer se');
-    await userEvent.click(row.getByRole('button', { name: /confirm reassign/i }));
+    await userEvent.click(row.getByTestId('action-confirm'));
 
-    const banner = await screen.findByTestId('onsite-conflict-banner');
+    const banner = await row.findByTestId('action-conflict');
     expect(banner).toHaveTextContent('tkt-1');
     // The conflict is the commit's, and it is answered on the commit — the preview took no part in it.
-    await userEvent.click(within(banner).getByRole('button', { name: /confirm override/i }));
+    await userEvent.click(within(banner).getByTestId('action-conflict-confirm'));
     await waitFor(() =>
       expect(commitCalls().some(([, o]) => String((o as RequestInit).body).includes('"confirm":true'))).toBe(true),
     );

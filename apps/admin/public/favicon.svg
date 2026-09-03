@@ -1,6 +1,8 @@
+<!-- AutoPlant mark: the wordmark's lowercase "a" in brand red (--color-brand-logo #b91c1c),
+     reversed out on the tile so it reads on both light and dark browser tabs. The full
+     "autoplant Systems" lockup (components/shell/BrandLogo.tsx) is unreadable at 32px. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#0f172a"/>
-  <circle cx="16" cy="13" r="4.5" fill="none" stroke="#38bdf8" stroke-width="2.5"/>
-  <path d="M16 17.5V27" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
-  <path d="M10.5 24h11" stroke="#38bdf8" stroke-width="2.5" stroke-linecap="round"/>
+  <rect width="32" height="32" rx="7" fill="#b91c1c"/>
+  <text x="16" y="16" fill="#ffffff" font-family="Segoe UI, Helvetica, Arial, sans-serif"
+        font-size="22" font-weight="700" text-anchor="middle" dominant-baseline="central">a</text>
 </svg>

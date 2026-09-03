@@ -1,6 +1,6 @@
 import { Controller, Get, NotFoundException, Param, ParseUUIDPipe, Query, UseGuards } from '@nestjs/common';
-import { AccessTokenClaims } from '../auth/token.service';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -45,16 +45,16 @@ export class DispatchRunsController {
 
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims, @Query('limit') limit?: string): Promise<DispatchRunListRow[]> {
+  list(@CurrentScope() scope: ManagerScope, @Query('limit') limit?: string): Promise<DispatchRunListRow[]> {
     const parsed = Number(limit);
     const take = Number.isInteger(parsed) && parsed > 0 && parsed <= 100 ? parsed : 30;
-    return this.query.listRuns(this.scope(user), take);
+    return this.query.listRuns(scope, take);
   }
 
   @Get(':runId')
   @Roles(...MANAGER_ROLES)
-  async detail(@CurrentUser() user: AccessTokenClaims, @Param('runId') runId: string): Promise<DispatchRunDetail> {
-    const detail = await this.query.getRunDetail(parseId(runId), this.scope(user));
+  async detail(@CurrentScope() scope: ManagerScope, @Param('runId') runId: string): Promise<DispatchRunDetail> {
+    const detail = await this.query.getRunDetail(parseId(runId), scope);
     if (!detail) throw new NotFoundException({ code: 'DISPATCH_RUN_NOT_FOUND' });
     return detail;
   }
@@ -62,11 +62,11 @@ export class DispatchRunsController {
   @Get(':runId/zones/:zoneId')
   @Roles(...MANAGER_ROLES)
   async zoneDetail(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('runId') runId: string,
     @Param('zoneId') zoneId: string,
   ): Promise<DispatchZoneDetail> {
-    const detail = await this.query.getZoneDetail(parseId(runId), parseId(zoneId), this.scope(user));
+    const detail = await this.query.getZoneDetail(parseId(runId), parseId(zoneId), scope);
     if (!detail) throw new NotFoundException({ code: 'DISPATCH_RUN_ZONE_NOT_FOUND' });
     return detail;
   }
@@ -81,13 +81,13 @@ export class DispatchRunsController {
   @Get(':runId/decisions')
   @Roles(...MANAGER_ROLES)
   async decisions(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('runId') runId: string,
     @Query('zoneId') zoneId?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ): Promise<DispatchRunDecisions> {
-    const decisions = await this.query.getRunDecisions(parseId(runId), this.scope(user), {
+    const decisions = await this.query.getRunDecisions(parseId(runId), scope, {
       zoneId: zoneId != null && zoneId !== '' ? parseId(zoneId) : undefined,
       limit: toPositiveInt(limit),
       offset: toPositiveInt(offset),
@@ -99,18 +99,16 @@ export class DispatchRunsController {
   @Get(':runId/tickets/:ticketId/trace')
   @Roles(...MANAGER_ROLES)
   async ticketTrace(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('runId') runId: string,
     @Param('ticketId', new ParseUUIDPipe()) ticketId: string,
   ): Promise<DispatchTicketTrace> {
-    const trace = await this.query.getTicketTrace(parseId(runId), ticketId, this.scope(user));
+    const trace = await this.query.getTicketTrace(parseId(runId), ticketId, scope);
     if (!trace) throw new NotFoundException({ code: 'DISPATCH_TRACE_NOT_FOUND' });
     return trace;
   }
 
-  private scope(user: AccessTokenClaims): ZmScope {
-    return { role: user.role, zoneId: user.zone_id };
-  }
+
 }
 
 /** A numeric query value, or `undefined` — the service owns the bounds, so garbage simply falls back. */

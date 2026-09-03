@@ -1,13 +1,8 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the Warehouse Manager Shadow Use Queue (Issue 24). Unreconciled SHADOW_USE
 // inventory rows + Mark Reconciled / Mark Disputed. WAREHOUSE_MANAGER only — enforced server-side.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
-
-function authHeaders(): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 export interface ShadowUseRow {
   id: string;

@@ -124,6 +124,17 @@ export function DecisionTraceView({ data }: { data: DispatchTicketTrace }) {
           Dropped candidates: {dropEntries.map(([reason, n]) => `${reason} ×${n}`).join(' · ')}
         </p>
       )}
+
+      {/*
+        #270 — never render a stubbed feed as though it were a genuine pass. VEHICLE_ON_TRIP and
+        COMPONENT_UNAVAILABLE cannot fire until Issue 65/22's feeds exist, so this trace never claims
+        either was evaluated — distinct, muted, and separate from the real drop reasons above.
+      */}
+      {t.notEnforcedFilters && t.notEnforcedFilters.length > 0 && (
+        <p className="rounded-md bg-surface-sunken px-3 py-2 text-xs text-ink-muted" data-testid="not-enforced-filters">
+          Not enforced — data source pending: {t.notEnforcedFilters.join(', ')} (#65/#22)
+        </p>
+      )}
     </div>
   );
 }

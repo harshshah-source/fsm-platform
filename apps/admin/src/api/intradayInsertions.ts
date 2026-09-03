@@ -14,13 +14,13 @@ import {
   type DeferralOverride,
 } from './schedules';
 import type { CandidateRow } from './candidates';
+import { authHeaders } from './authHeaders';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
-function authHeaders(json = false): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+/** #341 — the shared builder plus this client's JSON content type. */
+function jsonHeaders(json = false): Record<string, string> {
+  const headers: Record<string, string> = authHeaders();
   if (json) headers['Content-Type'] = 'application/json';
   return headers;
 }
@@ -95,7 +95,7 @@ export async function apiManualAssign(
 ): Promise<ManualAssignOk> {
   const res = await fetch(`${BASE_URL}/intraday-insertions/${insertionId}/manual-assign`, {
     method: 'POST',
-    headers: authHeaders(true),
+    headers: jsonHeaders(true),
     body: JSON.stringify({ seId, ...deferral }),
   });
   if (res.status === 409) {

@@ -10,6 +10,7 @@ import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MasterSyncRunService, type EntityStat, type MasterSyncOutcome } from './master-sync-run.service';
 import {
+  identityProblem,
   isOperationalStatus,
   mapCommissioning,
   mapCompany,
@@ -18,7 +19,9 @@ import {
   mapTransporter,
   mapVehicle,
   plantInScope,
+  rejectKey,
   toBigIntOrNull,
+  vehicleIdentityProblem,
   type CommissioningFact,
   type CompanyDefaults,
   type MasterSyncScope,
@@ -210,6 +213,18 @@ export class MasterSyncService {
       const neededCompanyIds = new Set<string>();
       const plantPlans: ReturnType<typeof mapPlant>[] = [];
       for (const p of await this.source.readPlants()) {
+        // #324 (F13) — the identity guard comes FIRST, before any predicate reads the row's columns.
+        // `mapPlant` does `BigInt(String(row.plant_id).trim())` and `row.plant_name.trim()`, both of
+        // which throw on a null or non-numeric value, and nothing caught them: one malformed row failed
+        // the ENTIRE sync, every run, until the source was fixed by hand. Degrading per row is the
+        // posture #299 gave the telemetry side; the trade — a skipped row leaves its mirror stale
+        // rather than failing loudly — is only acceptable because the skip is counted here and
+        // enumerable from `master_sync_rejects`, which is what #300 surfaces.
+        const badPlant = identityProblem(p.plant_id, p.plant_name);
+        if (badPlant) {
+          skip('plants', rejectKey(p.plant_id), badPlant);
+          continue;
+        }
         if (!plantInScope(p, scope)) {
           skip('plants', String(p.plant_id), 'OUT_OF_SCOPE_STATUS'); // e.g. INACTIVE
           continue;
@@ -246,7 +261,14 @@ export class MasterSyncService {
       const companyIdBySource = new Map<string, bigint>();
       const companyPlans: ReturnType<typeof mapCompany>[] = [];
       for (const c of await this.source.readCompanies()) {
-        const key = BigInt(String(c.company_id).trim()).toString();
+        // #324 (F13) — and this cast was the finding's own example: `BigInt(String(...).trim())` on a
+        // dirty `company_id` threw here, outside any mapper, before the row was even considered.
+        const badCompany = identityProblem(c.company_id, c.company_name);
+        if (badCompany) {
+          skip('companies', rejectKey(c.company_id), badCompany);
+          continue;
+        }
+        const key = toBigIntOrNull(c.company_id)!.toString();
         if (!neededCompanyIds.has(key)) {
           skip('companies', key, 'NO_INSCOPE_PLANT'); // inert company — nothing in scope names it
           continue;
@@ -270,9 +292,19 @@ export class MasterSyncService {
 
       // 3. Transporters — best-effort company FK, keyed by source_transporter_id.
       const transporterIdBySource = new Map<string, bigint>();
-      const transporterPlans = (await this.source.readTransporters()).map((t) =>
-        mapTransporter(t, { companyId: companyIdBySource.get(String(toBigIntOrNull(t.company_id))) ?? null }),
-      );
+      // #324 (F13) — a `map()` had no place to put a skip, which is part of why this stage had no
+      // degradation at all. A loop does.
+      const transporterPlans: ReturnType<typeof mapTransporter>[] = [];
+      for (const t of await this.source.readTransporters()) {
+        const badTransporter = identityProblem(t.transporter_id, t.transporter_name);
+        if (badTransporter) {
+          skip('transporters', rejectKey(t.transporter_id), badTransporter);
+          continue;
+        }
+        transporterPlans.push(
+          mapTransporter(t, { companyId: companyIdBySource.get(String(toBigIntOrNull(t.company_id))) ?? null }),
+        );
+      }
       const existingTransporters = await this.existingKeys(
         () =>
           this.prisma.transporter.findMany({
@@ -304,7 +336,21 @@ export class MasterSyncService {
       //    would take `vehicles` ~21k → ~48k and change the meaning of every dashboard total.
       //    A vehicle FSM ALREADY knows is always upserted regardless of status, so its `status` mirror
       //    finally tells the truth (that update is exactly what the departure pass keys on).
-      const vehicleMasters = await this.source.readVehicleMasters();
+      //    #324 (F13) — the identity filter runs ONCE here rather than at each of the three loops
+      //    below, because every one of them reaches for `v.vehicle_no.trim()` and would throw on the
+      //    same row. `vehicle_no` IS the mirror's key (`where: { vehicleNo }`), so a blank one has no
+      //    row to be. The raw read is kept for `devices.observed`, which is defined as the source
+      //    catalog size "regardless of mirror outcome" — a dirty vehicle's fitted device still exists
+      //    at the source, and the observed-vs-mirrored gap is exactly what that counter is for. Its
+      //    device is not ALSO counted as a device skip: one bad row is one named event, and the
+      //    vehicle-level reject carries the key an operator needs.
+      const vehicleMastersRaw = await this.source.readVehicleMasters();
+      const vehicleMasters = vehicleMastersRaw.filter((v) => {
+        const badVehicle = vehicleIdentityProblem(v.vehicle_no);
+        if (!badVehicle) return true;
+        skip('vehicles', rejectKey(v.vehicle_no), badVehicle);
+        return false;
+      });
       const existingVehicles = await this.existingKeys(
         () => this.prisma.vehicle.findMany({ select: { vehicleNo: true } }),
         (r) => r.vehicleNo,
@@ -344,7 +390,7 @@ export class MasterSyncService {
       //    returned, regardless of deployment status / plant scope / mirror outcome. This is the
       //    dashboard "Total Devices" number — the operational fleet FSM actually mirrors is a subset.
       const sourceDeviceIds = new Set<string>();
-      for (const v of vehicleMasters) {
+      for (const v of vehicleMastersRaw) {
         const id = String(v.device_id ?? '').trim();
         if (id !== '') sourceDeviceIds.add(id);
       }

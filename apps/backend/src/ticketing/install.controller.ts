@@ -13,7 +13,9 @@ import {
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
@@ -130,14 +132,14 @@ export class InstallController {
   @Post()
   @Roles(...CREATOR_ROLES)
   async createSingle(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: SingleBody,
   ): Promise<InstallTicketView> {
     const row = parseSingleBody(body);
     const out = await this.install.createSingle(
       row,
-      { role: user.role, zoneId: user.zone_id },
+      scope,
       actor,
     );
     if (out.result === 'ERROR') throwForRowError(out.code);
@@ -148,14 +150,14 @@ export class InstallController {
   @HttpCode(201)
   @Roles(...CREATOR_ROLES)
   async upload(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: UploadBody,
   ): Promise<{ created: string[]; batchId: string }> {
     if (typeof body.csv !== 'string' || body.csv.trim() === '') {
       throw new BadRequestException({ code: 'CSV_REQUIRED' });
     }
-    const out = await this.install.uploadCsv(body.csv, { role: user.role, zoneId: user.zone_id }, actor);
+    const out = await this.install.uploadCsv(body.csv, scope, actor);
     if (out.result === 'TOO_MANY_ROWS') {
       throw new BadRequestException({ code: 'CSV_TOO_MANY_ROWS', maxRows: out.maxRows, rows: out.rows });
     }
@@ -171,6 +173,7 @@ export class InstallController {
   @Roles(...SCHEDULER_ROLES)
   async schedule(
     @Param('ticketId') ticketId: string,
+    @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
     @Body() body: ScheduleBody,
@@ -179,8 +182,8 @@ export class InstallController {
     if (!seId) throw new BadRequestException({ code: 'MISSING_REQUIRED_FIELD', field: 'seId' });
     return unwrap(
       await this.lifecycle.scheduleInstall(ticketId, seId, actor, {
-        role: user.role,
-        zoneId: user.zone_id,
+        role: scope.role,
+        zoneId: scope.zoneId,
         userId: user.user_id,
       }),
     );
@@ -217,11 +220,12 @@ export class InstallController {
   @Roles(...INSTALL_READER_ROLES)
   async getOne(
     @Param('ticketId') ticketId: string,
+    @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
   ): Promise<InstallViewDto> {
     const view = await this.lifecycle.getInstallView(ticketId, {
-      role: user.role,
-      zoneId: user.zone_id,
+      role: scope.role,
+      zoneId: scope.zoneId,
       userId: user.user_id,
     });
     if (!view) throw new NotFoundException({ code: 'NOT_FOUND' });

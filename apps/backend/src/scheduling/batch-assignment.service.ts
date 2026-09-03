@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { isNotDeferredOn, notDeferredOn } from '../ticketing/deferral';
 import { RETIRED_RECOMMENDATION_STATUS } from '../recommender/recommendation-status';
 import {
   DAY_PLAN_NOTIFIER,
@@ -7,11 +8,13 @@ import {
   LoggingDayPlanNotifier,
 } from './day-plan-notifier';
 import { ADD_SOURCES } from './add-source';
+import { committedDayLoad } from './committed-day-load';
 import { resolveCoverageForPlants } from './coverage-at-assign';
 import { drainRows, queueDayPlanDispatched } from './day-plan-notification-outbox';
-import { ZONE_LOCK_TIMEOUT_MS, dispatchZoneLockKey } from './dispatch-zone-lock';
+import { ZONE_LOCK_TIMEOUT_MS, dispatchEngineerLockKey, dispatchZoneLockKey } from './dispatch-zone-lock';
+import { uniqueViolationModel } from '../common/unique-violation';
 import { type SeSkip, describeSeSkip } from './se-skip';
-import { UNIQUE_ACTIVE_SCHEDULE_INDEX_STATUS, liveScheduleFilter } from './schedule-status';
+import { UNIQUE_ACTIVE_SCHEDULE_INDEX_STATUS, liveBatchFilter, liveScheduleFilter } from './schedule-status';
 
 export interface DispatchOptions {
   /** Day Plan coverage start (Schedule Cadence: daily → dateFrom === dateTo). */
@@ -20,9 +23,42 @@ export interface DispatchOptions {
   now?: Date;
   /** Dispatch-run ledger id (transparency feature) — stamped on created schedules, observe-only. */
   runId?: bigint;
+  /**
+   * #305 — say the run is still alive, once per SE.
+   *
+   * The reaper judges a run by the freshness of its beat (#261), and the beat used to be stamped only
+   * per ZONE — so a run's silence was bounded by its slowest single zone, and a big zone exceeded the
+   * threshold while healthy: its live run was marked ABORTED, its claim freed, and the #286 collector
+   * could start a second dispatch of a zone whose first was still writing. Per-SE is the right
+   * granularity because the per-SE transaction is already the unit this loop is bounded by.
+   *
+   * Called strictly BETWEEN transactions, never inside one — a beat must not extend or join a data
+   * transaction (the issue's boundary), and a beat inside a transaction that later rolls back would
+   * not have happened at all.
+   */
+  onProgress?: () => Promise<void>;
 }
 
 export type { SeSkip };
+
+/**
+ * #306 — why the engine may not place a claimed ticket, or `null` when it may.
+ *
+ * The order is the order an operator would want it named in: a closed ticket is a different problem
+ * from a held one. `notDeferredOn` semantics exactly — **not** `deferredUntil === null` — so a ticket
+ * dispatched ON its return day still passes and still has its spent deferral cleared, which is the
+ * behaviour `:283` has always had and the one regression risk the issue calls out.
+ */
+function ineligibleReason(
+  ticket: { status: string; assignment_state: string; deferred_until: Date | null },
+  day: Date,
+  alreadyAssigned: boolean,
+): TicketSkip['reason'] | null {
+  if (ticket.status !== 'OPEN') return 'NOT_OPEN';
+  if (ticket.assignment_state !== 'UNASSIGNED' || alreadyAssigned) return 'ALREADY_ASSIGNED';
+  if (!isNotDeferredOn(ticket.deferred_until, day)) return 'DEFERRED';
+  return null;
+}
 
 export interface DispatchSummary {
   schedules: number;
@@ -42,6 +78,21 @@ export interface DispatchSummary {
   orphansCleared?: number;
   /** #262 — per-SE failures, contained. Absent when every SE with work committed. */
   seSkips?: SeSkip[];
+  /**
+   * #306 — tickets the engine declined to place, and why. Absent when it placed everything it claimed.
+   *
+   * A **counted** skip, never a silent override: holds win over the engine (#251's contract — a hold
+   * is "a date the existing `notDeferredOn` predicate already respects" — and every manual door needs
+   * confirm+reason to break one, #249). A run that quietly dispatched a held ticket and one that had
+   * nothing held must not report the same thing.
+   */
+  ticketSkips?: TicketSkip[];
+}
+
+/** Why one ticket was claimed but not placed (#306). */
+export interface TicketSkip {
+  ticketId: string;
+  reason: 'NOT_OPEN' | 'ALREADY_ASSIGNED' | 'DEFERRED' | 'CHANGED_DURING_DISPATCH' | 'CAPACITY_REACHED';
 }
 
 /**
@@ -92,6 +143,8 @@ export class BatchAssignmentService {
     // I/O has no place inside a DB transaction.
     const outboxIds: bigint[] = [];
     const seSkips: SeSkip[] = [];
+    /** #306 — tickets the engine claimed but declined to place, across every SE in this zone. */
+    const ticketSkips: TicketSkip[] = [];
     let schedules = 0;
     let batches = 0;
     let tickets = 0;
@@ -103,16 +156,47 @@ export class BatchAssignmentService {
     if (seIds.length === 0) return { schedules: 0, batches: 0, tickets: 0 };
 
     for (const seId of seIds) {
-      try {
-        const out = await this.dispatchForSe(zoneId, seId, opts, now, outboxIds);
-        schedules += out.schedules;
-        batches += out.batches;
-        tickets += out.tickets;
-      } catch (e) {
-        const skip = describeSeSkip(seId, e);
-        seSkips.push(skip);
-        this.logger.warn(`dispatch for zone ${zoneId}, SE ${seId} skipped — ${skip.reason}`);
+      // #307 — at most one retry, and only for the ticket collision.
+      //
+      // A manager assigning one ticket inside this SE's transaction window trips the
+      // `batch_assignment_tickets` partial unique, and a P2002 aborts its interactive transaction
+      // (#265) — so the SE lost their WHOLE plan and `clearFailedSeOrphans` retired every SUGGESTED
+      // row they had, over one ticket somebody else took. Recovery meant a human noticing the zone
+      // card and pressing Run again.
+      //
+      // Retrying works without any new coordination because the idempotency re-read inside
+      // `dispatchForSe` runs in the NEW transaction: the collided ticket is now in `alreadyAssigned`,
+      // folds out as a named `ALREADY_ASSIGNED` skip, and the rest of the plan dispatches. Blocking the
+      // manual doors instead was rejected in the issue — it would make an operator wait on the engine,
+      // which inverts #258's posture.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const out = await this.dispatchForSe(zoneId, seId, opts, now, outboxIds);
+          schedules += out.schedules;
+          batches += out.batches;
+          tickets += out.tickets;
+          ticketSkips.push(...out.ticketSkips);
+          break;
+        } catch (e) {
+          // Scoped to the discriminated ticket unique. A `WorkSchedule` conflict keeps today's
+          // semantics (retrying it would collide identically), and a lock timeout or a generic
+          // database error must never loop.
+          if (attempt === 0 && uniqueViolationModel(e) === 'BatchAssignmentTicket') {
+            this.logger.log(
+              `dispatch for zone ${zoneId}, SE ${seId}: a ticket was assigned mid-transaction — ` +
+                `retrying this SE once so the collision costs one ticket, not the plan`,
+            );
+            continue;
+          }
+          const skip = describeSeSkip(seId, e);
+          seSkips.push(skip);
+          this.logger.warn(`dispatch for zone ${zoneId}, SE ${seId} skipped — ${skip.reason}`);
+          break;
+        }
       }
+      // #305 — outside the per-SE transaction, and after it either way: a skipped SE still took time,
+      // so the run is just as alive and just as much in need of saying so.
+      if (opts.onProgress) await opts.onProgress();
     }
 
     // #126/#262 — leftover SUGGESTED rows belonging to the SEs whose transaction failed, cleared so a
@@ -132,6 +216,7 @@ export class BatchAssignmentService {
       batches,
       tickets,
       ...(seSkips.length > 0 ? { seSkips } : {}),
+      ...(ticketSkips.length > 0 ? { ticketSkips } : {}),
       ...(orphansCleared > 0 ? { orphansCleared } : {}),
     };
   }
@@ -150,8 +235,11 @@ export class BatchAssignmentService {
     opts: DispatchOptions,
     now: Date,
     outboxIds: bigint[],
-  ): Promise<{ schedules: number; batches: number; tickets: number }> {
-    const empty = { schedules: 0, batches: 0, tickets: 0 };
+  ): Promise<{ schedules: number; batches: number; tickets: number; ticketSkips: TicketSkip[] }> {
+    // #306 — collected inside the transaction but reported whatever it commits: a skip is a fact about
+    // work the run declined, and a rolled-back SE reports through `seSkips` instead.
+    const ticketSkips: TicketSkip[] = [];
+    const empty = { schedules: 0, batches: 0, tickets: 0, ticketSkips };
     return this.prisma.$transaction(async (tx) => {
       // #262 item 2 — the zone advisory lock is now taken per SE and **blocking**, not `try`. Its job
       // changed: run-vs-run exclusion is #259's zone claim, so what is left is exclusion against
@@ -160,13 +248,33 @@ export class BatchAssignmentService {
       // `lock_timeout` bounds it and a timeout costs this SE only.
       await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '${this.zoneLockTimeoutMs}ms'`);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dispatchZoneLockKey(zoneId)}))`;
+      // #304 — and the engineer, across zones. `daily_capacity` caps the whole day but zone claims
+      // serialize per zone, so two runs in different zones could each fill the same floating SE to
+      // capacity. Ordered after the zone lock in every transaction that takes both, and no transaction
+      // ever asks for a zone lock while holding an engineer lock — so contention on one engineer is a
+      // queue, never a cycle, and every other engineer in both zones proceeds in parallel.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dispatchEngineerLockKey(seId)}))`;
 
       // Claim this SE's rows. SKIP LOCKED is the point: a concurrent claimer's rows become invisible
       // rather than a P2002 nobody can recover from in place (a P2002 aborts its transaction, #265).
       // `FOR UPDATE OF r` names the recommendations alone — the joined ticket and plant rows are read
       // for their columns and must not be locked, or an unrelated ticket write would block on us.
-      const claimed = await tx.$queryRaw<Array<{ recommendation_id: bigint; ticket_id: string; plant_id: bigint }>>`
-        SELECT r."recommendation_id", r."ticket_id", t."plant_id"
+      // #306 — the ticket's liveness columns come back with the claim so an ineligible ticket can be
+      // named rather than merely dropped. They are READ, not locked (`FOR UPDATE OF r` still names the
+      // recommendations alone), so this is a pre-filter and not the guarantee — the guard on the ticket
+      // write below is what actually holds when a hold lands after this read.
+      const claimed = await tx.$queryRaw<
+        Array<{
+          recommendation_id: bigint;
+          ticket_id: string;
+          plant_id: bigint;
+          status: string;
+          assignment_state: string;
+          deferred_until: Date | null;
+        }>
+      >`
+        SELECT r."recommendation_id", r."ticket_id", t."plant_id",
+               t."status", t."assignment_state", t."deferred_until"
           FROM "recommendations" r
           JOIN "tickets" t ON t."ticket_id" = r."ticket_id"
           JOIN "plants" p ON p."plant_id" = t."plant_id"
@@ -187,7 +295,46 @@ export class BatchAssignmentService {
           })
         ).map((t) => t.ticketId),
       );
-      const fresh = claimed.filter((r) => !alreadyAssigned.has(r.ticket_id));
+
+      // #306 (RC-7) — the recommender wrote SUGGESTED minutes ago; a ZM has had that whole window to
+      // place a hold, and the operators using the preview screen do it in exactly that window. Skip
+      // here rather than at the claim's WHERE **on purpose**: an unclaimed row stays SUGGESTED for
+      // ever (only `clearFailedSeOrphans` sweeps them, and only for SEs whose transaction threw), so
+      // an excluded ticket would leave the poisoned-ledger residue #126 exists to prevent. Claimed and
+      // skipped, the row is retired with its siblings at the end of this transaction.
+      const eligible = claimed.filter((r) => {
+        const reason = ineligibleReason(r, opts.dateFrom, alreadyAssigned.has(r.ticket_id));
+        if (reason === null) return true;
+        ticketSkips.push({ ticketId: r.ticket_id, reason });
+        return false;
+      });
+      // #304 (RC-4) — commit-time capacity, read inside this transaction and therefore behind the
+      // engineer lock above. The recommender seeds its counter from committed rows once per zone-run
+      // and increments only its own wins, so its optimism is fine — but nothing enforced it at the one
+      // place that can: the moment of commit. Two zone runs offering the same floating SE five stops
+      // each used to commit ten.
+      //
+      // `committedDayLoad` is THE definition of "committed" (#269) and is reused, not respelled — the
+      // number a manager reads beside `daily_capacity` has to be the number the engine enforces.
+      // Counted BEFORE this transaction writes anything, so it cannot count its own rows.
+      const engineer = await tx.engineerMaster.findUnique({
+        where: { engineerId: seId },
+        select: { dailyCapacity: true },
+      });
+      const capacity = engineer?.dailyCapacity ?? null;
+      let fresh = eligible;
+      if (capacity !== null) {
+        const committed = (await committedDayLoad(tx, opts.dateFrom, { seIds: [seId] })).get(seId) ?? 0;
+        const remaining = Math.max(0, capacity - committed);
+        if (eligible.length > remaining) {
+          // The claim is ordered by `processing_rank`, so the prefix that fits is the engine's own
+          // priority order — the surplus dropped is the work it ranked last, not an arbitrary slice.
+          for (const r of eligible.slice(remaining)) {
+            ticketSkips.push({ ticketId: r.ticket_id, reason: 'CAPACITY_REACHED' });
+          }
+          fresh = eligible.slice(0, remaining);
+        }
+      }
 
       // plant_id → ticket_ids, insertion order = canonical processing order.
       const byPlant = new Map<bigint, string[]>();
@@ -202,6 +349,72 @@ export class BatchAssignmentService {
       let tickets = 0;
 
       if (byPlant.size > 0) {
+        // #283 — the tier this SE covered each plant in, resolved once per plant for the whole
+        // transaction. The engine chose within a tier (#258 Q1) but the recommendation row it reads
+        // here does not carry which one, so it is resolved rather than threaded down from the
+        // recommender — one indexed lookup per stop, not per ticket.
+        const coverageByPlant = await resolveCoverageForPlants(tx, seId, [...byPlant.keys()]);
+
+        // #334 — THE TICKET ROWS COME FIRST, before this transaction touches `work_schedules`.
+        //
+        // #306 established that the ticket write precedes the *batch* row; #327 then gave the manual
+        // doors one acquisition order across all four tables, `tickets → work_schedules →
+        // plant_batch_assignments → batch_assignment_tickets`, and named this run as the writer still
+        // outside it: it took the schedule first and the tickets second. That inverted pair is a cycle
+        // with any manual assign, which locks the ticket row and then reaches for the same SE's
+        // schedule — the run holds the schedule and waits for the ticket, the assign holds the ticket
+        // and waits on the schedule's partial unique. Narrow (it needs the SE's *first* schedule of the
+        // day to be created by both at once) and mapped rather than fatal since #327 — but a mapped
+        // deadlock is still an operator repeating a click, and on this side of it a whole day plan.
+        //
+        // **The run moved, not the manual doors** — the one decision #334 asks for, recorded here and
+        // in `override.service.ts`'s order note. The doors' order is the one #327 measured and chose
+        // for reasons that still hold (the ticket row is what every path contends on; realigning the
+        // lane would unwind #265's `SKIP LOCKED` re-verify), so the file that must change is the one
+        // that never stated an order at all. It also costs this run nothing: the schedule is only
+        // needed once there is something to hang off it.
+        //
+        // Nothing else moves. The per-plant guard, its skip vocabulary, and the claim/capacity reads
+        // above are untouched; only the point at which the schedule is resolved comes later.
+        const placedByPlant: [bigint, string[]][] = [];
+        for (const [plantId, ticketIds] of this.orderPlantStops(byPlant)) {
+          // #306 (RC-7) — the ticket write is guarded.
+          //
+          // It used to be an unconditional update by primary key, after the batch row was already
+          // inserted. Two consequences, both real: a hold placed after the claim read was erased
+          // (`deferredUntil: null`, no predicate) leaving an audit trail showing a hold placed and
+          // nothing overriding it, and a ticket CLOSED in the same window still landed on the day plan
+          // until the 04:00 closure recycled it. Putting the guard in the WHERE lets the database pick
+          // the winner; doing it before the batch row means a loser leaves no row behind to explain.
+          //
+          // `notDeferredOn(day)` and not `deferredUntil: null`: a ticket dispatched ON its return day
+          // is legitimate and still has its spent deferral cleared, exactly as before.
+          const placed: string[] = [];
+          for (const ticketId of ticketIds) {
+            const { count } = await tx.ticket.updateMany({
+              where: {
+                ticketId,
+                status: 'OPEN',
+                assignmentState: 'UNASSIGNED',
+                ...notDeferredOn(opts.dateFrom),
+              },
+              // Committed work leaves the Shared Pool (Issue 12): the dispatched ticket is now a Formal
+              // Assignment, not pickable secondary work (schema D6, LLD shared-pool partial index).
+              // #146 — clear any spent deferral as the ticket is re-dispatched. The batch row's
+              // `deferred_to_date` is the durable record of what the ZM did (scorecard AC#7).
+              data: { assignmentState: 'FORMALLY_ASSIGNED', deferredUntil: null },
+            });
+            if (count === 0) {
+              ticketSkips.push({ ticketId, reason: 'CHANGED_DURING_DISPATCH' });
+              continue;
+            }
+            placed.push(ticketId);
+          }
+          // Every ticket for this plant lost its guard — no stop, and no empty batch to explain.
+          if (placed.length === 0) continue;
+          placedByPlant.push([plantId, placed]);
+        }
+
         // APPEND, don't collide: reuse the SE's existing live (se, zone, day) schedule — an earlier
         // dispatch run today, or a ZM_MANUAL plan — instead of creating a second one. New stops
         // continue after the schedule's current last stop; a fresh schedule is created only when the
@@ -211,6 +424,10 @@ export class BatchAssignmentService {
         // partial on `status = 'ACTIVE'`, so once a ZM override flipped the schedule this lookup
         // missed it, the create succeeded unopposed, and the SE ended the day with two day-plans.
         // Oldest-first so an SE carrying legacy duplicates keeps the plan they are already executing.
+        //
+        // #334 — resolved on `byPlant`, deliberately NOT on `placedByPlant`. An SE whose every claimed
+        // ticket lost its guard still ends the transaction with a schedule and a `schedules` of 1,
+        // exactly as before the reorder: this slice changes when the row is taken, not whether it is.
         const existing = await tx.workSchedule.findFirst({
           where: { seId, zoneId, dateFrom: opts.dateFrom, ...liveScheduleFilter() },
           orderBy: { scheduleId: 'asc' },
@@ -242,12 +459,7 @@ export class BatchAssignmentService {
           _max: { stopSequence: true },
         });
         let stopSequence = lastStop._max.stopSequence ?? 0;
-        // #283 — the tier this SE covered each plant in, resolved once per plant for the whole
-        // transaction. The engine chose within a tier (#258 Q1) but the recommendation row it reads
-        // here does not carry which one, so it is resolved rather than threaded down from the
-        // recommender — one indexed lookup per stop, not per ticket.
-        const coverageByPlant = await resolveCoverageForPlants(tx, seId, [...byPlant.keys()]);
-        for (const [plantId, ticketIds] of this.orderPlantStops(byPlant)) {
+        for (const [plantId, placed] of placedByPlant) {
           stopSequence++;
           // A fresh batch per run (stamped with run_id) even when the plant already has a stop from an
           // earlier run — keeps run-attribution clean and sidesteps mutating another run's batch.
@@ -257,7 +469,7 @@ export class BatchAssignmentService {
           batches++;
 
           let sortOrder = 0;
-          for (const ticketId of ticketIds) {
+          for (const ticketId of placed) {
             sortOrder++;
             await tx.batchAssignmentTicket.create({
               data: {
@@ -274,22 +486,39 @@ export class BatchAssignmentService {
                 createdAt: now,
               },
             });
-            // Committed work leaves the Shared Pool (Issue 12): the dispatched ticket is now a Formal
-            // Assignment, not pickable secondary work (schema D6, LLD shared-pool partial index).
-            await tx.ticket.update({
-              where: { ticketId },
-              // #146 — clear any spent deferral as the ticket is re-dispatched. The batch row's
-              // `deferred_to_date` is the durable record of what the ZM did (scorecard AC#7).
-              data: { assignmentState: 'FORMALLY_ASSIGNED', deferredUntil: null },
-            });
             tickets++;
           }
         }
 
+        // #321 (CB-8) — both numbers on ONE basis, and the basis is the SE's whole plan.
+        //
+        // They used to be mixed: `stops` was the running `stopSequence`, which continues from the
+        // plan's existing maximum on an append, while `tickets` counted only the rows this run wrote.
+        // An SE with three stops receiving one more stop of two tickets was told `stops=4, tickets=2` —
+        // a pair describing no state the plan had ever been in. The two are only ever read together
+        // (`SpineDayPlanNotifier` puts both in one notification's metadata), so mixing them is not a
+        // rounding difference, it is a sentence that is false either way you read it.
+        //
+        // **Cumulative, and the argument is not stylistic.** The notification's body is "Your Day Plan
+        // is live. Tap to start.", and the tap opens the SE's day plan — so these counts are checkable
+        // against the screen they send the SE to. An incremental pair would be internally consistent
+        // and still contradicted by Home the moment the SE looked. They are therefore read back the way
+        // `DayPlanQueryService` reads them, through the shared `liveBatchFilter`, rather than derived
+        // from this transaction's own bookkeeping: a stop whose every ticket has been removed is not on
+        // the plan (#179 slice 3) and must not be counted here either.
+        //
+        // On a fresh plan the two bases coincide, so nothing about a first dispatch changes.
+        const planStops = await tx.plantBatchAssignment.count({
+          where: { scheduleId, ...liveBatchFilter(), tickets: { some: { removedAt: null } } },
+        });
+        const planTickets = await tx.batchAssignmentTicket.count({
+          where: { removedAt: null, batch: { scheduleId, ...liveBatchFilter() } },
+        });
+
         // #264 — written INSIDE this SE's own transaction: the intent commits with the plan or not at
         // all. A rollback after this point (e.g. the P2002 guard elsewhere in this class never applies
         // here, but a future failure would) takes the outbox row with it — no ghost "plan is live".
-        const outboxId = await queueDayPlanDispatched(tx, { seId, scheduleId, zoneId, stops: stopSequence, tickets });
+        const outboxId = await queueDayPlanDispatched(tx, { seId, scheduleId, zoneId, stops: planStops, tickets: planTickets });
         outboxIds.push(outboxId);
       }
 
@@ -301,7 +530,7 @@ export class BatchAssignmentService {
         data: { status: 'DISPATCHED' },
       });
 
-      return { schedules, batches, tickets };
+      return { schedules, batches, tickets, ticketSkips };
     });
   }
 

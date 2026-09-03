@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -41,8 +43,8 @@ export class CrossZoneController {
 
   @Get()
   @Roles(...ALL_MANAGERS)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<CrossZoneEscalationRow[]> {
-    return this.svc.listForScope({ role: user.role, zoneId: user.zone_id });
+  list(@CurrentScope() scope: ManagerScope): Promise<CrossZoneEscalationRow[]> {
+    return this.svc.listForScope(scope);
   }
 
   @Post('sweep')

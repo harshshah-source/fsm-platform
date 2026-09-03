@@ -1,13 +1,34 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Optional } from '@nestjs/common';
 import { istDate } from '../common/ist-day';
 import { currentAssigneesFor } from '../intraday/current-assignee';
 import { PrismaService } from '../prisma/prisma.service';
+import { readAgingThresholdHours } from '../settings/aging-threshold';
+import { CHRONIC_FAILURE_CYCLE_THRESHOLD } from '../ticketing/chronic-device';
 import { isSystemAddSource } from './add-source';
 import { committedDayPlan } from './committed-day-load';
+import { REMOVAL_REASONS } from './removal-reason';
 import { liveScheduleFilter } from './schedule-status';
+import {
+  NoConflictSoftStatePort,
+  SOFT_STATE_CONFLICT,
+  type SoftStateConflictPort,
+} from './soft-state-conflict';
+import {
+  deriveTicketActionStatus,
+  hoursSinceAssignment,
+  type TicketActionStatus,
+} from './ticket-action-status';
 import type { ZmScope } from './zm-schedule-query.service';
 
-/** A ticket as it sits on a stop — persisted order and persisted provenance, nothing derived. */
+/**
+ * A ticket as it sits on a stop — persisted order, persisted provenance, and (since #295) the
+ * physical identity a dispatcher actually reasons about.
+ *
+ * The identity fields are a **read-model enrichment, not a second source**: they come from the joins
+ * `ticket-query.service.ts` has always used, batched once over the whole payload. Nothing here is
+ * decided; the one derived field, `actionStatus`, is a pure function of two facts and one published
+ * threshold, so the client renders a verdict rather than recomputing one.
+ */
 export interface TodayTicket {
   ticketId: string;
   sortOrder: number;
@@ -30,6 +51,71 @@ export interface TodayTicket {
    * ticket resolves to no device.
    */
   failureCycles: number | null;
+
+  // ── #295 — the work card's physical identity ────────────────────────────────────────────────────
+  /** The unit in the field. The label a dispatcher recognises — never the key; `ticketId` is that. */
+  deviceId: string | null;
+  /** From `vehicles.vehicle_no` via the ticket's vehicle. Null when the ticket resolves to none. */
+  vehicleNo: string | null;
+  /** `company_master.name`. The tier already travelled; the name is what an operator says out loud. */
+  companyName: string | null;
+  /** `transporters.name`, reached through the vehicle. Null when either link is absent. */
+  transporterName: string | null;
+  /**
+   * `device_states.inactivity_hours` — how long the *device* has been silent, as a number.
+   *
+   * **Null is "never recomputed", and is not zero.** A state row that has never been through
+   * `DeviceStateService.recompute` knows nothing about this device's silence, and rendering that as
+   * `0h` would tell a dispatcher the unit had just reported in. Precedent for the same care:
+   * `assignable-work-query.service.ts:98-105`.
+   *
+   * **This is not the aging clock.** It is displayed, and it is the reason the ticket exists — but
+   * `actionStatus` is measured from `assignedAt`. See `ticket-action-status.ts`.
+   */
+  inactivityHours: number | null;
+  /** When this ticket became this engineer's — `batch_assignment_tickets.created_at`, ISO. */
+  assignedAt: string;
+  /**
+   * This assignment has been worked. True on either proof, and both are needed:
+   *
+   * - an **unresolved `TROUBLESHOOT_STARTED`** — the engineer is on it now; or
+   * - a **troubleshooting report filed since this assignment began** — they were on it and finished.
+   *
+   * Not ON_SITE (arriving is not starting), and emphatically not "it has been assigned". The second
+   * clause exists because submitting a report *resolves* the soft state while the work stays on the
+   * plan until verification — see `submittedInWindow`.
+   */
+  troubleshootingStarted: boolean;
+  /** The dispatcher's one-word verdict. Derived here so no client owns the rule. */
+  actionStatus: TicketActionStatus;
+}
+
+/**
+ * #295 — one visible card's physical identity on a **non-today** column.
+ *
+ * The `TodayTicket` fields that a day-scoped source can honestly answer, and not one more: no
+ * provenance (the column's own read carries that), no SLA bucket, and above all no `actionStatus`.
+ */
+export interface CardSummary {
+  ticketId: string;
+  deviceId: string | null;
+  vehicleNo: string | null;
+  companyName: string | null;
+  transporterName: string | null;
+  inactivityHours: number | null;
+}
+
+/** The cap on one `cardSummaries` request — a bounded id list, because it becomes a bounded query. */
+export const CARD_SUMMARY_LIMIT = 500;
+
+/** What one batched identity pass resolves per ticket, before it is spread onto a card (#295). */
+interface TicketIdentity {
+  deviceId: string | null;
+  slaBucket: string | null;
+  inactivityHours: number | null;
+  companyName: string | null;
+  vehicleNo: string | null;
+  transporterName: string | null;
 }
 
 /** One plant stop in the engineer's ordered day. */
@@ -100,6 +186,8 @@ export interface TodayUnassignable {
   plantId: string | null;
   plantName: string | null;
   poolEmptyReason: string | null;
+  /** #295 — the chronic count, which the client has always declared and never received. */
+  failureCycles: number | null;
 }
 
 export interface TodayHold {
@@ -109,7 +197,18 @@ export interface TodayHold {
   heldUntil: string;
   /** From the ticket's OPEN vehicle-unavailability report, when one backs the hold. */
   expectedFrom: string | null;
+  /** Who approved the *vehicle-unavailability report* behind this hold — and nothing else. */
   decidedBy: string | null;
+  /**
+   * Who deferred the ticket, if a manager did (`DEFER_TICKET`). Separate from `decidedBy` on purpose:
+   * that field answers the vehicle-report question, and one field standing for two different decisions
+   * is how a rail starts telling a plausible lie about which one happened.
+   */
+  deferredBy: string | null;
+  /** Their display name; null when the id resolves to no user — render the id, never a guess (B7). */
+  deferredByName: string | null;
+  /** The reason they were made to type. Null for a hold no manager deferred, and for pre-#241 history. */
+  deferredReason: string | null;
   failureCycles: number | null;
 }
 
@@ -120,6 +219,11 @@ export interface TodayHold {
  * morning and was recovered, or that was given up on after three attempts, must not read the same as a
  * zone that had a quiet day. The state is the whole message; `attempts` and `lastError` are what make
  * it actionable rather than alarming.
+ *
+ * #319 widened what reaches here without changing the shape: a zone lost to a **contained** error —
+ * one that threw inside a live run, or whose claim was still open when the run unwound — is now marked
+ * exactly as a crashed zone is. So this field no longer means "the process died"; it means the zone
+ * lost its dispatch, and the cockpit's wording follows it.
  */
 export interface TodayRecovery {
   /** `PENDING` | `RECOVERED` | `EXHAUSTED` | `EXPIRED`. */
@@ -153,6 +257,20 @@ export interface TodayEscalation {
 
 export interface DispatchTodayView {
   operatingDay: string;
+  /**
+   * **The rules the cards are painted by, published with them.**
+   *
+   * `chronicThreshold` is the #295 half of a defect worth naming: the admin client has declared it
+   * *required* since Phase 3.4 and this payload never sent it, so `failureCycles >= undefined` was
+   * permanently false and the `CHR ×n` token could not light for any ticket in production. It read as
+   * working only because six test fixtures hand-wrote the number. `agingThresholdHours` ships beside
+   * it under the same rule, so the new status field cannot inherit the same silent hole: the server
+   * owns the rule, the client renders the verdict, and a threshold that never arrives is a visible
+   * bug rather than a permanently-false comparison.
+   */
+  chronicThreshold: number;
+  /** Hours an assignment may sit untouched before `actionStatus` turns AGING_UNTOUCHED (#295). */
+  agingThresholdHours: number;
   zone: { zoneId: string; name: string };
   run: TodayRun | null;
   /** #286 — set only when this zone was owed a re-dispatch today. Null is "nothing crashed". */
@@ -193,7 +311,19 @@ export interface DispatchTodayView {
  */
 @Injectable()
 export class DispatchTodayQueryService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly softStates: SoftStateConflictPort;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    /**
+     * Optional, matching `OverrideService`'s constructor: the many specs that build this service with
+     * nothing but a Prisma client keep working, and a board that cannot read soft states reports
+     * nothing started — which renders as untouched, never as a fabricated green.
+     */
+    @Optional() @Inject(SOFT_STATE_CONFLICT) softStates?: SoftStateConflictPort,
+  ) {
+    this.softStates = softStates ?? new NoConflictSoftStatePort();
+  }
 
   async today(scope: ZmScope, opts: { zoneId: bigint; now?: Date }): Promise<DispatchTodayView> {
     const now = opts.now ?? new Date();
@@ -244,12 +374,26 @@ export class DispatchTodayQueryService {
     });
 
     const ticketIds = schedules.flatMap((s) => s.batches.flatMap((b) => b.tickets.map((t) => t.ticketId)));
-    const [buckets, returnDue, load, availability] = await Promise.all([
-      this.bucketByTicket(ticketIds),
+    const [identity, returnDue, load, availability, started, agingThresholdHours] = await Promise.all([
+      // #295 — one batched read for every card's identity, replacing the narrower `bucketByTicket`.
+      this.identityByTicket(ticketIds),
       this.returnDueToday(ticketIds, day),
       // One batched query for the whole zone — the same function the engine enforces against.
       committedDayPlan(this.prisma, day, { seIds }),
       this.availabilityBySe(seIds, now),
+      // One batched soft-state read for the whole board. TROUBLESHOOT_STARTED only — an engineer who
+      // has arrived and not begun has not started the work (`soft-state-conflict.ts`).
+      this.softStates.activeTroubleshootStartedTicketIds(ticketIds),
+      readAgingThresholdHours(this.prisma),
+    ]);
+    // Two more batched reads: one over the devices the identity pass resolved, one over the
+    // assignment rows, so a finished job does not read as an untouched one (see `submittedInWindow`).
+    const assignmentRows = schedules.flatMap((s) =>
+      s.batches.flatMap((b) => b.tickets.map((t) => ({ ticketId: t.ticketId, assignedAt: t.createdAt }))),
+    );
+    const [failureCycles, submitted] = await Promise.all([
+      this.failureCyclesByDevice([...identity.values()].map((i) => i.deviceId)),
+      this.submittedInWindow(assignmentRows),
     ]);
 
     const scheduleBySe = new Map(schedules.map((s) => [s.seId, s]));
@@ -279,21 +423,39 @@ export class DispatchTodayQueryService {
             plantName: b.plant?.name ?? String(b.plantId),
             status: b.status,
             runId: b.runId != null ? String(b.runId) : null,
-            tickets: b.tickets.map((t) => ({
-              ticketId: t.ticketId,
-              sortOrder: t.sortOrder,
-              slaBucket: buckets.get(t.ticketId) ?? null,
-              companyTier: t.ticket?.companyTier ?? null,
-              addSource: t.addSource,
-              addedBy: t.addedBy,
-              addReason: t.addReason,
-              coverageTypeAtAssign: t.coverageTypeAtAssign,
-              systemPlaced: isSystemAddSource(t.addSource),
-              returnDueToday: returnDue.has(t.ticketId),
-              // Seeded null and filled by `attachFailureCycles` in one pass over the whole payload —
-              // counting per ticket here would be one query per chip on the board.
-              failureCycles: null,
-            })),
+            tickets: b.tickets.map((t) => {
+              const id = identity.get(t.ticketId);
+              // Either proof that this assignment has been worked: the engineer is holding the state
+              // now, or they already filed the report that resolved it. See `submittedInWindow`.
+              const troubleshootingStarted = started.has(t.ticketId) || submitted.has(t.ticketId);
+              return {
+                ticketId: t.ticketId,
+                sortOrder: t.sortOrder,
+                slaBucket: id?.slaBucket ?? null,
+                companyTier: t.ticket?.companyTier ?? null,
+                addSource: t.addSource,
+                addedBy: t.addedBy,
+                addReason: t.addReason,
+                coverageTypeAtAssign: t.coverageTypeAtAssign,
+                systemPlaced: isSystemAddSource(t.addSource),
+                returnDueToday: returnDue.has(t.ticketId),
+                failureCycles: id?.deviceId != null ? (failureCycles.get(id.deviceId) ?? 0) : null,
+                deviceId: id?.deviceId ?? null,
+                vehicleNo: id?.vehicleNo ?? null,
+                companyName: id?.companyName ?? null,
+                transporterName: id?.transporterName ?? null,
+                inactivityHours: id?.inactivityHours ?? null,
+                assignedAt: t.createdAt.toISOString(),
+                troubleshootingStarted,
+                // The one derived field on this payload, and it is derived here rather than in React
+                // so that "what makes a card yellow" has exactly one implementation.
+                actionStatus: deriveTicketActionStatus({
+                  troubleshootingStarted,
+                  hoursSinceAssignment: hoursSinceAssignment(t.createdAt, now),
+                  agingThresholdHours,
+                }),
+              };
+            }),
           })),
       };
     });
@@ -309,8 +471,22 @@ export class DispatchTodayQueryService {
     ]);
     const funnelTail = await this.funnelTail(zoneId, day);
 
+    // #295 — the rails carry the chronic count too, and both were publishing a hardcoded null. One
+    // grouped query over both rails' devices, for the same reason the board's is one: the Work Pool's
+    // chronic filter runs over every unassignable row in the zone, which can be four figures.
+    const railCycles = await this.failureCyclesByDevice([
+      ...unassignable.map((u) => u.deviceId),
+      ...held.map((h) => h.deviceId),
+    ]);
+    const withCycles = <T extends { deviceId: string | null; failureCycles: number | null }>(row: T): T => ({
+      ...row,
+      failureCycles: row.deviceId != null ? (railCycles.get(row.deviceId) ?? 0) : null,
+    });
+
     return {
       operatingDay: day.toISOString().slice(0, 10),
+      chronicThreshold: CHRONIC_FAILURE_CYCLE_THRESHOLD,
+      agingThresholdHours,
       zone: { zoneId: String(zone.zoneId), name: zone.name },
       run,
       recovery,
@@ -325,15 +501,76 @@ export class DispatchTodayQueryService {
         componentBlockedWithheld: funnelTail.componentBlockedWithheld,
         bucketlessDropped: funnelTail.bucketlessDropped,
       },
-      rails: { unassignable, held, policyWithheld: { count: policyWithheld, itemised: false } },
+      rails: {
+        unassignable: unassignable.map(withCycles),
+        held: held.map(withCycles),
+        policyWithheld: { count: policyWithheld, itemised: false },
+      },
       escalations,
+    };
+  }
+
+  /**
+   * #295 — **the identity of work on a day that is not today**, for every visible card in one call.
+   *
+   * A committed future column is built from `GET /schedules?date=&detail=stops`, which returns ticket
+   * ids and provenance and nothing physical. Asking per card would be one request per chip; widening
+   * `/schedules` instead would grow a pan-zone read that four other surfaces consume. So the column
+   * names its ids once and gets their identity back.
+   *
+   * **What this deliberately does not return is `actionStatus`.** Nobody has started work whose day
+   * has not begun, and "untouched for six hours" said about Wednesday is not a fact about Wednesday.
+   * The future column renders identity and its committed badge; the verdict belongs to the day the
+   * work is live. Same rule as every other column: answer at the fidelity the source can honestly
+   * reach, never one step past it.
+   *
+   * **Scoped like every other scheduler read.** The ids come from the client, which makes this an
+   * enumeration surface unless it is clamped: the zone is checked exactly as `today()` checks it, and
+   * rows are then filtered to tickets whose plant sits in that zone, so a guessed id from another
+   * zone returns nothing rather than a fleet record.
+   */
+  async cardSummaries(
+    scope: ZmScope,
+    opts: { zoneId: bigint; ticketIds: string[] },
+  ): Promise<{ summaries: CardSummary[] }> {
+    if (scope.role === 'ZONAL_MANAGER' && scope.zoneId != null && BigInt(scope.zoneId) !== opts.zoneId) {
+      throw new ForbiddenException({ code: 'ZONE_SCOPE_VIOLATION' });
+    }
+    // The cap is on what was **sent**, before de-duplication, so it agrees with the DTO's
+    // `ArrayMaxSize` and cannot be walked past by repeating one id a hundred thousand times.
+    if (opts.ticketIds.length > CARD_SUMMARY_LIMIT) {
+      // Refused by name rather than truncated: a silently shortened answer leaves cards blank with
+      // nothing on the wire to explain why, which is the class of quiet failure #295 exists to end.
+      throw new BadRequestException({
+        code: 'TOO_MANY_TICKETS',
+        hint: `at most ${CARD_SUMMARY_LIMIT} ticket ids per request`,
+      });
+    }
+    const ticketIds = [...new Set(opts.ticketIds)];
+    if (ticketIds.length === 0) return { summaries: [] };
+
+    const inZone = await this.prisma.ticket.findMany({
+      where: { ticketId: { in: ticketIds }, plant: { zoneId: opts.zoneId } },
+      select: { ticketId: true },
+    });
+    const identity = await this.identityByTicket(inZone.map((t) => t.ticketId));
+
+    return {
+      summaries: [...identity.entries()].map(([ticketId, id]) => ({
+        ticketId,
+        deviceId: id.deviceId,
+        vehicleNo: id.vehicleNo,
+        companyName: id.companyName,
+        transporterName: id.transporterName,
+        inactivityHours: id.inactivityHours,
+      })),
     };
   }
 
   /**
    * #286 — the zone's recovery mark for the operating day, if there is one.
    *
-   * Scoped to `day` deliberately: yesterday's crash is history, not today's situation, and a rail that
+   * Scoped to `day` deliberately: yesterday's loss is history, not today's situation, and a rail that
    * kept showing it would train the operator to ignore the rail.
    */
   private async recoveryToday(zoneId: bigint, day: Date): Promise<TodayRecovery | null> {
@@ -350,19 +587,115 @@ export class DispatchTodayQueryService {
     };
   }
 
-  /** SLA bucket per ticket — read from device_state, the same source the engine ranks on. */
-  private async bucketByTicket(ticketIds: string[]): Promise<Map<string, string | null>> {
+  /**
+   * **Everything a work card names, in two queries** (#295).
+   *
+   * This grew out of `bucketByTicket`, which read the same two tables for the SLA bucket alone. The
+   * join is not new either — `ticket-query.service.ts` (`FROM_JOINS`) has always reached
+   * device_states / plants / company_master / vehicles / transporters this way, and
+   * `MeTicketsQueryService` proves the same shape through Prisma `include` for the SE app. What is new
+   * is only that the Console gets it too, batched over the whole board.
+   *
+   * **Two queries, not two per ticket.** A board routinely carries a few hundred cards; six joins per
+   * chip is the difference between a page and an outage, which is why every neighbour on this service
+   * (`returnDueToday`, `availabilityBySe`, the name lookup in `heldToday`) is written the same way.
+   *
+   * The plant is deliberately absent: it is a property of the *stop*, already on `TodayStop`, and
+   * copying it onto every ticket would invite a card to disagree with the stop it sits in.
+   */
+  private async identityByTicket(ticketIds: string[]): Promise<Map<string, TicketIdentity>> {
     if (ticketIds.length === 0) return new Map();
     const rows = await this.prisma.ticket.findMany({
       where: { ticketId: { in: ticketIds } },
-      select: { ticketId: true, deviceId: true },
+      select: {
+        ticketId: true,
+        deviceId: true,
+        company: { select: { name: true } },
+        vehicle: { select: { vehicleNo: true, transporter: { select: { name: true } } } },
+      },
     });
     const states = await this.prisma.deviceState.findMany({
       where: { deviceId: { in: rows.map((r) => r.deviceId).filter((d): d is string => d != null) } },
-      select: { deviceId: true, slaBucket: true },
+      select: { deviceId: true, slaBucket: true, inactivityHours: true },
     });
-    const byDevice = new Map(states.map((s) => [s.deviceId, s.slaBucket]));
-    return new Map(rows.map((r) => [r.ticketId, (r.deviceId ? byDevice.get(r.deviceId) : null) ?? null]));
+    const byDevice = new Map(states.map((s) => [s.deviceId, s]));
+    return new Map(
+      rows.map((r) => {
+        const state = r.deviceId ? byDevice.get(r.deviceId) : undefined;
+        return [
+          r.ticketId,
+          {
+            deviceId: r.deviceId ?? null,
+            slaBucket: state?.slaBucket ?? null,
+            // `Decimal | null` → `number | null`. **Never `Number(null) === 0`**: null means the state
+            // row has never been recomputed, and "silent for 0 hours" is a different, wrong claim.
+            inactivityHours: state?.inactivityHours != null ? Number(state.inactivityHours) : null,
+            companyName: r.company?.name ?? null,
+            vehicleNo: r.vehicle?.vehicleNo ?? null,
+            transporterName: r.vehicle?.transporter?.name ?? null,
+          },
+        ];
+      }),
+    );
+  }
+
+  /**
+   * **Tickets whose current assignment has already been worked and filed** — the other half of
+   * "somebody is on this".
+   *
+   * Reading the soft state alone was not enough, and the reason is a real sequence rather than a
+   * hypothetical. Submitting a troubleshooting report **resolves** every unresolved soft state for
+   * that `(ticket, se)` pair in the same transaction (`troubleshoot-submission.service.ts:157-160`,
+   * stamped `FORM_SUBMITTED`) — while the assignment row stays live: nothing retires it until a ZM
+   * makes a verification decision (`close-assignment.ts`, called only from the terminal paths), and
+   * the ticket sits at `VERIFICATION_PENDING`, which is not a resolved status.
+   *
+   * So on the literal rule, the moment an engineer finished the job their card flipped from green
+   * back to **red**, then aged to amber — telling a dispatcher to chase work that is done and waiting
+   * on their own colleague. A filed report is proof that troubleshooting started; that it also
+   * finished does not make it untouched.
+   *
+   * **Bounded to the current assignment window**, the same bound #244 uses to decide an attempt was
+   * *reached*: a report filed against some earlier dispatch of the same ticket says nothing about
+   * this one, and letting it vouch would leave a device permanently green across every future
+   * assignment. The window's start is `batch_assignment_tickets.created_at` — the row is live
+   * (`removedAt: null`), so there is no end bound to apply.
+   *
+   * One query for the whole board, compared in memory, in the same batched idiom as its neighbours.
+   */
+  private async submittedInWindow(rows: { ticketId: string; assignedAt: Date }[]): Promise<Set<string>> {
+    if (rows.length === 0) return new Set();
+    const assignedAt = new Map(rows.map((r) => [r.ticketId, r.assignedAt]));
+    const submissions = await this.prisma.troubleshootingSubmission.findMany({
+      where: { ticketId: { in: [...assignedAt.keys()] } },
+      select: { ticketId: true, submittedAt: true },
+    });
+    const out = new Set<string>();
+    for (const s of submissions) {
+      const from = assignedAt.get(s.ticketId);
+      if (from && s.submittedAt >= from) out.add(s.ticketId);
+    }
+    return out;
+  }
+
+  /**
+   * Lifetime failure cycles per device — the chronic predicate's input, in one grouped query.
+   *
+   * This is the field that was hardcoded `null` at two sites beside a comment naming an
+   * `attachFailureCycles` that never existed in the repo. Lifetime, with no window, because that is
+   * what the surface promises in words: *"chronic device — n lifetime failure cycles"*. The windowed
+   * 3-in-7-days rule is ADR-0021's **escalation** rule and stays where it is; see
+   * `ticketing/chronic-device.ts` for why the two thresholds are separate constants.
+   */
+  private async failureCyclesByDevice(deviceIds: (string | null)[]): Promise<Map<string, number>> {
+    const ids = [...new Set(deviceIds.filter((d): d is string => d != null))];
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.failureCycle.groupBy({
+      by: ['deviceId'],
+      where: { deviceId: { in: ids } },
+      _count: { _all: true },
+    });
+    return new Map(rows.map((r) => [r.deviceId, r._count._all]));
   }
 
   /**
@@ -417,18 +750,43 @@ export class DispatchTodayQueryService {
   }
 
   /** What the latest run could not place — persisted rows with their reasons, never a bare count. */
+  /**
+   * Work today's runs could not place — **one row per ticket**, carrying the most recent verdict.
+   *
+   * The dedupe is the whole of this method's difficulty, and it was missing. A decision trace is
+   * written **per run**, not per day, and a zone is dispatched more than once on any day somebody
+   * presses Run Now or the recovery collector re-dispatches a crashed zone. A ticket nobody could take
+   * at 05:00 and still nobody could take at 11:00 therefore has *two* `seId: null` traces, and this
+   * read returned both.
+   *
+   * That was not a cosmetic duplicate. `rails.unassignable` is also what
+   * `situation.unassignable` counts, so a second run inflated the headline figure on the one surface
+   * whose purpose is to answer *what did not get placed* — a zone with 215 unplaceable tickets and two
+   * runs reported 376. It also handed the client duplicate React keys, which is how it was found.
+   *
+   * **The latest trace wins**, because a ticket's current reason for being unassignable is what the
+   * most recent run concluded, not what the first one did — coverage can be fixed and capacity can
+   * free up between runs, and reporting the stale verdict would explain the wrong problem. Rows arrive
+   * in `traceId` order (the order the engine processed them, which is the canonical sort), so a later
+   * trace overwrites an earlier one while `Map` keeps the ticket at its **first** position — the
+   * newest verdict, in processing order.
+   */
   private async unassignableToday(zoneId: bigint, day: Date): Promise<TodayUnassignable[]> {
     const traces = await this.prisma.dispatchDecisionTrace.findMany({
       where: { zoneId, seId: null, run: { startedAt: { gte: day, lt: new Date(day.getTime() + 86_400_000) } } },
       orderBy: { traceId: 'asc' },
       include: { ticket: { select: { deviceId: true, plantId: true, plant: { select: { name: true } } } } },
     });
-    return traces.map((t) => ({
+    const latestPerTicket = new Map<string, (typeof traces)[number]>();
+    for (const t of traces) latestPerTicket.set(t.ticketId, t);
+    return [...latestPerTicket.values()].map((t) => ({
       ticketId: t.ticketId,
       deviceId: t.ticket?.deviceId ?? null,
       plantId: t.ticket?.plantId != null ? String(t.ticket.plantId) : null,
       plantName: t.ticket?.plant?.name ?? null,
       poolEmptyReason: (t.trace as { poolEmptyReason?: string } | null)?.poolEmptyReason ?? null,
+      // Filled in one grouped pass over both rails once this read resolves — see `today()`.
+      failureCycles: null,
     }));
   }
 
@@ -440,20 +798,59 @@ export class DispatchTodayQueryService {
       select: { ticketId: true, deviceId: true, deferredUntil: true, plant: { select: { name: true } } },
     });
     if (tickets.length === 0) return [];
+    const ids = tickets.map((t) => t.ticketId);
     const reports = await this.prisma.vehicleUnavailabilityReport.findMany({
-      where: { ticketId: { in: tickets.map((t) => t.ticketId) }, status: 'OPEN' },
+      where: { ticketId: { in: ids }, status: 'OPEN' },
       select: { ticketId: true, expectedFrom: true, decidedBy: true },
     });
     const byTicket = new Map(reports.map((r) => [r.ticketId, r]));
-    return tickets.map((t) => ({
-      ticketId: t.ticketId,
-      deviceId: t.deviceId,
-      plantName: t.plant?.name ?? null,
-      heldUntil: t.deferredUntil!.toISOString().slice(0, 10),
-      failureCycles: null,
-      expectedFrom: byTicket.get(t.ticketId)?.expectedFrom?.toISOString() ?? null,
-      decidedBy: byTicket.get(t.ticketId)?.decidedBy ?? null,
-    }));
+
+    /**
+     * **Who deferred it, and why** — a separate question from `decidedBy`, deliberately.
+     *
+     * `decidedBy` above answers only *who approved the vehicle-unavailability report*. A manager's own
+     * `DEFER_TICKET` override creates no such report, so it left every field on this row null and the
+     * rail drew a deliberate managerial decision exactly like a hold the system made. The operator who
+     * deferred three devices read that as their decision not having been taken.
+     *
+     * Widening `decidedBy` to mean "or whoever deferred it" was the tempting one-line version and is
+     * the wrong shape: one field standing for two different decisions is how a rail starts telling a
+     * plausible lie about which of them happened. Two questions, two fields.
+     *
+     * Ordered newest-first and reduced to the first hit per ticket: a ticket may have been deferred
+     * more than once across days, and the hold in force is the most recent one.
+     */
+    const defers = await this.prisma.batchAssignmentTicket.findMany({
+      where: { ticketId: { in: ids }, removalReason: REMOVAL_REASONS.ZM_DEFERRED, removedBy: { not: null } },
+      orderBy: { removedAt: 'desc' },
+      select: { ticketId: true, removedBy: true, removalNote: true },
+    });
+    const deferByTicket = new Map<string, (typeof defers)[number]>();
+    for (const d of defers) if (!deferByTicket.has(d.ticketId)) deferByTicket.set(d.ticketId, d);
+
+    // One query for every name, not one per row. A name that does not resolve stays null and the
+    // client renders the id — #284 B7's rule, never a fabricated name.
+    const actorIds = [...new Set([...deferByTicket.values()].map((d) => d.removedBy!))];
+    const actors = actorIds.length
+      ? await this.prisma.user.findMany({ where: { userId: { in: actorIds } }, select: { userId: true, name: true } })
+      : [];
+    const nameOf = new Map(actors.map((a) => [a.userId, a.name]));
+
+    return tickets.map((t) => {
+      const d = deferByTicket.get(t.ticketId);
+      return {
+        ticketId: t.ticketId,
+        deviceId: t.deviceId,
+        plantName: t.plant?.name ?? null,
+        heldUntil: t.deferredUntil!.toISOString().slice(0, 10),
+        failureCycles: null,
+        expectedFrom: byTicket.get(t.ticketId)?.expectedFrom?.toISOString() ?? null,
+        decidedBy: byTicket.get(t.ticketId)?.decidedBy ?? null,
+        deferredBy: d?.removedBy ?? null,
+        deferredByName: d ? (nameOf.get(d.removedBy!) ?? null) : null,
+        deferredReason: d?.removalNote ?? null,
+      };
+    });
   }
 
   /**

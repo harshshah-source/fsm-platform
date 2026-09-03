@@ -3,6 +3,13 @@ import { auditActor, AuditService } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  AGING_THRESHOLD_OPTIONS,
+  ASSIGNED_UNTOUCHED_AGING_DESCRIPTION,
+  ASSIGNED_UNTOUCHED_AGING_KEY,
+  DEFAULT_ASSIGNED_UNTOUCHED_AGING_HOURS,
+  parseAgingThresholdHours,
+} from './aging-threshold';
+import {
   DEFAULT_SE_ASSIGNMENT_THRESHOLD_HOURS,
   SE_ASSIGNMENT_THRESHOLD_DESCRIPTION,
   SE_ASSIGNMENT_THRESHOLD_KEY,
@@ -52,6 +59,12 @@ export const SETTINGS_DEFAULTS: Record<string, { value: unknown; description: st
   troubleshoot_started_stale_warning_hours: {
     value: 2,
     description: 'TROUBLESHOOT_STARTED held longer than this raises a ZM stale-work warning.',
+  },
+  // #295 — the dispatch board's aging dial. The third hour-count in this registry and the one most
+  // likely to be confused with the other two; see aging-threshold.ts for which clock each measures.
+  [ASSIGNED_UNTOUCHED_AGING_KEY]: {
+    value: DEFAULT_ASSIGNED_UNTOUCHED_AGING_HOURS,
+    description: ASSIGNED_UNTOUCHED_AGING_DESCRIPTION,
   },
   plant_cluster_multiplier: {
     value: 1.25,
@@ -110,6 +123,13 @@ export const SETTING_VALIDATORS: Record<
       return parsed.ok ? { ok: true, value: parsed.attempts } : { ok: false };
     },
     allowed: SPECIAL_ATTEMPT_THRESHOLD_OPTIONS,
+  },
+  [ASSIGNED_UNTOUCHED_AGING_KEY]: {
+    validate: (raw) => {
+      const parsed = parseAgingThresholdHours(raw);
+      return parsed.ok ? { ok: true, value: parsed.hours } : { ok: false };
+    },
+    allowed: AGING_THRESHOLD_OPTIONS,
   },
 };
 

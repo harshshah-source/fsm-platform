@@ -14,6 +14,8 @@ import {
 } from '@nestjs/common';
 import { AccessTokenClaims } from '../auth/token.service';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { istWindowEnd, istWindowStart } from '../common/ist-day';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -42,6 +44,8 @@ interface CreateSeBody {
   zoneId?: number | string;
   coverageType?: string;
   dailyCapacity?: number | string;
+  homeLat?: number | string | null;
+  homeLng?: number | string | null;
 }
 
 interface UpdateSeBody extends CreateSeBody {}
@@ -58,6 +62,18 @@ interface CoverageBody {
 /** Coerce a body id (number | numeric string) → number, or 400. */
 function reqNum(raw: number | string | undefined, field: string): number {
   const n = typeof raw === 'number' ? raw : Number(String(raw ?? '').trim());
+  if (!Number.isFinite(n)) throw new BadRequestException({ code: 'INVALID_NUMBER', field });
+  return n;
+}
+
+/** #267 — an optional, nullable numeric field: `undefined` (omitted) means "no change", `null`/`''`
+ *  means "clear", anything else must parse as a finite number or the request is 400. Range validation
+ *  (lat/lng bounds, the half-set-pair rule) is `EngineerAdminService.assertLatLng`'s job, not this
+ *  coercion's — it only guards against a non-numeric body value reaching the service as `NaN`. */
+function optNum(raw: number | string | null | undefined, field: string): number | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || raw === '') return null;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
   if (!Number.isFinite(n)) throw new BadRequestException({ code: 'INVALID_NUMBER', field });
   return n;
 }
@@ -93,8 +109,8 @@ export class EngineersController {
 
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<EngineerListRow[]> {
-    return this.query.listForZone({ role: user.role, zoneId: user.zone_id });
+  list(@CurrentScope() scope: ManagerScope): Promise<EngineerListRow[]> {
+    return this.query.listForZone(scope);
   }
 
   // ---- SE Management CRUD (Phase 4) — OH/CSM cross-zone, ZM home-zone-clamped, SE denied (MANAGER_ROLES).
@@ -103,13 +119,14 @@ export class EngineersController {
   /** SE Management directory: name / phone / email / address / zone / mapped plants / status, zone-scoped. */
   @Get('directory')
   @Roles(...MANAGER_ROLES)
-  directory(@CurrentUser() user: AccessTokenClaims): Promise<SeManagementRow[]> {
-    return this.admin.list(this.scope(user));
+  directory(@CurrentScope() scope: ManagerScope, @CurrentUser() user: AccessTokenClaims): Promise<SeManagementRow[]> {
+    return this.admin.list(this.adminScope(scope, user));
   }
 
   @Post()
   @Roles(...MANAGER_ROLES)
   create(
+    @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
     @Body() body: CreateSeBody,
@@ -123,8 +140,10 @@ export class EngineersController {
         zoneId: reqNum(body.zoneId, 'zoneId'),
         coverageType: body.coverageType ?? '',
         dailyCapacity: reqNum(body.dailyCapacity, 'dailyCapacity'),
+        homeLat: optNum(body.homeLat, 'homeLat') ?? null,
+        homeLng: optNum(body.homeLng, 'homeLng') ?? null,
       },
-      this.scope(user),
+      this.adminScope(scope, user),
       actor,
     );
   }
@@ -132,6 +151,7 @@ export class EngineersController {
   @Patch(':seId')
   @Roles(...MANAGER_ROLES)
   update(
+    @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
     @Param('seId', new ParseUUIDPipe()) seId: string,
@@ -147,8 +167,10 @@ export class EngineersController {
         zoneId: body.zoneId !== undefined ? reqNum(body.zoneId, 'zoneId') : undefined,
         coverageType: body.coverageType,
         dailyCapacity: body.dailyCapacity !== undefined ? reqNum(body.dailyCapacity, 'dailyCapacity') : undefined,
+        homeLat: optNum(body.homeLat, 'homeLat'),
+        homeLng: optNum(body.homeLng, 'homeLng'),
       },
-      this.scope(user),
+      this.adminScope(scope, user),
       actor,
     );
   }
@@ -156,48 +178,52 @@ export class EngineersController {
   @Post(':seId/status')
   @Roles(...MANAGER_ROLES)
   setStatus(
+    @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
     @Param('seId', new ParseUUIDPipe()) seId: string,
     @Body() body: StatusBody,
   ): Promise<SeManagementRow> {
     if (typeof body.active !== 'boolean') throw new BadRequestException({ code: 'ACTIVE_REQUIRED' });
-    return this.admin.setActive(seId, body.active, this.scope(user), actor);
+    return this.admin.setActive(seId, body.active, this.adminScope(scope, user), actor);
   }
 
   @Post(':seId/coverage')
   @Roles(...MANAGER_ROLES)
   addCoverage(
+    @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
     @Param('seId', new ParseUUIDPipe()) seId: string,
     @Body() body: CoverageBody,
   ): Promise<SeCoverageRow> {
-    return this.admin.addCoverage(seId, reqNum(body.plantId, 'plantId'), body.coverageType ?? '', this.scope(user), actor);
+    return this.admin.addCoverage(seId, reqNum(body.plantId, 'plantId'), body.coverageType ?? '', this.adminScope(scope, user), actor);
   }
 
   @Delete(':seId/coverage/:coverageId')
   @Roles(...MANAGER_ROLES)
   removeCoverage(
+    @CurrentScope() scope: ManagerScope,
     @CurrentUser() user: AccessTokenClaims,
     @CurrentActor() actor: RequestActor,
     @Param('seId', new ParseUUIDPipe()) seId: string,
     @Param('coverageId') coverageId: string,
   ): Promise<{ id: number }> {
-    return this.admin.removeCoverage(seId, reqNum(coverageId, 'coverageId'), this.scope(user), actor);
+    return this.admin.removeCoverage(seId, reqNum(coverageId, 'coverageId'), this.adminScope(scope, user), actor);
   }
 
-  private scope(user: AccessTokenClaims): EngineerAdminScope {
-    return { role: user.role, zoneId: user.zone_id, userId: user.user_id };
+  /** #341 — the zone comes from the proven acting context; only `userId` still comes from the claims. */
+  private adminScope(scope: ManagerScope, user: AccessTokenClaims): EngineerAdminScope {
+    return { ...scope, userId: user.user_id };
   }
 
   @Get(':seId')
   @Roles(...MANAGER_ROLES)
   async detail(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Param('seId', new ParseUUIDPipe()) seId: string,
   ): Promise<EngineerDetail> {
-    const detail = await this.query.getDetail(seId, { role: user.role, zoneId: user.zone_id });
+    const detail = await this.query.getDetail(seId, scope);
     if (!detail) throw new NotFoundException({ code: 'SE_NOT_FOUND' });
     return detail;
   }
@@ -206,6 +232,7 @@ export class EngineersController {
   @Roles('ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'SERVICE_ENGINEER')
   async setAvailability(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentActor() actor: RequestActor,
     @Param('seId', new ParseUUIDPipe()) seId: string,
     @Body() body: SetAvailabilityBody,
   ): Promise<SetAvailabilityOutcome> {
@@ -233,7 +260,7 @@ export class EngineersController {
 
     const outcome = await this.availability.setAvailability(
       { seId, status: body.status, windowStart, windowEnd, reason: body.reason ?? null },
-      { userId: user.user_id, role: user.role, zoneId: user.zone_id, actedAsRole: null },
+      actor,
     );
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'SE_NOT_FOUND' });
     if (outcome.result === 'FORBIDDEN') throw new ForbiddenException({ code: 'AVAILABILITY_FORBIDDEN' });

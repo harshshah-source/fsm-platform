@@ -68,6 +68,7 @@ const STRANDED = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
   operatingDay: '2026-08-27',
   chronicThreshold: 3,
+  agingThresholdHours: 4,
   zone: { zoneId: '7', name: 'North Zone' },
   run: { runId: '42', status: 'SUCCESS', trigger: 'CRON', startedAt: '2026-08-27T05:00:00Z', finishedAt: null },
   recovery: null,
@@ -103,6 +104,14 @@ const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
               systemPlaced: true,
               returnDueToday: false,
               failureCycles: null,
+              deviceId: '869645080787056',
+              vehicleNo: 'MH-12-AB-3456',
+              companyName: 'Northbound Cement',
+              transporterName: 'Sharma Logistics',
+              inactivityHours: 18,
+              assignedAt: '2026-08-28T05:30:00Z',
+              troubleshootingStarted: false,
+              actionStatus: 'NOT_STARTED' as const,
             },
           ],
         },
@@ -127,7 +136,7 @@ const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
       { ticketId: STRANDED, deviceId: 'DEV-9', plantId: '5', plantName: 'Beta Works', poolEmptyReason: 'NO_COVERAGE', failureCycles: null },
     ],
     held: [
-      { ticketId: HELD, deviceId: 'DEV-4', plantName: 'Gamma Plant', heldUntil: '2026-08-29', expectedFrom: null, decidedBy: 'zm1', failureCycles: null },
+      { ticketId: HELD, deviceId: 'DEV-4', plantName: 'Gamma Plant', heldUntil: '2026-08-29', expectedFrom: null, decidedBy: 'zm1', deferredBy: null, deferredByName: null, deferredReason: null, failureCycles: null },
     ],
     policyWithheld: { count: 5, itemised: false },
   },
@@ -171,6 +180,14 @@ const trace = (scoreBreakdown: Record<string, unknown> | null) => ({
     dropCounts: {},
     poolEmptyReason: null,
     failureCycles: null,
+    deviceId: '869645080787056',
+    vehicleNo: 'MH-12-AB-3456',
+    companyName: 'Northbound Cement',
+    transporterName: 'Sharma Logistics',
+    inactivityHours: 18,
+    assignedAt: '2026-08-28T05:30:00Z',
+    troubleshootingStarted: false,
+    actionStatus: 'NOT_STARTED' as const,
     scoreDegenerate: false,
     notEnforcedFilters: [],
   },
@@ -186,6 +203,11 @@ const renderAt = (entry: string, session: SessionView) =>
   );
 
 beforeEach(() => {
+  // The Work Pool rail is collapsed by default since 2026-09-01 (the board is the canvas). These
+  // assertions are about what the rail *contains*, not about its default width, so they start from
+  // the operator preference that opens it; the default and the toggle are covered explicitly in
+  // `scheduler-console-composition.test.tsx`.
+  localStorage.setItem('fsm.console.workRailOpen', '1');
   vi.mocked(apiDispatchToday).mockResolvedValue(view());
   vi.mocked(apiDispatchChangesToday).mockResolvedValue(changes());
   vi.mocked(listZones).mockResolvedValue([
@@ -366,6 +388,8 @@ describe('Phase 1.3 — one selection, one Inspector', () => {
     // No empty placeholder: the Inspector is contextual and absent until something is selected
     // (composition correction §5.5) — the board owns the height instead.
     expect(screen.queryByTestId('console-inspector')).not.toBeInTheDocument();
+    // This file's beforeEach sets the operator preference that opens the rail; the collapsed default
+    // is the composition suite's subject, not this one's.
     expect(screen.getByTestId('console-work-rail')).toBeInTheDocument();
   });
 
@@ -400,11 +424,13 @@ describe('Phase 1.3 — one selection, one Inspector', () => {
     expect(inspectors[0]).toHaveTextContent(HELD.slice(0, 8));
   });
 
-  it('selecting an engineer in the People rail inspects that engineer, not their tickets', async () => {
+  /** Retargeted from the People rail to the personnel column by #295 — one engineer representation,
+   *  and clicking it still inspects the engineer rather than diving into their work. */
+  it('selecting an engineer in the personnel column inspects that engineer, not their tickets', async () => {
     const user = userEvent.setup();
     renderAt('/dispatch/today', ZM);
 
-    await user.click(await screen.findByTestId('person-se-2'));
+    await user.click(await screen.findByTestId('lane-se-2'));
 
     const inspector = await screen.findByTestId('console-inspector');
     expect(inspector).toHaveTextContent('Priya M.');

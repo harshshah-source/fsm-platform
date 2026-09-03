@@ -16,12 +16,20 @@ import { ZonesService, type ZoneView } from './zones.service';
 export class ZonesAdminController {
   constructor(private readonly zones: ZonesService) {}
 
+  /**
+   * The zone list is read by both acting-capable roles, not just the configurator: the "Act as ZM"
+   * control picks a zone from it (Issue 27), and a CSM can act. Zone names are already visible to a
+   * CSM through the Zone Performance Scorecard, so this widens no data — only the write below stays
+   * Operations-Head-only.
+   */
   @Get()
+  @Roles('CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD')
   list(): Promise<ZoneView[]> {
     return this.zones.list();
   }
 
   @Post()
+  @Roles('OPERATIONS_HEAD')
   create(
     @Body() body: { name: string },
     @CurrentActor() actor: RequestActor,

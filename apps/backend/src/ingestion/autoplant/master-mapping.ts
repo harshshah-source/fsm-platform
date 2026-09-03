@@ -16,6 +16,7 @@
  */
 
 import { normalizeGpsTimestamp, TRUE_SOURCE_UTC_OFFSET_MIN } from '../normalize';
+import { MIN_PLAUSIBLE_SOURCE_MS, SOURCE_NULLISH, isSourceBlank } from './source-sentinels';
 
 /** An idempotent upsert keyed on a source id: match `where`, insert `create`, or refresh `update`. */
 export interface UpsertPlan<TWhere, TCreate, TUpdate> {
@@ -31,13 +32,65 @@ export type CompanyTierValue = 'PLATINUM' | 'GOLD' | 'SILVER';
 export const DEFAULT_INSERT_TIER: CompanyTierValue = 'SILVER';
 export const DEFAULT_INSERT_RANK = 'C';
 
-const NULLISH = new Set(['', 'NA', 'NULL', 'null']);
+// #323 (AR-9c) — shared with `mapping.ts` rather than spelled twice. This path's set was already the
+// correct one; what changed is that the telemetry path now reads the same definition instead of its
+// own copy, which had drifted by omitting 'NA' — so an 'NA' device id was journalled there while
+// being refused here, stranding the device in `unknownDevices` for ever.
+const NULLISH = SOURCE_NULLISH;
 
-const isBlank = (v: string | null | undefined): boolean => v == null || NULLISH.has(v.trim());
+const isBlank = isSourceBlank;
 
 /** Trim to a non-blank String, or null (AutoPlant uses `''`/`NA`/`NULL` sentinels interchangeably). */
 export function cleanStr(v: string | null | undefined): string | null {
   return isBlank(v) ? null : v!.trim();
+}
+
+/**
+ * The reason code a master row skipped for an unusable identity is counted under (#324 F13).
+ *
+ * One code rather than several (`BLANK_ID` / `BAD_ID` / `BLANK_NAME`), because the operator action is
+ * the same for all of them — go and look at that source row — and the `master_sync_rejects` row
+ * carries the offending key, which is what actually locates it.
+ */
+export const UNPARSEABLE_IDENTITY = 'UNPARSEABLE_IDENTITY';
+
+/**
+ * Can this source row become a mirror row at all? `null` when it can, the reject reason when it cannot
+ * (#324 F13).
+ *
+ * The masters path used to assume it could: `BigInt(String(row.plant_id).trim())` and `.trim()` on each
+ * name column throw on a null or non-numeric value, uncaught, so **one** malformed row failed the whole
+ * sync — every plant, company, transporter, vehicle and device, on every run, until somebody fixed the
+ * source by hand. "Authoritative PKs cannot be dirty" is an assumption, and this source has already
+ * broken the same one twice in columns that were equally authoritative (#323: a `0000-00-00` datetime
+ * and an `'NA'` device id).
+ *
+ * **The name is part of identity, not decoration.** It is NOT NULL on every mirror table and is what
+ * each operator surface renders; a row that cannot answer "which plant is this?" is not partially
+ * usable, it is unusable with a number attached.
+ *
+ * Called by the service before the mapper, so the mappers below keep assuming clean input — now
+ * guaranteed rather than hoped for — and the accounting stays where the run's other skip reasons live.
+ */
+export function identityProblem(
+  sourceId: number | string | null | undefined,
+  name: string | null | undefined,
+): string | null {
+  return toBigIntOrNull(sourceId) == null || cleanStr(name) == null ? UNPARSEABLE_IDENTITY : null;
+}
+
+/**
+ * The same question for a vehicle, whose mirror row is keyed on `vehicle_no` **itself** — a string, so
+ * there is no numeric id to parse and the name IS the key.
+ */
+export function vehicleIdentityProblem(vehicleNo: string | null | undefined): string | null {
+  return cleanStr(vehicleNo) == null ? UNPARSEABLE_IDENTITY : null;
+}
+
+/** A dirty key, rendered for the reject row: whatever the source sent, or a marker when it sent nothing. */
+export function rejectKey(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  return s === '' ? '(blank)' : s;
 }
 
 /** Coerce an AutoPlant numeric id (int/bigint arrives as number or string) to bigint, null-safe. */
@@ -344,7 +397,7 @@ export interface CommissioningFact {
  * turn it into a year-0 instant and freeze it into an append-only table. Anything before 2000 here is
  * a sentinel, not a fitment (AutoPlant's own fleet starts 2023 — feasibility §5.2).
  */
-const MIN_PLAUSIBLE_INSTALL_MS = Date.UTC(2000, 0, 1);
+const MIN_PLAUSIBLE_INSTALL_MS = MIN_PLAUSIBLE_SOURCE_MS;
 
 /**
  * Parse `FIRST_INSTALLED_DATE_TIME` to a true instant at {@link TRUE_SOURCE_UTC_OFFSET_MIN}, or null.

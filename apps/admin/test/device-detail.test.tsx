@@ -276,4 +276,29 @@ describe('Device Detail — AutoPlant enrichment columns', () => {
       expect(screen.queryByTestId('commissioned-scope')).not.toBeInTheDocument();
     });
   });
+
+  // The top-bar global search lands here as `?search=`. Same #217 S2 lesson as the block above: this
+  // page is the search's TARGET, and until it read the param the search box could only ever look
+  // functional — it navigated, and the list came back unfiltered.
+  describe('?search= from the top-bar global search', () => {
+    it('seeds the search box and the very first list request', async () => {
+      stub();
+      renderPage(OH, '/reports/device?search=RJ-14-AA');
+      await screen.findByTestId('dev-row-900');
+
+      expect(screen.getByLabelText(/search/i)).toHaveValue('RJ-14-AA');
+      // First request, not one that arrives 300ms later once the debounce settles — otherwise the page
+      // opens on an unfiltered fleet and then jumps.
+      const firstList = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes('/devices?'));
+      expect(firstList).toContain('search=RJ-14-AA');
+    });
+
+    it('URL-decodes a multi-word term', async () => {
+      stub();
+      renderPage(OH, '/reports/device?search=Acme%20Logistics');
+      await screen.findByTestId('dev-row-900');
+
+      expect(screen.getByLabelText(/search/i)).toHaveValue('Acme Logistics');
+    });
+  });
 });

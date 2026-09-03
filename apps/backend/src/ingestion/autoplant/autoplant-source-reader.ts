@@ -102,9 +102,18 @@ export class AutoPlantSourceReader implements SourceReader {
     // #222 P6 — the skew guard's drops are tallied and logged, not swallowed. `FUTURE_SKEW` in
     // particular is the IST-writer signature: a non-zero count here is the fleet telling us a device
     // writes a different timezone into this column, which is the only way that fact becomes visible.
+    // #299 adds `UNPARSEABLE_TIMESTAMP` to the same channel — also a dropped row — and a SECOND,
+    // separate tally for fields nulled with their row kept, because those two are not the same event.
     const rejected: Record<string, number> = {};
-    const onReject = (_deviceId: string, reason: string): void => {
+    const repaired: Record<string, number> = {};
+    const first: Record<string, string> = {};
+    const onReject = (deviceId: string, reason: string): void => {
       rejected[reason] = (rejected[reason] ?? 0) + 1;
+      first[reason] ??= deviceId;
+    };
+    const onRepair = (deviceId: string, reason: string): void => {
+      repaired[reason] = (repaired[reason] ?? 0) + 1;
+      first[reason] ??= deviceId;
     };
     for (const r of rows) {
       const row = mapVehicleMasterRow(r, {
@@ -112,15 +121,30 @@ export class AutoPlantSourceReader implements SourceReader {
         offsetMinutes: this.offsetMinutes,
         maxSkewMinutes: this.maxSkewMinutes,
         onReject,
+        onRepair,
       });
       if (row) mapped.push(row);
     }
+    // A device id per distinct reason, so the WARN is actionable against the source rather than merely
+    // alarming: "3 rows rejected" cannot be chased, "UNPARSEABLE_TIMESTAMP first seen on 0869…" can.
+    const tally = (counts: Record<string, number>): string =>
+      Object.entries(counts).map(([k, v]) => `${k}=${v} (first: ${first[k]})`).join(' ');
     const rejectedAny = Object.keys(rejected).length > 0;
+    const repairedAny = Object.keys(repaired).length > 0;
     if (rejectedAny) {
       this.logger.warn(
-        `skew guard dropped ${Object.values(rejected).reduce((a, b) => a + b, 0)} row(s) this chunk: ` +
-          `${Object.entries(rejected).map(([k, v]) => `${k}=${v}`).join(' ')}. ` +
-          `FUTURE_SKEW means the device writes a non-UTC wall clock into latest_gps_datetime (#222 P6).`,
+        `dropped ${Object.values(rejected).reduce((a, b) => a + b, 0)} row(s) this chunk: ${tally(rejected)}. ` +
+          `FUTURE_SKEW means the device writes a non-UTC wall clock into latest_gps_datetime (#222 P6); ` +
+          `UNPARSEABLE_TIMESTAMP means latest_gps_datetime is not a timestamp at all and the source row ` +
+          `needs fixing — the scan no longer stops on it (#299 AR-1); SENTINEL_DEVICE_ID means the ` +
+          `device_id is a sentinel word ('NA'/'NULL') rather than an id, so the masters path can never ` +
+          `create the device and its telemetry would be unreachable (#323 AR-9c).`,
+      );
+    }
+    if (repairedAny) {
+      this.logger.warn(
+        `nulled ${Object.values(repaired).reduce((a, b) => a + b, 0)} out-of-range field(s) this chunk, ` +
+          `rows kept: ${tally(repaired)}. The ping was ingested; only the named reading was discarded (#299 AR-2).`,
       );
     }
 
@@ -130,6 +154,6 @@ export class AutoPlantSourceReader implements SourceReader {
     const last = rows[rows.length - 1];
     const nextCursor = exhausted || !last ? null : encodeDeviceCursor(String(last.device_id));
 
-    return { rows: mapped, nextCursor, ...(rejectedAny ? { rejected } : {}) };
+    return { rows: mapped, nextCursor, ...(rejectedAny ? { rejected } : {}), ...(repairedAny ? { repaired } : {}) };
   }
 }

@@ -69,7 +69,13 @@ describe('Issue 23 slice 2 — WAITING_COMPONENT > 7 days in Action Required', (
   });
 
   const cardFor = async (scope: { role: string; zoneId: number | null }) => {
-    const cards = await svc.actionRequired(scope, NOW);
+    // The `{}` is load-bearing. `actionRequired` gained a `filters` parameter **before** `now` (B5,
+    // the Console's zone-scoped attention band), so `(scope, NOW)` silently handed the frozen clock
+    // to `filters` and let `now` default to the real one — moving the 7-day cutoff far enough that
+    // the deliberately-not-overdue cycle started counting. `tsconfig.json` includes only `src`, so
+    // no typecheck saw it; this spec did, and only on a **full** backend run, because the routes
+    // covered by the changed-route specs never call the service positionally.
+    const cards = await svc.actionRequired(scope, {}, NOW);
     return cards.find((c) => c.key === 'waiting_component_overdue')!;
   };
 

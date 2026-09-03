@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { CRITICAL_PLUS_BUCKETS } from '../device-state/sla-bucket';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 
 /** Devices on a deactivated plant (Issue 119) drop out of every dashboard count + SLA bucket; they are
  *  surfaced instead on the OH "Plant Deactivations" list. Self-contained predicate — appended to any
@@ -309,19 +310,11 @@ const RECOVERY_STALL_DAYS = 14;
 
 /**
  * Ticket statuses that mean "this work is over". The complement is what the Device Detail list calls a
- * live ticket (`device.service.ts`' `ot` lateral) — restated here as a named constant rather than a
- * second hand-spelled list, because the drill-down's assignment counts must agree with that table's
- * per-row assignment column exactly.
+ * live ticket (`device.service.ts`' `ot` lateral); #308 folded both onto the ONE canonical set, because
+ * the drill-down's assignment counts must agree with that table's per-row assignment column exactly —
+ * and two hand-spelled lists is precisely how the departure/deactivation copies drifted to four members.
  */
-const CLOSED_TICKET_STATUSES = [
-  'CLOSED',
-  'CLOSED_AUTO_RECOVERY',
-  'CLOSED_NON_OPERATIONAL',
-  'FAILED_VERIFICATION',
-  'FAILED_ACTIVATION',
-  'FAILED_RECOVERY',
-  'RECEIVED_AT_WAREHOUSE',
-] as const;
+const CLOSED_TICKET_STATUSES = RESOLVED_TICKET_STATUSES;
 
 /**
  * The Device Detail page's device-status filter, as it scopes the zone drill-down's aggregates.

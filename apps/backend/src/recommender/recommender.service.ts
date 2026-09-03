@@ -15,7 +15,7 @@ import {
 } from '../scheduling/committed-day-load';
 import { notDeferredOn, returnDateArrivedBefore } from '../ticketing/deferral';
 import { componentBlockedTickets, notComponentBlocked } from '../ticketing/component-blocked';
-import { CandidateSelectionService, type CoverageType } from './candidate-selection.service';
+import { type CandidateSe, CandidateSelectionService, type CoverageType } from './candidate-selection.service';
 import { RETIRED_RECOMMENDATION_STATUS } from './recommendation-status';
 import {
   type CandidateTicket,
@@ -254,6 +254,13 @@ interface RunCandidate {
  * `recommendations` row with the reasoning breakdown. No eligible SE → an UNASSIGNABLE row (never
  * silently dropped). Day-plan grouping + dispatch is Issue 11; this only selects + explains.
  */
+/**
+ * #305 — how many tickets one zone's recommendation may process between heartbeats. 50 keeps a live
+ * run's silence at a small fraction of `DISPATCH_STALE_RUN_MIN` (10 min) even at the slowest measured
+ * per-ticket cost, while costing one indexed single-column UPDATE per 50 tickets.
+ */
+const BEAT_EVERY_TICKETS = 50;
+
 @Injectable()
 export class RecommenderService {
   constructor(
@@ -286,6 +293,15 @@ export class RecommenderService {
        * "every covering engineer", the pre-#276 behaviour.
        */
       engineerIds?: string[];
+      /**
+       * #305 — say the run is still alive, every {@link BEAT_EVERY_TICKETS} tickets.
+       *
+       * A zone's recommendation is the half of its work that scales with ticket count (the per-ticket
+       * candidate fan-out, AR-11/#330), so a big zone could stay silent past `DISPATCH_STALE_RUN_MIN`
+       * while perfectly healthy and have its LIVE run reaped. Optional and awaited: a caller with no
+       * run to attest for (the preview, a test) passes nothing and pays nothing.
+       */
+      onProgress?: () => Promise<void>;
     } = {},
   ): Promise<RunSummary> {
     const now = opts.now ?? new Date();
@@ -513,6 +529,29 @@ export class RecommenderService {
     const plannerByPlant = await this.plannerForDate(zoneId, targetDay); // plant_id → planned se_ids (soft bias)
     const kitStatusBySe = new Map<string, CommonKitStatus>(); // memoised Common-Kit status per SE
     const availabilityBySe = new Map<string, SeAvailabilityStatus>(); // memoised current availability per SE
+    /**
+     * #330 (AR-11) — the candidate pool per plant, for the length of THIS run.
+     *
+     * `orderedCandidatesForPlant` is two queries — `se_coverage`, then the floating leg joined live
+     * against `engineer_master` — and it ran once per **ticket**. Everything else expensive in the loop
+     * below was already memoised across the run (kit completeness, availability, plant coordinates,
+     * home bases); the pool was the one read still scaling with the ticket list, so a 900-ticket zone
+     * spent ~1,800 round trips re-answering a question about plants it had already asked about. The
+     * cost is the smaller half: the loop's wall time is the window #305's heartbeat exists to keep
+     * inside the reap threshold, so shortening it shrinks a real exposure.
+     *
+     * **Only the pool is memoised.** Readiness, the hard filters, tier precedence, scoring and the
+     * capacity counter stay per ticket, because those genuinely change as the run assigns work — the
+     * pool is the one input that does not.
+     *
+     * **Declared here, so its lifetime is the run.** A pool cached before a mid-run coverage change is
+     * stale, and that is already this engine's semantics rather than a new compromise: the run reads a
+     * snapshot (its ticket list, its committed day plan, its weights are all read once up front), and a
+     * coverage edit landing between two tickets was never going to be seen consistently anyway. Across
+     * runs it must be seen, which a run-scoped map gives for free — there is nothing to invalidate,
+     * because there is nothing that outlives the run.
+     */
+    const candidatePoolByPlant = new Map<string, CandidateSe[]>();
 
     // #267 — plant coordinates fetched ONCE per zone-run (never per ticket/candidate — the AC this
     // guards), plus every engineer's admin-entered home base (global, matching `engineerCapacity`'s
@@ -590,7 +629,13 @@ export class RecommenderService {
     for (let i = 0; i < runList.length; i++) {
       const t = runList[i];
       const processingRank = i + 1;
-      const orderedFull = await this.candidates.orderedCandidatesForPlant(t.plantId);
+      // #305 — one beat per N tickets, not per ticket: the write is cheap but not free, and the point
+      // is only to keep the silence well inside the reap threshold, not to narrate progress.
+      if (opts.onProgress && i > 0 && i % BEAT_EVERY_TICKETS === 0) await opts.onProgress();
+      // #330 — one pool fetch per plant per run. The returned array is shared across that plant's
+      // tickets and every reader below treats it as read-only (`filter`/`map`/`slice`/`findIndex`);
+      // the `engineerIds` narrowing on the next line builds a new array rather than editing this one.
+      const orderedFull = await this.candidatePool(t.plantId, candidatePoolByPlant);
       // #276 — Distribute's engineer-set scope, applied once here and nowhere else. Everything below
       // (kit/availability memoisation, readiness, hard filters, tier precedence, scoring, capacity,
       // the trace) runs over `ordered` exactly as it always has; a narrower pool is not a different
@@ -1001,6 +1046,23 @@ export class RecommenderService {
       data: { status: RETIRED_RECOMMENDATION_STATUS },
     });
     return count;
+  }
+
+  /**
+   * Memoise the ordered candidate pool for a plant within a run (#330).
+   *
+   * Shaped exactly like {@link ensureKitStatus} and {@link ensureAvailability} — the cache is a
+   * parameter, not a field, so it is created by and dies with `runForZone`. A field would be shared by
+   * every zone this singleton ever serves, which is precisely the cross-run, cross-zone staleness the
+   * issue rules out.
+   */
+  private async candidatePool(plantId: bigint, cache: Map<string, CandidateSe[]>): Promise<CandidateSe[]> {
+    const key = String(plantId);
+    const cached = cache.get(key);
+    if (cached) return cached;
+    const pool = await this.candidates.orderedCandidatesForPlant(plantId);
+    cache.set(key, pool);
+    return pool;
   }
 
   /** Memoise Common-Kit completeness for an SE within a run (Issue 21). */

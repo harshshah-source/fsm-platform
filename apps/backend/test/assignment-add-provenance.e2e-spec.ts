@@ -67,6 +67,10 @@ describe('#283 slice 1 — assignment add-provenance columns and vocabulary', ()
       'MANUAL_PLANT_ASSIGN',
       'MANUAL_REASSIGN',
       'MANUAL_SPLIT',
+      // The Console's cross-day drag. Its own member rather than MANUAL_REASSIGN's because the two
+      // answer different questions — "somebody else does this today" vs "the same work happens on a
+      // different day" — and a reader asking the second can only ask it of a distinct value.
+      'MANUAL_DAY_MOVE',
       'SAME_DAY_ADD',
       'CROSS_ZONE_ASSIGN',
     ]);

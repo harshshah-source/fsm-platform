@@ -1,14 +1,14 @@
 // Typed client for the `/api/reports/*` read surface (Issues 39/40). Mirrors the backend
 // ReportsService view types. Token comes from the same sessionStorage key AuthProvider writes.
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
+import { authHeaders } from './authHeaders';
 
+const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
+
+// Shared `authHeaders()` — the bearer plus `X-Acting-As-Zone`, so the Fleet Uptime hero KPI follows a
+// CSM / OH into acting mode instead of reporting pan-India uptime on a zone dashboard.
 async function get<T>(path: string): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  const res = await fetch(`${BASE_URL}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  const res = await fetch(`${BASE_URL}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as T;
 }

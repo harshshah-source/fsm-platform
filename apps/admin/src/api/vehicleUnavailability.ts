@@ -1,3 +1,4 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the ZM Vehicle Unavailability Review surface (Issue 28, extended by #245).
 // Manager-only reads of the live reports (plus a bounded resumed tail) with BOTH SLA clocks — the
 // secondary, never-pausing clock lives only on this manager-gated endpoint — and the manager legs:
@@ -10,12 +11,6 @@
 // endpoint answers 410 rather than 404 so a stale client learns why its write did nothing.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
-
-function authHeaders(): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 export type VehicleUnavailReason =
   | 'VEHICLE_ON_TRIP'

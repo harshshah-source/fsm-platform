@@ -1,8 +1,13 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
 import { committedDayPlan } from './committed-day-load';
 import type { OverrideCommand } from './override.service';
+import {
+  NoConflictSoftStatePort,
+  SOFT_STATE_CONFLICT,
+  type SoftStateConflictPort,
+} from './soft-state-conflict';
 import type { ZmScope } from './zm-schedule-query.service';
 
 /** One side of a move, as the design's capacity bar reads it: `5/6 → 6/6`. */
@@ -108,7 +113,23 @@ const PROJECTABLE = new Set(['REASSIGN', 'SWAP_SE', 'SPLIT_BATCH']);
  */
 @Injectable()
 export class OverrideProjectionService {
-  constructor(private readonly prisma: PrismaService) {}
+  /**
+   * #311 (CB-4) — the SAME conflict source the commit gates on, injected rather than assumed absent.
+   *
+   * `@Optional()` and the `NoConflictSoftStatePort` fallback mirror {@link OverrideService} exactly,
+   * because the two must not be able to answer differently: if one falls back and the other does not,
+   * the drift this slice closes reopens in the shape of a hand-constructed instance. That cuts both
+   * ways and is the forensic A6 note — a fixture that omits the port asserts the seam's silence, not
+   * this behaviour, so any spec pinning the parity has to bind the real adapter to BOTH.
+   */
+  private readonly conflict: SoftStateConflictPort;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(SOFT_STATE_CONFLICT) conflict?: SoftStateConflictPort,
+  ) {
+    this.conflict = conflict ?? new NoConflictSoftStatePort();
+  }
 
   async projectOverride(
     batchId: bigint,
@@ -292,15 +313,26 @@ export class OverrideProjectionService {
    *
    * Deliberately **reported, not enforced**: both are confirm-and-reason gates on the write, not
    * refusals, so a preview that hid a conflicted move would be lying about what the operator is
-   * allowed to do. `onSite` is the seam it has always been (Issue 15 — `soft_states` does not exist
-   * yet), so it reads empty today and the shape is here for when it does not.
+   * allowed to do.
+   *
+   * #311 (CB-4) — `onSite` used to be hardcoded `[]` with a note that `soft_states` "does not exist
+   * yet". It did: the adapter was implemented, bound in this very module, and the commit path was
+   * already gating on it. So the preview reported a clean move for a batch whose engineer was standing
+   * at the plant, and the identical confirm body came back `CONFLICT_ON_SITE` — the drift this file's
+   * own header calls worse than no preview, arriving through a comment that had simply outlived its
+   * premise. It now asks {@link SoftStateConflictPort}, which is the same object the commit consults,
+   * so the two agree **by construction** rather than by two predicates being kept in step.
+   *
+   * Asking the port rather than reading `soft_states` here is the load-bearing half: VIEWED and
+   * resolved states do not count, and a second copy of that rule would be a second thing to drift.
    */
   private async conflictsFor(ticketIds: string[], day: Date): Promise<OverrideConflicts> {
     const held = await this.prisma.ticket.findMany({
       where: { ticketId: { in: ticketIds }, deferredUntil: { gt: day } },
       select: { ticketId: true },
     });
-    return { onSite: [], deferred: held.map((t) => t.ticketId) };
+    const onSite = await this.conflict.activeOnSiteTicketIds(ticketIds);
+    return { onSite: [...onSite], deferred: held.map((t) => t.ticketId) };
   }
 
   private inScope(zoneId: bigint, scope: ZmScope): boolean {

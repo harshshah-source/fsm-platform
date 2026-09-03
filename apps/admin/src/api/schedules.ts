@@ -30,6 +30,24 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** A committed stop on a listed schedule — present only when `detail: 'stops'` was requested. */
+export interface ScheduleRowStop {
+  batchId: string;
+  stopSequence: number;
+  plantId: string;
+  plantName: string;
+  status: string;
+  tickets: {
+    ticketId: string;
+    sortOrder: number;
+    addSource: string | null;
+    addedBy: string | null;
+    coverageTypeAtAssign: string | null;
+    /** The server's reading of `addSource` — the client never re-derives which sources are the engine's. */
+    systemPlaced: boolean;
+  }[];
+}
+
 export interface ScheduleRow {
   scheduleId: string;
   seId: string;
@@ -42,14 +60,24 @@ export interface ScheduleRow {
   status: string;
   batchCount: number;
   ticketCount: number;
+  /**
+   * The stops themselves, when asked for. A board column that has to draw the ticket an operator just
+   * moved onto it cannot do so from `ticketCount` — see `useDayContext`.
+   */
+  stops?: ScheduleRowStop[];
 }
 
 /**
  * #284 §D — `date` narrows to the plans covering that IST operating day; omitting it returns the
  * all-live list this endpoint has always returned. Additive on both sides of the wire.
  */
-export const apiListSchedules = (date?: string) =>
-  get<ScheduleRow[]>(`/schedules${date ? `?date=${encodeURIComponent(date)}` : ''}`);
+export const apiListSchedules = (date?: string, detail?: 'stops') => {
+  const q = new URLSearchParams();
+  if (date) q.set('date', date);
+  if (detail) q.set('detail', detail);
+  const qs = q.toString();
+  return get<ScheduleRow[]>(`/schedules${qs ? `?${qs}` : ''}`);
+};
 
 export interface TicketReasoning {
   companyTier: string | null;
@@ -296,7 +324,21 @@ export type OverrideCommand =
   | { action: 'REORDER'; stopSequence: number; reasonCode: string; confirm?: boolean }
   | { action: 'SWAP_SE'; newSeId: string; reasonCode: string; confirm?: boolean }
   | { action: 'REASSIGN'; ticketId: string; newSeId: string; reasonCode: string; confirm?: boolean }
-  | { action: 'SPLIT_BATCH'; ticketIds: string[]; newSeId: string; reasonCode: string; confirm?: boolean };
+  | { action: 'SPLIT_BATCH'; ticketIds: string[]; newSeId: string; reasonCode: string; confirm?: boolean }
+  /**
+   * Move one ticket's planned assignment to another operating day (and, if the operator said so,
+   * another engineer). Distinct from `DEFER_TICKET` in the one way that matters: the ticket stays
+   * assigned. A defer unassigns and lets the target day's run decide; this decides.
+   */
+  | {
+      action: 'MOVE_TICKET';
+      ticketId: string;
+      newSeId: string;
+      /** IST operating day, `YYYY-MM-DD`. The endpoint refuses a past date with `TARGET_DATE_IN_PAST`. */
+      targetDate: string;
+      reasonCode: string;
+      confirm?: boolean;
+    };
 
 export interface OverrideOk {
   result: 'OK';
@@ -304,6 +346,8 @@ export interface OverrideOk {
   scheduleId: string;
   seId: string;
   status: string;
+  /** Present only for `MOVE_TICKET` — the day the work now sits on, so the board can go there. */
+  movedToDate?: string;
 }
 
 /**
@@ -340,6 +384,13 @@ export async function apiOverrideBatch(batchId: string, cmd: OverrideCommand): P
   });
   if (res.status === 409) {
     throw new OverrideConflictError((await res.json()) as OverrideConflict);
+  }
+  // A 400 here is a *refusal with a stated reason* (`TARGET_DATE_IN_PAST` is the first), not a
+  // transport failure, and the operator can act on the sentence. `REQUEST_FAILED_400` told them
+  // nothing they could use; the server already wrote the explanation, so it is carried through.
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(body?.message || 'The change was refused.');
   }
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as OverrideOk;

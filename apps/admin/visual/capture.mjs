@@ -42,14 +42,26 @@ async function clientNavigate(page, route) {
   await page.waitForFunction((to) => window.location.pathname === to, route, { timeout: NAV_TIMEOUT });
 }
 
+// The control is a zone picker when /org/zones could be read, and the legacy numeric input otherwise
+// (Issue 27) — drive whichever one this build rendered.
 async function setActingZone(page, zone) {
-  await page.fill('input[aria-label="Act as ZM for zone"]', String(zone));
+  const control = page.getByLabel('Act as ZM for zone');
+  const tag = await control.evaluate((el) => el.tagName);
+  if (tag === 'SELECT') await control.selectOption(String(zone));
+  else await control.fill(String(zone));
   await page.getByRole('button', { name: 'Go', exact: true }).click();
   await page.waitForSelector('[role="status"]', { timeout: NAV_TIMEOUT });
 }
 
 async function settle(page) {
   await page.waitForLoadState('networkidle').catch(() => {});
+  // Park the pointer off-canvas and drop focus before shooting. Without this a chart under the
+  // cursor captures with its hover tooltip open — deterministic, but it freezes a transient overlay
+  // into the baseline, and the overlay then moves with the data and inflates every later diff. The
+  // pointer lands wherever the previous spec left it (a row click, say) and pages are navigated
+  // client-side, so it persists across specs within a role.
+  await page.mouse.move(-50, -50).catch(() => {});
+  await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined)).catch(() => {});
   await page.waitForTimeout(700); // charts/animations/font swap
 }
 

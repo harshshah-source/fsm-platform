@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 
 /**
  * OH raw-data "entity mapping" export (Issue 120): one CSV row per device joining the org graph
@@ -13,8 +14,14 @@ import { PrismaService } from '../prisma/prisma.service';
  * flowing after the first page and peak memory is one page, not the whole fleet.
  */
 
-/** Non-open (terminal) ticket statuses — a device's open-ticket count excludes these. */
-const CLOSED_TICKET_STATUSES = ['CLOSED', 'CLOSED_AUTO_RECOVERY', 'CLOSED_NON_OPERATIONAL', 'FAILED_RECOVERY'];
+/**
+ * Non-open (terminal) ticket statuses — a device's open-ticket count excludes these.
+ *
+ * #308 — this was the **divergent** copy: four members, silently counting `FAILED_VERIFICATION`,
+ * `FAILED_ACTIVATION` and `RECEIVED_AT_WAREHOUSE` tickets as open work. The exported numbers move as a
+ * result, and that is the fix, not a side effect.
+ */
+const CLOSED_TICKET_STATUSES: readonly string[] = RESOLVED_TICKET_STATUSES;
 
 const PAGE_SIZE = 2000;
 

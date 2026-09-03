@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import type { $Enums } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { LIVE_FAILURE_CYCLE_STATES, RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 import { AuditService, auditActor } from '../audit/audit.service';
 import type { RequestActor } from '../common/request-actor';
@@ -16,13 +17,15 @@ import type { RequestActor } from '../common/request-actor';
  * counts, dispatch) read {@link activeDeactivatedPlantIds}.
  */
 
-/** Terminal ticket statuses — everything else is "open" work a deactivation cancels. */
-const TERMINAL_TICKET_STATUSES: $Enums.TicketStatus[] = [
-  'CLOSED',
-  'CLOSED_AUTO_RECOVERY',
-  'CLOSED_NON_OPERATIONAL',
-  'FAILED_RECOVERY',
-];
+/**
+ * Terminal ticket statuses — everything else is "open" work a deactivation cancels.
+ *
+ * #308 — the second **divergent** copy (four members). Now the canonical seven, so a ticket already
+ * terminal at `FAILED_VERIFICATION` / `FAILED_ACTIVATION` / `RECEIVED_AT_WAREHOUSE` keeps its own
+ * closure instead of being re-closed as `CLOSED / OPERATIONS_HEAD_OVERRIDE_CLOSE` with a second
+ * closure event on top. Its still-live failure cycle is ended directly — see `cancelOpenTickets`.
+ */
+const TERMINAL_TICKET_STATUSES: $Enums.TicketStatus[] = [...RESOLVED_TICKET_STATUSES];
 
 export type DeactivateResult =
   | { result: 'OK'; deactivationId: string; cancelledTickets: number }
@@ -166,13 +169,21 @@ export class PlantDeactivationService {
     actor: RequestActor,
     now: Date,
   ): Promise<number> {
-    const open = await tx.ticket.findMany({
-      where: { plantId, status: { notIn: TERMINAL_TICKET_STATUSES } },
+    // Every ticket on the plant, so the live-cycle sweep below can also see cycles hanging off
+    // ALREADY-terminal tickets (#308) — `open` is only the subset this deactivation closes.
+    const allTickets = await tx.ticket.findMany({
+      where: { plantId },
       select: { ticketId: true, status: true, failureCycleId: true },
     });
+    const terminal = new Set<string>(TERMINAL_TICKET_STATUSES);
+    const open = allTickets.filter((t) => !terminal.has(t.status));
+    const closed: typeof open = [];
     for (const ticket of open) {
-      await tx.ticket.update({
-        where: { ticketId: ticket.ticketId },
+      // #308 — the status guard is in the WHERE. This loop makes one round trip per ticket, so the
+      // read above can be many tickets stale by the time a late one is written; a ticket that reached
+      // a terminal state meanwhile keeps its own closure rather than having it overwritten here.
+      const { count } = await tx.ticket.updateMany({
+        where: { ticketId: ticket.ticketId, status: { notIn: TERMINAL_TICKET_STATUSES } },
         data: {
           status: 'CLOSED',
           closureType: 'OPERATIONS_HEAD_OVERRIDE_CLOSE',
@@ -181,6 +192,8 @@ export class PlantDeactivationService {
           lastStateChangedAt: now,
         },
       });
+      if (count === 0) continue;
+      closed.push(ticket);
       await tx.ticketEvent.create({
         data: {
           ticketId: ticket.ticketId,
@@ -192,28 +205,34 @@ export class PlantDeactivationService {
           at: now,
         },
       });
-      // Terminate the parent Failure Cycle (state → FAILED so it leaves the one-active-per-device set,
-      // letting reactivation's next pipeline run open a fresh cycle; FAILED, not VERIFIED, so the
-      // re-created ticket is not mis-flagged a REPEAT).
-      if (ticket.failureCycleId) {
-        await tx.failureCycle.update({
-          where: { cycleId: ticket.failureCycleId },
-          data: { state: 'FAILED', closedAt: now },
-        });
-      }
+    }
+    // Terminate the parent Failure Cycles (state → FAILED so they leave the one-active-per-device set,
+    // letting reactivation's next pipeline run open a fresh cycle; FAILED, not VERIFIED, so the
+    // re-created ticket is not mis-flagged a REPEAT).
+    //
+    // #308 — taken from the plant's cycles rather than only the tickets just closed, and guarded on the
+    // cycle still being live. A `FAILED_VERIFICATION` ticket is terminal while its cycle is not, so the
+    // old ticket-driven write reached that cycle only as a side effect of re-closing a ticket that was
+    // already over; the flag-clear below covers the whole plant either way.
+    const cycleIds = allTickets.map((t) => t.failureCycleId).filter((c): c is string => c !== null);
+    if (cycleIds.length > 0) {
+      await tx.failureCycle.updateMany({
+        where: { cycleId: { in: cycleIds }, state: { in: [...LIVE_FAILURE_CYCLE_STATES] } },
+        data: { state: 'FAILED', closedAt: now },
+      });
     }
     // #241 — end the assignments too, in the same transaction. Day-plan reads filter on
     // `removed_at IS NULL` and not on ticket status, so a cancelled ticket whose batch row stayed
     // live kept appearing as work to do on an SE's plan. Symmetric with the device-departure path.
     // `removed_by` is NULL: the OH deactivated the *plant*, nobody withdrew these tickets by hand.
-    if (open.length > 0) {
+    if (closed.length > 0) {
       await tx.batchAssignmentTicket.updateMany({
-        where: { ticketId: { in: open.map((t) => t.ticketId) }, removedAt: null },
+        where: { ticketId: { in: closed.map((t) => t.ticketId) }, removedAt: null },
         data: { removedAt: now, removedBy: null, removalReason: REMOVAL_REASONS.TICKET_CANCELLED },
       });
     }
     // Clear the hot-state open-cycle flag for the plant's devices — the ticket-creation gate keys on it.
     await tx.deviceState.updateMany({ where: { plantId }, data: { hasOpenFailureCycle: false } });
-    return open.length;
+    return closed.length;
   }
 }

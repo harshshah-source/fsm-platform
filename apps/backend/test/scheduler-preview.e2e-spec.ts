@@ -160,7 +160,7 @@ describe('#251 — scheduler preview + pre-run holds', () => {
    */
   it('AC-2: a hold removes the ticket from the held day and release restores it', async () => {
     // Held "until D2" ⇒ absent on D1, present again on D2 — `notDeferredOn` is inclusive on D2.
-    const held = await svc.placeHold(ticketA, D2, 'AWAITING_PARTS', OH, actor);
+    const held = await svc.placeHold(ticketA, D2, 'AWAITING_PARTS', OH, actor, { now: NOW });
     expect(held.result).toBe('OK');
     expect(held.result === 'OK' && held.heldUntil).toBe('2026-06-23');
 
@@ -181,7 +181,7 @@ describe('#251 — scheduler preview + pre-run holds', () => {
 
   /** AC-2 — both writes are audited with the reason, so a hold is never an anonymous date change. */
   it('AC-2: hold and release are audited with reason and previous value', async () => {
-    await svc.placeHold(ticketA, D2, 'PLANNED_SITE_CLOSURE', OH, actor);
+    await svc.placeHold(ticketA, D2, 'PLANNED_SITE_CLOSURE', OH, actor, { now: NOW });
     await svc.releaseHold(ticketA, OH, actor);
 
     const rows = await prisma.auditLog.findMany({
@@ -213,13 +213,13 @@ describe('#251 — scheduler preview + pre-run holds', () => {
       },
     });
 
-    const refused = await svc.placeHold(ticketA, D2, 'ADMIN_HOLD', OH, actor);
+    const refused = await svc.placeHold(ticketA, D2, 'ADMIN_HOLD', OH, actor, { now: NOW });
     expect(refused.result).toBe('CONFLICT_VEHICLE_UNAVAILABLE');
     expect(refused.result === 'CONFLICT_VEHICLE_UNAVAILABLE' && refused.reportId).toBe(String(report.id));
     // Refused means refused — the column is untouched, not "refused but written anyway".
     expect((await prisma.ticket.findUniqueOrThrow({ where: { ticketId: ticketA } })).deferredUntil).toBeNull();
 
-    const confirmed = await svc.placeHold(ticketA, D2, 'ADMIN_HOLD', OH, actor, { confirm: true });
+    const confirmed = await svc.placeHold(ticketA, D2, 'ADMIN_HOLD', OH, actor, { confirm: true, now: NOW });
     expect(confirmed.result).toBe('OK');
     // The override is recorded — the one case where this write destroys information.
     const audit = await prisma.auditLog.findFirst({
@@ -238,7 +238,7 @@ describe('#251 — scheduler preview + pre-run holds', () => {
    */
   it('refuses to hold an assigned ticket, pointing at the batch-override path instead', async () => {
     await prisma.ticket.update({ where: { ticketId: ticketA }, data: { assignmentState: 'FORMALLY_ASSIGNED' } });
-    const outcome = await svc.placeHold(ticketA, D2, 'ADMIN_HOLD', OH, actor);
+    const outcome = await svc.placeHold(ticketA, D2, 'ADMIN_HOLD', OH, actor, { now: NOW });
     expect(outcome.result).toBe('NOT_HOLDABLE');
     expect(outcome.result === 'NOT_HOLDABLE' && outcome.assignmentState).toBe('FORMALLY_ASSIGNED');
     await prisma.ticket.update({ where: { ticketId: ticketA }, data: { assignmentState: 'UNASSIGNED' } });
@@ -250,7 +250,7 @@ describe('#251 — scheduler preview + pre-run holds', () => {
     const preview = await svc.preview(D1, zm, NOW);
     expect(preview.zones.every((z) => z.zoneId !== String(zoneId))).toBe(true);
 
-    const outcome = await svc.placeHold(ticketA, D2, 'ADMIN_HOLD', zm, actor);
+    const outcome = await svc.placeHold(ticketA, D2, 'ADMIN_HOLD', zm, actor, { now: NOW });
     expect(outcome.result).toBe('NOT_FOUND');
   });
 
@@ -263,7 +263,7 @@ describe('#251 — scheduler preview + pre-run holds', () => {
     expect((await svc.checkStaleness(preview.previewToken, OH, NOW)).result).toBe('FRESH');
 
     // Move the world: hold the only dispatchable ticket, so the zone's counts change.
-    await svc.placeHold(ticketA, D2, 'AWAITING_PARTS', OH, actor);
+    await svc.placeHold(ticketA, D2, 'AWAITING_PARTS', OH, actor, { now: NOW });
     const stale = await svc.checkStaleness(preview.previewToken, OH, NOW);
     expect(stale.result).toBe('TOKEN_STALE');
     expect(stale.result === 'TOKEN_STALE' && stale.freshPreview.zones.find((z) => z.zoneId === String(zoneId))!.recommended).toBe(0);

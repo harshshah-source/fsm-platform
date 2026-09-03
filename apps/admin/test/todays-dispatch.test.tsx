@@ -1,5 +1,5 @@
 import type { SessionView } from '@fsm/shared';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DispatchChangesTodayView, DispatchTodayView } from '../src/api/dispatchToday';
@@ -31,12 +31,21 @@ const ticket = (over: Partial<DispatchTodayView['engineers'][0]['stops'][0]['tic
   systemPlaced: true,
   returnDueToday: false,
   failureCycles: null,
+  deviceId: '869645080787056',
+  vehicleNo: 'MH-12-AB-3456',
+  companyName: 'Northbound Cement',
+  transporterName: 'Sharma Logistics',
+  inactivityHours: 18,
+  assignedAt: '2026-08-28T05:30:00Z',
+  troubleshootingStarted: false,
+  actionStatus: 'NOT_STARTED' as const,
   ...over,
 });
 
 const view = (over: Partial<DispatchTodayView> = {}): DispatchTodayView => ({
   operatingDay: '2026-08-25',
   chronicThreshold: 3,
+  agingThresholdHours: 4,
   zone: { zoneId: '7', name: 'North Zone' },
   run: { runId: '42', status: 'SUCCESS', trigger: 'CRON', startedAt: '2026-08-25T05:00:00Z', finishedAt: null },
   engineers: [
@@ -93,6 +102,11 @@ const renderPage = (session: SessionView = ZM) => renderAt('/dispatch/today', se
 
 describe("#285 — Today's Dispatch cockpit", () => {
   beforeEach(() => {
+    // The Work Pool rail is collapsed by default since 2026-09-01 (the board is the canvas). These
+    // assertions are about what the rail *contains*, not about its default width, so they start from
+    // the operator preference that opens it; the default and the toggle are covered explicitly in
+    // `scheduler-console-composition.test.tsx`.
+    localStorage.setItem('fsm.console.workRailOpen', '1');
     vi.mocked(apiDispatchChangesToday).mockResolvedValue(changes());
   });
 
@@ -100,14 +114,18 @@ describe("#285 — Today's Dispatch cockpit", () => {
     vi.mocked(apiDispatchToday).mockResolvedValue(view());
     renderPage();
 
-    // Scoped to the board lane on purpose. Under the Console's approved four-region layout an
-    // engineer is legitimately named twice — once in the People rail, once on their board lane — so an
-    // unscoped query matches both. The assertion that matters is that the *lane* carries the name and
-    // the stop, which is what a plain `getByText` was only incidentally checking before.
+    // Scoped to the board lane on purpose. This assertion was originally scoped because the Console's
+    // four-region layout named an engineer twice — once in the People rail, once on their board lane —
+    // so an unscoped query matched both. #295 deleted the rail and made that duplication impossible,
+    // so the scoping is now belt-and-braces rather than load-bearing, and the *absence* of a second
+    // name is asserted directly instead.
     const lane = await screen.findByTestId('cell-se-1-2026-08-25');
-    expect(within(lane).getByText('Acme Cement')).toBeInTheDocument();
+    // The stop *header*, by its own test id. Since the density correction (2026-09-01) the work card
+    // also names the plant it is at — from this very stop — so an unscoped text query legitimately
+    // matches twice. What this test is about is the stop being on the lane, so it asks for the stop.
+    expect(within(lane).getByTestId('stop-b1')).toHaveTextContent('Acme Cement');
     expect(within(screen.getByTestId('console-board')).getByTestId('lane-se-1')).toHaveTextContent('Ramesh K.');
-    expect(within(screen.getByTestId('console-people-rail')).getByText('Ramesh K.')).toBeInTheDocument();
+    expect(screen.getAllByText('Ramesh K.')).toHaveLength(1);
   });
 
   it('shows an engineer with no stops rather than omitting them — an empty lane is a fact', async () => {
@@ -301,6 +319,33 @@ describe("#285 — Today's Dispatch cockpit", () => {
   });
 
   /**
+   * #319 — the notice covers more than a crash now, so it must not claim one.
+   *
+   * A zone is marked when it throws inside a live run, or when its claim is still open as the run
+   * unwinds; in both the run finished and *reported* the loss. The old copy said "this zone's dispatch
+   * run died", which would send an operator looking for a crashed process that never existed.
+   */
+  it('describes a marked zone as having lost its dispatch, not as a crash', async () => {
+    vi.mocked(apiDispatchToday).mockResolvedValue(
+      view({
+        recovery: {
+          state: 'PENDING',
+          attempts: 0,
+          markedAt: '2026-08-25T05:02:00Z',
+          lastAttemptAt: null,
+          lastError: null,
+        },
+      }),
+    );
+    renderPage();
+
+    const notice = await screen.findByTestId('recovery-notice');
+    expect(notice).toHaveTextContent(/lost its dispatch run/i);
+    expect(notice).toHaveTextContent(/queued/i);
+    expect(notice.textContent).not.toMatch(/died/i);
+  });
+
+  /**
    * #285 AC8 / #284 §C — the run's own decisions, in the order the engine made them.
    *
    * The Plan/Live/Replay mode nav dissolved into the day axis (composition correction §4), so the
@@ -449,5 +494,54 @@ describe('#288 — stranded work in the interception strip', () => {
     renderPage();
 
     expect(await screen.findByText(/No capacity-eligible engineer was available/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * #298 (CB-2) — the strip clears when the escalation it was asking about is resolved.
+ *
+ * The frontend needed no change for #298; what it needed was proof that it never *held* the row. The
+ * operator's complaint was that the strip came back after a correct assignment, and that could have
+ * been either half of the round trip: a backend that never closed the escalation, or a console that
+ * cached the strip past a refetch. It was the backend — `assignTicket` never touched
+ * `intraday_insertions` — and this test is the half that says so, by driving the page's own refetch
+ * over a payload where the row has gone and asserting the strip goes with it.
+ *
+ * Deliberately driven through the real "Refresh the operating day" control rather than by re-rendering
+ * with a different mock: a second render proves the first paint reads the payload, which is already
+ * asserted above; only a refetch on a live page proves the strip is not sticky.
+ */
+describe('#298 — the interception strip clears on the refetch after the assignment', () => {
+  const escalated = {
+    insertionId: 'i3',
+    ticketId: 'ffffffff-0000-0000-0000-000000000000',
+    slaBucket: 'CRITICAL',
+    createdAt: '2026-08-25T11:55:00Z',
+    insertionType: 'SYSTEM_CRITICAL',
+    assignedSeId: null,
+    assignedSeName: null,
+  };
+  const withEscalation = view({
+    situation: { placed: 1, unassignable: 0, held: 0, criticalNeedsYou: 1, overCapacity: 0, changesToday: 0, componentBlockedWithheld: null, bucketlessDropped: null },
+    escalations: [escalated],
+  });
+
+  it('drops the strip once the assignment has closed the escalation server-side', async () => {
+    // First paint: the row the operator is about to act on. Every subsequent fetch answers with the
+    // state the fixed `assignTicket` leaves behind — the escalation ACCEPTED, so absent from the read.
+    vi.mocked(apiDispatchToday).mockResolvedValueOnce(withEscalation).mockResolvedValue(view());
+    renderPage();
+
+    const strip = await screen.findByTestId('critical-interception');
+    expect(within(strip).getByTestId(`escalation-resolve-${escalated.ticketId}`)).toHaveTextContent(
+      /Assign this work/i,
+    );
+
+    fireEvent.click(screen.getByText(/Refresh the operating day/i));
+
+    await waitFor(() => expect(screen.queryByTestId('critical-interception')).toBeNull());
+    // The headline count is the same fact read a second way; a strip that vanished while the counter
+    // still said "1 needs manual assignment" would be the same contradiction in a new place.
+    expect(screen.queryByTestId(`escalation-resolve-${escalated.ticketId}`)).toBeNull();
   });
 });

@@ -13,6 +13,8 @@ import {
 import { AccessTokenClaims } from '../auth/token.service';
 import { istWindowEnd, istWindowStart } from '../common/ist-day';
 import { CurrentActor } from '../common/decorators/current-actor.decorator';
+import { CurrentScope } from '../common/decorators/current-scope.decorator';
+import type { ManagerScope } from '../common/manager-scope';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { RequestActor } from '../common/request-actor';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -75,8 +77,8 @@ export class LeaveRequestController {
 
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims): Promise<LeaveRequestRow[]> {
-    return this.leave.listForZone({ role: user.role, zoneId: user.zone_id });
+  list(@CurrentScope() scope: ManagerScope): Promise<LeaveRequestRow[]> {
+    return this.leave.listForZone(scope);
   }
 
   @Post(':id/approve')

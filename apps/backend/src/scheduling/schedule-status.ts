@@ -1,4 +1,4 @@
-import { type WorkScheduleStatus } from '../generated/prisma/enums';
+import { type BatchStatus, type WorkScheduleStatus } from '../generated/prisma/enums';
 
 /**
  * #153 — the one definition of "is this work schedule live today?".
@@ -28,6 +28,30 @@ export const LIVE_SCHEDULE_STATUSES: readonly WorkScheduleStatus[] = ['ACTIVE', 
  */
 export const liveScheduleFilter = (): { status: { in: WorkScheduleStatus[] } } => ({
   status: { in: [...LIVE_SCHEDULE_STATUSES] },
+});
+
+/**
+ * The same liveness question one level down: is this stop still on the plan?
+ *
+ * `PlantBatchAssignment.status` runs `AUTO_ASSIGNED | OVERRIDDEN | COMPLETED | PARTIAL` and carries the
+ * same conflation as its parent — `OVERRIDDEN` means a ZM adjusted the stop, not that it is finished —
+ * so every reader that asks "what is on this SE's day plan" takes the first two.
+ *
+ * Named here, beside its schedule sibling, because #321 made two call sites *have* to agree: the
+ * notification's stop and ticket counts are asserted against `DayPlanQueryService`, on the ground that
+ * a number the SE can contradict by opening the screen the notification sent them to is worse than
+ * either basis alone. Two hand-written copies of a status list is exactly how that agreement would rot.
+ *
+ * Seven other readers (`engineers-query`, `me-tickets-query`, `se-ticket-access`,
+ * `dispatch-today-query`, `zm-schedule-query` ×2) still spell the pair inline. They answer different
+ * questions on different screens and were deliberately left alone rather than swept in on a payload
+ * slice; folding them in is a tidy follow-up, not a correctness one.
+ */
+export const LIVE_BATCH_STATUSES: readonly BatchStatus[] = ['AUTO_ASSIGNED', 'OVERRIDDEN'];
+
+/** Prisma `where` fragment for a live stop. Same factory reasoning as {@link liveScheduleFilter}. */
+export const liveBatchFilter = (): { status: { in: BatchStatus[] } } => ({
+  status: { in: [...LIVE_BATCH_STATUSES] },
 });
 
 /**

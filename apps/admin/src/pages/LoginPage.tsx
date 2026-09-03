@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LoginError } from '../api/client';
 import { useAuth } from '../auth/AuthProvider';
+import { BrandLogo } from '../components/shell/BrandLogo';
 import { Button } from '../components/ui/Button';
 import { IconCheck, IconEye, IconEyeOff, IconLock, IconMail } from '../components/ui/icons';
 
@@ -74,15 +75,8 @@ export function LoginPage() {
       {/* Left — brand + marketing + KPI tiles (hidden on small screens) */}
       <div className="relative hidden flex-col justify-between overflow-hidden p-12 lg:flex">
         <div>
-          <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-b from-brand-600 to-brand-700 text-lg font-bold shadow-lg shadow-brand-700/25">
-              A
-            </span>
-            <div>
-              <div className="text-lg font-semibold">Autoplant</div>
-              <div className="text-xs text-chrome-muted">Fleet Operations Platform</div>
-            </div>
-          </div>
+          {/* Same lockup the signed-in shell uses (sidebar rail) — one AutoPlant wordmark, not two. */}
+          <BrandLogo />
 
           <h1 className="mt-16 max-w-lg text-5xl font-semibold leading-[1.05]">
             Manage Fleet Operations <span className="text-brand-600">Faster.</span>

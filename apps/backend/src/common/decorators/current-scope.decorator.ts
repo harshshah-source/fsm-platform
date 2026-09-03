@@ -19,7 +19,9 @@ interface ScopedRequest {
  * means not acting, deliberately, rather than a re-parse of the header.
  */
 export const CurrentScope = createParamDecorator(
-  (_data: unknown, ctx: ExecutionContext): ManagerScope => {
+  // Named, not anonymous: #341's route sweep identifies a scoped handler by this factory's name in
+  // Nest's `ROUTE_ARGS_METADATA`, which is the only trace a param decorator leaves on a method.
+  function currentScopeFactory(_data: unknown, ctx: ExecutionContext): ManagerScope {
     const request = ctx.switchToHttp().getRequest<ScopedRequest>();
     return resolveManagerScope(request.user, request.acting ?? notActing(request.user.role));
   },

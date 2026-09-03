@@ -1,13 +1,8 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the Component-Blocked Queue (Issue 21) — the ZM read-only view of tickets the
 // Recommender dropped for an incomplete Common Kit. Zone scope is enforced server-side.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
-
-function authHeaders(): Record<string, string> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 export interface MissingComponent {
   componentId: string;

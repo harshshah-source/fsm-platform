@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { DayPlanStop, DayPlanStopTicket, DayPlanView } from '@fsm/shared';
 import { istDate } from '../common/ist-day';
 import { PrismaService } from '../prisma/prisma.service';
-import { liveScheduleFilter } from './schedule-status';
+import { liveBatchFilter, liveScheduleFilter } from './schedule-status';
 
 export type { DayPlanStop, DayPlanStopTicket, DayPlanView } from '@fsm/shared';
 
@@ -40,7 +40,8 @@ export class DayPlanQueryService {
     if (!schedule) return EMPTY;
 
     const batches = await this.prisma.plantBatchAssignment.findMany({
-      where: { scheduleId: schedule.scheduleId, status: { in: ['AUTO_ASSIGNED', 'OVERRIDDEN'] } },
+      // #321 — shared with the dispatch notification's counts, which are asserted against this read.
+      where: { scheduleId: schedule.scheduleId, ...liveBatchFilter() },
       orderBy: { stopSequence: 'asc' },
       include: {
         plant: { select: { name: true } },

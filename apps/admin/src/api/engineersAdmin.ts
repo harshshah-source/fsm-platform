@@ -1,10 +1,10 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the Phase 4 SE Management CRUD (`/api/engineers` admin surface). Unlike the generic
 // helper it preserves the backend error `code` so the page renders validation/authority messages inline.
 // Zone authority (OH/CSM cross-zone, ZM home-zone) is enforced server-side from the JWT; the page mirrors
 // it for affordances only.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
 export interface MappedPlant {
   id: number;
@@ -23,6 +23,10 @@ export interface SeDirectoryRow {
   coverageType: string;
   dailyCapacity: number;
   isActive: boolean;
+  /** #267 — admin-managed home/base for the recommender's `distance` score component. Either both
+   *  set or both null — never a lone lat/lng. */
+  homeLat: number | null;
+  homeLng: number | null;
   plants: MappedPlant[];
   companies: MappedPlant[];
 }
@@ -42,6 +46,8 @@ export interface CreateSeBody {
   zoneId: number;
   coverageType: string;
   dailyCapacity: number;
+  homeLat?: number | null;
+  homeLng?: number | null;
 }
 
 export interface UpdateSeBody {
@@ -52,6 +58,8 @@ export interface UpdateSeBody {
   zoneId?: number;
   dailyCapacity?: number;
   coverageType?: string;
+  homeLat?: number | null;
+  homeLng?: number | null;
 }
 
 /** Carries the backend error `code` (+ optional `field`) to the page. */
@@ -67,12 +75,11 @@ export class SeApiError extends Error {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...authHeaders(),
       ...(init?.headers ?? {}),
     },
   });

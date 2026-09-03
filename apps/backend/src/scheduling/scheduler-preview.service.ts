@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
 import { istDate, istWindowStart } from '../common/ist-day';
+import { LostRaceError, stampOnceOrLose } from '../common/lost-race';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { type ZoneProjection } from '../recommender/recommender.service';
@@ -78,7 +79,15 @@ export type HoldOutcome =
    * date is an operational fact about a vehicle. Overwriting the second with the first would lose
    * information nobody could recover, so it refuses and shows the return context instead.
    */
-  | { result: 'CONFLICT_VEHICLE_UNAVAILABLE'; expectedFrom: string; reportId: string };
+  | { result: 'CONFLICT_VEHICLE_UNAVAILABLE'; expectedFrom: string; reportId: string }
+  /**
+   * #310 (RC-11) — a hold whose date would hold nothing. `notDeferredOn` is inclusive, so
+   * `deferred_until = D` is dispatchable **on** D: any date at or before today puts the ticket back in
+   * today's run, and the call returned OK having changed the ticket's plan not at all. Silent no-ops
+   * on a deliberate lever are worse than refusals — the operator walks away believing the work is
+   * held, and finds it dispatched.
+   */
+  | { result: 'INVALID_DATE'; field: 'heldUntil'; value: string; today: string };
 
 export type ReleaseOutcome =
   | { result: 'OK'; ticketId: string }
@@ -164,8 +173,26 @@ export class SchedulerPreviewService {
     reasonCode: string,
     scope: ZmScope,
     actor: { userId: string; role: string; actedAsRole?: string | null },
-    opts: { confirm?: boolean } = {},
+    /** `now` rides in the bag rather than an eighth positional argument — #310 needs the caller's clock
+     *  to decide what "past" means, and this service's siblings (`preview`, `checkStaleness`) and the
+     *  run/dispatch entry points all already spell an injected clock this way. */
+    opts: { confirm?: boolean; now?: Date } = {},
   ): Promise<HoldOutcome> {
+    const now = opts.now ?? new Date();
+    // Before anything is read: a hold that would hold nothing is not a hold. This is a question about
+    // the request and today's date alone, so it needs no row — and answering it first means an
+    // operator who mistypes the year is told so rather than told the ticket cannot be held.
+    const today = istDate(now);
+    const day = istDate(heldUntil);
+    if (Number.isNaN(day.getTime()) || day.getTime() <= today.getTime()) {
+      return {
+        result: 'INVALID_DATE',
+        field: 'heldUntil',
+        value: Number.isNaN(heldUntil.getTime()) ? String(heldUntil) : heldUntil.toISOString().slice(0, 10),
+        today: today.toISOString().slice(0, 10),
+      };
+    }
+
     const ticket = await this.prisma.ticket.findUnique({
       where: { ticketId },
       include: { plant: { select: { zoneId: true } } },
@@ -192,28 +219,56 @@ export class SchedulerPreviewService {
       };
     }
 
-    const day = istDate(heldUntil);
-    await this.audit.withAudit(
-      {
-        actorId: actor.userId,
-        actorRole: actor.role,
-        actedAsRole: actor.actedAsRole ?? null,
-        action: 'SCHEDULER_HOLD_PLACED',
-        entityType: 'ticket',
-        entityId: ticketId,
-        metadata: {
-          heldUntil: day.toISOString().slice(0, 10),
-          reasonCode,
-          previousDeferredUntil: ticket.deferredUntil?.toISOString().slice(0, 10) ?? null,
-          // Recorded when set: an override of a vehicle-return date is the one case where this write
-          // destroys information, so the trail has to say it happened and who accepted it.
-          overrodeVehicleReport: openReport ? String(openReport.id) : null,
-        } as Prisma.InputJsonValue,
-      },
-      async (tx) => {
-        await tx.ticket.update({ where: { ticketId }, data: { deferredUntil: day } });
-      },
-    );
+    try {
+      await this.audit.withAudit(
+        {
+          actorId: actor.userId,
+          actorRole: actor.role,
+          actedAsRole: actor.actedAsRole ?? null,
+          action: 'SCHEDULER_HOLD_PLACED',
+          entityType: 'ticket',
+          entityId: ticketId,
+          metadata: {
+            heldUntil: day.toISOString().slice(0, 10),
+            reasonCode,
+            previousDeferredUntil: ticket.deferredUntil?.toISOString().slice(0, 10) ?? null,
+            // Recorded when set: an override of a vehicle-return date is the one case where this write
+            // destroys information, so the trail has to say it happened and who accepted it.
+            overrodeVehicleReport: openReport ? String(openReport.id) : null,
+          } as Prisma.InputJsonValue,
+        },
+        async (tx) => {
+          // #306 (RC-6) — the OPEN/UNASSIGNED test above is a plain read, and this write used to be keyed
+          // on the primary key alone. Between the two, a dispatch run can formally assign the ticket —
+          // and then the hold lands on already-assigned work: a live batch row this write does not
+          // touch, plus a `deferred_until` that holds the ticket out of every future run the moment it is
+          // REMOVEd back to the pool. The stranding is silent and permanent, which is exactly the
+          // split-brain the check above was written to prevent and could not.
+          //
+          // Throwing rather than returning: `withAudit` inserts the audit row in this transaction, so a
+          // return would commit a permanent record of a hold that never took (`lost-race.ts`).
+          await stampOnceOrLose(
+            tx.ticket,
+            { ticketId, status: 'OPEN', assignmentState: 'UNASSIGNED' },
+            { deferredUntil: day },
+            `scheduler hold on ticket ${ticketId}`,
+          );
+        },
+      );
+    } catch (e) {
+      if (!(e instanceof LostRaceError)) throw e;
+      // Re-read so the refusal names what the ticket actually IS now, not what this caller last saw —
+      // the same shape the pre-read refusal returns, so no caller learns a new outcome (#265's rule).
+      const current = await this.prisma.ticket.findUnique({
+        where: { ticketId },
+        select: { status: true, assignmentState: true },
+      });
+      return {
+        result: 'NOT_HOLDABLE',
+        status: current?.status ?? ticket.status,
+        assignmentState: current?.assignmentState ?? ticket.assignmentState,
+      };
+    }
 
     return { result: 'OK', ticketId, heldUntil: day.toISOString().slice(0, 10) };
   }

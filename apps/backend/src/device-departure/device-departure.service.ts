@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client';
 import type { $Enums } from '../generated/prisma/client';
 import { isOperationalStatus } from '../ingestion/autoplant/master-mapping';
 import { PrismaService } from '../prisma/prisma.service';
+import { LIVE_FAILURE_CYCLE_STATES, RESOLVED_TICKET_STATUSES } from '../ticketing/resolved-ticket-status';
 import { REMOVAL_REASONS } from '../scheduling/removal-reason';
 
 /**
@@ -30,15 +31,19 @@ import { REMOVAL_REASONS } from '../scheduling/removal-reason';
  * active departure and resumes automatically — no manual step, nothing destroyed.
  */
 
-/** Terminal ticket statuses — everything else is "open" work a departure cancels (mirrors #119).
- * Exported for #218c's stand-down export, which must select the SAME ticket set this pass closes:
- * respelling the predicate there is how the two would silently drift apart. */
-export const TERMINAL_TICKET_STATUSES: $Enums.TicketStatus[] = [
-  'CLOSED',
-  'CLOSED_AUTO_RECOVERY',
-  'CLOSED_NON_OPERATIONAL',
-  'FAILED_RECOVERY',
-];
+/**
+ * Terminal ticket statuses — everything else is "open" work a departure cancels (mirrors #119).
+ * Re-exported for #218c's stand-down export, which must select the SAME ticket set this pass closes:
+ * respelling the predicate there is how the two would silently drift apart.
+ *
+ * #308 — this was one of the two **divergent** copies (four members). It now aliases the canonical
+ * seven, so a ticket already terminal at `FAILED_VERIFICATION` / `FAILED_ACTIVATION` /
+ * `RECEIVED_AT_WAREHOUSE` is no longer re-closed as `CLOSED / DEVICE_UNDEPLOYED_CLOSE` with its
+ * `closure_type`, `closed_at` and closure event overwritten. What the departure still needs from such
+ * a device — a live failure cycle terminated — is now taken from the cycle directly; see
+ * `openDepartures`.
+ */
+export const TERMINAL_TICKET_STATUSES: $Enums.TicketStatus[] = [...RESOLVED_TICKET_STATUSES];
 
 /** `observed_status` sentinel for the absence path — the device is in no source row at all. */
 export const MISSING_FROM_SOURCE = 'MISSING_FROM_SOURCE';
@@ -252,10 +257,14 @@ export class DeviceDepartureService {
     if (rows.length === 0) return 0;
     const deviceIds = rows.map((r) => r.deviceId);
 
-    const open = await tx.ticket.findMany({
-      where: { deviceId: { in: deviceIds }, status: { notIn: TERMINAL_TICKET_STATUSES } },
+    // Every ticket these devices hold, so the live-cycle sweep below can see the cycles hanging off
+    // ALREADY-terminal tickets too (#308) — `open` is only the subset this pass closes.
+    const allTickets = await tx.ticket.findMany({
+      where: { deviceId: { in: deviceIds } },
       select: { ticketId: true, status: true, deviceId: true, failureCycleId: true },
     });
+    const terminal = new Set<string>(TERMINAL_TICKET_STATUSES);
+    const open = allTickets.filter((t) => !terminal.has(t.status));
     const cancelledByDevice = new Map<string, number>();
     for (const t of open) cancelledByDevice.set(t.deviceId, (cancelledByDevice.get(t.deviceId) ?? 0) + 1);
     const statusByDevice = new Map(rows.map((r) => [r.deviceId, r.observedStatus]));
@@ -283,8 +292,12 @@ export class DeviceDepartureService {
         byStatus.set(status, list);
       }
       for (const [status, ticketIds] of byStatus) {
+        // #308 — the status guard is in the WHERE, not only in the read above. The read and this write
+        // are separated by the departure-row insert, and a ticket that reached a terminal state in that
+        // window must keep its own closure rather than have `closure_type`/`closed_at` overwritten by
+        // a departure that did not close it.
         await tx.ticket.updateMany({
-          where: { ticketId: { in: ticketIds } },
+          where: { ticketId: { in: ticketIds }, status: { notIn: TERMINAL_TICKET_STATUSES } },
           data: {
             status: 'CLOSED',
             closureType: 'DEVICE_UNDEPLOYED_CLOSE',
@@ -294,8 +307,24 @@ export class DeviceDepartureService {
           },
         });
       }
+      // Which tickets this transaction actually closed — a guarded `updateMany` reports a count, not
+      // rows, and every write below (event, day-plan detach) must describe the tickets that really
+      // moved. Re-read rather than trust `open`, which is now only a candidate list.
+      const closedIds = new Set(
+        (
+          await tx.ticket.findMany({
+            where: {
+              ticketId: { in: open.map((t) => t.ticketId) },
+              closedAt: now,
+              closureType: 'DEVICE_UNDEPLOYED_CLOSE',
+            },
+            select: { ticketId: true },
+          })
+        ).map((t) => t.ticketId),
+      );
+      const closed = open.filter((t) => closedIds.has(t.ticketId));
       await tx.ticketEvent.createMany({
-        data: open.map((t) => ({
+        data: closed.map((t) => ({
           ticketId: t.ticketId,
           fromState: t.status,
           toState: 'CLOSED',
@@ -309,19 +338,32 @@ export class DeviceDepartureService {
       // ticket kept rendering on the SE's day plan as work to do. 3,310 such rows exist in the dev
       // mirror, 20 of them on ACTIVE schedules. `removed_by` is NULL because no human did this.
       await tx.batchAssignmentTicket.updateMany({
-        where: { ticketId: { in: open.map((t) => t.ticketId) }, removedAt: null },
+        where: { ticketId: { in: closed.map((t) => t.ticketId) }, removedAt: null },
         data: { removedAt: now, removedBy: null, removalReason: REMOVAL_REASONS.TICKET_CANCELLED },
       });
-      // Terminate the parent Failure Cycle → FAILED so it leaves the one-active-per-device set: a
-      // returned device can open a fresh cycle, and FAILED (not VERIFIED) keeps the re-created ticket
-      // from being mis-flagged a REPEAT. Same reasoning as #119.
-      const cycleIds = open.map((t) => t.failureCycleId).filter((c): c is string => c !== null);
-      if (cycleIds.length > 0) {
-        await tx.failureCycle.updateMany({
-          where: { cycleId: { in: cycleIds } },
-          data: { state: 'FAILED', closedAt: now },
-        });
-      }
+    }
+
+    // Terminate the parent Failure Cycle → FAILED so it leaves the one-active-per-device set: a
+    // returned device can open a fresh cycle, and FAILED (not VERIFIED) keeps the re-created ticket
+    // from being mis-flagged a REPEAT. Same reasoning as #119.
+    //
+    // #308 — sourced from the device's cycles, NOT from the tickets this pass closed, and OUTSIDE the
+    // `open.length > 0` branch. A `FAILED_VERIFICATION` ticket is terminal while its cycle stays live
+    // (verification closes the cycle only on CLOSED), so the old ticket-driven set reached that cycle
+    // *only* as a side effect of wrongly re-closing the ticket. Widening the terminal vocabulary
+    // without moving this would have stranded those cycles live on a departed device whose only
+    // ticket was already terminal — while `has_open_failure_cycle` was cleared anyway, which is
+    // precisely the contradiction #218's lifecycle check exists to catch. The `state` filter also
+    // means an already-terminated cycle is never re-stamped.
+    const cycleIds = allTickets.map((t) => t.failureCycleId).filter((c): c is string => c !== null);
+    const endedCycles =
+      cycleIds.length === 0
+        ? { count: 0 }
+        : await tx.failureCycle.updateMany({
+            where: { cycleId: { in: cycleIds }, state: { in: [...LIVE_FAILURE_CYCLE_STATES] } },
+            data: { state: 'FAILED', closedAt: now },
+          });
+    if (open.length > 0 || endedCycles.count > 0) {
       await tx.deviceState.updateMany({
         where: { deviceId: { in: deviceIds } },
         data: { hasOpenFailureCycle: false },

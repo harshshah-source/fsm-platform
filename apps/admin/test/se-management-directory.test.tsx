@@ -147,6 +147,50 @@ describe('SE Management directory (Phase 4)', () => {
     await waitFor(() => expect(deleted).toContain('/engineers/se-1/coverage/77'));
   });
 
+  it('#267 — edits the home-base lat/lng inline and saves via PATCH', async () => {
+    let patchBody: unknown = null;
+    let serverRow = { ...DIR_ROW, homeLat: null as number | null, homeLng: null as number | null };
+    stubReads((u, opts) => {
+      if (u.endsWith('/engineers/se-1') && opts?.method === 'PATCH') {
+        patchBody = JSON.parse(String(opts.body));
+        serverRow = { ...serverRow, ...(patchBody as object) };
+        return json(serverRow);
+      }
+      return undefined;
+    });
+    renderPage(OH);
+    await screen.findByText('Asha Rao');
+
+    await userEvent.click(screen.getByLabelText(/edit home latitude for asha rao/i));
+    const latInput = screen.getByLabelText(/edit home latitude for asha rao/i);
+    await userEvent.clear(latInput);
+    await userEvent.type(latInput, '28.6139{Enter}');
+    await waitFor(() => expect(patchBody).toEqual({ homeLat: 28.6139 }));
+
+    await userEvent.click(screen.getByLabelText(/edit home longitude for asha rao/i));
+    const lngInput = screen.getByLabelText(/edit home longitude for asha rao/i);
+    await userEvent.clear(lngInput);
+    await userEvent.type(lngInput, '77.209{Enter}');
+    await waitFor(() => expect(patchBody).toEqual({ homeLng: 77.209 }));
+  });
+
+  it('#267 — rejects a HOME_BASE_INCOMPLETE half-set pair with an inline message', async () => {
+    stubReads((u, opts) => {
+      if (u.endsWith('/engineers/se-1') && opts?.method === 'PATCH') {
+        return json({ code: 'HOME_BASE_INCOMPLETE' }, 400);
+      }
+      return undefined;
+    });
+    renderPage(OH);
+    await screen.findByText('Asha Rao');
+
+    await userEvent.click(screen.getByLabelText(/edit home latitude for asha rao/i));
+    const latInput = screen.getByLabelText(/edit home latitude for asha rao/i);
+    await userEvent.clear(latInput);
+    await userEvent.type(latInput, '28.6139{Enter}');
+    expect(await screen.findByText(/set both latitude and longitude, or leave both blank/i)).toBeInTheDocument();
+  });
+
   it('maps a backend validation code to an inline message', async () => {
     stubReads((u, opts) => {
       if (u.endsWith('/engineers') && (opts?.method ?? 'GET') === 'POST') return json({ code: 'INVALID_EMAIL' }, 400);

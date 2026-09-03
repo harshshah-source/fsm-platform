@@ -61,30 +61,6 @@ import {
 } from './zm-schedule-query.service';
 
 /**
- * The zone scope a `/schedules` request runs under, with acting folded in.
- *
- * A CSM / Operations Head acting in a zone (`X-Acting-As-Zone`) is read **and written** as that
- * zone's ZM. Before this there were two postures on one controller: the console's reads collapsed
- * (inline, four times over) while every write built its scope straight from the claims — so an
- * Operations Head acting in a zone saw that zone's pool and committed against a pan-India scope. On
- * the console specifically, the read and the write are two halves of one operator action, and they
- * cannot disagree about which zone the operator is standing in.
- *
- * **This can only ever narrow.** With no header it is byte-identical to the old expression; a ZM
- * cannot widen, because {@link RequestActor} only carries an `actingZone` for the two acting-capable
- * roles. No `@Roles()` guard changes, so no role gains reach it did not have.
- *
- * #239 owns replacing this with its shared `@CurrentScope()` decorator across every manager surface;
- * the semantics here are deliberately identical so that swap is a mechanical no-op. It is kept local
- * rather than imported so this slice carries no dependency on #239's own unlanded files.
- */
-function scopeFor(user: AccessTokenClaims, actor: RequestActor): { role: string; zoneId: number | null } {
-  return actor.actingZone !== null
-    ? { role: 'ZONAL_MANAGER', zoneId: actor.actingZone }
-    : { role: user.role, zoneId: user.zone_id };
-}
-
-/**
  * `?plantIds=1,2,3` → `bigint[]`. Deliberately lenient about junk: an unparseable id is dropped
  * rather than 400-ing the whole request, because the console asks for the plants it is showing and a
  * single bad id must not blank the column for the rest of them. Duplicates collapse.
@@ -182,6 +158,7 @@ export class SchedulesController {
   @Put('dispatch-schedule')
   @Roles('OPERATIONS_HEAD')
   async dispatchSchedulePut(
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: { cron?: unknown } = {},
   ): Promise<DispatchScheduleView> {
@@ -227,8 +204,8 @@ export class SchedulesController {
   @Roles('OPERATIONS_HEAD', 'CENTRAL_SERVICE_MANAGER', 'ZONAL_MANAGER')
   async dispatchRunNow(
     @CurrentUser() user: AccessTokenClaims,
-    @CurrentActor() actor: RequestActor,
     @CurrentScope() scope: ManagerScope,
+    @CurrentActor() actor: RequestActor,
     @Body() body: { zoneId?: number; reason?: string } = {},
   ): Promise<DispatchRunSummary> {
     // The clamp. A zone-scoped caller runs their own zone, whatever the body says; only a caller with
@@ -333,7 +310,7 @@ export class SchedulesController {
   @Get('preview')
   @Roles(...MANAGER_ROLES)
   schedulerPreviewGet(
-    @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @Query('date') date?: string,
   ): Promise<SchedulerPreviewResult> {
     // A bare `YYYY-MM-DD` means an IST calendar day; `istWindowStart` is the one parser for that, and
@@ -342,7 +319,7 @@ export class SchedulesController {
     if (Number.isNaN(target.getTime())) {
       throw new BadRequestException({ code: 'INVALID_DATE', message: 'date must be YYYY-MM-DD.' });
     }
-    return this.schedulerPreview.preview(target, { role: user.role, zoneId: user.zone_id });
+    return this.schedulerPreview.preview(target, scope);
   }
 
   /**
@@ -358,6 +335,7 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async placeHold(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: { ticketId?: string; heldUntil?: string; reasonCode?: string; confirm?: boolean },
   ): Promise<HoldOutcome> {
@@ -373,11 +351,20 @@ export class SchedulesController {
       body.ticketId,
       heldUntil,
       body.reasonCode.trim(),
-      scopeFor(user, actor),
+      scope,
       actor,
       { confirm: body.confirm === true },
     );
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
+    // #310 — a 400 and not a 409: there is no `confirm` that makes a past date hold anything. The
+    // parse above catches a date that is not a date; this catches one that is, and would do nothing.
+    if (outcome.result === 'INVALID_DATE') {
+      throw new BadRequestException({
+        code: 'INVALID_DATE',
+        message: `heldUntil must be a future IST day — ${outcome.value} is not after today (${outcome.today}). A hold names the day the work comes back.`,
+        field: outcome.field,
+      });
+    }
     // Returned as a 409 body rather than thrown away: the client needs the return-date context to
     // show the operator what they would be overwriting before offering the confirm.
     if (outcome.result === 'NOT_HOLDABLE') throw new ConflictException({ code: 'TICKET_NOT_HOLDABLE', ...outcome });
@@ -393,13 +380,14 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async releaseHold(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: { ticketId?: string },
   ): Promise<ReleaseOutcome> {
     if (!body?.ticketId) throw new BadRequestException({ code: 'INVALID_RELEASE', message: 'ticketId is required.' });
     const outcome = await this.schedulerPreview.releaseHold(
       body.ticketId,
-      scopeFor(user, actor),
+      scope,
       actor,
     );
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'TICKET_NOT_FOUND' });
@@ -417,13 +405,14 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async assign(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: { ticketId: string; seId: string; confirm?: boolean; reasonCode?: string },
   ): Promise<AssignOutcome> {
     const outcome = await this.override.assignTicket(
       body.ticketId,
       body.seId,
-      scopeFor(user, actor),
+      scope,
       actor,
       new Date(),
       'CRITICAL_ASSIGN',
@@ -458,6 +447,7 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async assignPlants(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: { seId: string; plantIds: string[] },
   ): Promise<PlantAssignSummary> {
@@ -466,7 +456,7 @@ export class SchedulesController {
     const outcome = await this.override.assignPlants(
       body.plantIds.map(String),
       body.seId,
-      scopeFor(user, actor),
+      scope,
       actor,
     );
     if ('result' in outcome) throw new NotFoundException({ code: 'SE_NOT_FOUND' });
@@ -484,6 +474,7 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   async assignBatchRoute(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: { reasonCode?: string; lanes?: AssignBatchLane[] },
   ): Promise<AssignBatchResult> {
@@ -498,7 +489,7 @@ export class SchedulesController {
     return this.override.assignBatch(
       body.lanes,
       body.reasonCode.trim(),
-      scopeFor(user, actor),
+      scope,
       actor,
     );
   }
@@ -513,15 +504,26 @@ export class SchedulesController {
    */
   @Get()
   @Roles(...MANAGER_ROLES)
-  list(@CurrentUser() user: AccessTokenClaims, @Query('date') date?: string): Promise<ZmScheduleRow[]> {
+  list(
+    @CurrentScope() scope: ManagerScope,
+    @Query('date') date?: string,
+    /**
+     * `detail=stops` adds each schedule's live stops and their tickets to the rows. Opt-in for the
+     * same reason `date` is: a caller that does not ask gets exactly the response it always got. The
+     * Scheduler Console asks for the day column it is about to draw chips in; every other caller
+     * still reads counts.
+     */
+    @Query('detail') detail?: string,
+  ): Promise<ZmScheduleRow[]> {
+    const opts = { detail: detail === 'stops' };
     if (date != null && date !== '') {
       const target = istWindowStart(date);
       if (Number.isNaN(target.getTime())) {
         throw new BadRequestException({ code: 'INVALID_DATE', message: 'date must be YYYY-MM-DD.' });
       }
-      return this.zm.listSchedules({ role: user.role, zoneId: user.zone_id }, { date: target });
+      return this.zm.listSchedules(scope, { ...opts, date: target });
     }
-    return this.zm.listSchedules({ role: user.role, zoneId: user.zone_id });
+    return this.zm.listSchedules(scope, opts);
   }
 
   // Static route — must be declared before `:engineerId` so it is not captured as a param.
@@ -538,9 +540,10 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   zoneEngineers(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
   ): Promise<ZoneEngineerRow[]> {
-    return this.zm.listZoneEngineers(scopeFor(user, actor));
+    return this.zm.listZoneEngineers(scope);
   }
 
   /**
@@ -560,10 +563,10 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   assignableWorkPool(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
   ): Promise<AssignableWorkView> {
-    const scope = scopeFor(user, actor);
-    return this.assignableWork.listForScope(scope);
+        return this.assignableWork.listForScope(scope);
   }
 
   /**
@@ -576,11 +579,11 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   candidates(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Query('plantIds') plantIds?: string,
   ): Promise<CandidatesView> {
-    const scope = scopeFor(user, actor);
-    return this.candidateQuery.listForPlants(parsePlantIds(plantIds), scope);
+        return this.candidateQuery.listForPlants(parsePlantIds(plantIds), scope);
   }
 
   /**
@@ -593,11 +596,11 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   assignableTicketIds(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Query('plantIds') plantIds?: string,
   ): Promise<{ plantId: string; ticketIds: string[] }[]> {
-    const scope = scopeFor(user, actor);
-    return this.assignableWork.ticketIdsForPlants(scope, parsePlantIds(plantIds));
+        return this.assignableWork.ticketIdsForPlants(scope, parsePlantIds(plantIds));
   }
 
   /**
@@ -611,6 +614,7 @@ export class SchedulesController {
   @Roles(...MANAGER_ROLES)
   distributePreview(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Body() body: { ticketIds?: string[]; engineerIds?: string[]; strategy?: DistributeStrategy },
   ): Promise<DistributeResult> {
@@ -620,20 +624,20 @@ export class SchedulesController {
       throw new BadRequestException({ code: 'ENGINEER_IDS_REQUIRED' });
     if (!['COVERAGE_TIER', 'CAPACITY_HEADROOM', 'PLANT_WHOLE'].includes(body.strategy as string))
       throw new BadRequestException({ code: 'STRATEGY_REQUIRED' });
-    const scope = scopeFor(user, actor);
-    return this.distribute.project(body.ticketIds, body.engineerIds, body.strategy!, scope);
+        return this.distribute.project(body.ticketIds, body.engineerIds, body.strategy!, scope);
   }
 
   @Get(':engineerId')
   @Roles(...MANAGER_ROLES)
   async detail(
     @CurrentUser() user: AccessTokenClaims,
+    @CurrentScope() scope: ManagerScope,
     @CurrentActor() actor: RequestActor,
     @Param('engineerId', new ParseUUIDPipe()) engineerId: string,
   ): Promise<ZmScheduleDetail> {
     // #239 (Console scope) — the Console's Inspector deep-links here, so it must resolve the same
     // engineer set the deck did; acting must not change which page answers and which 404s.
-    const detail = await this.zm.getScheduleDetail(engineerId, scopeFor(user, actor));
+    const detail = await this.zm.getScheduleDetail(engineerId, scope);
     if (!detail) throw new NotFoundException({ code: 'SCHEDULE_NOT_FOUND' });
     return detail;
   }

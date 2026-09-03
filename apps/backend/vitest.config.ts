@@ -10,7 +10,8 @@ export default defineConfig({
     // the app-namespace ALLOWLIST (#182) — deletes every var in the app's own namespace, then re-sets
     // the handful the suite needs to a fixed test value — so a developer's local `.env` never changes
     // test outcomes. Order matters — dotenv loads, then we sanitize.
-    setupFiles: ['reflect-metadata', 'dotenv/config', './test/setup-env.ts'],
+    // crash-diagnostics.ts is a no-op unless TINYPOOL_CRASH_LOG is set (#184 AC-1 instrumentation).
+    setupFiles: ['reflect-metadata', 'dotenv/config', './test/setup-env.ts', './test/crash-diagnostics.ts'],
     // globalSetup runs ONCE before any worker: it migrates + seeds the ISOLATED test database
     // (DATABASE_URL with the db name suffixed `_test`) so the suite never runs against the
     // developer's live DB, which may hold a full AutoPlant production sync (~17.9k devices) that
@@ -21,6 +22,14 @@ export default defineConfig({
     // test files in parallel makes those suites contend on that shared state, so files run
     // serially. Tests within a file already run sequentially.
     fileParallelism: false,
+    // #184 AC-1 investigation flag, no-op unless set: TINYPOOL_CRASH_LOG turns on
+    // --trace-uncaught/--trace-warnings in the child so an escaping exception carries a full stack.
+    // (`poolOptions.forks.singleFork` was tried as a candidate fix and rejected — see
+    // docs/progress/184-vitest-worker-exited-unexpectedly.md: it does not lower the crash rate and
+    // turns a 1-2 file loss into a whole-suite-tail loss, since there is then only one worker to lose.)
+    poolOptions: process.env.TINYPOOL_CRASH_LOG
+      ? { forks: { execArgv: ['--trace-uncaught', '--trace-warnings'] } }
+      : undefined,
   },
   // SWC transform so NestJS decorators + emitDecoratorMetadata work under Vitest.
   plugins: [swc.vite()],

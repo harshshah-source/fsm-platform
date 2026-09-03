@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CronTickClaimService } from '../scheduling/cron-tick-claim.service';
+import { pruneSentDayPlanOutbox } from '../scheduling/day-plan-notification-outbox';
 import { SettingsService } from '../settings/settings.service';
 import {
   planPartitionMaintenance,
@@ -79,6 +80,10 @@ export class PartitionMaintenanceService {
       // right trade, because a day of unpruned claims is invisible and a partition that never got
       // created is not.
       await this.claims.pruneExpiredClaims(firedAt);
+      // #264 AC — the outbox's retention rides here too, same reasoning as the claim table's: a
+      // twentieth job is not warranted for a few-thousand-row-a-week prune, and this tick is already
+      // the daily janitor with an existing retention horizon.
+      await pruneSentDayPlanOutbox(this.prisma, firedAt);
       return { ran: true };
     } catch (e) {
       this.logger.error(`partition maintenance tick failed: ${e instanceof Error ? e.message : String(e)}`);

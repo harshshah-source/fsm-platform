@@ -16,12 +16,14 @@ import type { RequestActor } from '../common/request-actor';
 import { CurrentScope } from '../common/decorators/current-scope.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { ManagerScope } from '../common/manager-scope';
+import { toBigIntId } from '../common/parse-id';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AuthGuard } from '../common/guards/auth.guard';
 import { RoleGuard } from '../common/guards/role.guard';
 import { DispatchTransparencyQueryService, type DispatchBatchDetail } from './dispatch-transparency-query.service';
 import { OverrideProjectionService, type OverrideImpact } from './override-projection.service';
-import { OverrideService, type OverrideCommand, type OverrideOutcome } from './override.service';
+import { asOverrideCommand, OverrideCommandDto } from './dto/override-command.dto';
+import { OverrideService, type OverrideOutcome } from './override.service';
 
 const MANAGER_ROLES = ['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD'] as const;
 
@@ -60,12 +62,8 @@ export class BatchesController {
     @CurrentScope() scope: ManagerScope,
     @Param('batchId') batchId: string,
   ): Promise<DispatchBatchDetail> {
-    let id: bigint;
-    try {
-      id = BigInt(batchId);
-    } catch {
-      throw new NotFoundException({ code: 'DISPATCH_BATCH_NOT_FOUND' });
-    }
+    const id = toBigIntId(batchId);
+    if (id === null) throw new NotFoundException({ code: 'DISPATCH_BATCH_NOT_FOUND' });
     const detail = await this.query.getBatchDetail(id, scope);
     if (!detail) throw new NotFoundException({ code: 'DISPATCH_BATCH_NOT_FOUND' });
     return detail;
@@ -90,17 +88,13 @@ export class BatchesController {
   async previewOverride(
     @CurrentScope() scope: ManagerScope,
     @Param('id') id: string,
-    @Body() body: OverrideCommand,
+    @Body() body: OverrideCommandDto,
   ): Promise<OverrideImpact> {
-    let batchId: bigint;
-    try {
-      batchId = BigInt(id);
-    } catch {
-      throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
-    }
+    const batchId = toBigIntId(id);
+    if (batchId === null) throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
     // The preview must resolve under **exactly** the scope the commit will use, or an operator can be
     // shown an impact for a move the write then refuses.
-    const impact = await this.projection.projectOverride(batchId, body, scope);
+    const impact = await this.projection.projectOverride(batchId, asOverrideCommand(body), scope);
     if (impact.result === 'NOT_FOUND') throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
     if (impact.result === 'NOT_PROJECTABLE') {
       throw new BadRequestException({
@@ -119,16 +113,24 @@ export class BatchesController {
     @CurrentActor() actor: RequestActor,
     @CurrentScope() scope: ManagerScope,
     @Param('id') id: string,
-    @Body() body: OverrideCommand,
+    @Body() body: OverrideCommandDto,
   ): Promise<OverrideOutcome> {
+    // #310 (CB-9) — the sibling handlers above have always wrapped this; only the write door did not,
+    // so `POST /batches/abc/override` was a 500 on input the caller types.
+    const batchId = toBigIntId(id);
+    if (batchId === null) throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
     const outcome = await this.override.override(
-      BigInt(id),
-      body,
+      batchId,
+      asOverrideCommand(body),
       scope,
       // `actedAsRole` was hard-coded null here, so an override committed by an acting CSM recorded as
       // an ordinary CSM action and the acting was lost from the ticket's history. `RequestActor`
       // already resolves it for every other audited write; this one simply never asked.
-      { userId: user.user_id, role: user.role, actedAsRole: actor.actedAsRole },
+      //
+      // #340 — and it is passed whole. Re-copying two of its fields dropped `actingZone`, so the row
+      // named the acting role but not the zone, and the one reader of that pair (the CSM-backup-share
+      // report) still could not see it.
+      actor,
     );
     if (outcome.result === 'NOT_FOUND') throw new NotFoundException({ code: 'BATCH_NOT_FOUND' });
     if (outcome.result === 'CONFLICT_ON_SITE') {
@@ -145,6 +147,35 @@ export class BatchesController {
         code: 'CONFLICT_DEFERRED',
         message: 'Affected work is held to a future vehicle-return date — resend with confirm=true and a reason code.',
         ticketIds: outcome.ticketIds,
+      });
+    }
+    // A 400, not a 409: there is no `confirm` that makes this legal. A day that has already been
+    // cannot be planned into, so the client's job is to pick another date, not to insist.
+    // 501-shaped in meaning but 400 in code, deliberately: the request is well-formed HTTP that this
+    // build cannot honour, and a client that sees 400 + a code retries nothing, which is right.
+    if (outcome.result === 'UNSUPPORTED_ACTION') {
+      throw new BadRequestException({
+        code: 'UNSUPPORTED_ACTION',
+        message: `This server does not support the override action "${outcome.action}". The admin app may be newer than the API — reload after the next backend deploy.`,
+        action: outcome.action,
+      });
+    }
+    // #310 — the defer twin of `TARGET_DATE_IN_PAST`, and a 400 for the same reason: no `confirm`
+    // makes a date that holds nothing hold something. Named separately because the rule differs —
+    // a move onto today is legal, a defer to today is not.
+    if (outcome.result === 'INVALID_DATE') {
+      throw new BadRequestException({
+        code: 'INVALID_DATE',
+        message: `${outcome.field} must be a future IST day — ${outcome.value} is not after today (${outcome.today}). A deferral names the day the work comes back, and today's runs would pick it up again immediately.`,
+        field: outcome.field,
+      });
+    }
+    if (outcome.result === 'TARGET_DATE_IN_PAST') {
+      throw new BadRequestException({
+        code: 'TARGET_DATE_IN_PAST',
+        message: `Cannot move work to ${outcome.targetDate} — that operating day has already passed (today is ${outcome.today}).`,
+        targetDate: outcome.targetDate,
+        today: outcome.today,
       });
     }
     return outcome;

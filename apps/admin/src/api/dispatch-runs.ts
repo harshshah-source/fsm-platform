@@ -1,15 +1,14 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the `/api/dispatch-runs/*` Batch-Assignment transparency read surface (Issue 123).
 // Mirrors the backend DispatchTransparencyQueryService view types. A ZONAL_MANAGER is zone-clamped
 // server-side at every level, so the UI never needs to filter by zone — and never renders a
 // foreign-zone link (the zone-detail route would 403 via the global ZoneScopeGuard).
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
 async function get<T>(path: string): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`REQUEST_FAILED_${res.status}`);
   return (await res.json()) as T;

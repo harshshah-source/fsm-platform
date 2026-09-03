@@ -158,6 +158,58 @@ describe('#284 — GET /dispatch/changes-today', () => {
     expect(removal?.via).toBe('ZM_WITHDRAWN');
   });
 
+  /**
+   * **The reason the operator was forced to type, read back.**
+   *
+   * `reason` on a REMOVE row was hard-coded `null` while ADD and SWAP carried theirs, so an override
+   * the product *refuses to accept without a reason* published no reason at all. An operator deferred
+   * three devices with three different explanations, and the Changes tab showed their name three times
+   * followed by nothing.
+   *
+   * It could not simply be read off the row: `removal_reason` is a **closed vocabulary read as a
+   * predicate** (#241 — #244 counts attempts off it, so free text there would silently change an
+   * operational classification), and `plant_batch_assignments.override_reason` is *batch*-level and
+   * last-writer-wins — after those three defers it held one string, and not the operator's first two.
+   * So the words now live in `removal_note`, symmetric with the `add_reason` the add side already had.
+   */
+  it('a removal publishes the words the operator was made to type, not just the vocabulary code', async () => {
+    const ticketId = await makeTicket();
+    await override.assignTicket(ticketId, seA, scope(), actor(), TODAY);
+    const row = await prisma.batchAssignmentTicket.findFirstOrThrow({
+      where: { ticketId, removedAt: null },
+      include: { batch: true },
+    });
+
+    await override.override(
+      row.batch.batchId,
+      { action: 'DEFER_TICKET', ticketId, deferredToDate: '2026-06-30', reasonCode: 'Vehicle return not confirmed yet' },
+      scope(),
+      actor(),
+      TODAY,
+    );
+
+    const view = await svc.changesToday(scope(), { zoneId, now: TODAY });
+    const removal = view.changes.find((c) => c.kind === 'REMOVE' && c.ticketId === ticketId);
+    // `via` still carries the predicate; `reason` now carries the human's sentence. Both, not either.
+    expect(removal?.via).toBe('ZM_DEFERRED');
+    expect(removal?.reason).toBe('Vehicle return not confirmed yet');
+  });
+
+  /** A removal nobody typed a reason for stays null — absence is never filled in with a guess. */
+  it('a system removal carries no invented reason', async () => {
+    const ticketId = await makeTicket();
+    await override.assignTicket(ticketId, seA, scope(), actor(), TODAY);
+    const row = await prisma.batchAssignmentTicket.findFirstOrThrow({ where: { ticketId, removedAt: null } });
+    await prisma.batchAssignmentTicket.update({
+      where: { id: row.id },
+      data: { removedAt: TODAY, removedBy: null, removalReason: 'PLAN_EXPIRED' },
+    });
+
+    const view = await svc.changesToday(scope(), { zoneId, now: TODAY });
+    const removal = view.changes.find((c) => c.kind === 'REMOVE' && c.ticketId === ticketId);
+    expect(removal?.reason ?? null).toBeNull();
+  });
+
   it('AC8 — a swap counts once, not as one add plus one remove', async () => {
     const ticketId = await makeTicket();
     // Assigned yesterday so today's window contains the move and nothing else — otherwise the setup

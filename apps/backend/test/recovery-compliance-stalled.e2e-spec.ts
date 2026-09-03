@@ -60,7 +60,7 @@ describe('Issue 37 slice 2 — stalled + non-standard closures', () => {
   });
 
   it('surfaces the stalled count in the ZM Action Required panel', async () => {
-    const cards = await dashboard.actionRequired({ role: 'OPERATIONS_HEAD', zoneId: null }, NOW);
+    const cards = await dashboard.actionRequired({ role: 'OPERATIONS_HEAD', zoneId: null }, {}, NOW);
     const card = cards.find((c) => c.key === 'recovery_stalled');
     expect(card).toBeDefined();
     expect(card!.available).toBe(true);

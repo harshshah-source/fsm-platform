@@ -1,9 +1,9 @@
+import { authHeaders } from './authHeaders';
 // Typed client for the Operations-Head org/reference config endpoints (Issue 02). Each call
 // carries the access token from sessionStorage (the same store AuthProvider writes). Views mirror
 // the backend `*View` shapes; ids are JSON-safe numbers.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api';
-const TOKEN_KEY = 'fsm.accessToken';
 
 export interface ZoneView {
   zoneId: number;
@@ -52,12 +52,11 @@ export interface CommonKitView {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = sessionStorage.getItem(TOKEN_KEY);
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...authHeaders(),
       ...(init?.headers ?? {}),
     },
   });

@@ -66,7 +66,8 @@ export function SystemEfficiencyPage() {
 
       <ReportGrid>
         <ChartCard title="Auto-dispatch % by zone">
-          {dispatchByZone.length ? <BarChartCard data={dispatchByZone} /> : <EmptyState message="No per-zone data in this window." />}
+          {/* Ascending — the zone automating least is the one to act on. */}
+          {dispatchByZone.length ? <BarChartCard data={dispatchByZone} format="percent" sort="asc" /> : <EmptyState message="No per-zone data in this window." />}
         </ChartCard>
         <ChartCard title="SE active load vs capacity">
           <EmptyState message="Per-SE load vs capacity — no aggregation source in this endpoint (future backend follow-up)." />

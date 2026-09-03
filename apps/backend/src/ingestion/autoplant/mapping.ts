@@ -1,5 +1,6 @@
 import { normalizeGpsTimestamp, normalizeSourceRow, type RawSourceRow } from '../normalize';
 import type { SourceSnapshotRow } from '../source-reader';
+import { MIN_PLAUSIBLE_SOURCE_MS, isSourceBlank } from './source-sentinels';
 
 /**
  * Pure AutoPlant → FSM mapping for the Snapshot path (Phase 3). Turns a `tb_vehiclemaster` row (the
@@ -92,10 +93,99 @@ const DEFAULT_MAX_FUTURE_SKEW_MINUTES = 60;
  * what would have caught this on 2026-07-07). That check is [#228](../../../../.scratch/fsm-platform-v1/issues/228-guard-pattern-remediation.md)'s
  * R2 and is not built here; this constant must not be mistaken for it.
  */
-const MIN_PLAUSIBLE_GPS_MS = Date.UTC(2000, 0, 1);
+const MIN_PLAUSIBLE_GPS_MS = MIN_PLAUSIBLE_SOURCE_MS;
 
-/** Why a row carrying a real ping was dropped. Reported through {@link MapOptions.onReject}. */
-export type RowRejectionReason = 'FUTURE_SKEW' | 'IMPLAUSIBLE_PAST';
+/**
+ * Why a row carrying a real ping was DROPPED — the whole row, nothing ingested. Reported through
+ * {@link MapOptions.onReject}.
+ *
+ * `UNPARSEABLE_TIMESTAMP` is #299 (AR-1). Until then `normalizeSourceRow` threw straight out of this
+ * function, out of the reader's row loop, and out of `readChunk` — where the worker reads any throw as
+ * a *source read* failure and stops draining. Because the scan is deterministic (`ORDER BY device_id`,
+ * restarted from `cursor = null` every run), one row with a malformed `latest_gps_datetime` therefore
+ * killed every device sorting after it, in that run and in every future run, until somebody fixed the
+ * source by hand. The throw in `normalize.ts` is the correct contract for a single row — a ping with no
+ * usable instant is not recoverable — so containment belongs here, in the caller, not there.
+ *
+ * A dropped row is the last resort, used only when the row cannot exist without the value: the device
+ * id and the ping instant. Anything else degrades to a null field — see {@link FieldRepairReason}.
+ */
+export type RowRejectionReason =
+  | 'FUTURE_SKEW'
+  | 'IMPLAUSIBLE_PAST'
+  | 'UNPARSEABLE_TIMESTAMP'
+  /**
+   * #323 (AR-9c) — a device id that is a sentinel word rather than an id: `'NA'`, `'NULL'`, `'null'`.
+   *
+   * Reported because widening this path's sentinel set to match the masters path (adding `'NA'`) drops
+   * rows it used to journal, and a behaviour change that removes data must be countable rather than
+   * silent. A NULL or empty device id is deliberately NOT reported: that is the source's ordinary
+   * "vehicle with no fitted device" shape, tens of thousands of rows, and counting it would bury every
+   * real signal in this channel.
+   */
+  | 'SENTINEL_DEVICE_ID';
+
+/**
+ * Why one nullable telemetry FIELD was discarded while its row was kept — #299 (AR-2). Reported
+ * through {@link MapOptions.onRepair}, counted separately from {@link RowRejectionReason} because
+ * "we dropped this device's ping" and "we dropped one reading off it" are different operational facts
+ * and #300 has to be able to tell them apart.
+ *
+ * **The defect this closes.** Nothing validated a coerced value against the column it was bound for,
+ * and `createMany` is atomic per chunk: one `mains_status` of 99999 going into a SmallInt failed its
+ * whole 90-row chunk, deterministically, through all three retries, every 30 minutes, forever. The run
+ * then finalised PARTIAL and the #230 gate correctly refused to derive device state, recover devices or
+ * create tickets — **fleet-wide, on every tick**. The gate is right (freeze beats fabrication); the
+ * blast radius of one bad reading is the defect.
+ *
+ * **Why the field is nulled rather than the row rejected** (operator ruling, 2026-09-02; #299's text
+ * said reject the row). Two reasons, and the first is this file's own convention: a *malformed* value
+ * in these same columns already degrades to null and keeps the row — `coerceMainsStatus('abc')`,
+ * `coerceNumeric`, `parseTripCreation` all do exactly that. Rejecting the row for an *out-of-range*
+ * value would have made one column behave two different ways depending on whether its garbage happened
+ * to be numeric. Second, and operationally: the load-bearing content of the row is the device id and
+ * the ping instant. Dropping it because a voltage reading is nonsense makes a live device look dark,
+ * which climbs `inactivity_hours` and manufactures a Troubleshoot Ticket for a device that is fine —
+ * the platform reporting a fault it invented. A nulled field costs one reading and is counted.
+ */
+export type FieldRepairReason =
+  | 'RANGE_LAT'
+  | 'RANGE_LON'
+  | 'RANGE_SPEED'
+  | 'RANGE_MAINS_STATUS'
+  | 'RANGE_MAINS_VOLTAGE'
+  | 'RANGE_CSQ';
+
+/** Postgres `smallint` — the column type behind `mains_status` and `csq`. */
+const SMALLINT_MIN = -32_768;
+const SMALLINT_MAX = 32_767;
+
+/**
+ * `Decimal(12, 2)` — `mains_voltage` and `speed`. Precision 12 with scale 2 leaves ten integer digits,
+ * so anything at or beyond 10^10 overflows the column. Scale is NOT enforced here: Postgres rounds a
+ * value with too many decimal places, which is a lossless-enough coercion that never errors, whereas
+ * exceeding the precision raises `numeric field overflow` and takes the chunk with it.
+ */
+const DECIMAL_12_2_LIMIT = 10 ** 10;
+
+/**
+ * Keep a value only if it is finite and inside `[min, max]`; otherwise null it and say why.
+ *
+ * Null in, null out, with no report — an absent reading is the source's normal shape, not a fault, and
+ * counting it would bury the real ones. Same discipline as `onReject` not firing for the ordinary skips.
+ */
+function withinOrNull(
+  value: number | null,
+  min: number,
+  max: number,
+  reason: FieldRepairReason,
+  report: (reason: FieldRepairReason) => void,
+): number | null {
+  if (value === null) return null;
+  if (Number.isFinite(value) && value >= min && value <= max) return value;
+  report(reason);
+  return null;
+}
 
 /**
  * The `tb_vehiclemaster` columns the reader selects. `dateStrings:true` means datetimes arrive as raw
@@ -117,9 +207,15 @@ export interface VehicleMasterRow {
   gpssignal: unknown;
 }
 
-const NULLISH = new Set(['', 'NULL', 'null']);
-
-const isBlank = (v: string | null | undefined): boolean => v == null || NULLISH.has(v.trim());
+/**
+ * #323 (AR-9c) — the sentinel vocabulary is shared with `master-mapping.ts` rather than spelled twice.
+ *
+ * This path used to omit `'NA'`, which the masters path has always had. The consequence was not a
+ * cosmetic difference: a literal `'NA'` device id passed here and was journalled, while the masters
+ * path refused to create the device, so it sat in `unknownDevices` permanently — telemetry unreachable,
+ * warned about on every chunk, and no operator action could resolve it. One source, one answer.
+ */
+const isBlank = isSourceBlank;
 
 /** `gpssignal.power.mainstatus` is `"1"`/`"0"` (AutoPlant) or `"ON"`/`"OFF"` (3rd-party) — normalize to 1/0/null. */
 export function coerceMainsStatus(v: unknown): number | null {
@@ -169,11 +265,18 @@ export function parseGpssignal(raw: unknown): { mainsStatus: number | null; main
  */
 export function parseTripCreation(v: string | null | undefined): Date | null {
   if (isBlank(v)) return null;
+  let parsed: Date;
   try {
-    return normalizeGpsTimestamp(v!.trim(), TRIP_CREATION_UTC_OFFSET_MIN);
+    parsed = normalizeGpsTimestamp(v!.trim(), TRIP_CREATION_UTC_OFFSET_MIN);
   } catch {
     return null;
   }
+  // #323 (CB-11) — the floor both siblings already had, and the only one of the three that lacked it.
+  // MySQL's `0000-00-00 00:00:00` satisfies the naive-timestamp grammar, so without this a device whose
+  // only trip stamp is the sentinel had an instant near 1899-11-30 written into
+  // `device_states.trip_creation_datetime` — a plausible-looking date no reader can distinguish from a
+  // real one, which is strictly worse than the null it now becomes. Same fold as `parseInstalledAt`.
+  return parsed.getTime() < MIN_PLAUSIBLE_GPS_MS ? null : parsed;
 }
 
 export interface MapOptions {
@@ -193,6 +296,15 @@ export interface MapOptions {
    * ordinary skips (no fitted device, never pinged): those are the source's normal shape, not a fault.
    */
   onReject?: (deviceId: string, reason: RowRejectionReason) => void;
+  /**
+   * Called once per FIELD nulled by the range guard, with the row itself kept (#299 AR-2).
+   *
+   * Separate from {@link onReject} on purpose. Folding both into one counter would make "one device's
+   * ping never arrived" and "one device's voltage reading was nonsense" the same number, and they are
+   * not: the first is a hole in the fleet's telemetry, the second is a data-quality fact about a device
+   * that reported perfectly well. #300 surfaces them differently, so they are counted differently here.
+   */
+  onRepair?: (deviceId: string, reason: FieldRepairReason) => void;
 }
 
 /**
@@ -205,37 +317,87 @@ export interface MapOptions {
  * The device id is preserved as an exact String (leading zeros / alphanumerics survive — the reason for §7).
  */
 export function mapVehicleMasterRow(row: VehicleMasterRow, opts: MapOptions = {}): SourceSnapshotRow | null {
-  if (isBlank(row.device_id) || isBlank(row.latest_gps_datetime)) return null;
+  if (isBlank(row.device_id)) {
+    // #323 — a non-empty sentinel word is worth naming; a NULL/empty id is the ordinary no-device row.
+    const raw = row.device_id?.trim();
+    if (raw) opts.onReject?.(raw, 'SENTINEL_DEVICE_ID');
+    return null;
+  }
+  if (isBlank(row.latest_gps_datetime)) return null;
 
+  const deviceId = row.device_id!.trim();
   const offsetMinutes = opts.offsetMinutes ?? AUTOPLANT_UTC_OFFSET_MIN;
   const { mainsStatus, mainsVoltage } = parseGpssignal(row.gpssignal);
+  const repair = (reason: FieldRepairReason): void => opts.onRepair?.(deviceId, reason);
+
+  // #299 (AR-2) — every value bound for a constrained column is checked against that column's real
+  // bounds HERE, where a bad reading costs one field, rather than at `createMany`, where it costs the
+  // whole 90-row chunk atomically and does so again on all three retries and on every tick thereafter.
+  //
+  // `lat`/`lon`/`speed` go through `coerceNumeric` first. They are typed `number | null` but arrive
+  // from MySQL, where a numeric column can surface as a string, and `speed` in particular reached the
+  // Decimal(12,2) column completely unguarded — it never passed through any of this file's coercers.
+  // `coerceNumeric` also removes NaN/Infinity, which `withinOrNull` would reject anyway but which have
+  // no business reaching a bound check in the first place.
+  const lat = withinOrNull(coerceNumeric(row.latitude), -90, 90, 'RANGE_LAT', repair);
+  const lon = withinOrNull(coerceNumeric(row.longitude), -180, 180, 'RANGE_LON', repair);
+  const speed = withinOrNull(
+    coerceNumeric(row.speed),
+    -DECIMAL_12_2_LIMIT,
+    DECIMAL_12_2_LIMIT,
+    'RANGE_SPEED',
+    repair,
+  );
 
   const raw: RawSourceRow = {
-    deviceId: row.device_id!.trim(),
+    deviceId,
     gpsWallClock: row.latest_gps_datetime!.trim(),
     sourceUtcOffsetMinutes: offsetMinutes,
-    lat: row.latitude,
-    lon: row.longitude,
-    speed: row.speed,
+    lat,
+    lon,
+    speed,
     ignitionStatus: isBlank(row.IGNITION_STATUS) ? null : row.IGNITION_STATUS!.trim(),
     deviceType: isBlank(row.DEVICE_TYPE) ? null : row.DEVICE_TYPE!.trim(),
     // Already-UTC (TIMESTAMP), so it does NOT take `offsetMinutes` — see parseTripCreation.
     tripCreationDatetime: parseTripCreation(row.TRIP_CREATION_DATETIME),
-    mainsStatus,
-    mainsVoltage,
+    mainsStatus: withinOrNull(mainsStatus, SMALLINT_MIN, SMALLINT_MAX, 'RANGE_MAINS_STATUS', repair),
+    mainsVoltage: withinOrNull(
+      mainsVoltage,
+      -DECIMAL_12_2_LIMIT,
+      DECIMAL_12_2_LIMIT,
+      'RANGE_MAINS_VOLTAGE',
+      repair,
+    ),
     // Not present anywhere in ap_widgets — stay null (Technical Hints degrade gracefully).
     gpsValidity: null,
     gpsMode: null,
     creg: null,
     cgreg: null,
-    csq: null,
+    // `ap_widgets` exposes no CSQ, so this is null by construction today and the guard is a no-op. It is
+    // written anyway so the guarded set matches the *column* set rather than today's accident of which
+    // columns happen to carry values — a later slice giving `csq` a source cannot reintroduce AR-2 by
+    // forgetting it. Same for `port_no` below, which is an Int and would overflow just as atomically.
+    csq: withinOrNull(null, SMALLINT_MIN, SMALLINT_MAX, 'RANGE_CSQ', repair),
     ipAddress: null,
     portNo: null,
     simSubscriberName: null,
     unitNo: null,
   };
 
-  const normalized = normalizeSourceRow(raw);
+  // #299 (AR-1) — the one throw on this path, contained at its only caller. `normalizeGpsTimestamp`
+  // rejects a wall clock that does not match the naive-timestamp grammar, which is right for one row and
+  // catastrophic for the scan: uncaught, it escapes `readChunk`, the worker reads it as a source-read
+  // failure and stops draining, and because the scan restarts from `cursor = null` and orders by the
+  // immutable `device_id`, every device sorting after the bad one is never ingested again. The row is
+  // dropped and counted instead; the scan walks past it. `parseTripCreation` has always taken exactly
+  // this posture for its own field.
+  let normalized: SourceSnapshotRow;
+  try {
+    normalized = normalizeSourceRow(raw);
+  } catch {
+    opts.onReject?.(deviceId, 'UNPARSEABLE_TIMESTAMP');
+    return null;
+  }
 
   // Two-directional skew guard (#222 Proposed step 5 / P6). Both arms reject; neither is silent.
   const now = opts.now ?? new Date();
