@@ -6,9 +6,12 @@ import { RootCauseAnalyticsPage } from '../src/pages/reports/RootCauseAnalyticsP
  * FE-23 — Root-Cause Analytics (ref 23). KPI strip + distribution bars + breakdown table over the
  * Issue 41 `/reports/root-cause` endpoint (structured root cause from troubleshoot forms).
  */
+const CUBE_COMPUTED_AT = new Date(Date.now() - 4 * 3_600_000).toISOString();
+
 const report = {
   fromMonth: '2026-06-01',
   toMonth: '2026-06-30',
+  dataAsOf: CUBE_COMPUTED_AT,
   totalSubmissions: 40,
   filters: { zoneId: null, companyId: null, plantId: null, deviceType: null, seId: null },
   distribution: [
@@ -46,5 +49,20 @@ describe('Root-Cause Analytics (FE-23)', () => {
     render(<RootCauseAnalyticsPage />);
     await screen.findByTestId('rc-row-GPS_ANTENNA_ISSUE');
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/reports/root-cause'))).toBe(true);
+  });
+
+  /** #347 AC2 — this page had no freshness stamp at all; the reference band (ref 23) draws one. */
+  it('prints the cube’s data-as-of stamp, and "No cube computed yet" when there is none', async () => {
+    const fresh = render(<RootCauseAnalyticsPage />);
+    const stamp = await screen.findByTestId('root-cause-data-as-of');
+    expect(stamp).toHaveAttribute('data-freshness', 'fresh');
+    expect(stamp).toHaveTextContent(/data as of/i);
+    fresh.unmount();
+
+    fetchMock.mockImplementationOnce(async () => json({ ...report, dataAsOf: null }));
+    render(<RootCauseAnalyticsPage />);
+    const empty = await screen.findByTestId('root-cause-data-as-of');
+    expect(empty).toHaveAttribute('data-freshness', 'missing');
+    expect(empty).toHaveTextContent(/no cube computed yet/i);
   });
 });

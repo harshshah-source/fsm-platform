@@ -1,5 +1,5 @@
 # 347 — Report freshness stamps + auto-escalations cube
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/347-report-freshness-stamps-auto-escalations-cube.md
 Type: AFK
 Wave: 2 · Severity: P2 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -38,9 +38,9 @@ this issue only carries it as a bundled deliverable.
 
 ## Acceptance criteria
 
-- [ ] AC1 — every `/reports/*` payload carries `dataAsOf` (null when no cube row exists).
-- [ ] AC2 — the report pages print `dataAsOf` and label "No cube computed yet" when it is null.
-- [ ] AC3 — #333's acceptance criteria (AC1–AC3 in that file) are met.
+- [x] AC1 — every `/reports/*` payload carries `dataAsOf` (null when no cube row exists).
+- [x] AC2 — the report pages print `dataAsOf` and label "No cube computed yet" when it is null.
+- [x] AC3 — #333's acceptance criteria (AC1–AC3 in that file) are met.
 
 ## Verification
 

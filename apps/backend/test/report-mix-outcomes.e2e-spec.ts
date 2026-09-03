@@ -177,6 +177,30 @@ describe('Issue 90 — work-type-mix + verification-outcomes (e2e)', () => {
     await request(app.getHttpServer()).get(`/api/reports/verification-outcomes?${WINDOW}`).set('Authorization', `Bearer ${se}`).expect(403);
   });
 
+  /**
+   * #347 AC1 — every `/reports/*` payload carries `dataAsOf`. These two are the exception that proves
+   * the rule: they aggregate `tickets` / `verification_runs` LIVE rather than reading a cube, so their
+   * data time is the instant the server ran the query. Non-null (there is no "no cube yet" state to
+   * report) and still the SERVER's clock, never the browser's — the bug this issue closes.
+   */
+  it('both live distributions carry a server-side dataAsOf', async () => {
+    const oh = await login('ops.head@fsm.test');
+    const before = Date.now();
+    const mix = await request(app.getHttpServer())
+      .get(`/api/reports/work-type-mix?${WINDOW}`)
+      .set('Authorization', `Bearer ${oh}`)
+      .expect(200);
+    const outcomes = await request(app.getHttpServer())
+      .get(`/api/reports/verification-outcomes?${WINDOW}`)
+      .set('Authorization', `Bearer ${oh}`)
+      .expect(200);
+
+    for (const body of [mix.body, outcomes.body]) {
+      expect(typeof body.dataAsOf).toBe('string');
+      expect(new Date(body.dataAsOf).getTime()).toBeGreaterThanOrEqual(before - 5_000);
+    }
+  });
+
   it('rejects an invalid day and a reversed range (400)', async () => {
     const oh = await login('ops.head@fsm.test');
     await request(app.getHttpServer()).get('/api/reports/work-type-mix?from=2026-13-01').set('Authorization', `Bearer ${oh}`).expect(400);

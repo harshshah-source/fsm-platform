@@ -23,6 +23,16 @@ export interface SystemEfficiencyAggregationResult {
  * `se_id` dimension is populated only for **assignment-attributable** metrics (auto-assignments via the
  * Recommendation's SE, overrides via the batch's SE); device / cycle / stage-time metrics are fleet /
  * zone / plant-level (`se_id = NULL`), so an SE filter narrows to the SE-attributable families.
+ *
+ * **#333 — historical recompute decision: NOT applied, deliberately.** Correcting the auto-escalations
+ * predicate (leg 11) changes what a past day's `auto_escalations` should read, and `computeDay` is
+ * idempotent per day (delete + insert in one transaction, pinned by
+ * `system-efficiency-report.e2e-spec.ts`), so replaying history is safe to do. It is not done here
+ * because the cron only ever computes the *previous* day (`BusinessSweepSchedulerService.
+ * systemEfficiencyTick`) and a multi-day replay is a different job with a different failure mode —
+ * one this issue does not own. The door already exists: `POST /reports/efficiency/recompute?day=`
+ * (Operations Head) rebuilds any single day on demand, and that is the supported path for restating a
+ * range once someone decides how far back is worth restating.
  */
 @Injectable()
 export class SystemEfficiencyAggregationService {
@@ -216,18 +226,38 @@ export class SystemEfficiencyAggregationService {
         WHERE t.work_type = 'RECOVERY' AND ev.closed_at >= ${dayStart} AND ev.closed_at < ${dayEnd}
         GROUP BY p.zone_id, t.company_id, t.plant_id, dv.device_type`);
 
-      // 11) Auto-escalations per zone — cross-zone AUTO_PLATINUM + intra-day ESCALATION_REQUIRED + cycle ESCALATED.
+      // 11) Auto-escalations per zone — cross-zone AUTO_PLATINUM + intra-day escalations.
+      //
+      // **Both legs count escalations RAISED on day D, whatever happened to them afterwards** (#333).
+      // That one basis is the whole metric: "auto-escalations per zone" answers how much work the
+      // system could not place on its own, and resolving an escalation must never edit a past day's
+      // number. Every rate derived from it (and every ZM measured on it) depends on the two legs
+      // agreeing, so if a third leg is ever added it predicates on the raising instant too.
       await tx.$executeRaw(Prisma.sql`
         INSERT INTO system_efficiency_summary_daily (day, zone_id, auto_escalations, computed_at)
         SELECT ${d}, home_zone_id, COUNT(*)::int, ${now}
         FROM cross_zone_escalations
         WHERE created_at >= ${dayStart} AND created_at < ${dayEnd} AND escalation_type = 'AUTO_PLATINUM'
         GROUP BY home_zone_id`);
+      // #333 — this leg read `updated_at` and `status = 'ESCALATION_REQUIRED'`, and both halves failed
+      // in the same direction. Every resolver (`manualAssign`, `moveTickets` #288, `assignTicket` /
+      // `assignLane` #298) rewrites the row IN PLACE to `ACCEPTED` at the moment of resolution, so a
+      // resolved escalation matched neither the status nor the day it was raised on: it vanished
+      // entirely, from every day. The metric therefore read LOWEST on the days managers cleared the
+      // queue fastest — precisely inverted.
+      //
+      // `acceptance_deadline IS NULL` is the surviving marker of "raised as an escalation", and it is
+      // the only one. `status` is overwritten on resolution; `offered_se_id` is overwritten too (with
+      // whoever took the work, which is not who it was offered to — it was offered to nobody). But an
+      // escalation has no acceptance window to bound, so both writers (`IntradayInsertionService.
+      // escalate`, `StrandedWorkEscalationService`) leave it null and nothing ever fills it in, while
+      // every `ASSIGNED_DIRECT` row is created with one. A future writer that creates a
+      // deadline-less row for some other reason would join this count — so it must not.
       await tx.$executeRaw(Prisma.sql`
         INSERT INTO system_efficiency_summary_daily (day, zone_id, auto_escalations, computed_at)
         SELECT ${d}, zone_id, COUNT(*)::int, ${now}
         FROM intraday_insertions
-        WHERE updated_at >= ${dayStart} AND updated_at < ${dayEnd} AND status = 'ESCALATION_REQUIRED'
+        WHERE created_at >= ${dayStart} AND created_at < ${dayEnd} AND acceptance_deadline IS NULL
         GROUP BY zone_id`);
 
       const [{ count }] = await tx.$queryRaw<{ count: bigint }[]>(

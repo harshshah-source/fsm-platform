@@ -16,6 +16,26 @@ export const ROOT_CAUSE_CATEGORIES: RootCauseCategory[] = [
   'UNKNOWN',
 ];
 
+/**
+ * **When the numbers were computed** — carried by every `/reports/*` payload (#347).
+ *
+ * ISO-8601, or `null` when the report's window has no cube row at all. For the four cube-backed
+ * reports this is `MAX(computed_at)` **over exactly the rows that report read**, so a filter that
+ * lands on a corner of the cube the sweep has not rebuilt reports that corner's age rather than the
+ * newest row in the table. For the two live distributions (work-type mix, verification outcomes) it
+ * is the instant the server ran the query, because there is no cube between the reader and the rows.
+ *
+ * Why the field exists at all: all four cubes have always stored `computed_at` and no payload ever
+ * returned it, so the admin's "Data as of" line was `new Date()` in the browser at the moment the
+ * fetch resolved. That stamp cannot go stale by construction — a sweep dead for two days still drew a
+ * timestamp from this morning over two-day-old numbers. `null` is deliberately not "now" for the same
+ * reason `uptimePct` is not `100` at a zero window (#346): an absence of computation is not a
+ * computation, and the surface has to say so rather than format a plausible-looking time.
+ */
+export interface DataAsOf {
+  dataAsOf: string | null;
+}
+
 export interface RootCauseSlice {
   category: RootCauseCategory;
   count: number;
@@ -33,7 +53,7 @@ export interface RootCauseFilters {
   seId?: string | null;
 }
 
-export interface RootCauseReport {
+export interface RootCauseReport extends DataAsOf {
   fromMonth: string; // ISO date of the range's first month
   toMonth: string; // ISO date of the range's last month
   totalSubmissions: number;
@@ -87,7 +107,7 @@ export interface EfficiencyMetrics {
   avgRecoveryClosureSeconds: number | null;
 }
 
-export interface SystemEfficiencyReport {
+export interface SystemEfficiencyReport extends DataAsOf {
   from: string; // ISO date of the range's first day
   to: string; // ISO date of the range's last day
   filters: { zoneId: number | null; companyId: number | null; plantId: number | null; deviceType: string | null; seId: string | null };
@@ -99,6 +119,8 @@ export interface SystemEfficiencyReport {
 interface RawEfficiencyRow {
   zoneId: string | null;
   zoneName: string | null;
+  /** `MAX(computed_at)` for this group — never summed (see `EFFICIENCY_SUM_FIELDS`), only max'd. */
+  computedAt: Date | null;
   failureCyclesOpened: number;
   ticketsCreated: number;
   troubleshootTicketsCreated: number;
@@ -171,7 +193,7 @@ export interface ZmScorecardSeries {
   zmName: string;
   points: ZmScorecardTrendPoint[];
 }
-export interface ZmScorecardReport {
+export interface ZmScorecardReport extends DataAsOf {
   fromMonth: string;
   toMonth: string;
   zoneId: number | null;
@@ -185,6 +207,7 @@ type RawZmRow = {
   zoneId: string;
   zoneName: string;
   month: Date;
+  computedAt: Date | null;
   overridesTotal: number;
   removals: number;
   deferrals: number;
@@ -222,7 +245,7 @@ export interface FleetUptimeRow {
   seRepairedClosures: number;
 }
 
-export interface FleetUptimeReport {
+export interface FleetUptimeReport extends DataAsOf {
   month: string; // ISO date of the month's first day
   groupBy: FleetUptimeGroupBy;
   fleet: {
@@ -238,6 +261,7 @@ export interface FleetUptimeReport {
 type RawGroupRow = {
   id: string;
   name: string;
+  computedAt: Date | null;
   deviceCount: number;
   downtime: bigint;
   window: bigint;
@@ -257,7 +281,7 @@ export interface SoftInactiveZoneSeries {
   zoneName: string;
   points: SoftInactivePoint[];
 }
-export interface SoftInactiveTrend {
+export interface SoftInactiveTrend extends DataAsOf {
   sinceDays: number;
   zones: SoftInactiveZoneSeries[];
 }
@@ -292,7 +316,7 @@ export interface DistributionFilters {
   plantId?: number | null;
 }
 
-export interface WorkTypeMixReport {
+export interface WorkTypeMixReport extends DataAsOf {
   from: string;
   to: string;
   total: number;
@@ -300,7 +324,7 @@ export interface WorkTypeMixReport {
   rows: { workType: WorkTypeKey; count: number; pct: number }[];
 }
 
-export interface VerificationOutcomesReport {
+export interface VerificationOutcomesReport extends DataAsOf {
   from: string;
   to: string;
   total: number;
@@ -352,6 +376,7 @@ export class ReportsService {
     return {
       month: monthStart.toISOString().slice(0, 10),
       groupBy: opts.groupBy,
+      dataAsOf: maxComputedAt(rows),
       fleet: { ...fleet, uptimePct: uptimePct(downtime, window) },
       rows: out,
     };
@@ -373,6 +398,10 @@ export class ReportsService {
       WHERE h.captured_at >= ${cutoff}
       ORDER BY z.name, h.captured_at ASC`);
 
+    // This report reads a capture HISTORY, not a cube: its "computed at" is the newest capture in the
+    // window, which is exactly what `soft_inactive_count_history.captured_at` records.
+    const dataAsOf = maxDate(rows.map((r) => r.capturedAt));
+
     const byZone = new Map<string, SoftInactiveZoneSeries>();
     for (const r of rows) {
       let series = byZone.get(r.zoneId);
@@ -388,7 +417,7 @@ export class ReportsService {
         deficitMode: r.deficitMode,
       });
     }
-    return { sinceDays: days, zones: [...byZone.values()] };
+    return { sinceDays: days, dataAsOf, zones: [...byZone.values()] };
   }
 
   /**
@@ -414,8 +443,9 @@ export class ReportsService {
       opts.seId != null ? Prisma.sql`AND se_id = ${opts.seId}::uuid` : Prisma.empty,
     ];
 
-    const rows = await this.prisma.$queryRaw<{ category: string; count: bigint }[]>(Prisma.sql`
-      SELECT root_cause_category::text AS category, COALESCE(SUM(submission_count), 0)::bigint AS count
+    const rows = await this.prisma.$queryRaw<{ category: string; count: bigint; computedAt: Date | null }[]>(Prisma.sql`
+      SELECT root_cause_category::text AS category, COALESCE(SUM(submission_count), 0)::bigint AS count,
+             MAX(computed_at) AS "computedAt"
       FROM root_cause_summary_monthly
       WHERE month >= ${fromStart} AND month <= ${toStart} ${Prisma.join(filters, ' ')}
       GROUP BY root_cause_category`);
@@ -431,6 +461,7 @@ export class ReportsService {
       fromMonth: fromStart.toISOString().slice(0, 10),
       toMonth: toStart.toISOString().slice(0, 10),
       totalSubmissions: total,
+      dataAsOf: maxComputedAt(rows),
       filters: {
         zoneId: restrictZone ?? null,
         companyId: opts.companyId ?? null,
@@ -462,7 +493,8 @@ export class ReportsService {
              z.month, z.overrides_total AS "overridesTotal", z.removals, z.deferrals, z.reorders, z.swaps,
              z.reassignments, z.split_batches AS "splitBatches", z.override_after_onsite AS "overrideAfterOnsite",
              z.manual_assignments AS "manualAssignments", z.auto_assigned_count AS "autoAssignedCount",
-             z.zone_downtime_seconds AS "downtime", z.zone_window_seconds AS "window"
+             z.zone_downtime_seconds AS "downtime", z.zone_window_seconds AS "window",
+             z.computed_at AS "computedAt"
       FROM zm_performance_summary_monthly z
       JOIN users u ON u.user_id = z.zm_id
       JOIN zones zo ON zo.zone_id = z.zone_id
@@ -519,7 +551,14 @@ export class ReportsService {
       });
     }
 
-    return { fromMonth: fromStart.toISOString().slice(0, 10), toMonth: toStart.toISOString().slice(0, 10), zoneId: opts.zoneId ?? null, rows, trend };
+    return {
+      fromMonth: fromStart.toISOString().slice(0, 10),
+      toMonth: toStart.toISOString().slice(0, 10),
+      zoneId: opts.zoneId ?? null,
+      dataAsOf: maxComputedAt(raw),
+      rows,
+      trend,
+    };
   }
 
   /**
@@ -544,6 +583,9 @@ export class ReportsService {
     return {
       ...meta,
       total,
+      // No cube sits between the reader and `tickets`, so the data time IS the query instant — the
+      // server's, never the browser's (#347).
+      dataAsOf: now.toISOString(),
       filters: filters.echo,
       rows: WORK_TYPES.map((workType) => ({ workType, count: counts.get(workType) ?? 0, pct: ratePct(counts.get(workType) ?? 0, total) })),
     };
@@ -574,6 +616,8 @@ export class ReportsService {
       ...meta,
       total,
       fraudFlagged: rows.reduce((s, r) => s + r.fraudFlagged, 0),
+      // Live aggregation over `verification_runs` — see `workTypeMix` (#347).
+      dataAsOf: now.toISOString(),
       filters: filters.echo,
       rows: VERIFY_OUTCOME_KEYS.map((outcome) => ({ outcome, count: counts.get(outcome) ?? 0, pct: ratePct(counts.get(outcome) ?? 0, total) })),
     };
@@ -595,6 +639,7 @@ export class ReportsService {
 
   private queryGroups(groupBy: FleetUptimeGroupBy, monthStart: Date, zoneFilter: Prisma.Sql): Promise<RawGroupRow[]> {
     const select = Prisma.sql`
+      MAX(s.computed_at) AS "computedAt",
       COUNT(*)::int AS "deviceCount",
       COALESCE(SUM(s.downtime_seconds), 0)::bigint AS "downtime",
       COALESCE(SUM(s.window_seconds), 0)::bigint AS "window",
@@ -656,6 +701,7 @@ export class ReportsService {
 
     const raw = await this.prisma.$queryRaw<RawEfficiencyRow[]>(Prisma.sql`
       SELECT s.zone_id::text AS "zoneId", z.name AS "zoneName",
+        MAX(s.computed_at) AS "computedAt",
         COALESCE(SUM(s.failure_cycles_opened), 0)::int AS "failureCyclesOpened",
         COALESCE(SUM(s.tickets_created), 0)::int AS "ticketsCreated",
         COALESCE(SUM(s.troubleshoot_tickets_created), 0)::int AS "troubleshootTicketsCreated",
@@ -699,6 +745,7 @@ export class ReportsService {
     return {
       from: fromDay.toISOString().slice(0, 10),
       to: toDay.toISOString().slice(0, 10),
+      dataAsOf: maxComputedAt(raw),
       filters: {
         zoneId: restrictZone ?? null,
         companyId: opts.companyId ?? null,
@@ -730,6 +777,28 @@ export class ReportsService {
 function uptimePct(downtime: number, window: number): number | null {
   if (window <= 0) return null;
   return Math.round((1 - downtime / window) * 100 * 100) / 100;
+}
+
+/**
+ * `MAX(computed_at)` across the cube rows a report read, ISO-8601 — or `null` when it read none
+ * (#347). Taken in JS rather than as a second round trip: every cube query already groups, so each
+ * group's own `MAX(computed_at)` comes back for free and the report-wide max is a fold over rows that
+ * are already in hand.
+ */
+function maxComputedAt(rows: { computedAt: Date | null }[]): string | null {
+  return maxDate(rows.map((r) => r.computedAt));
+}
+
+/** The newest of a set of possibly-absent instants, ISO-8601, or `null` when there is none. */
+function maxDate(dates: (Date | null | undefined)[]): string | null {
+  let newest: number | null = null;
+  for (const d of dates) {
+    if (!d) continue;
+    const t = d.getTime();
+    if (Number.isNaN(t)) continue;
+    if (newest === null || t > newest) newest = t;
+  }
+  return newest === null ? null : new Date(newest).toISOString();
 }
 
 /** `numerator/denominator × 100`, 2 decimals. A zero denominator (no assignments) reports 0%. */
@@ -845,7 +914,9 @@ const EFFICIENCY_SUM_FIELDS: (keyof RawEfficiencyRow)[] = [
 ];
 
 function emptyEfficiencyRow(): RawEfficiencyRow {
-  const base = { zoneId: null, zoneName: null } as RawEfficiencyRow;
+  // `computedAt` is not a summable field — the report-wide stamp is max'd off the raw rows, not the
+  // fleet fold — so the accumulator carries it as null and `addEfficiency` never touches it.
+  const base = { zoneId: null, zoneName: null, computedAt: null } as RawEfficiencyRow;
   const rec = base as unknown as Record<string, number>;
   for (const f of EFFICIENCY_SUM_FIELDS) rec[f] = 0;
   return base;

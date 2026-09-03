@@ -3,6 +3,7 @@ import { apiZmScorecard, type ZmScorecardReport, type ZmScorecardRow } from '../
 import { ChartCard } from '../../components/charts';
 import { DataTable, EmptyState, PageHeader, type Column } from '../../components/data';
 import { SectionCard } from '../../components/ui';
+import { ReportMetaStrip } from './DataAsOfStamp';
 
 /**
  * FE-25 — ZM Performance Scorecard (ref 25). A leader card (top ZM by zone Fleet-Uptime compliance) +
@@ -68,6 +69,10 @@ export function ZmScorecardPage() {
         title="ZM Performance Scorecard"
         subtitle="Zonal-Manager decision activity vs zone Fleet-Uptime outcomes — override behaviour, manual assignments and SLA compliance. Operations-Head view."
       />
+
+      {/* #347 — ref 25's header band. People are ranked on this page; how old the cube behind the
+          ranking is belongs on it, and "no cube computed yet" is a real answer for a fresh month. */}
+      <ReportMetaStrip dataAsOf={report?.dataAsOf} loading={loading} stampTestId="zm-scorecard-data-as-of" />
 
       {error && (
         <div role="alert" className="mb-4 rounded-md border border-critical/30 bg-critical-bg px-3 py-2 text-sm text-critical">

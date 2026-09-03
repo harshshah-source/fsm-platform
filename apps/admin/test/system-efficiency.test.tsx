@@ -14,8 +14,10 @@ const metrics = {
   repeatFailures: 9, firstTimeFixes: 70, componentPauses: 4, agedResolutions: 3, autoEscalations: 3,
   repeatFailureRatePct: 9, firstTimeFixRatePct: 70, failedVerificationRatePct: 5, autoRecoveryRatePct: 15,
 };
+const CUBE_COMPUTED_AT = new Date(Date.now() - 2 * 3_600_000).toISOString();
 const report = {
   from: '2026-06-01', to: '2026-06-30',
+  dataAsOf: CUBE_COMPUTED_AT,
   filters: { zoneId: null, companyId: null, plantId: null, deviceType: null, seId: null },
   fleet: metrics,
   byZone: [{ ...metrics, zoneId: '1', zoneName: 'West', ticketsCreated: 60, autoAssignmentRatePct: 80 }],
@@ -52,5 +54,20 @@ describe('System Efficiency (FE-24)', () => {
     render(<SystemEfficiencyPage />);
     await screen.findByTestId('eff-row-1');
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/reports/efficiency'))).toBe(true);
+  });
+
+  /** #347 AC2 — the daily cube's own stamp, with a real threshold behind it (ref 24's band). */
+  it('prints the cube’s data-as-of stamp and flags a stale cube', async () => {
+    const fresh = render(<SystemEfficiencyPage />);
+    const stamp = await screen.findByTestId('efficiency-data-as-of');
+    expect(stamp).toHaveAttribute('data-freshness', 'fresh');
+    expect(stamp).toHaveTextContent(/data as of/i);
+    fresh.unmount();
+
+    fetchMock.mockImplementationOnce(async () => json({ ...report, dataAsOf: new Date(Date.now() - 4 * 86_400_000).toISOString() }));
+    render(<SystemEfficiencyPage />);
+    const stale = await screen.findByTestId('efficiency-data-as-of');
+    expect(stale).toHaveAttribute('data-freshness', 'stale');
+    expect(stale).toHaveTextContent(/stale/i);
   });
 });

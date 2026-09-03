@@ -30,6 +30,12 @@ describe('Issue 42 — System Efficiency Report', () => {
   const userIds: string[] = [];
   const ticketIds: string[] = [];
 
+  // #333 — a zone of its own for the auto-escalation cases, so the cross-zone leg's count in the
+  // assertions above stays exactly 1 and the two legs can be read apart.
+  let escZoneId: bigint;
+  let escPlantId: bigint;
+  const escTicketIds: string[] = [];
+
   beforeAll(async () => {
     prisma = new PrismaService();
     await prisma.onModuleInit();
@@ -85,10 +91,54 @@ describe('Issue 42 — System Efficiency Report', () => {
 
     // Auto-escalation: a Platinum cross-zone escalation raised in the day.
     await prisma.crossZoneEscalation.create({ data: { ticketId: tsTicketId, homeZoneId: zoneId, companyTier: 'PLATINUM', escalationType: 'AUTO_PLATINUM', status: 'PENDING', createdAt: at(7) } });
+
+    // ---- #333 — the intra-day auto-escalation leg, in its own zone. ------------------------------
+    //
+    // Three `intraday_insertions` rows, all created on DAY, in the three shapes the metric has to tell
+    // apart. `acceptanceDeadline` is the surviving marker of "this row was RAISED as an escalation":
+    // resolution rewrites `status` to ACCEPTED and overwrites `offeredSeId` with whoever took the
+    // work, but nothing ever writes an acceptance window onto a row that never had one.
+    escZoneId = (await prisma.zone.create({ data: { name: 'Z-esc-' + NS } })).zoneId;
+    escPlantId = (await prisma.plant.create({ data: { name: 'P-esc-' + NS, zoneId: escZoneId } })).plantId;
+    const escTicket = async (createdAt: Date): Promise<string> => {
+      const t = await prisma.ticket.create({
+        data: { workType: 'INSTALL', status: 'REQUESTED', deviceId, plantId: escPlantId, companyId, companyTier: 'GOLD', lastStateChangedAt: createdAt, createdAt },
+      });
+      escTicketIds.push(t.ticketId);
+      return t.ticketId;
+    };
+
+    // (A) raised 08:00 and RESOLVED THE SAME DAY at 09:00 — the exact case that read 0 before #333.
+    await prisma.intradayInsertion.create({
+      data: {
+        ticketId: await escTicket(at(8)), zoneId: escZoneId, insertionType: 'SYSTEM_CRITICAL',
+        offeredSeId: se, offeredAt: at(8), acceptanceDeadline: null, status: 'ACCEPTED',
+        respondedAt: at(9), createdAt: at(8), updatedAt: at(9),
+      },
+    });
+    // (B) raised 10:00, resolved the NEXT day — belongs to DAY, never to D+1.
+    await prisma.intradayInsertion.create({
+      data: {
+        ticketId: await escTicket(at(10)), zoneId: escZoneId, insertionType: 'SE_UNAVAILABLE',
+        offeredSeId: se, offeredAt: at(10), acceptanceDeadline: null, status: 'ACCEPTED',
+        respondedAt: new Date(Date.UTC(2026, 5, 21, 10)), createdAt: at(10), updatedAt: new Date(Date.UTC(2026, 5, 21, 10)),
+      },
+    });
+    // (C) an ASSIGNED_DIRECT insertion — the system placed this work, it was never an escalation.
+    await prisma.intradayInsertion.create({
+      data: {
+        ticketId: await escTicket(at(11)), zoneId: escZoneId, insertionType: 'SYSTEM_CRITICAL',
+        offeredSeId: se, offeredAt: at(11), acceptanceDeadline: at(11), status: 'ASSIGNED_DIRECT',
+        respondedAt: at(11), createdAt: at(11), updatedAt: at(11),
+      },
+    });
   });
 
   afterAll(async () => {
-    await prisma.systemEfficiencySummaryDaily.deleteMany({ where: { zoneId } });
+    await prisma.systemEfficiencySummaryDaily.deleteMany({ where: { zoneId: { in: [zoneId, escZoneId] } } });
+    await prisma.intradayInsertion.deleteMany({ where: { zoneId: escZoneId } });
+    await prisma.ticket.deleteMany({ where: { ticketId: { in: escTicketIds } } });
+    await prisma.plant.deleteMany({ where: { plantId: escPlantId } });
     await prisma.crossZoneEscalation.deleteMany({ where: { homeZoneId: zoneId } });
     await prisma.verificationRun.deleteMany({ where: { ticketId: { in: ticketIds } } });
     await prisma.softState.deleteMany({ where: { ticketId: { in: ticketIds } } });
@@ -106,7 +156,7 @@ describe('Issue 42 — System Efficiency Report', () => {
     await prisma.user.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.plant.deleteMany({ where: { plantId } });
     await prisma.company.deleteMany({ where: { companyId } });
-    await prisma.zone.deleteMany({ where: { zoneId } });
+    await prisma.zone.deleteMany({ where: { zoneId: { in: [zoneId, escZoneId] } } });
     await prisma.onModuleDestroy();
   });
 
@@ -203,5 +253,68 @@ describe('Issue 42 — System Efficiency Report', () => {
     const after = (await reports.systemEfficiency(ohScope, { from: DAY, to: DAY, zoneId: Number(zoneId) })).fleet
       .manualAssignments;
     expect(after).toBe(before); // unchanged — the SYSTEM row did not join the human-actor count
+  });
+
+  /**
+   * #333 AC1 — the metric under-reported exactly when the queue was busiest. The intra-day leg
+   * predicated on the *current* `status` and on `updated_at`, and every resolver rewrites the row in
+   * place to `ACCEPTED` at the moment of resolution, so an escalation raised and answered on the same
+   * day matched nothing on any day. The faster managers cleared the queue, the lower "auto-escalations
+   * per zone" read — the opposite of what the figure is for.
+   */
+  it('#333 — an escalation raised and resolved on the same day still counts for that day', async () => {
+    await agg.computeDay(new Date(DAY + 'T00:00:00Z'));
+    const report = await reports.systemEfficiency(ohScope, { from: DAY, to: DAY, zoneId: Number(escZoneId) });
+    // (A) same-day-resolved + (B) resolved next day. (C) ASSIGNED_DIRECT is not an escalation.
+    expect(report.fleet.autoEscalations).toBe(2);
+  });
+
+  /** #333 — an escalation belongs to the day it was RAISED, and to no other day. */
+  it('#333 — an escalation raised on D and resolved on D+1 counts on D, not on D+1', async () => {
+    const nextDay = '2026-06-21';
+    await agg.computeDay(new Date(DAY + 'T00:00:00Z'));
+    await agg.computeDay(new Date(nextDay + 'T00:00:00Z'));
+
+    const onD = await reports.systemEfficiency(ohScope, { from: DAY, to: DAY, zoneId: Number(escZoneId) });
+    const onNext = await reports.systemEfficiency(ohScope, { from: nextDay, to: nextDay, zoneId: Number(escZoneId) });
+    expect(onD.fleet.autoEscalations).toBe(2);
+    expect(onNext.fleet.autoEscalations).toBe(0);
+  });
+
+  /**
+   * #333 AC2 — the two legs now share one basis (raised, not current status). The cross-zone leg was
+   * always right; this pins that the fix did not disturb it while correcting its sibling.
+   */
+  it('#333 — the cross-zone AUTO_PLATINUM leg keeps its own count on the raising day', async () => {
+    await agg.computeDay(new Date(DAY + 'T00:00:00Z'));
+    const report = await reports.systemEfficiency(ohScope, { from: DAY, to: DAY, zoneId: Number(zoneId) });
+    expect(report.fleet.autoEscalations).toBe(1);
+  });
+
+  /** #333 AC3 — recompute stays idempotent per day, which is what makes a history backfill safe. */
+  it('#333 — recomputing the day twice does not double the escalation count', async () => {
+    await agg.computeDay(new Date(DAY + 'T00:00:00Z'));
+    await agg.computeDay(new Date(DAY + 'T00:00:00Z'));
+    const report = await reports.systemEfficiency(ohScope, { from: DAY, to: DAY, zoneId: Number(escZoneId) });
+    expect(report.fleet.autoEscalations).toBe(2);
+  });
+
+  /**
+   * #347 AC1 — the report says when the cube behind it was built. `MAX(computed_at)` over the rows
+   * this filter actually read, so a filter that lands on an unrecomputed corner reports that corner's
+   * age rather than the newest row in the table.
+   */
+  it('#347 — carries dataAsOf = MAX(computed_at), and null for a window with no cube row', async () => {
+    await agg.computeDay(new Date(DAY + 'T00:00:00Z'));
+    const rows = await prisma.systemEfficiencySummaryDaily.findMany({ where: { zoneId }, select: { computedAt: true } });
+    const newest = Math.max(...rows.map((r) => r.computedAt.getTime()));
+
+    const report = await reports.systemEfficiency(ohScope, { from: DAY, to: DAY, zoneId: Number(zoneId) });
+    expect(report.dataAsOf).not.toBeNull();
+    expect(new Date(report.dataAsOf!).getTime()).toBe(newest);
+
+    const empty = await reports.systemEfficiency(ohScope, { from: '2029-10-01', to: '2029-10-01' });
+    expect(empty).toHaveProperty('dataAsOf');
+    expect(empty.dataAsOf).toBeNull();
   });
 });

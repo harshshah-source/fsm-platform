@@ -8,9 +8,13 @@ import { ReportsPage } from '../src/pages/reports/ReportsPage';
  * zone-overview-derived bucket/critical panels, all from real endpoints. Asserts the KPI value, the
  * Zone-breakdown table, and that the bucket panel renders.
  */
+/** #347 — a cube stamp the page must print instead of the browser clock. Recent → fresh. */
+const CUBE_COMPUTED_AT = new Date(Date.now() - 3 * 3_600_000).toISOString();
+
 const fleet = {
   month: '2026-06',
   groupBy: 'zone',
+  dataAsOf: CUBE_COMPUTED_AT,
   fleet: { eligibleDeviceCount: 500, uptimePct: 94.2, autoRecoveryClosures: 3, seRepairedClosures: 12 },
   rows: [{ id: '1', name: 'West', eligibleDeviceCount: 200, uptimePct: 94.2, autoRecoveryClosures: 2, seRepairedClosures: 6 }],
 };
@@ -148,6 +152,37 @@ describe('Reports landing (FE-21)', () => {
     });
     expect(csv).toContain('Zone,Inactive w/ work,Critical+,Fleet Uptime %');
     expect(csv).toContain('West,46,15,94.2');
+  });
+
+  /**
+   * #347 AC2 — the stamp is the CUBE's, not the browser's. The old page set `new Date()` when its
+   * fetch resolved, so the strip always agreed with the wall clock and a dead cube cron was invisible.
+   */
+  it('prints the cube’s dataAsOf, not the client clock', async () => {
+    render(<ReportsPage />);
+    const stamp = await screen.findByTestId('reports-data-as-of');
+    expect(stamp).toHaveAttribute('data-freshness', 'fresh');
+    // The rendered stamp is the cube's own instant — the same minute, not "now".
+    const minute = new Date(CUBE_COMPUTED_AT).toLocaleString(undefined, { hour: '2-digit', minute: '2-digit' });
+    expect(stamp).toHaveTextContent(new RegExp(minute.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    expect(stamp).toHaveTextContent(/data as of/i);
+  });
+
+  it('flags a cube older than the staleness threshold as stale', async () => {
+    fetchMock.mockImplementationOnce(async () => json({ ...fleet, dataAsOf: new Date(Date.now() - 5 * 86_400_000).toISOString() }));
+    render(<ReportsPage />);
+    const stamp = await screen.findByTestId('reports-data-as-of');
+    expect(stamp).toHaveAttribute('data-freshness', 'stale');
+    expect(stamp).toHaveTextContent(/stale/i);
+    expect(stamp).toHaveTextContent(/5 days old/i);
+  });
+
+  it('says "No cube computed yet" when the report carries no dataAsOf', async () => {
+    fetchMock.mockImplementationOnce(async () => json({ ...fleet, dataAsOf: null }));
+    render(<ReportsPage />);
+    const stamp = await screen.findByTestId('reports-data-as-of');
+    expect(stamp).toHaveAttribute('data-freshness', 'missing');
+    expect(stamp).toHaveTextContent(/no cube computed yet/i);
   });
 
   it('queries the Fleet Uptime and Soft-Inactive endpoints', async () => {

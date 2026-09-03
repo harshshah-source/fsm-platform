@@ -25,6 +25,7 @@ import {
 } from '../../components/data';
 import { BarChartCard, BarList, CHART, ChartCard, ReportGrid, TrendChart, type BarDatum, type BarListItem, type TrendDatum } from '../../components/charts';
 import { Button } from '../../components/ui';
+import { ReportMetaStrip } from './DataAsOfStamp';
 import { SLA_BUCKETS, BUCKET_LABEL, BUCKET_COLOR, type SlaBucket } from '../../lib/slaBucket';
 
 /** Buckets counted as "Critical+" — CRITICAL severity and worse (CONTEXT SLA Bucket table). */
@@ -66,15 +67,13 @@ export function ReportsPage() {
   const [outcomes, setOutcomes] = useState<VerificationOutcomesReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [asOf, setAsOf] = useState<Date | null>(null);
-
   const load = useCallback(() => {
     setError(null);
+    // #347 — no client-clock stamp is taken here any more. The page's "Data as of" comes from the
+    // report's own `dataAsOf`; a timestamp minted when the fetch resolved described the fetch, not
+    // the data, and could never go stale however dead the cube cron was.
     apiFleetUptime({ groupBy: 'zone' })
-      .then((r) => {
-        setFleet(r);
-        setAsOf(new Date());
-      })
+      .then(setFleet)
       .catch(() => setError('Failed to load the Fleet Uptime report'));
     apiFleetUptimeTrend(6)
       .then(setUptimeTrend)
@@ -247,10 +246,19 @@ export function ReportsPage() {
         }
       />
 
-      {/* Scope meta strip (reference header band): scoped zones + data-as-of stamp. */}
-      <div
-        data-testid="reports-meta"
-        className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-card px-3 py-2 text-xs"
+      {/*
+        Scope meta strip (reference header band, ref 21): scoped zones then the data-as-of stamp.
+
+        #347 — the stamp is the FLEET UPTIME CUBE's `computed_at`, which is this page's hero KPI and
+        its only cube-backed source. The other two panels (work-type mix, verification outcomes) are
+        live aggregations whose data time is the request instant, so they are never the constraint on
+        how fresh this page is; the cube is.
+      */}
+      <ReportMetaStrip
+        testId="reports-meta"
+        dataAsOf={fleet?.dataAsOf}
+        loading={fleet === null && error === null}
+        stampTestId="reports-data-as-of"
       >
         <span className="font-semibold uppercase tracking-wider text-ink-caps">Scope</span>
         {(zones ?? []).map((z) => (
@@ -262,10 +270,7 @@ export function ReportsPage() {
           </span>
         ))}
         {zones !== null && zones.length === 0 && <span className="text-ink-muted">No zones in scope</span>}
-        <span className="ml-auto text-ink-muted">
-          {asOf ? `Data as of ${asOf.toLocaleString()}` : 'Loading…'}
-        </span>
-      </div>
+      </ReportMetaStrip>
 
       {error && (
         <div

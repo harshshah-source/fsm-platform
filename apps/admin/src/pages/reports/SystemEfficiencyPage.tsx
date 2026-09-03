@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiSystemEfficiency, type SystemEfficiencyReport } from '../../api/reports';
 import { BarChartCard, ChartCard, ReportGrid, type BarDatum } from '../../components/charts';
 import { DataTable, EmptyState, MetricStrip, PageHeader, type Column, type Metric } from '../../components/data';
+import { ReportMetaStrip } from './DataAsOfStamp';
 
 type ZoneRow = SystemEfficiencyReport['byZone'][number];
 
@@ -54,6 +55,10 @@ export function SystemEfficiencyPage() {
         title="System Efficiency"
         subtitle="End-to-end pipeline metrics — detection, assignment, resolution, verification and escalation — from the daily efficiency cube. Zone-scoped for ZM, cross-zone for CSM / Operations Head."
       />
+
+      {/* #347 — ref 24's header band. This page is served entirely from a DAILY cube, so a stopped
+          `business-system-efficiency` sweep is exactly what the stamp has to be able to show. */}
+      <ReportMetaStrip dataAsOf={report?.dataAsOf} loading={loading} stampTestId="efficiency-data-as-of" />
 
       {error && (
         <div role="alert" className="mb-4 rounded-md border border-critical/30 bg-critical-bg px-3 py-2 text-sm text-critical">

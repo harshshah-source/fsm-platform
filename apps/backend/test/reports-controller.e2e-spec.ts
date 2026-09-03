@@ -134,6 +134,37 @@ describe('Issue 39 slice 3 — /api/reports/fleet-uptime (e2e)', () => {
     expect(report.body.rows).toEqual([]);
   });
 
+  /**
+   * #347 AC1 — the wire payload carries the cube's own `computed_at`. The admin page printed the
+   * BROWSER clock as "Data as of", which cannot go stale: a scheduler dead for two days still drew a
+   * stamp from this morning. `dataAsOf` is the last time the cube behind these numbers was rebuilt,
+   * and `null` when there is no cube row to have been rebuilt at all.
+   */
+  it('carries dataAsOf — the cube computed_at after a recompute, null for a month with no cube row', async () => {
+    const oh = await login('ops.head@fsm.test');
+    const before = Date.now();
+    await request(app.getHttpServer())
+      .post('/api/reports/fleet-uptime/recompute?month=2026-05')
+      .set('Authorization', `Bearer ${oh}`)
+      .expect(200);
+
+    const report = await request(app.getHttpServer())
+      .get('/api/reports/fleet-uptime?month=2026-05&groupBy=plant')
+      .set('Authorization', `Bearer ${oh}`)
+      .expect(200);
+    expect(report.body).toHaveProperty('dataAsOf');
+    expect(typeof report.body.dataAsOf).toBe('string');
+    // The stamp is the recompute we just ran, not the request instant of some earlier read.
+    expect(new Date(report.body.dataAsOf).getTime()).toBeGreaterThanOrEqual(before - 5_000);
+
+    const empty = await request(app.getHttpServer())
+      .get('/api/reports/fleet-uptime?month=2029-10&groupBy=zone')
+      .set('Authorization', `Bearer ${oh}`)
+      .expect(200);
+    expect(empty.body).toHaveProperty('dataAsOf');
+    expect(empty.body.dataAsOf).toBeNull();
+  });
+
   /** #346 AC5 — the manual recompute door is untouched by the honesty change. */
   it('the Operations-Head recompute endpoint is unchanged (200, month + device count)', async () => {
     const oh = await login('ops.head@fsm.test');

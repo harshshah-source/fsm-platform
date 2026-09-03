@@ -13,6 +13,94 @@ async function get<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+// ---- Report freshness (#347) ---------------------------------------------------
+
+/**
+ * Every report payload carries `dataAsOf` — **when the data was computed**, not when the browser drew
+ * it. For the four cube-backed reports it is `MAX(computed_at)` over the rows that report actually
+ * read, and `null` when the window has no cube row at all; for the two live distributions it is the
+ * instant the server ran the query.
+ *
+ * #347. Before this, the Reports page stamped `new Date()` at the moment its fetch resolved and
+ * labelled it "Data as of". That stamp could not go stale, by construction: a cube cron dead for two
+ * days still produced a timestamp from this morning, over two-day-old numbers, and a manager acted on
+ * them. A number with no honest stamp is worse than no number.
+ */
+export interface DataAsOf {
+  dataAsOf: string | null;
+}
+
+export type ReportFreshnessState = 'fresh' | 'stale' | 'missing';
+
+/**
+ * Every cube behind a report is rebuilt by a **daily** sweep — `business-system-efficiency` (01:30),
+ * `business-fleet-uptime` (03:00), `business-root-cause` (03:15), `business-zm-performance` (03:30),
+ * all `0 H * * *`-shaped since #346 made the three monthly cubes cover the in-flight month. So 24h is
+ * the expected cadence for all four and one threshold serves them.
+ */
+export const REPORT_CUBE_CADENCE_HOURS = 24;
+
+/**
+ * Stale past **two** missed cadences, the same `× 2` rule the ingestion detectors use: one skipped run
+ * is a late cron or a long recompute, two is a stopped one. The doubling is what stops the badge
+ * crying wolf every morning between the sweep's window opening and its actually finishing — a
+ * threshold that fires on noise is one operators learn to ignore, which is the same outcome as having
+ * none.
+ */
+export const REPORT_STALE_AFTER_HOURS = REPORT_CUBE_CADENCE_HOURS * 2;
+export const REPORT_STALE_AFTER_MS = REPORT_STALE_AFTER_HOURS * 3_600_000;
+
+/** What a report surface says when no cube row exists — never a blank, never a client-clock stamp. */
+export const NO_CUBE_LABEL = 'No cube computed yet';
+
+export interface ReportFreshness {
+  state: ReportFreshnessState;
+  /** Parsed stamp, or `null` when the report carries none. */
+  asOf: Date | null;
+  /** Age at `now`, clamped at 0 — a cube stamped slightly in the future is not "negative age". */
+  ageMs: number | null;
+  /** The rendered stamp line: `Data as of …`, or {@link NO_CUBE_LABEL}. */
+  label: string;
+}
+
+/** `11 Jun 2026, 10:30 am` — the reference band's shape, in the viewer's locale. */
+function formatAsOf(asOf: Date): string {
+  return asOf.toLocaleString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** How old, in the coarsest unit that still answers "should I trust this?". */
+export function reportAgeLabel(ageMs: number): string {
+  const hours = Math.floor(ageMs / 3_600_000);
+  if (hours < 1) return 'under an hour old';
+  if (hours < 48) return `${hours}h old`;
+  return `${Math.floor(hours / 24)} days old`;
+}
+
+/**
+ * The ONE place a report surface decides whether the number in front of the reader is current. An
+ * unparseable or absent stamp is `missing` rather than silently `fresh`: the two failure modes this
+ * closes both looked like freshness, and defaulting to "fine" is how they stayed invisible.
+ */
+export function reportFreshness(dataAsOf: string | null | undefined, now: Date = new Date()): ReportFreshness {
+  const asOf = dataAsOf ? new Date(dataAsOf) : null;
+  if (asOf === null || Number.isNaN(asOf.getTime())) {
+    return { state: 'missing', asOf: null, ageMs: null, label: NO_CUBE_LABEL };
+  }
+  const ageMs = Math.max(0, now.getTime() - asOf.getTime());
+  return {
+    state: ageMs > REPORT_STALE_AFTER_MS ? 'stale' : 'fresh',
+    asOf,
+    ageMs,
+    label: `Data as of ${formatAsOf(asOf)}`,
+  };
+}
+
 // ---- Fleet Uptime % (Issue 39) -------------------------------------------------
 
 export type FleetUptimeGroupBy = 'zone' | 'company' | 'plant';
@@ -32,7 +120,7 @@ export interface FleetUptimeRow {
   seRepairedClosures: number;
 }
 
-export interface FleetUptimeReport {
+export interface FleetUptimeReport extends DataAsOf {
   month: string;
   groupBy: FleetUptimeGroupBy;
   fleet: {
@@ -114,7 +202,7 @@ export interface SoftInactiveZoneSeries {
   zoneName: string;
   points: SoftInactivePoint[];
 }
-export interface SoftInactiveTrend {
+export interface SoftInactiveTrend extends DataAsOf {
   sinceDays: number;
   zones: SoftInactiveZoneSeries[];
 }
@@ -131,7 +219,7 @@ export const apiSoftInactiveTrend = (params: { days?: number } = {}) => {
 export type WorkTypeKey = 'TROUBLESHOOT' | 'INSTALL' | 'RECOVERY';
 export type VerifyOutcomeKey = 'CLOSED' | 'CLOSED_AUTO_RECOVERY' | 'PARTIAL_RECOVERY' | 'FAILED_VERIFICATION' | 'FAILED_ACTIVATION' | 'PENDING';
 
-export interface WorkTypeMixReport {
+export interface WorkTypeMixReport extends DataAsOf {
   from: string;
   to: string;
   total: number;
@@ -139,7 +227,7 @@ export interface WorkTypeMixReport {
   rows: { workType: WorkTypeKey; count: number; pct: number }[];
 }
 
-export interface VerificationOutcomesReport {
+export interface VerificationOutcomesReport extends DataAsOf {
   from: string;
   to: string;
   total: number;
@@ -159,7 +247,7 @@ export interface RootCauseSlice {
   count: number;
   pct: number; // share of total submissions, 0–100
 }
-export interface RootCauseReport {
+export interface RootCauseReport extends DataAsOf {
   fromMonth: string;
   toMonth: string;
   totalSubmissions: number;
@@ -194,7 +282,7 @@ export interface EfficiencyMetrics {
   failedVerificationRatePct: number;
   autoRecoveryRatePct: number;
 }
-export interface SystemEfficiencyReport {
+export interface SystemEfficiencyReport extends DataAsOf {
   from: string;
   to: string;
   filters: { zoneId: number | null; companyId: number | null; plantId: number | null; deviceType: string | null; seId: string | null };
@@ -224,7 +312,7 @@ export interface ZmScorecardRow {
   /** Zone Fleet-Uptime compliance — `null` when the zone had no eligible device-time (#346). */
   zoneSlaCompliancePct: number | null;
 }
-export interface ZmScorecardReport {
+export interface ZmScorecardReport extends DataAsOf {
   fromMonth: string;
   toMonth: string;
   zoneId: number | null;

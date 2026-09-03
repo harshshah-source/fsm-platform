@@ -14,8 +14,10 @@ const OH: SessionView = { user_id: 'oh', role: 'OPERATIONS_HEAD', zone_id: null,
 const ZM: SessionView = { user_id: 'zm', role: 'ZONAL_MANAGER', zone_id: 1, acted_as_role: null };
 
 const base = { removals: 0, deferrals: 0, reorders: 0, swaps: 0, reassignments: 0, splitBatches: 0, overrideAfterOnsite: 0 };
+const CUBE_COMPUTED_AT = new Date(Date.now() - 6 * 3_600_000).toISOString();
 const report = {
   fromMonth: '2026-06-01', toMonth: '2026-06-30', zoneId: null,
+  dataAsOf: CUBE_COMPUTED_AT,
   rows: [
     { zmId: 'zm-1', zmName: 'Asha', zoneId: 1, zoneName: 'West', overrides: 12, manualAssignments: 5, autoAssigned: 120, overrideRatePct: 10, zoneSlaCompliancePct: 97.5, ...base },
     { zmId: 'zm-2', zmName: 'Ravi', zoneId: 2, zoneName: 'East', overrides: 30, manualAssignments: 9, autoAssigned: 130, overrideRatePct: 22, zoneSlaCompliancePct: 92, ...base },
@@ -55,6 +57,21 @@ describe('ZM Performance Scorecard (FE-25)', () => {
     expect(row).toHaveTextContent(/Ravi/);
     expect(row).toHaveTextContent(/22/); // override rate
     expect(row).toHaveTextContent(/92/); // zone SLA compliance
+  });
+
+  /** #347 AC2 — a scorecard people are measured on says how old the cube behind it is (ref 25's band). */
+  it('prints the cube’s data-as-of stamp, and "No cube computed yet" when there is none', async () => {
+    const fresh = render(<ZmScorecardPage />);
+    const stamp = await screen.findByTestId('zm-scorecard-data-as-of');
+    expect(stamp).toHaveAttribute('data-freshness', 'fresh');
+    expect(stamp).toHaveTextContent(/data as of/i);
+    fresh.unmount();
+
+    fetchMock.mockImplementationOnce(async () => json({ ...report, dataAsOf: null }));
+    render(<ZmScorecardPage />);
+    const empty = await screen.findByTestId('zm-scorecard-data-as-of');
+    expect(empty).toHaveAttribute('data-freshness', 'missing');
+    expect(empty).toHaveTextContent(/no cube computed yet/i);
   });
 
   it('is reachable by Operations Head but redirects a Zonal Manager', async () => {

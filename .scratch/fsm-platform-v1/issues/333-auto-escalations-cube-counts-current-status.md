@@ -1,5 +1,5 @@
 # 333 — `auto_escalations` counts current status, so a resolved escalation vanishes from the day
-Status: ready-for-agent
+Status: done 2026-09-03 (landed inside #347) — report docs/progress/347-report-freshness-stamps-auto-escalations-cube.md
 Type: AFK
 Wave: 3 · Severity: P2 · Found by: #298 (CB-2) regression check, 2026-09-02
 
@@ -92,10 +92,10 @@ None. Independent of #298 (which is done) — this can land at any time.
 
 ## Acceptance criteria
 
-- [ ] AC1 — an escalation resolved on the day it was raised still counts for that day.
-- [ ] AC2 — the intra-day and cross-zone legs of `auto_escalations` use the same basis (raised, not
+- [x] AC1 — an escalation resolved on the day it was raised still counts for that day.
+- [x] AC2 — the intra-day and cross-zone legs of `auto_escalations` use the same basis (raised, not
       current status), stated in a comment so the next reader does not re-derive it.
-- [ ] AC3 — the recompute decision for historical days is recorded (applied, or deliberately not,
+- [x] AC3 — the recompute decision for historical days is recorded (applied, or deliberately not,
       with the reason) rather than left implicit.
 
 ## UI surfaces

@@ -93,4 +93,18 @@ describe('Issue 43 slice 2 — ReportsService.zmScorecard', () => {
     expect(report.rows.find((r) => r.zmId === zmB)).toBeTruthy();
     expect(report.rows.find((r) => r.zmId === zmA)).toBeUndefined();
   });
+
+  /** #347 AC1 — the scorecard stamps the cube it read, not the moment the page rendered. */
+  it('carries dataAsOf = MAX(computed_at) over the rows read, and null for an empty range', async () => {
+    const rows = await prisma.zmPerformanceSummaryMonthly.findMany({ where: { id: { in: ids }, zoneId: zoneB }, select: { computedAt: true } });
+    const newest = Math.max(...rows.map((r) => r.computedAt.getTime()));
+
+    const scoped = await service.zmScorecard({ fromMonth: '2026-05', toMonth: '2026-06', zoneId: Number(zoneB) });
+    expect(scoped.dataAsOf).not.toBeNull();
+    expect(new Date(scoped.dataAsOf!).getTime()).toBe(newest);
+
+    const empty = await service.zmScorecard({ fromMonth: '2029-10', toMonth: '2029-10' });
+    expect(empty).toHaveProperty('dataAsOf');
+    expect(empty.dataAsOf).toBeNull();
+  });
 });

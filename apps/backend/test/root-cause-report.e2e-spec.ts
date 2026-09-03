@@ -102,4 +102,24 @@ describe('Issue 41 slice 2 — ReportsService.rootCause', () => {
     expect(r.totalSubmissions).toBe(10); // the other zone's 99 UNKNOWN excluded
     expect(Object.fromEntries(r.distribution.map((d) => [d.category, d.count])).UNKNOWN).toBe(0);
   });
+
+  /**
+   * #347 AC1 — the payload carries the CUBE's `computed_at`, not the moment the reader looked. It is
+   * `MAX(computed_at)` over exactly the rows this filter read, so a filter that narrows to an older
+   * corner of the cube reports that corner's age rather than the newest row in the table.
+   */
+  it('carries dataAsOf = MAX(computed_at) over the rows the filter read', async () => {
+    const rows = await prisma.rootCauseSummaryMonthly.findMany({ where: { id: { in: ids }, zoneId }, select: { computedAt: true } });
+    const newest = Math.max(...rows.map((r) => r.computedAt.getTime()));
+
+    const r = await service.rootCause(ALL, { ...range, zoneId: Number(zoneId) });
+    expect(r.dataAsOf).not.toBeNull();
+    expect(new Date(r.dataAsOf!).getTime()).toBe(newest);
+  });
+
+  it('dataAsOf is null for a month with no cube row', async () => {
+    const r = await service.rootCause(ALL, { fromMonth: '2029-10', toMonth: '2029-10' });
+    expect(r).toHaveProperty('dataAsOf');
+    expect(r.dataAsOf).toBeNull();
+  });
 });

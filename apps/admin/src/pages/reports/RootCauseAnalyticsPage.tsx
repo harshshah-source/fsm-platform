@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiRootCause, type RootCauseReport } from '../../api/reports';
 import { BarChartCard, ChartCard, ReportGrid, type BarDatum } from '../../components/charts';
 import { DataTable, EmptyState, MetricStrip, PageHeader, type Column, type Metric } from '../../components/data';
+import { ReportMetaStrip } from './DataAsOfStamp';
 
 /** Human-readable label for a structured root-cause category enum value. */
 const humanize = (c: string) => c.split('_').map((w) => w[0] + w.slice(1).toLowerCase()).join(' ');
@@ -47,6 +48,10 @@ export function RootCauseAnalyticsPage() {
         title="Root-Cause Analytics"
         subtitle="Structured root-cause distribution from SE troubleshoot forms — no free-text parsing. Zone-scoped for ZM, cross-zone for CSM / Operations Head."
       />
+
+      {/* #347 — the reference header band (ref 23) carries a "Data as of" stamp; this page had none
+          at all, so its monthly cube could be arbitrarily old with nothing on screen saying so. */}
+      <ReportMetaStrip dataAsOf={report?.dataAsOf} loading={loading} stampTestId="root-cause-data-as-of" />
 
       {error && (
         <div role="alert" className="mb-4 rounded-md border border-critical/30 bg-critical-bg px-3 py-2 text-sm text-critical">
