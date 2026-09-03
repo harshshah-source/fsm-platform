@@ -86,6 +86,22 @@ export function sanitizeTestEnv(env: NodeJS.ProcessEnv): void {
   env.BUSINESS_SWEEPS_ENABLED = 'false';
   env.INGESTION_SCHEDULER_ENABLED = 'false';
   env.PARTITION_MAINTENANCE_ENABLED = 'false';
+  // The same-day recovery cutoff (#286), pinned past the end of the day so the suite does not depend
+  // on WHAT TIME IT IS RUN. `recoverMarkedZones` expires every outstanding mark once the IST hour
+  // passes this value, so with the 18:00 default, three specs that exercise the *recovery* path —
+  // `dispatch-crashed-zone-recovery` (×2, one of them through `dispatchRecoveryTick`, which takes no
+  // policy argument) and `dispatch-errored-zone-recovery` — failed deterministically every evening
+  // and passed every morning. That intermittency was being read as flakiness; it is not, it is the
+  // clock. Their ten sibling call sites already pin `cutoffHourIst: 24` inline for exactly this
+  // reason; this covers the ones that cannot.
+  //
+  // Note `TZ = 'UTC'` below does NOT cover this: the cutoff is derived from the IST day-start
+  // *instant*, deliberately (`dispatch-run.service.ts`), so it moves with real time regardless of
+  // process timezone.
+  //
+  // Expiry itself is still exercised — the test that asserts it passes `cutoffHourIst: 0` explicitly,
+  // so nothing here masks the behaviour this value switches off.
+  env.DISPATCH_RECOVERY_CUTOFF_HOUR_IST = '24';
 
   // Two named, deliberate exceptions outside the app namespace (#182 R3) — not new flags to track,
   // just two things that could otherwise leak a developer's local Postgres/OS config into the suite:
