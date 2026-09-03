@@ -80,8 +80,14 @@ describe('Issue 122b — fleet KPI cards', () => {
     expect(screen.getByTestId('kpi-devices')).toHaveTextContent('19301'); // Active Fleet (deployed)
     // Total Devices — the raw AutoPlant source catalog, pan-India (odometer digits, no grouping).
     expect(screen.getByTestId('kpi-total-devices')).toHaveTextContent('54210');
-    // The Action-Required KPI card is gone from the strip (the panel below is a ZM-view feature).
-    expect(screen.queryByText(/^action required$/i)).toBeNull();
+    // The Action-Required KPI **card** is gone from the strip. Scoped to the strip on purpose: #350
+    // mounted the Action Required *panel* on this dashboard (DASH-G08 — the CSM and OH saw every other
+    // part of the page but not the one that says what needs doing), so a page-wide `queryByText` now
+    // catches the panel heading and pins the opposite of what #122b meant. What #122b actually fixed
+    // was a KPI tile that duplicated the panel's job in the counts strip.
+    const strip = screen.getByTestId('kpi-companies').closest('div[class*="grid"], section, div');
+    expect(strip).not.toBeNull();
+    expect(within(strip as HTMLElement).queryByText(/^action required$/i)).toBeNull();
   });
 });
 
