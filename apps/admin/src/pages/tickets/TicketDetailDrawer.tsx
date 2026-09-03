@@ -12,6 +12,14 @@ import {
   type TicketForm,
 } from '../../api/tickets';
 import { apiTicketVerification, type TicketVerification } from '../../api/verification';
+import {
+  apiTicketAuditTrail,
+  format as formatMetadataValue,
+  metadataChanges,
+  metadataDetail,
+  metadataReason,
+  type TicketAuditEntry,
+} from '../../api/auditTrail';
 import { Badge, Button, type BadgeTone } from '../../components/ui';
 import { IconClose } from '../../components/ui/icons';
 import { Modal } from '../../components/overlay/Modal';
@@ -21,8 +29,28 @@ import { BucketBadge, InlineBadges } from './ticketBadges';
 
 const RECOVERY_TERMINAL = new Set(['CLOSED', 'FAILED_RECOVERY']);
 
-type TabId = 'Overview' | 'Lifecycle' | 'Forms' | 'Verification' | 'Components' | 'Assignment History';
-const TABS: TabId[] = ['Overview', 'Lifecycle', 'Forms', 'Verification', 'Components', 'Assignment History'];
+type TabId =
+  | 'Overview'
+  | 'Lifecycle'
+  | 'Audit'
+  | 'Forms'
+  | 'Verification'
+  | 'Components'
+  | 'Assignment History';
+const TABS: TabId[] = [
+  'Overview',
+  'Lifecycle',
+  // #342 — beside Lifecycle, because the two answer adjacent questions about the same ticket and were
+  // previously conflated: Lifecycle is the *state* chain (`ticket_events`), Audit is the *action*
+  // chain (`audit_logs`) — the manual decisions, who took them, and under whose authority. The drawer
+  // has always derived its history from `ticket.lifecycle`, so every audited action on a ticket was
+  // invisible from the ticket.
+  'Audit',
+  'Forms',
+  'Verification',
+  'Components',
+  'Assignment History',
+];
 
 // Every tab now renders real data; no stub tabs remain.
 
@@ -54,6 +82,48 @@ function TimelineItem({ title, meta }: { title: string; meta: string }) {
 }
 
 /**
+ * #342 AC4 — one audited action on this ticket: what was done, by whom, under whose authority, why,
+ * and what changed. The `acted_as_role` line is the point of the tab: an action taken by a CSM under
+ * a ZM's backup authority looked identical to the ZM's own action everywhere else in the product.
+ * The from/to reading of `metadata` is shared with the Audit Trail page (`api/auditTrail.ts`).
+ */
+function AuditActionCard({ entry }: { entry: TicketAuditEntry }) {
+  const changes = metadataChanges(entry.metadata);
+  const reason = metadataReason(entry.metadata);
+  const detail = metadataDetail(entry.metadata);
+  return (
+    <div data-testid={`audit-action-${entry.action}`} className={ITEM_CARD}>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="font-semibold text-ink-strong">{entry.action}</span>
+        <span className="text-xs text-ink-muted">{new Date(entry.at).toLocaleString()}</span>
+      </div>
+      <div className="text-xs text-ink">
+        {entry.actorRole ?? 'system'}
+        {entry.actorId ? ` · ${entry.actorId}` : ''}
+      </div>
+      {entry.actedAsRole && (
+        <div className="mt-1">
+          <Badge tone="warning" title="Taken under backup authority">
+            acting as {entry.actedAsRole}
+            {entry.actingZone ? ` · zone ${entry.actingZone}` : ''}
+          </Badge>
+        </div>
+      )}
+      {changes.map((c) => (
+        <div key={c.field} className="mt-1 text-xs">
+          <span className="text-ink-muted">{c.field}: </span>
+          <span className="text-ink line-through decoration-ink-muted/60">{formatMetadataValue(c.from)}</span>
+          <span className="text-ink-muted"> → </span>
+          <span className="font-medium text-ink-strong">{formatMetadataValue(c.to)}</span>
+        </div>
+      ))}
+      {reason && <div className="mt-1 text-xs text-ink">Reason: {reason}</div>}
+      {detail && <div className="mt-1 text-xs text-ink-muted">{detail}</div>}
+    </div>
+  );
+}
+
+/**
  * Ticket Detail Drawer (Issue 07, `/tickets/:ticketId`). Slides in over the list (the list stays
  * mounted via its parent route). Overview + Lifecycle render real data from `/api/tickets/:id`; the
  * remaining tabs lazy-load their data when opened.
@@ -75,6 +145,8 @@ export function TicketDetailDrawer() {
   const [verification, setVerification] = useState<{ run: TicketVerification | null } | null>(null);
   // #244 — the assignment windows behind the Special verdict. Lazy, like every other tab's data.
   const [attempts, setAttempts] = useState<TicketAttemptHistory | null>(null);
+  // #342 — the ticket's audited actions (`kind: 'ACTION'`), lazy like every other tab's data.
+  const [audit, setAudit] = useState<TicketAuditEntry[] | null>(null);
   const [recoveryCloseOpen, setRecoveryCloseOpen] = useState(false);
   const [recoveryReason, setRecoveryReason] = useState('');
   // The Verification Review page (Issue 19) deep-links to a specific tab via `?tab=Verification`.
@@ -119,6 +191,19 @@ export function TicketDetailDrawer() {
       alive = false;
     };
   }, [ticketId, tab, attempts]);
+
+  // #342 — lazy-load the ticket's audited actions when the Audit tab is opened. `null` = not loaded;
+  // `[]` = loaded and empty (or the caller is out of zone, which the endpoint answers with a 404).
+  useEffect(() => {
+    if (!ticketId || tab !== 'Audit' || audit !== null) return;
+    let alive = true;
+    apiTicketAuditTrail(ticketId)
+      .then((t) => alive && setAudit(t.entries.filter((e) => e.kind === 'ACTION')))
+      .catch(() => alive && setAudit([]));
+    return () => {
+      alive = false;
+    };
+  }, [ticketId, tab, audit]);
 
   // Lazy-load the ticket's SE troubleshoot-form submissions when the Forms tab is opened (Issue 70).
   useEffect(() => {
@@ -310,6 +395,18 @@ export function TicketDetailDrawer() {
                   />
                 ))}
               </ol>
+            )}
+
+            {tab === 'Audit' && (
+              <div data-testid="audit-panel" className="flex flex-col gap-3 text-sm">
+                {audit === null && <p className="text-ink-muted">Loading…</p>}
+                {audit !== null && audit.length === 0 && (
+                  <p className="text-ink-muted">No audited actions on this ticket yet.</p>
+                )}
+                {audit?.map((e, i) => (
+                  <AuditActionCard key={`${e.at}-${i}`} entry={e} />
+                ))}
+              </div>
             )}
 
             {tab === 'Components' && (

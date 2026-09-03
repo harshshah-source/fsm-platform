@@ -188,6 +188,10 @@ export function buildNav(role: string, features: NavFeatures = {}): NavGroup[] {
       { label: 'System Efficiency', to: '/reports/system-efficiency', icon: IconActivity },
     ];
     if (isOpsHead) analytics.push({ label: 'ZM Scorecard', to: '/reports/zm-scorecard', icon: IconShield });
+    // #342 — the audit ledger sits with Analytics, not Admin: Admin is Operations-Head-only, and the
+    // ZM is the role most often asked to account for an action taken in their zone. It is last in the
+    // group because it is the surface you reach for after a report raised a question, not before.
+    analytics.push({ label: 'Audit Trail', to: '/audit-trail', icon: IconSearch });
     groups.push({ heading: 'Analytics', items: analytics });
   }
 

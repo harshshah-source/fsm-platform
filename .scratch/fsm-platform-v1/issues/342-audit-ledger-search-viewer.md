@@ -1,5 +1,5 @@
 # 342 — Audit ledger search + admin viewer + drawer Audit tab
-Status: ready-for-agent
+Status: done 2026-09-03 — report docs/progress/342-audit-ledger-search-viewer.md
 Type: AFK
 Wave: 1 · Severity: P1 · Found by: module-gaps survey 2026-09-02, verified against the working tree 2026-09-03 (`docs/module-gaps/IMPLEMENTATION-PLAN.md` §4)
 
@@ -41,15 +41,30 @@ until this lands.
 
 ## Acceptance criteria
 
-- [ ] AC1 — filters are honoured (byte-identical bodies for different filters is a failing test)
-- [ ] AC2 — ZM sees own zone only
-- [ ] AC3 — `metadata` rendered as from/to where present
-- [ ] AC4 — drawer Audit tab shows the action chain for the ticket, including acting role
-- [ ] AC5 — keyset pagination, `limit ≤ 200`
+- [x] AC1 — filters are honoured (byte-identical bodies for different filters is a failing test)
+- [x] AC2 — ZM sees own zone only
+- [x] AC3 — `metadata` rendered as from/to where present
+- [x] AC4 — drawer Audit tab shows the action chain for the ticket, including acting role
+- [x] AC5 — keyset pagination, `limit ≤ 200`
 
 ## Verification
 
 e2e per filter + clamp; admin tests.
+
+`test/audit-ledger-search.e2e-spec.ts` (8) + `test/audit-trail-controller.e2e-spec.ts` (6) — 14 passed.
+`test/audit-metadata.test.ts` (7) + `test/audit-trail-page.test.tsx` (7) +
+`test/ticket-drawer-audit-tab.test.tsx` (4) — 18 passed.
+
+## Premise corrections found while building
+
+- **The per-ticket trail was already dropping about half its rows.** `entity_type` is written as
+  `'ticket'` (16 sites), `'tickets'` (15) and `'TICKET'` (1); the read hard-filtered `'ticket'`. Both
+  readers now normalise. Follow-up: normalise the writers.
+- `apps/admin/src/lib/nav.ts` does not exist — the nav is `apps/admin/src/components/shell/nav.ts`.
+- No index on `audit_logs(actor_id, created_at)` exists, and none on `created_at` either — the second
+  matters more. Not added: `schema.prisma` is owned by another agent this round. See the report.
+- `docs/ui/desktop/approved-designs/README.md` was **not** edited (shared-file collision risk); the
+  ledger page still needs recording there as an approved-design gap.
 
 ## UI surfaces
 

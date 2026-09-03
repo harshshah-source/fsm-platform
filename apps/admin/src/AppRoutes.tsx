@@ -44,6 +44,7 @@ import { AssignmentThresholdPage } from './pages/admin/AssignmentThresholdPage';
 import { ManagerAvailabilityPage } from './pages/admin/ManagerAvailabilityPage';
 import { TierOverridesPage } from './pages/admin/TierOverridesPage';
 import { BuildHealthPage } from './pages/admin/BuildHealthPage';
+import { AuditTrailPage } from './pages/admin/AuditTrailPage';
 import { DeviceDetailPage } from './pages/reports/DeviceDetailPage';
 import { FleetDirectoryPage } from './pages/reports/FleetDirectoryPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
@@ -321,6 +322,17 @@ export function AppRoutes() {
             element={
               <RoleRoute roles={['OPERATIONS_HEAD']}>
                 <BuildHealthPage />
+              </RoleRoute>
+            }
+          />
+          {/* Audit Trail ledger — every manager role (#342). Deliberately NOT Operations-Head-only
+              like the Data Explorer beside it: the ZM is the role most often *asked* to explain an
+              action taken in their zone, and the server clamps them to it. */}
+          <Route
+            path="/audit-trail"
+            element={
+              <RoleRoute roles={['ZONAL_MANAGER', 'CENTRAL_SERVICE_MANAGER', 'OPERATIONS_HEAD']}>
+                <AuditTrailPage />
               </RoleRoute>
             }
           />

@@ -50,6 +50,12 @@ describe('Issue 03 slice 4 — /api/audit-trail/tickets/:id (e2e)', () => {
     await prisma.ticketEvent.create({ data: { ticketId: otherTicket, fromState: 'OPEN', toState: 'CLOSED', actorId: ZM_NORTH, actorRole: 'CENTRAL_SERVICE_MANAGER', actedAsRole: 'ZONAL_MANAGER', reasonCode: 'RESOLVED', at: NOW } });
     const a = await prisma.auditLog.create({ data: { actorId: ZM_NORTH, actorRole: 'ZONAL_MANAGER', actedAsRole: 'ZONAL_MANAGER', actingZone: otherZone, action: 'CRITICAL_ASSIGN', entityType: 'ticket', entityId: otherTicket, createdAt: new Date(NOW.getTime() - 1_800_000) } });
     auditIds.push(a.id);
+    // #342 — the writers do not agree on one spelling: `entity_type` is written as 'ticket' (16 call
+    // sites), 'tickets' (15) and 'TICKET' (1). The trail hard-filtered 'ticket', so roughly half the
+    // ticket audit rows in the database were unreachable from the ticket they belong to.
+    const b = await prisma.auditLog.create({ data: { actorId: ZM_NORTH, actorRole: 'ZONAL_MANAGER', actingZone: otherZone, action: 'INSTALL_VERIFIED', entityType: 'tickets', entityId: otherTicket, createdAt: new Date(NOW.getTime() - 1_500_000) } });
+    const c = await prisma.auditLog.create({ data: { actorId: 'SYSTEM', actorRole: 'SYSTEM', action: 'DEVICE_DEPARTED', entityType: 'TICKET', entityId: otherTicket, createdAt: new Date(NOW.getTime() - 1_200_000) } });
+    auditIds.push(b.id, c.id);
   });
 
   async function makeTicket(plant: bigint): Promise<string> {
@@ -84,13 +90,20 @@ describe('Issue 03 slice 4 — /api/audit-trail/tickets/:id (e2e)', () => {
     const oh = await login('ops.head@fsm.test');
     const res = await request(app.getHttpServer()).get(`/api/audit-trail/tickets/${otherTicket}`).set('Authorization', `Bearer ${oh}`).expect(200);
     const e = res.body.entries;
-    expect(e).toHaveLength(3);
-    expect(e.map((x: { kind: string }) => x.kind)).toEqual(['STATE_CHANGE', 'ACTION', 'STATE_CHANGE']); // ordered by time
+    expect(e).toHaveLength(5);
+    expect(e.map((x: { kind: string }) => x.kind)).toEqual(['STATE_CHANGE', 'ACTION', 'ACTION', 'ACTION', 'STATE_CHANGE']); // ordered by time
     expect(e[1].action).toBe('CRITICAL_ASSIGN');
-    const closed = e[2];
+    const closed = e[4];
     expect(closed.toState).toBe('CLOSED');
     expect(closed.reasonCode).toBe('RESOLVED');
     expect(closed.actedAsRole).toBe('ZONAL_MANAGER'); // AC#6
+  });
+
+  it('#342 — the action chain includes rows written as `tickets` / `TICKET`, not only `ticket`', async () => {
+    const oh = await login('ops.head@fsm.test');
+    const res = await request(app.getHttpServer()).get(`/api/audit-trail/tickets/${otherTicket}`).set('Authorization', `Bearer ${oh}`).expect(200);
+    const actions = res.body.entries.filter((x: { kind: string }) => x.kind === 'ACTION').map((x: { action: string }) => x.action);
+    expect(actions).toEqual(['CRITICAL_ASSIGN', 'INSTALL_VERIFIED', 'DEVICE_DEPARTED']);
   });
 
   it('a ZM sees a trail for a ticket in their own zone (zone 1)', async () => {
